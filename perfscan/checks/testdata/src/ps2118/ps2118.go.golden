@@ -1,0 +1,95 @@
+package ps2118
+
+import (
+	"bytes"
+	"io"
+)
+
+func direct(w io.Writer, b []byte) {
+	w.Write(b) // want `io\.WriteString\(w, string\(b\)\) allocates a string copy of the byte slice just to write it; w\.Write\(b\) writes the bytes directly`
+}
+
+// Both return (int, error): the results survive the rewrite.
+func withResults(w io.Writer, b []byte) (int, error) {
+	return w.Write(b) // want `io\.WriteString\(w, string\(b\)\) allocates a string copy of the byte slice just to write it; w\.Write\(b\) writes the bytes directly`
+}
+
+// A named type with underlying []byte converts to string and stays
+// assignable to Write's []byte parameter.
+type payload []byte
+
+func namedSlice(w io.Writer, p payload) {
+	w.Write(p) // want `io\.WriteString\(w, string\(b\)\) allocates a string copy of the byte slice just to write it; w\.Write\(b\) writes the bytes directly`
+}
+
+// A non-selectable first argument is parenthesized by the fix.
+func addressed(buf bytes.Buffer, b []byte) {
+	(&buf).Write(b) // want `io\.WriteString\(w, string\(b\)\) allocates a string copy of the byte slice just to write it; w\.Write\(b\) writes the bytes directly`
+}
+
+// Parens around the conversion are stripped with the rest of the call.
+func parenthesized(w io.Writer, b []byte) {
+	w.Write(b) // want `io\.WriteString\(w, string\(b\)\) allocates a string copy of the byte slice just to write it; w\.Write\(b\) writes the bytes directly`
+}
+
+// An alias of string is the same conversion.
+type str = string
+
+func aliased(w io.Writer, b []byte) {
+	w.Write(b) // want `io\.WriteString\(w, string\(b\)\) allocates a string copy of the byte slice just to write it; w\.Write\(b\) writes the bytes directly`
+}
+
+// Reported but NOT fixed: a comment inside the rewritten call would be
+// destroyed by the rewrite.
+func commented(w io.Writer, b []byte) {
+	io.WriteString(w, string( /* keep me */ b)) // want `io\.WriteString\(w, string\(b\)\) allocates a string copy of the byte slice just to write it; w\.Write\(b\) writes the bytes directly`
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// The second argument is already a string: nothing is allocated here.
+func plainString(w io.Writer, s string) {
+	io.WriteString(w, s)
+}
+
+// A []rune conversion re-encodes; it is not a byte-for-byte write.
+func runeSlice(w io.Writer, rs []rune) {
+	io.WriteString(w, string(rs))
+}
+
+// A single rune converts to its UTF-8 encoding, not to one byte.
+func singleRune(w io.Writer, r rune) {
+	io.WriteString(w, string(r))
+}
+
+// A slice of a NAMED byte type converts to string, but is not assignable
+// to Write's []byte parameter — the rewrite would not compile.
+type myByte byte
+
+func namedByteElem(w io.Writer, nb []myByte) {
+	io.WriteString(w, string(nb))
+}
+
+// A shadowed io is not the io package.
+type fakeIO struct{}
+
+func (fakeIO) WriteString(w io.Writer, s string) (int, error) { return w.Write([]byte(s)) }
+
+func shadowed(w io.Writer, b []byte) {
+	io := fakeIO{}
+	io.WriteString(w, string(b))
+}
+
+// A local value named string makes string(b) a function call, not a
+// conversion — it could do anything.
+func stringShadow(w io.Writer, b []byte) {
+	string := func(p []byte) str { return str(p) }
+	io.WriteString(w, string(b))
+}
+
+// string(b) handed to anything other than io.WriteString is out of scope.
+func take(s string) int { return len(s) }
+
+func otherCallee(b []byte) int {
+	return take(string(b))
+}
