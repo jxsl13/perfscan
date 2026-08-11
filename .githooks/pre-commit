@@ -1,27 +1,19 @@
 #!/bin/sh
-# perfscan pre-commit hook: gofmt, vet, build, tests, self-scan.
-# Install with `make hooks` (sets core.hooksPath=.githooks).
+# perfscan monorepo pre-commit hook: gofmt, vet, build, tests per module,
+# plus perfscan self-scan. Install with `make hooks` (core.hooksPath=.githooks).
 set -e
 
-echo "pre-commit: gofmt"
-out=$(gofmt -l .)
-if [ -n "$out" ]; then
-	echo "gofmt needed on:"
-	echo "$out"
-	echo "run: make fmt"
-	exit 1
-fi
-
-echo "pre-commit: go vet"
-go vet ./...
-
-echo "pre-commit: go build"
-go build ./...
-
-echo "pre-commit: go test"
-go test ./...
+for mod in perfscan perfscanxx; do
+	echo "pre-commit [$mod]: gofmt"
+	out=$(cd "$mod" && gofmt -l $(git ls-files '*.go' | grep -v /testdata/ | sed "s#^$mod/##") 2>/dev/null)
+	if [ -n "$out" ]; then
+		echo "gofmt needed on (in $mod):"; echo "$out"; echo "run: gofmt -w $mod"; exit 1
+	fi
+	echo "pre-commit [$mod]: vet + build + test"
+	( cd "$mod" && go vet ./... && go build ./... && go test ./... )
+done
 
 echo "pre-commit: perfscan self-scan (all levels)"
-go run ./cmd/perfscan -level 3 ./...
+( cd perfscan && go run ./cmd/perfscan -level 3 ./... )
 
 echo "pre-commit: ok"

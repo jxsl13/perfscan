@@ -9,13 +9,18 @@ permissions:
   contents: read
 
 jobs:
+  # Build + race-test each module independently, across OSes and Go versions.
   test:
     strategy:
       fail-fast: false
       matrix:
+        module: [perfscan, perfscanxx]
         os: [ubuntu-latest, macos-latest, windows-latest]
         go: [stable, oldstable]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -26,8 +31,16 @@ jobs:
       - name: Test
         run: go test -race ./...
 
-  lint:
+  # Shared quality gates for BOTH modules: formatting, vet, staticcheck.
+  quality:
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [perfscan, perfscanxx]
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -35,17 +48,28 @@ jobs:
           go-version: stable
       - name: gofmt
         run: |
-          out=$(gofmt -l .)
-          if [ -n "$out" ]; then
-            echo "gofmt needed on:"; echo "$out"; exit 1
-          fi
+          # analysistest fixtures under testdata/ need exact // want anchoring
+          # (single-line loops etc.) that gofmt would break, so exclude them.
+          out=$(gofmt -l . | grep -v /testdata/ || true)
+          if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
       - name: go vet
         run: go vet ./...
       - name: staticcheck
-        uses: dominikh/staticcheck-action@v1
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          "$(go env GOPATH)/bin/staticcheck" ./...
+
+  # perfscan-specific gates: generated docs, plugin module, benchmarks, dogfood.
+  perfscan-extras:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: perfscan
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          version: latest
-          install-go: false
+          go-version: stable
       - name: docs up to date
         run: |
           go run ./cmd/gendocs
@@ -54,14 +78,5 @@ jobs:
         run: cd plugin && go build ./...
       - name: micro-benchmarks compile and run once
         run: go test -run '^$' -bench . -benchtime=1x ./benchmarks/
-
-  selfscan:
-    # Dogfood: perfscan must run clean on itself at every level.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-      - name: perfscan on perfscan
+      - name: perfscan on perfscan (dogfood, all levels)
         run: go run ./cmd/perfscan -level 3 ./...

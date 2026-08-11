@@ -1,5 +1,8 @@
-/perfscan
+# built binaries (per module)
+/perfscan/perfscan
+/perfscanxx/perfscanxx
 /dist/
+/perfscan/dist/
 *.test
 *.out
 .DS_Store

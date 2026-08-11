@@ -8,9 +8,9 @@ import (
 func TestResolvePath(t *testing.T) {
 	abs := filepath.FromSlash("/abs/main.cpp")
 	cases := []struct{ fp, build, main, want string }{
-		{filepath.FromSlash("/x/a.cpp"), "/build", "/m/main.cpp", filepath.FromSlash("/x/a.cpp")}, // absolute wins
+		{filepath.FromSlash("/x/a.cpp"), "/build", "/m/main.cpp", filepath.FromSlash("/x/a.cpp")},  // absolute wins
 		{"a.cpp", filepath.FromSlash("/build"), "/m/main.cpp", filepath.FromSlash("/build/a.cpp")}, // join build dir
-		{"a.cpp", "", filepath.FromSlash("/m/main.cpp"), filepath.FromSlash("/m/a.cpp")},            // fall back to main src dir
+		{"a.cpp", "", filepath.FromSlash("/m/main.cpp"), filepath.FromSlash("/m/a.cpp")},           // fall back to main src dir
 		{"", "", abs, abs}, // empty file path -> main source
 	}
 	for _, c := range cases {
