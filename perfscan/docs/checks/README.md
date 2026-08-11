@@ -74,5 +74,6 @@ checks' fixes.
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
+| [PS5104](PS5104.md) | arith | L1 | yes | strings.Count/bytes.Count compared against 0 or 1 for membership, where Contains short-circuits |
 | [PS6004](PS6004.md) | verify | L2 |  | a fast-path/fallback dual path whose bit-identity claim needs coverage on both arms |
 | [PS6010](PS6010.md) | verify | L3 | yes | an accumulator loop re-reading an operand invariant in the output index |

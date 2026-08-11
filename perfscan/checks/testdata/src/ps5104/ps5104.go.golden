@@ -1,0 +1,142 @@
+package ps5104
+
+import (
+	"bytes"
+	"strings"
+	stdstrings "strings"
+)
+
+// --- the six membership forms, strings ---
+
+func hasGT(s, sub string) bool {
+	return strings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) > 0 tests membership only; strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+func hasGE(s, sub string) bool {
+	return strings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) >= 1 tests membership only; strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+func hasNE(s, sub string) bool {
+	return strings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) != 0 tests membership only; strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+func noneEQ(s, sub string) bool {
+	return !strings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) == 0 tests membership only; !strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+func noneLT(s, sub string) bool {
+	return !strings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) < 1 tests membership only; !strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+func noneLE(s, sub string) bool {
+	return !strings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) <= 0 tests membership only; !strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+// Literal on the left: `0 < Count` is `Count > 0`, `1 > Count` is `Count < 1`.
+
+func reversed(s, sub string) bool {
+	return strings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) > 0 tests membership only; strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+func reversedNeg(s, sub string) bool {
+	return !strings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) < 1 tests membership only; !strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+// An aliased import keeps its qualifier: only the selected name changes.
+func aliased(s, sub string) bool {
+	return stdstrings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) > 0 tests membership only; strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+// Composed into a larger condition: unary ! binds tighter than &&, so the
+// rewrite needs no extra parentheses.
+func composed(s, sub, t string) bool {
+	return len(t) > 0 && !strings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) == 0 tests membership only; !strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+// --- bytes.Count -> bytes.Contains ---
+
+func hasBytes(b, sub []byte) bool {
+	return bytes.Contains(b, sub) // want `bytes\.Count\(\.\.\.\) > 0 tests membership only; bytes\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+func noneBytes(b, sub []byte) bool {
+	return !bytes.Contains(b, sub) // want `bytes\.Count\(\.\.\.\) == 0 tests membership only; !bytes\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+func hasBytesNE(b, sub []byte) bool {
+	return bytes.Contains(b, sub) // want `bytes\.Count\(\.\.\.\) != 0 tests membership only; bytes\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+// Empty substring stays bit-identical either way: Count(s, "") >= 1
+// always, and Contains(s, "") is always true — no guard needed.
+func emptySub(s string) bool {
+	return strings.Contains(s, "") // want `strings\.Count\(\.\.\.\) > 0 tests membership only; strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// Thresholds other than the six membership forms genuinely need the tally.
+func moreThanOne(s, sub string) bool {
+	return strings.Count(s, sub) > 1
+}
+
+func exactlyTwo(s, sub string) bool {
+	return strings.Count(s, sub) == 2
+}
+
+func atLeastTwo(s, sub string) bool {
+	return strings.Count(s, sub) >= 2
+}
+
+func atMostOne(s, sub string) bool {
+	return strings.Count(s, sub) <= 1
+}
+
+// The count bound to a variable and used elsewhere must survive.
+func viaVariable(s, sub string) bool {
+	n := strings.Count(s, sub)
+	return n > 0
+}
+
+// The count used arithmetically is a real count.
+func arithmetic(s, sub string) int {
+	return strings.Count(s, sub) * 2
+}
+
+// A variable holding 0 is not the literal constant 0.
+func zeroVar(s, sub string) bool {
+	zero := 0
+	return strings.Count(s, sub) > zero
+}
+
+// A named constant is not the literal 0 either.
+const namedZero = 0
+
+func zeroConst(s, sub string) bool {
+	return strings.Count(s, sub) > namedZero
+}
+
+// strings.Index answering membership is a different function — out of scope.
+func viaIndex(s, sub string) bool {
+	return strings.Index(s, sub) >= 0
+}
+
+// A local method named Count on a value called strings must not match.
+type fakeStrings struct{}
+
+func (fakeStrings) Count(s, sub string) int { return 0 }
+
+func shadowed(s, sub string) bool {
+	var strings fakeStrings
+	return strings.Count(s, sub) > 0
+}
+
+// The comparison is an untyped bool and may adopt a named bool type from
+// its context; Contains returns plain bool, so the rewrite would not
+// compile here — skipped.
+type myBool bool
+
+func namedBoolContext(s, sub string) myBool {
+	var f myBool = strings.Count(s, sub) > 0
+	return f
+}
