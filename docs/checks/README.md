@@ -32,6 +32,9 @@ checks' fixes.
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
 | [PS2104](PS2104.md) | alloc | L1 | yes | a map filled in a bounded loop directly after a declaration with no size hint |
+| [PS2105](PS2105.md) | alloc | L1 | yes | ranging over []rune(s) allocates a rune slice; range the string directly |
+| [PS2106](PS2106.md) | alloc | L1 | yes | consecutive appends to the same slice can be combined into one call |
+| [PS2107](PS2107.md) | alloc | L1 | yes | fmt.Sprintf of a single value has a faster strconv/hex equivalent |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
@@ -55,5 +58,6 @@ checks' fixes.
 | [PS5001](PS5001.md) | arith | L3 |  | a divide by a loop-invariant scalar on every element |
 | [PS5002](PS5002.md) | arith | L2 | yes | a nested loop accumulating a full symmetric matrix |
 | [PS5008](PS5008.md) | arith | L1 | yes | math.Sin and math.Cos on the same argument (fusable to math.Sincos) |
+| [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS6004](PS6004.md) | verify | L2 |  | a fast-path/fallback dual path whose bit-identity claim needs coverage on both arms |
 | [PS6010](PS6010.md) | verify | L3 | yes | an accumulator loop re-reading an operand invariant in the output index |

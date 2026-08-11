@@ -264,6 +264,7 @@ func ps2106Fix(pass *analysis.Pass, f *ast.File, run []*ast.AssignStmt, name str
 		return nil
 	}
 	var extra strings.Builder
+	extra.Grow(16 * len(run)) // rough lower bound: ", " + a short arg per combined statement
 	edits := make([]analysis.TextEdit, 0, len(run))
 	edits = append(edits, analysis.TextEdit{Pos: firstCall.Rparen, End: firstCall.Rparen})
 	for k := 1; k < len(run); k++ {
