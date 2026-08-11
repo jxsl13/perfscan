@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/jxsl13/perfscanxx/internal/catalog"
@@ -48,11 +49,16 @@ var ReadFile = os.ReadFile
 func FromExport(ef *fixes.ExportFile, maxLevel catalog.Level) []Finding {
 	var out []Finding
 	for _, d := range ef.Diagnostics {
+		// clang-tidy writes the diagnostic FilePath RELATIVE to its
+		// BuildDirectory (the -p build dir); MainSourceFile is absolute.
+		// Resolve to an absolute path for reading, and display it relative
+		// to the current working directory (perfscan-style).
+		abs := resolvePath(d.DiagnosticMessage.FilePath, d.BuildDirectory, ef.MainSourceFile)
 		f := Finding{
 			ID:       d.DiagnosticName,
 			TidyName: d.DiagnosticName,
 			Message:  d.DiagnosticMessage.Message,
-			File:     d.DiagnosticMessage.FilePath,
+			File:     displayPath(abs),
 			Offset:   d.DiagnosticMessage.FileOffset,
 			Fixes:    len(d.DiagnosticMessage.Replacements),
 		}
@@ -64,7 +70,7 @@ func FromExport(ef *fixes.ExportFile, maxLevel catalog.Level) []Finding {
 			f.Level = e.Level.String()
 			f.Category = e.Category
 		}
-		f.Line, f.Col = lineCol(f.File, f.Offset)
+		f.Line, f.Col = lineCol(abs, f.Offset)
 		out = append(out, f)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -74,6 +80,45 @@ func FromExport(ef *fixes.ExportFile, maxLevel catalog.Level) []Finding {
 		return out[i].Offset < out[j].Offset
 	})
 	return out
+}
+
+// resolvePath makes a diagnostic's (possibly BuildDirectory-relative)
+// FilePath absolute: an already-absolute path is returned as-is; otherwise
+// it is joined onto the BuildDirectory, falling back to the directory of the
+// absolute MainSourceFile when no BuildDirectory was exported.
+func resolvePath(filePath, buildDir, mainSrc string) string {
+	if filePath == "" {
+		return mainSrc
+	}
+	if filepath.IsAbs(filePath) {
+		return filepath.Clean(filePath)
+	}
+	if buildDir != "" {
+		return filepath.Clean(filepath.Join(buildDir, filePath))
+	}
+	if mainSrc != "" {
+		return filepath.Clean(filepath.Join(filepath.Dir(mainSrc), filePath))
+	}
+	return filePath
+}
+
+// displayPath renders an absolute path relative to the current working
+// directory when that is shorter and stays within the tree, else returns the
+// path unchanged — so findings read like "examples/sample.cpp", not a long
+// absolute path.
+func displayPath(abs string) string {
+	if abs == "" || !filepath.IsAbs(abs) {
+		return abs
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return abs
+	}
+	rel, err := filepath.Rel(cwd, abs)
+	if err != nil || len(rel) == 0 || rel == "." || (len(rel) >= 2 && rel[0] == '.' && rel[1] == '.') {
+		return abs
+	}
+	return rel
 }
 
 // lineCol maps a byte offset to a 1-based line:column pair by reading the

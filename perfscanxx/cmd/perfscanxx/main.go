@@ -56,6 +56,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		jsonOut  = fs.Bool("json", false, "emit findings as JSON")
 		sarifOut = fs.Bool("sarif", false, "emit findings as SARIF 2.1.0 (GitHub Code Scanning)")
 		buildDir = fs.String("p", "", "build directory containing compile_commands.json (forwarded to clang-tidy -p)")
+		tidyBin  = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
 		showVer  = fs.Bool("version", false, "print version and exit")
 	)
 	fs.Usage = func() { printUsage(stderr, fs) }
@@ -96,6 +97,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	res, err := tidy.Run(context.Background(), tidy.Options{
+		Binary:   *tidyBin,
 		BuildDir: *buildDir,
 		Checks:   tidyChecks,
 		Fix:      *fix,
