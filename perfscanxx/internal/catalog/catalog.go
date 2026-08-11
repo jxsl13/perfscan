@@ -204,6 +204,12 @@ var entries = []Entry{
 		Title:  "s.compare(t) == 0 for (in)equality; s == t / s != t is clearer and length-checks first",
 		HasFix: true,
 	},
+	{
+		ID: "PX3015", TidyName: "cppcoreguidelines-prefer-member-initializer",
+		Level: LevelStructured, Category: "copies",
+		Title:  "member assigned in the constructor body default-constructs then assigns; a member initializer constructs it once directly",
+		HasFix: true,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
