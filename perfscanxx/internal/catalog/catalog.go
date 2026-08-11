@@ -210,6 +210,12 @@ var entries = []Entry{
 		Title:  "member assigned in the constructor body default-constructs then assigns; a member initializer constructs it once directly",
 		HasFix: true,
 	},
+	{
+		ID: "PX3016", TidyName: "modernize-avoid-bind",
+		Level: LevelStructured, Category: "callables",
+		Title:  "std::bind carries type-erasure overhead and inhibits inlining; an equivalent lambda is cheaper and inlinable",
+		HasFix: true,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
