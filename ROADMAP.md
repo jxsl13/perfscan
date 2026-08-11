@@ -40,7 +40,11 @@ figures cited in their docs are goai's measured results.
 - [x] PS3001 reflection-in-loop (L1)
 - [x] PS3002 closure-comparator-sort (L2)
 - [x] PS3003 int-key-map-in-loop (L2)
+- [x] PS2006 quadratic-cache-append (L3)
 - [x] PS3007 set-map-from-slice (L2, with read-only + size-threshold narrowings)
+- [x] PS3066 consecutive-loops-over-one-buffer (L2)
+- [x] PS3071 local-buffer-escapes-per-call (L2)
+- [x] PS3083 int-keyed-map-built-per-pass (L3, generation counter)
 - [x] PS3077 minmax-clamp-in-a-loop (L3, advisory)
 - [x] PS3082 minmax-call-in-a-loop (L2, clamps excluded — PS3077 owns those)
 
@@ -59,9 +63,6 @@ figures cited in their docs are goai's measured results.
 - [ ] PS2007 build-nxn-use-one-row
 - [ ] PS3005 indirect-key-comparator
 - [ ] PS3064 jagged-matrix-allocated-row-by-row (overlaps PS2008; decide split)
-- [ ] PS3066 consecutive-loops-over-one-buffer
-- [ ] PS3071 local-buffer-escapes-per-call
-- [ ] PS3083 integer-keyed-map-in-a-loop (build+probe shape)
 - [ ] PS4008, PS5001, PS5002 (arithmetic/vectorization generic subset)
 
 ### Domain checks (need vocabulary)
