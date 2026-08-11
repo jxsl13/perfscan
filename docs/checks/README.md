@@ -39,6 +39,8 @@ checks' fixes.
 | [PS2109](PS2109.md) | alloc | L1 | yes | []byte(fmt.Sprintf(...)) allocates a string then copies it; fmt.Appendf writes bytes directly |
 | [PS2110](PS2110.md) | alloc | L1 | yes | append([]T(nil), s...) is a hand-rolled clone; slices.Clone/bytes.Clone say it directly |
 | [PS2111](PS2111.md) | alloc | L1 | yes | w.Write([]byte(s)) allocates; w.WriteString(s) writes the string directly |
+| [PS2112](PS2112.md) | alloc | L1 | yes | append(append([]T(nil), a...), b...) is a hand-rolled concat; slices.Concat says it |
+| [PS2113](PS2113.md) | alloc | L1 | yes | w.Write([]byte(fmt.Sprintf(...))) builds a throwaway string+slice; fmt.Fprintf writes straight to w |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
@@ -55,6 +57,7 @@ checks' fixes.
 | [PS3082](PS3082.md) | indirect | L2 | yes | math.Min or math.Max called inside a loop |
 | [PS3083](PS3083.md) | indirect | L3 |  | an integer-keyed map allocated per outer iteration and probed in a nested loop |
 | [PS3101](PS3101.md) | indirect | L1 | yes | a loop-invariant string↔[]byte conversion inside a loop |
+| [PS3102](PS3102.md) | indirect | L1 | yes | deleting every key in a range loop is O(n) with rehashing; clear(m) is the direct idiom |
 | [PS4001](PS4001.md) | vector | L2 |  | a per-element binary decode (encoding/binary) in a loop |
 | [PS4002](PS4002.md) | vector | L3 |  | a scalar math transcendental in a loop beside a vectorized sibling kernel |
 | [PS4008](PS4008.md) | vector | L3 | yes | a matmul whose innermost loop is a serial scalar dot accumulator |
@@ -63,5 +66,6 @@ checks' fixes.
 | [PS5002](PS5002.md) | arith | L2 | yes | a nested loop accumulating a full symmetric matrix |
 | [PS5008](PS5008.md) | arith | L1 | yes | math.Sin and math.Cos on the same argument (fusable to math.Sincos) |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
+| [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS6004](PS6004.md) | verify | L2 |  | a fast-path/fallback dual path whose bit-identity claim needs coverage on both arms |
 | [PS6010](PS6010.md) | verify | L3 | yes | an accumulator loop re-reading an operand invariant in the output index |
