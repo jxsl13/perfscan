@@ -1,5 +1,7 @@
 package ps2101
 
+import "sync"
+
 func filtered(src []string) []string {
 	out := make([]string, 0, len(src)) // want `out is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(src\)\) — an upper bound: all appends are conditional`
 	for _, s := range src {
@@ -142,6 +144,26 @@ func nilPreserved(src []string, keep func(string) bool) []string {
 		if keep(s) {
 			out = append(out, s)
 		}
+	}
+	return out
+}
+
+type registry struct {
+	mu    sync.Mutex
+	items map[string]int
+}
+
+// Regression (symmetric to PS2104's pod_workers.go finding): a capacity
+// bound that reads a lock-guarded field must not be hoisted across the
+// lock. p.items is guarded by p.mu; pre-sizing at the declaration evaluates
+// len(p.items) BEFORE Lock() — an unsynchronized map read the original
+// literal did not have. Advisory only, never fixed.
+func (p *registry) keys() []string {
+	out := []string{} // want `out is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(p\.items\)\) — exact: one unconditional value per iteration`
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for k := range p.items {
+		out = append(out, k)
 	}
 	return out
 }

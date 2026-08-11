@@ -114,8 +114,12 @@ func runPS2101(pass *analysis.Pass) (any, error) {
 					// scheduler test caught exactly this via cmp.Diff),
 					// so the var form is advisory only. The bound still
 					// names the concrete capacity in the message.
+					// A field-read bound hoisted across a lock acquired
+					// between the declaration and the loop would read
+					// lock-protected state unsynchronized — advisory only.
 					emitFix := bound != "" && !isNil &&
-						!definesIdent(block.List[i+1:j], boundSubject(stmt))
+						!definesIdent(block.List[i+1:j], boundSubject(stmt)) &&
+						!(boundReadsField(stmt) && acquiresLockBetween(block.List[i+1:j]))
 					reportPrealloc(pass, block.List[i], name, typ, isNil, bound, emitFix, uncond, cond, unknown)
 				}
 			}
@@ -144,6 +148,67 @@ func boundSubject(s ast.Stmt) string {
 		}
 	}
 	return ""
+}
+
+// boundSourceExpr returns the expression a loop's capacity is derived from:
+// the range subject, or the counted-loop bound (unwrapping a single len(...)
+// argument). It returns nil when no such expression applies.
+func boundSourceExpr(s ast.Stmt) ast.Expr {
+	switch l := s.(type) {
+	case *ast.RangeStmt:
+		return l.X
+	case *ast.ForStmt:
+		cond, ok := l.Cond.(*ast.BinaryExpr)
+		if !ok {
+			return nil
+		}
+		if call, ok := cond.Y.(*ast.CallExpr); ok && len(call.Args) == 1 {
+			return call.Args[0]
+		}
+		return cond.Y
+	}
+	return nil
+}
+
+// boundReadsField reports whether the loop's capacity is derived from a
+// field access (a selector such as p.items) rather than a plain local
+// identifier. A field read is only safe to evaluate where its guarding
+// invariants hold; hoisting it (see acquiresLockBetween) can move it out of
+// a critical section.
+func boundReadsField(s ast.Stmt) bool {
+	_, ok := boundSourceExpr(s).(*ast.SelectorExpr)
+	return ok
+}
+
+// acquiresLockBetween reports whether any of the statements acquires a mutex
+// via a .Lock()/.RLock() call. When such a call sits between an unsized
+// container declaration and its fill loop, pre-sizing at the declaration
+// evaluates the bound BEFORE the lock is held — an unsynchronized read of
+// state the lock protects if the bound reads a field (see boundReadsField).
+func acquiresLockBetween(stmts []ast.Stmt) bool {
+	for _, s := range stmts {
+		found := false
+		ast.Inspect(s, func(n ast.Node) bool {
+			if found {
+				return false
+			}
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+				if sel.Sel.Name == "Lock" || sel.Sel.Name == "RLock" {
+					found = true
+					return false
+				}
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
 }
 
 // definesIdent reports whether any of the statements DEFINES name (:=, or

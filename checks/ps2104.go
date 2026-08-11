@@ -102,6 +102,13 @@ func reportMapPrealloc(pass *analysis.Pass, block *ast.BlockStmt, j int, bound s
 		if definesIdent(block.List[i+1:j], boundSubject(block.List[j])) {
 			fixBound = ""
 		}
+		// A field-read bound hoisted across a lock acquired between the
+		// declaration and the fill loop would read lock-protected state
+		// unsynchronized — drop the fix, keep the advisory.
+		if fixBound != "" && boundReadsField(block.List[j]) &&
+			acquiresLockBetween(block.List[i+1:j]) {
+			fixBound = ""
+		}
 		boundWord := fixBound
 		if boundWord == "" {
 			boundWord = "bound"

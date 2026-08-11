@@ -1,5 +1,7 @@
 package ps2104
 
+import "sync"
+
 func index(src []string) map[string]int {
 	index := map[string]int{} // want `index is filled in the following bounded loop but declared without a size hint; pre-size it with make\(map\[\.\.\.\]\.\.\., len\(src\)\) — exact: one unconditional value per iteration \(a hint may over-reserve for repeated keys\)`
 	for i, s := range src {
@@ -30,6 +32,26 @@ func presized(src []string) map[string]int {
 		index[s] = i
 	}
 	return index
+}
+
+type store struct {
+	mu    sync.Mutex
+	items map[string]int
+}
+
+// Regression (Kubernetes pod_workers.go SyncKnownPods): a size-hint bound
+// that reads a lock-guarded field must not be hoisted across the lock.
+// p.items is guarded by p.mu; pre-sizing at the declaration evaluates
+// len(p.items) BEFORE Lock() — an unsynchronized map read the original
+// make() did not have. Advisory only, never fixed.
+func (p *store) snapshot() map[string]int {
+	out := map[string]int{} // want `out is filled in the following bounded loop but declared without a size hint; pre-size it with make\(map\[\.\.\.\]\.\.\., bound\) — exact: one unconditional value per iteration \(a hint may over-reserve for repeated keys\)`
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for k, v := range p.items {
+		out[k] = v
+	}
+	return out
 }
 
 // Intervening statements that do not touch the map no longer break the
