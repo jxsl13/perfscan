@@ -38,6 +38,7 @@ func main() {
 		fix        = flag.Bool("fix", false, "apply auto-fixes (gated by -fix-level)")
 		fixLevel   = flag.Int("fix-level", 1, "apply fixes only for checks whose level is <= N (default 1: idiomatic, bit-identical rewrites only)")
 		jsonOut    = flag.Bool("json", false, "emit findings as JSON")
+		sarifOut   = flag.Bool("sarif", false, "emit findings as SARIF 2.1.0 (GitHub Code Scanning)")
 		tests      = flag.Bool("tests", false, "also scan _test.go files")
 		configPath = flag.String("config", "", "path to perfscan.json (default: auto-discover up to the module root)")
 		exitZero   = flag.Bool("exit-zero", false, "always exit 0, even with findings")
@@ -58,6 +59,7 @@ func main() {
 		return
 	}
 
+	runner.Version = version
 	code := runner.Run(checks.All(), runner.Options{
 		Patterns:   flag.Args(),
 		Checks:     *sel,
@@ -66,6 +68,7 @@ func main() {
 		Fix:        *fix,
 		FixLevel:   lint.Level(*fixLevel),
 		JSON:       *jsonOut,
+		SARIF:      *sarifOut,
 		ConfigPath: *configPath,
 		ExitZero:   *exitZero,
 	})

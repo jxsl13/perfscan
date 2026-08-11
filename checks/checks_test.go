@@ -80,6 +80,16 @@ func TestPS3007(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS3007.Analyzer, "ps3007")
 }
 
+func TestPS3063(t *testing.T) {
+	defer config.SetForTesting(config.Config{FanOutHelpers: []string{"parallelFor"}})()
+	analysistest.Run(t, analysistest.TestData(), PS3063.Analyzer, "ps3063")
+}
+
+func TestPS3065(t *testing.T) {
+	defer config.SetForTesting(config.Config{FanOutHelpers: []string{"parallelFor"}})()
+	analysistest.Run(t, analysistest.TestData(), PS3065.Analyzer, "ps3065")
+}
+
 func TestPS3066(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS3066.Analyzer, "ps3066")
 }

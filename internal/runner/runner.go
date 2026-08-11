@@ -41,6 +41,8 @@ type Options struct {
 	FixLevel lint.Level
 	// JSON emits findings as JSON instead of text.
 	JSON bool
+	// SARIF emits findings as SARIF 2.1.0 (for GitHub Code Scanning).
+	SARIF bool
 	// ConfigPath overrides config discovery.
 	ConfigPath string
 	// ExitZero forces exit code 0 even with findings.
@@ -131,9 +133,12 @@ func Run(checks []*lint.Check, opts Options) int {
 		fmt.Fprintf(opts.Stderr, "perfscan: applied %d fix(es), %d failed\n", applied, failed)
 	}
 
-	if opts.JSON {
+	switch {
+	case opts.SARIF:
+		emitSARIF(opts.Stdout, findings)
+	case opts.JSON:
 		emitJSON(opts.Stdout, findings)
-	} else {
+	default:
 		for _, f := range findings {
 			fmt.Fprintf(opts.Stdout, "%s:%d:%d: %s (%s %s)\n",
 				relPath(f.Pos.Filename), f.Pos.Line, f.Pos.Column, f.Message, f.Check.ID, f.Check.Level)

@@ -30,6 +30,8 @@ Every check has a stable PS-prefixed ID and a fix level:
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
 | [PS3005](PS3005.md) | indirect | L2 |  | an index-slice sort whose comparator dereferences into a 2-D structure |
 | [PS3007](PS3007.md) | indirect | L2 |  | a membership set built from a slice the caller already owns, probed in a loop |
+| [PS3063](PS3063.md) | indirect | L3 |  | a serial nest inside a function that already fans out elsewhere |
+| [PS3065](PS3065.md) | indirect | L3 |  | a single serial loop over an expensive call, with a fan-out helper available |
 | [PS3066](PS3066.md) | indirect | L2 |  | three or more sibling loops over the same bound, all touching one buffer |
 | [PS3071](PS3071.md) | indirect | L2 |  | a method-local fixed-size buffer sliced into an interface-taking call |
 | [PS3077](PS3077.md) | indirect | L3 |  | math.Min wrapped around math.Max (a clamp) inside a loop |

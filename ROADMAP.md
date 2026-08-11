@@ -13,11 +13,11 @@ planned engine work. PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
       level filter (`-level`), text + JSON output, exit codes
 - [x] `//perfscan:ignore` suppression directives
 - [x] Gated auto-fix (`-fix -fix-level N`) with gofmt post-formatting
+- [x] SARIF 2.1.0 output (`-sarif`; L3 advisories map to "note")
+- [x] Docs generated from the registry (`make docs`, CI drift gate)
 - [x] Project vocabulary config (perfscan.json, auto-discovery, starved-check
       warnings)
-- [ ] SARIF output
 - [ ] Package-level caching for large repos (staticcheck-style facts/caching)
-- [ ] Docs site generation from the registry (`perfscan -explain` → markdown)
 - [ ] `golangci-lint` plugin integration
 - [ ] Baseline file ("ratchet") support: fail only on new findings
 
@@ -71,7 +71,8 @@ figures cited in their docs are goai's measured results.
 ### Domain checks (need vocabulary)
 
 - [ ] PS1004, PS1006–PS1010 per-element family (rest)
-- [ ] PS3034/PS3059/PS3060/PS3063/PS3065 serial-nest family (fanOutHelpers)
+- [x] PS3063 + PS3065 serial-nest/serial-loop (fanOutHelpers, L3)
+- [ ] PS3034/PS3059/PS3060 serial-nest family (rest)
 - [ ] PS4001 bulk-copy, PS4002 scalar-transcendental-vectorizable
 - [ ] PS6004 unverified-dual-path
 

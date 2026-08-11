@@ -32,6 +32,7 @@ perfscan -level 1 ./...            # only findings with idiomatic (L1) fixes
 perfscan -fix ./...                # apply L1 auto-fixes in place
 perfscan -fix -fix-level 2 ./...   # also apply L2 (structured) fixes
 perfscan -json ./...               # machine-readable output (editor quick-fixes)
+perfscan -sarif ./...              # SARIF 2.1.0 (GitHub Code Scanning)
 perfscan -list                     # the check table
 perfscan -explain PS2005           # a check's full documentation
 ```
