@@ -38,7 +38,7 @@ import (
 	"github.com/jxsl13/perfscan/perfscanxx/internal/tidy"
 )
 
-var version = "dev" // set by goreleaser
+var version = "dev" // set by the release workflow via -ldflags
 
 // stringSlice is a repeatable string flag (-extra-arg=a -extra-arg=b).
 type stringSlice []string

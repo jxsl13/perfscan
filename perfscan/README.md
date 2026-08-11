@@ -24,7 +24,7 @@ go install github.com/jxsl13/perfscan/perfscan@latest
 Or download a prebuilt binary from the
 [releases page](https://github.com/jxsl13/perfscan/releases) — assets are named
 `perfscan_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows), published on
-`vX.Y.Z` release tags (alongside the `perfscanxx_*` binary).
+`perfscan/vX.Y.Z` tags.
 
 ## Usage
 

@@ -27,7 +27,7 @@ import (
 	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
-var version = "dev" // set by goreleaser
+var version = "dev" // set by the release workflow via -ldflags
 
 func main() {
 	var (

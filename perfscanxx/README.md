@@ -16,7 +16,7 @@ go install github.com/jxsl13/perfscan/perfscanxx@latest
 Or download a prebuilt binary from the
 [releases page](https://github.com/jxsl13/perfscan/releases) — assets are named
 `perfscanxx_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows), published on
-`vX.Y.Z` release tags (alongside the `perfscan_*` binary).
+`perfscanxx/vX.Y.Z` tags.
 
 ### Runtime dependency: clang-tidy
 
