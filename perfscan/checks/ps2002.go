@@ -9,8 +9,8 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/internal/astutil"
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/internal/astutil"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // PS2002 reports strings.Builder/bytes.Buffer values written in a loop with

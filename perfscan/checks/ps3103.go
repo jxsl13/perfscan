@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // ps3103Threshold is the element size, in bytes, above which a by-value

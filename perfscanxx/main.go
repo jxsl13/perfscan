@@ -32,10 +32,10 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/jxsl13/perfscanxx/internal/catalog"
-	"github.com/jxsl13/perfscanxx/internal/fixes"
-	"github.com/jxsl13/perfscanxx/internal/report"
-	"github.com/jxsl13/perfscanxx/internal/tidy"
+	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
+	"github.com/jxsl13/perfscan/perfscanxx/internal/fixes"
+	"github.com/jxsl13/perfscan/perfscanxx/internal/report"
+	"github.com/jxsl13/perfscan/perfscanxx/internal/tidy"
 )
 
 var version = "dev" // set by goreleaser

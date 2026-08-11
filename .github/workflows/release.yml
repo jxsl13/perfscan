@@ -1,18 +1,24 @@
 name: Release
 
+# Monorepo releases use per-tool tag prefixes so the two tools version
+# independently:
+#   git tag perfscan/v1.2.3     && git push --tags   # releases the linter
+#   git tag perfscanxx/v0.1.0   && git push --tags   # releases the C++ analyzer
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - "perfscan/v*"
+      - "perfscanxx/v*"
 
 permissions:
   contents: write
 
 jobs:
   goreleaser:
+    strategy:
+      matrix:
+        module: [perfscan, perfscanxx]
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: perfscan
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,13 +26,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - name: Test before release
+      # Test the module before releasing it (only for the tagged module).
+      - name: Test ${{ matrix.module }}
+        if: startsWith(github.ref_name, format('{0}/', matrix.module))
+        working-directory: ${{ matrix.module }}
         run: go test ./...
-      - uses: goreleaser/goreleaser-action@v6
+      # goreleaser reads the module's monorepo tag_prefix to derive the
+      # version from the prefixed tag and only runs for its own tag.
+      - name: Release ${{ matrix.module }}
+        if: startsWith(github.ref_name, format('{0}/', matrix.module))
+        uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
           args: release --clean
-          workdir: perfscan
+          workdir: ${{ matrix.module }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // PS2101 reports a slice declared with no capacity earlier in the block

@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // PS2109 reports []byte(fmt.Sprintf(...)) — formatting into a string only

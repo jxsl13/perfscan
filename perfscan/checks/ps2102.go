@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/internal/astutil"
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/internal/astutil"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // PS2102 reports string concatenation with += (or s = s + x) inside a loop.

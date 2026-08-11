@@ -7,8 +7,8 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/internal/astutil"
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/internal/astutil"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // PS3077 reports a two-bound clamp written as math.Min(math.Max(...)) (or

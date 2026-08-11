@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // PS2105 reports `for … := range []rune(s)` where s is a string: ranging

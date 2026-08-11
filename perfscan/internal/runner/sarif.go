@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // SARIF 2.1.0 output for GitHub Code Scanning and other SARIF consumers.
@@ -82,7 +82,7 @@ func emitSARIF(w io.Writer, findings []Finding) {
 			rules = append(rules, sarifRule{
 				ID:               f.Check.ID,
 				ShortDescription: sarifText{Text: f.Check.Doc.Title},
-				HelpURI:          "https://github.com/jxsl13/perfscan/blob/main/docs/checks/" + f.Check.ID + ".md",
+				HelpURI:          "https://github.com/jxsl13/perfscan/perfscan/blob/main/docs/checks/" + f.Check.ID + ".md",
 				Properties: map[string]string{
 					"category": f.Check.Category,
 					"fixLevel": f.Check.Level.String(),
@@ -113,7 +113,7 @@ func emitSARIF(w io.Writer, findings []Finding) {
 			Tool: sarifTool{Driver: sarifDriver{
 				Name:           "perfscan",
 				Version:        Version,
-				InformationURI: "https://github.com/jxsl13/perfscan",
+				InformationURI: "https://github.com/jxsl13/perfscan/perfscan",
 				Rules:          rules,
 			}},
 			Results: results,

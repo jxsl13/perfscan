@@ -17,8 +17,8 @@ import (
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/packages"
 
-	"github.com/jxsl13/perfscan/config"
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/config"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // Options configures a run.

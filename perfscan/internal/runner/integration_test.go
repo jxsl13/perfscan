@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jxsl13/perfscan/checks"
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/checks"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // The integration corpus is a miniature tensor library carrying both

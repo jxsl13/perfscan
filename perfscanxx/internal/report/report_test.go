@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jxsl13/perfscanxx/internal/catalog"
-	"github.com/jxsl13/perfscanxx/internal/fixes"
+	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
+	"github.com/jxsl13/perfscan/perfscanxx/internal/fixes"
 )
 
 func sampleExport() *fixes.ExportFile {

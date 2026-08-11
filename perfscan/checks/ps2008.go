@@ -9,8 +9,8 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/internal/astutil"
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/internal/astutil"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // PS2008 reports loops that allocate one slice per iteration into

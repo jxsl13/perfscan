@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // PS3102 reports the map-clearing idiom `for k := range m { delete(m, k) }`

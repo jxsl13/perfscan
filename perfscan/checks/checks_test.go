@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/tools/go/analysis/analysistest"
 
-	"github.com/jxsl13/perfscan/config"
+	"github.com/jxsl13/perfscan/perfscan/config"
 )
 
 func TestPS2002(t *testing.T) {

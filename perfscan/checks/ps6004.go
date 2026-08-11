@@ -6,8 +6,8 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/config"
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/config"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // PS6004 reports dual paths guarded by a configured fast-path helper's

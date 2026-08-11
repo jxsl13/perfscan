@@ -7,8 +7,8 @@ package checks
 import (
 	"go/ast"
 
-	"github.com/jxsl13/perfscan/config"
-	"github.com/jxsl13/perfscan/internal/astutil"
+	"github.com/jxsl13/perfscan/perfscan/config"
+	"github.com/jxsl13/perfscan/perfscan/internal/astutil"
 )
 
 // funcFacts holds the per-function facts the PS1xxx checks share.

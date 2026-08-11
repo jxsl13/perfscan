@@ -1,4 +1,4 @@
-module github.com/jxsl13/perfscanxx
+module github.com/jxsl13/perfscan/perfscanxx
 
 go 1.24
 

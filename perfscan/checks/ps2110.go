@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/internal/astutil"
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/internal/astutil"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // PS2110 reports the hand-rolled slice clone idioms append([]T(nil), s...)

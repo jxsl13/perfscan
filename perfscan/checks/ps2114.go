@@ -6,7 +6,7 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 // PS2114 reports sync.Pool round trips over non-pointer values: a Put whose

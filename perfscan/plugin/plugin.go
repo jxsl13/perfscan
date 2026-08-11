@@ -6,7 +6,7 @@
 //	# .custom-gcl.yml
 //	version: v2.1.0
 //	plugins:
-//	  - module: 'github.com/jxsl13/perfscan/plugin'
+//	  - module: 'github.com/jxsl13/perfscan/perfscan/plugin'
 //	    version: v0.4.0
 //
 //	$ golangci-lint custom
@@ -31,9 +31,9 @@ import (
 	"github.com/golangci/plugin-module-register/register"
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/checks"
-	"github.com/jxsl13/perfscan/config"
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/checks"
+	"github.com/jxsl13/perfscan/perfscan/config"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 func init() {

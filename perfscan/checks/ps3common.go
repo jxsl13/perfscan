@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/jxsl13/perfscan/internal/astutil"
+	"github.com/jxsl13/perfscan/perfscan/internal/astutil"
 )
 
 // packageHasFanOut reports whether any file declares or calls a configured

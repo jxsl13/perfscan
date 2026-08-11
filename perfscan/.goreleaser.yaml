@@ -2,6 +2,12 @@ version: 2
 
 project_name: perfscan
 
+# Monorepo: this module lives in perfscan/ and is released on tags
+# prefixed "perfscan/vX.Y.Z" (perfscanxx has its own "perfscanxx/vX.Y.Z").
+monorepo:
+  tag_prefix: perfscan/
+  dir: perfscan
+
 builds:
   - id: perfscan
     main: .
@@ -47,4 +53,4 @@ changelog:
 release:
   footer: |
     ---
-    Install with `go install github.com/jxsl13/perfscan@{{.Tag}}`
+    Install with `go install github.com/jxsl13/perfscan/perfscan@{{.Tag}}`

@@ -1,0 +1,46 @@
+version: 2
+
+project_name: perfscanxx
+
+# Monorepo: this module lives in perfscanxx/ and is released on tags
+# prefixed "perfscanxx/vX.Y.Z" (the perfscan linter has its own "perfscan/vX.Y.Z").
+monorepo:
+  tag_prefix: perfscanxx/
+  dir: perfscanxx
+
+builds:
+  - id: perfscanxx
+    main: .
+    binary: perfscanxx
+    env:
+      - CGO_ENABLED=0 # pure Go — perfscanxx shells out to clang-tidy at runtime
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
+
+release:
+  footer: |
+    ---
+    perfscanxx orchestrates clang-tidy — install it at runtime (`brew install llvm`).
+
+    Install perfscanxx with `go install github.com/jxsl13/perfscan/perfscanxx@{{.Tag}}`

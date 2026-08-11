@@ -22,9 +22,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/jxsl13/perfscan/checks"
-	"github.com/jxsl13/perfscan/internal/runner"
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/checks"
+	"github.com/jxsl13/perfscan/perfscan/internal/runner"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 var version = "dev" // set by goreleaser

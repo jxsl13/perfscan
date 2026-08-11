@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jxsl13/perfscan/checks"
-	"github.com/jxsl13/perfscan/lint"
+	"github.com/jxsl13/perfscan/perfscan/checks"
+	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
 func main() {

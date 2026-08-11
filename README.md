@@ -9,14 +9,33 @@ Two independent, benchmark-verified performance linters that share a philosophy 
 | **perfscan** | [`perfscan/`](perfscan/) | A Go performance linter (`go/analysis`-based). ~60 checks with bit-identical auto-fixes graded L1/L2/L3, YAML config, baseline, SARIF, and a golangci-lint plugin. |
 | **perfscan++** (`perfscanxx`) | [`perfscanxx/`](perfscanxx/) | The C++ analog: a Go CLI that **orchestrates clang-tidy**. It maps clang-tidy's `performance-*` checks into the same graded PX-id model and adds query-based custom checks — **zero of our own C++** (the only C++ is the prebuilt `clang-tidy` binary). |
 
+## Install
+
+Both tools are plain Go binaries. Install the one(s) you want with `go install`:
+
+```bash
+go install github.com/jxsl13/perfscan/perfscan@latest      # the Go linter
+go install github.com/jxsl13/perfscan/perfscanxx@latest    # the C++ analyzer
+```
+
+Or download a prebuilt binary from the
+[releases page](https://github.com/jxsl13/perfscan/releases). The two tools
+version and release independently via prefixed tags — `perfscan/vX.Y.Z` and
+`perfscanxx/vX.Y.Z` — so each release's assets are named
+`perfscan_<version>_<os>_<arch>.tar.gz` / `perfscanxx_<version>_<os>_<arch>.tar.gz`
+(`.zip` on Windows), for linux/darwin/windows × amd64/arm64.
+
+perfscanxx additionally needs `clang-tidy` at runtime (LLVM ≥ 20 —
+`brew install llvm`); see [perfscanxx/README.md](perfscanxx/README.md).
+
 ## Clean separation
 
 The two tools are **peer Go modules with disjoint source trees** — neither
 imports the other:
 
 ```
-perfscan/            module github.com/jxsl13/perfscan     (Go linter)
-perfscanxx/          module github.com/jxsl13/perfscanxx   (C++ analyzer)
+perfscan/            module github.com/jxsl13/perfscan/perfscan     (Go linter)
+perfscanxx/          module github.com/jxsl13/perfscan/perfscanxx   (C++ analyzer)
 go.work              dev workspace tying both (not fetched by consumers)
 corpus/              shared real-world test codebases (gitignored)
 LICENSE.md .github/  repo-level, shared
