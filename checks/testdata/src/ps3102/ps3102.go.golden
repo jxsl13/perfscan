@@ -1,0 +1,114 @@
+package ps3102
+
+// The exact idiom over a local map is rewritten to clear(m).
+func clearLocal(m map[string]int) {
+	clear(m) // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call`
+}
+
+// Any key/value shapes work as long as the key cannot hold NaN; only the
+// loop statement is replaced, surrounding statements stay.
+func clearSet(seen map[int]struct{}) int {
+	before := len(seen)
+	clear(seen) // want `seen is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(seen\) empties the map in one call`
+	return before
+}
+
+var cache = map[string][]byte{}
+
+// A package-level map variable is matched by object identity too.
+func resetCache() {
+	clear(cache) // want `cache is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(cache\) empties the map in one call`
+}
+
+// --- advisory: reported but never rewritten ---
+
+// A float key can be NaN; delete(m, k) cannot remove a NaN key (NaN != NaN)
+// but clear does, so the rewrite is not bit-identical.
+func floatKeys(m map[float64]int) {
+	for k := range m { // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
+		delete(m, k)
+	}
+}
+
+// A struct key embedding a float can hold NaN just the same.
+type coord struct{ x, y float64 }
+
+func structFloatKeys(m map[coord]bool) {
+	for k := range m { // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
+		delete(m, k)
+	}
+}
+
+// An interface key may dynamically hold a float NaN.
+func anyKeys(m map[any]int) {
+	for k := range m { // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
+		delete(m, k)
+	}
+}
+
+// A user declaration named clear captures the rewritten call: the loop is
+// reported but the fix is withheld.
+func shadowedClear(m map[string]int) {
+	clear := 0
+	_ = clear
+	for k := range m { delete(m, k) } // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call`
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// The body does more than the delete.
+func countAndClear(m map[string]int) int {
+	n := 0
+	for k := range m {
+		n++
+		delete(m, k)
+	}
+	return n
+}
+
+// A value variable is bound: not the bare key-only idiom.
+func withValue(m map[string]int, sink func(int)) {
+	for k, v := range m {
+		sink(v)
+		delete(m, k)
+	}
+}
+
+// Even a blank value variable is left alone (strict shape only).
+func blankValue(m map[string]int) {
+	for k, _ := range m {
+		delete(m, k)
+	}
+}
+
+// delete targets a DIFFERENT map than the one ranged over.
+func deleteOther(m, other map[string]int) {
+	for k := range m {
+		delete(other, k)
+	}
+}
+
+// The range is over a slice, not a map.
+func sliceRange(s []string, m map[string]int) {
+	for i := range s {
+		delete(m, s[i])
+	}
+}
+
+// A shadowed delete is not the builtin.
+func shadowedDelete(m map[string]int) {
+	delete := func(mm map[string]int, k string) {}
+	for k := range m {
+		delete(m, k)
+	}
+}
+
+// `for k = range m` assigns the final key to an outer variable, which
+// clear(m) would not; not matched.
+func assignedKey(m map[string]int) string {
+	var k string
+	for k = range m {
+		delete(m, k)
+	}
+	return k
+}

@@ -1,0 +1,135 @@
+package ps5102
+
+import (
+	"bufio"
+	"bytes"
+	"strings"
+)
+
+func buffer(b *bytes.Buffer) {
+	b.WriteRune('a')  // want `WriteRune of the single-byte constant 'a' takes the rune-encoding path; WriteByte writes the byte directly`
+	b.WriteRune('\n') // want `WriteRune of the single-byte constant '\\n' takes the rune-encoding path; WriteByte writes the byte directly`
+}
+
+func builder(sb *strings.Builder) {
+	sb.WriteRune(' ') // want `WriteRune of the single-byte constant ' ' takes the rune-encoding path; WriteByte writes the byte directly`
+}
+
+func writer(w *bufio.Writer) {
+	w.WriteRune('=') // want `WriteRune of the single-byte constant '=' takes the rune-encoding path; WriteByte writes the byte directly`
+}
+
+// An untyped int literal below 0x80 keeps its spelling.
+func intLiteral(b *bytes.Buffer) {
+	b.WriteRune(65) // want `WriteRune of the single-byte constant 65 takes the rune-encoding path; WriteByte writes the byte directly`
+}
+
+const ps5102Sep = ':'
+
+// A non-literal constant is wrapped in a byte(...) conversion.
+func namedConst(b *bytes.Buffer) {
+	b.WriteRune(ps5102Sep) // want `WriteRune of the single-byte constant ps5102Sep takes the rune-encoding path; WriteByte writes the byte directly`
+}
+
+// A constant expression is wrapped too — the original spelling survives
+// inside the conversion.
+func constExpr(b *bytes.Buffer) {
+	b.WriteRune('a' + 1) // want `WriteRune of the single-byte constant 'a' \+ 1 takes the rune-encoding path; WriteByte writes the byte directly`
+}
+
+// A value receiver works: the pointer-receiver WriteRune already required
+// the variable to be addressable, so WriteByte is reachable the same way.
+func valueRecv() string {
+	var sb strings.Builder
+	sb.WriteRune('!') // want `WriteRune of the single-byte constant '!' takes the rune-encoding path; WriteByte writes the byte directly`
+	return sb.String()
+}
+
+// Promotion through an embedded std writer resolves both methods to the
+// std pair — the fix still applies.
+type ps5102Wrapper struct {
+	*bytes.Buffer
+}
+
+func embedded(w ps5102Wrapper) {
+	w.WriteRune('.') // want `WriteRune of the single-byte constant '\.' takes the rune-encoding path; WriteByte writes the byte directly`
+}
+
+// defer discards the results just like an expression statement.
+func deferred(b *bytes.Buffer) {
+	defer b.WriteRune('d') // want `WriteRune of the single-byte constant 'd' takes the rune-encoding path; WriteByte writes the byte directly`
+}
+
+// --- advisory: reported but never rewritten ---
+
+// A used result changes shape: WriteRune returns (int, error), WriteByte
+// only error.
+func resultUsed(b *bytes.Buffer) error {
+	_, err := b.WriteRune('a') // want `WriteRune of the single-byte constant 'a' takes the rune-encoding path; WriteByte writes the byte directly; WriteRune returns \(int, error\) but WriteByte returns only error — adjust the result handling by hand`
+	return err
+}
+
+// A custom pair carries no proof the two methods agree.
+type ps5102Custom struct{}
+
+func (ps5102Custom) WriteRune(r rune) (int, error) { return 0, nil }
+func (ps5102Custom) WriteByte(c byte) error        { return nil }
+
+func customPair(c ps5102Custom) {
+	c.WriteRune('a') // want `WriteRune of the single-byte constant 'a' takes the rune-encoding path; WriteByte writes the byte directly; this WriteByte/WriteRune pair is not the standard library's — verify they agree before rewriting`
+}
+
+// An interface pair is equally unproven.
+type ps5102Iface interface {
+	WriteRune(r rune) (int, error)
+	WriteByte(c byte) error
+}
+
+func iface(w ps5102Iface) {
+	w.WriteRune('a') // want `WriteRune of the single-byte constant 'a' takes the rune-encoding path; WriteByte writes the byte directly; this WriteByte/WriteRune pair is not the standard library's — verify they agree before rewriting`
+}
+
+// --- guards: none of the following may be reported ---
+
+// Multi-byte runes genuinely need the encoder; 0x80 is the first of them.
+func multiByte(b *bytes.Buffer) {
+	b.WriteRune('€')
+	b.WriteRune(0x80)
+}
+
+// A non-constant rune may be anything at run time.
+func nonConst(b *bytes.Buffer, r rune) {
+	b.WriteRune(r)
+}
+
+// A receiver without WriteByte has nothing to rewrite to.
+type ps5102RuneOnly struct{}
+
+func (ps5102RuneOnly) WriteRune(r rune) (int, error) { return 0, nil }
+
+func noWriteByte(x ps5102RuneOnly) {
+	x.WriteRune('a')
+}
+
+// A function-typed field named WriteRune is not a method call.
+type ps5102FieldFunc struct {
+	WriteRune func(r rune) (int, error)
+	WriteByte func(c byte) error
+}
+
+func fieldFunc(f ps5102FieldFunc) {
+	f.WriteRune('a')
+}
+
+// A pointer-receiver WriteByte is not in the method set of a value
+// returned by a call: the rewrite would not even compile.
+type ps5102Mixed struct{}
+
+func (ps5102Mixed) WriteRune(r rune) (int, error) { return 0, nil }
+func (*ps5102Mixed) WriteByte(c byte) error       { return nil }
+
+func ps5102MakeMixed() ps5102Mixed { return ps5102Mixed{} }
+
+func mixed() {
+	ps5102MakeMixed().WriteRune('a')
+}
