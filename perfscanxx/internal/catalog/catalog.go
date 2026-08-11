@@ -180,6 +180,18 @@ var entries = []Entry{
 		Title:  "count()/find() != end() membership test; .contains() is clearer and never over-counts (C++20)",
 		HasFix: true,
 	},
+	{
+		ID: "PX3011", TidyName: "readability-const-return-type",
+		Level: LevelStructured, Category: "moves",
+		Title:  "top-level const on a by-value return type pessimizes move at call sites; drop the const",
+		HasFix: true,
+	},
+	{
+		ID: "PX3012", TidyName: "modernize-use-transparent-functors",
+		Level: LevelStructured, Category: "containers",
+		Title:  "std::less<T> etc. as a container comparator; the transparent std::less<> enables heterogeneous lookup without temporaries",
+		HasFix: true,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
