@@ -261,7 +261,7 @@ func selectChecks(all []*lint.Check, sel string, maxLevel lint.Level) ([]*lint.C
 	include := map[string]bool{}
 	exclude := map[string]bool{}
 	explicit := map[string]bool{}
-	for _, tok := range strings.Split(sel, ",") {
+	for tok := range strings.SplitSeq(sel, ",") {
 		tok = strings.TrimSpace(tok)
 		if tok == "" {
 			continue
