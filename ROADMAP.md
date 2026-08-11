@@ -56,7 +56,6 @@ figures cited in their docs are goai's measured results.
 ### Next up (generic, high value)
 
 - [ ] PS2004 poolable-loop-scratch
-- [ ] PS2006 quadratic-cache-append
 - [ ] PS2007 build-nxn-use-one-row
 - [ ] PS3005 indirect-key-comparator
 - [ ] PS3064 jagged-matrix-allocated-row-by-row (overlaps PS2008; decide split)
@@ -77,4 +76,3 @@ figures cited in their docs are goai's measured results.
 - [ ] `fmt.Sprintf` for pure concatenation in a hot loop (L1)
 - [ ] `time.Now()` in tight loops where coarse time suffices (L2)
 - [ ] defer-in-loop accumulation (L1)
-- [ ] PS2101/PS2104: derive bounds from selector sources (len(x.Items))

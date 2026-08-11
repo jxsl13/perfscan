@@ -34,6 +34,16 @@ func countedLoop(n int) []int {
 	return out
 }
 
+type box struct{ items []string }
+
+func selectorSource(b box) []string {
+	out := make([]string, 0, len(b.items)) // want `out is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, bound\) — exact for one unconditional append per iteration, an upper bound for filtered appends`
+	for _, s := range b.items {
+		out = append(out, s)
+	}
+	return out
+}
+
 func presized(src []string) []string {
 	out := make([]string, 0, len(src))
 	for _, s := range src {

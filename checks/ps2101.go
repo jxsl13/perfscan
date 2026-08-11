@@ -114,8 +114,8 @@ func loopBodyOf(s ast.Stmt) *ast.BlockStmt {
 func loopCapacityExpr(pass *analysis.Pass, s ast.Stmt) string {
 	switch l := s.(type) {
 	case *ast.RangeStmt:
-		src, ok := l.X.(*ast.Ident)
-		if !ok || reassigns(l.Body, src.Name) {
+		src := simpleExprText(l.X)
+		if src == "" || reassigns(l.Body, rootIdentName(l.X)) {
 			return ""
 		}
 		t := pass.TypesInfo.TypeOf(l.X)
@@ -124,9 +124,9 @@ func loopCapacityExpr(pass *analysis.Pass, s ast.Stmt) string {
 		}
 		switch t.Underlying().(type) {
 		case *types.Slice, *types.Array, *types.Map:
-			return "len(" + src.Name + ")"
+			return "len(" + src + ")"
 		case *types.Pointer: // *[N]T range
-			return "len(" + src.Name + ")"
+			return "len(" + src + ")"
 		}
 		return ""
 	case *ast.ForStmt:
@@ -147,22 +147,23 @@ func loopCapacityExpr(pass *analysis.Pass, s ast.Stmt) string {
 		if !ok || lhs.Name != iv.Name {
 			return ""
 		}
-		var bound string
+		var bound, subject string
 		switch b := cond.Y.(type) {
-		case *ast.Ident:
-			bound = b.Name
+		case *ast.Ident, *ast.SelectorExpr:
+			bound = simpleExprText(cond.Y)
+			subject = rootIdentName(cond.Y)
 		case *ast.CallExpr:
-			if len(b.Args) == 1 {
-				if id, ok := b.Args[0].(*ast.Ident); ok && calleeIsLen(b) {
-					bound = "len(" + id.Name + ")"
+			if len(b.Args) == 1 && calleeIsLen(b) {
+				if inner := simpleExprText(b.Args[0]); inner != "" {
+					bound = "len(" + inner + ")"
+					subject = rootIdentName(b.Args[0])
 				}
 			}
 		}
 		if bound == "" {
 			return ""
 		}
-		// The bound (or its subject) must not be reassigned in the body.
-		subject := strings.TrimSuffix(strings.TrimPrefix(bound, "len("), ")")
+		// The bound's subject must not be reassigned in the body.
 		if reassigns(l.Body, subject) {
 			return ""
 		}
@@ -174,6 +175,36 @@ func loopCapacityExpr(pass *analysis.Pass, s ast.Stmt) string {
 func calleeIsLen(call *ast.CallExpr) bool {
 	id, ok := call.Fun.(*ast.Ident)
 	return ok && id.Name == "len"
+}
+
+// simpleExprText renders a side-effect-free bound source — a plain
+// identifier or a selector chain over one (x, x.f, x.f.g) — and returns ""
+// for anything else (calls, index expressions), which cannot be safely
+// repeated in a make() capacity.
+func simpleExprText(e ast.Expr) string {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return x.Name
+	case *ast.SelectorExpr:
+		if base := simpleExprText(x.X); base != "" {
+			return base + "." + x.Sel.Name
+		}
+	}
+	return ""
+}
+
+// rootIdentName returns the root identifier of a selector chain.
+func rootIdentName(e ast.Expr) string {
+	for {
+		switch x := e.(type) {
+		case *ast.Ident:
+			return x.Name
+		case *ast.SelectorExpr:
+			e = x.X
+		default:
+			return ""
+		}
+	}
 }
 
 // unsizedSliceDecl matches `s := []T{}`, `s := make([]T, 0)` and

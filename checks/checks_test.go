@@ -36,6 +36,10 @@ func TestPS4101(t *testing.T) {
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS4101.Analyzer, "ps4101")
 }
 
+func TestPS2006(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), PS2006.Analyzer, "ps2006")
+}
+
 func TestPS2003(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS2003.Analyzer, "ps2003")
 }
