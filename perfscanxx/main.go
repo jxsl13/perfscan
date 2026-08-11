@@ -7,14 +7,21 @@
 //
 // Usage:
 //
-//	perfscanxx [flags] file.cpp...
+//	perfscanxx [flags] [packages]
+//
+// Like `perfscan ./...`, a package arg is a Go-style path pattern or directory
+// expanded against the compilation database to the translation units under it;
+// a concrete file is used as-is. No args means ./... (every TU under cwd). The
+// compilation database is found via -p or by walking up from the cwd.
 //
 // Examples:
 //
-//	perfscanxx -p build src/*.cpp        report all findings
-//	perfscanxx -checks PX1* src/a.cpp    only copy checks
-//	perfscanxx -level 1 -fix src/a.cpp   apply only L1 (idiomatic) fixes
-//	perfscanxx -json -p build src/a.cpp  machine-readable output
+//	perfscanxx -p build ./...            report all findings in the project
+//	perfscanxx -p build ./src/game/...   only the src/game subtree
+//	perfscanxx -checks PX1* -p build ./... only copy checks
+//	perfscanxx -level 1 -fix -p build ./... apply only L1 (idiomatic) fixes
+//	perfscanxx -json -p build ./...      machine-readable output
+//	perfscanxx -p build src/a.cpp        a single translation unit
 //	perfscanxx -list                     print the check table
 //	perfscanxx -explain PX1001           print a check's summary
 //
@@ -29,10 +36,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
+	"github.com/jxsl13/perfscan/perfscanxx/internal/compdb"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/fixes"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/report"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/tidy"
@@ -64,7 +74,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		maxLevel = fs.Int("level", 3, "report only checks whose fix level is <= N (1=idiomatic, 2=structured, 3=aggressive)")
 		jsonOut  = fs.Bool("json", false, "emit findings as JSON")
 		sarifOut = fs.Bool("sarif", false, "emit findings as SARIF 2.1.0 (GitHub Code Scanning)")
-		buildDir = fs.String("p", "", "build directory containing compile_commands.json (forwarded to clang-tidy -p)")
+		buildDir = fs.String("p", "", "build directory containing compile_commands.json (default: found by walking up from the cwd)")
 		tidyBin  = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
 		showVer  = fs.Bool("version", false, "print version and exit")
 		extra    stringSlice
@@ -91,9 +101,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "perfscanxx: -level must be 1, 2 or 3")
 		return 2
 	}
-	files := fs.Args()
+	// Positional args are files, directories, or Go-style `./...` patterns.
+	// Directories and `...` patterns are expanded to the matching translation
+	// units in the compilation database — the C++ analog of `perfscan ./...`.
+	// No args defaults to `./...` (every TU under the current directory).
+	inputs := fs.Args()
+	if len(inputs) == 0 {
+		inputs = []string{"./..."}
+	}
+	files, effBuildDir, err := expandInputs(inputs, *buildDir)
+	if err != nil {
+		fmt.Fprintln(stderr, "perfscanxx:", err)
+		return 2
+	}
 	if len(files) == 0 {
-		fs.Usage()
+		fmt.Fprintf(stderr, "perfscanxx: no C++ translation units matched %v\n", inputs)
 		return 2
 	}
 
@@ -113,7 +135,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	opts := tidy.Options{
 		Binary:    *tidyBin,
-		BuildDir:  *buildDir,
+		BuildDir:  effBuildDir,
 		Checks:    tidyChecks,
 		Fix:       *fix,
 		Files:     files,
@@ -170,6 +192,83 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// expandInputs turns the positional args into the concrete translation units
+// to hand clang-tidy, plus the build dir to pass as -p.
+//
+// An arg is either a Go-style path pattern (`.`, `./...`, `pkg/...`) or a
+// directory — expanded to every compilation-database entry under that path —
+// or a concrete file, used as-is. When any expansion is needed (or -p is set)
+// the compilation database is located (via -p, else by walking up from cwd)
+// and its directory becomes the effective build dir.
+func expandInputs(args []string, buildDir string) (files []string, effBuildDir string, err error) {
+	var prefixes []string // absolute dir prefixes to match TUs under
+	var concrete []string // explicit files, kept verbatim
+	for _, a := range args {
+		switch {
+		case a == "." || a == "./..." || a == "...":
+			prefixes = append(prefixes, mustAbs("."))
+		case strings.HasSuffix(a, "/...") || strings.HasSuffix(a, string(filepath.Separator)+"..."):
+			prefixes = append(prefixes, mustAbs(strings.TrimSuffix(strings.TrimSuffix(a, "..."), string(filepath.Separator))))
+		default:
+			if fi, e := os.Stat(a); e == nil && fi.IsDir() {
+				prefixes = append(prefixes, mustAbs(a))
+			} else {
+				concrete = append(concrete, a) // a file (or a shell glob already expanded)
+			}
+		}
+	}
+
+	// No DB needed when every arg was a concrete file and no -p was given.
+	if len(prefixes) == 0 && buildDir == "" {
+		return concrete, "", nil
+	}
+
+	dbPath, err := compdb.Find(buildDir, ".")
+	if err != nil {
+		return nil, "", err
+	}
+	effBuildDir = filepath.Dir(dbPath)
+
+	set := map[string]bool{}
+	for _, f := range concrete {
+		set[mustAbs(f)] = true
+	}
+	if len(prefixes) > 0 {
+		tus, err := compdb.Load(dbPath)
+		if err != nil {
+			return nil, "", err
+		}
+		for _, tu := range tus {
+			for _, p := range prefixes {
+				if underDir(tu, p) {
+					set[tu] = true
+					break
+				}
+			}
+		}
+	}
+	for f := range set {
+		files = append(files, f)
+	}
+	sort.Strings(files)
+	return files, effBuildDir, nil
+}
+
+// underDir reports whether file is dir itself or lives beneath it.
+func underDir(file, dir string) bool {
+	if file == dir {
+		return true
+	}
+	return strings.HasPrefix(file, dir+string(filepath.Separator))
+}
+
+func mustAbs(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(p)
+}
+
 // writeTidyConfig writes a generated .clang-tidy config to a temp file and
 // returns its path plus a cleanup func. Used to carry query-based custom
 // checks (their CustomChecks block) into the clang-tidy invocation.
@@ -195,14 +294,21 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 
 Usage:
 
-	perfscanxx [flags] file.cpp...
+	perfscanxx [flags] [packages]
+
+A package arg is a Go-style path pattern or directory (./..., ./src/game/...)
+expanded against the compilation database to the translation units under it, or
+a concrete .cpp file. No args means ./... (every TU under cwd). The compilation
+database is located via -p or by walking up from the current directory.
 
 Examples:
 
-	perfscanxx -p build src/main.cpp     report all applicable findings
-	perfscanxx -checks PX1* src/a.cpp    only copy checks
-	perfscanxx -level 1 -fix src/a.cpp   report + apply only L1 (idiomatic) fixes
-	perfscanxx -fix src/a.cpp            default -level 3: apply every available fix
+	perfscanxx -p build ./...            report all findings in the project
+	perfscanxx -p build ./src/game/...   only the src/game subtree
+	perfscanxx -checks PX1* -p build ./... only copy checks
+	perfscanxx -level 1 -fix -p build ./... report + apply only L1 fixes
+	perfscanxx -fix -p build ./...       default -level 3: apply every fix
+	perfscanxx -p build src/main.cpp     a single translation unit
 	perfscanxx -list                     the check table
 	perfscanxx -explain PX1001           one check's documentation
 

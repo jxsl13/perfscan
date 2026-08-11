@@ -33,13 +33,20 @@ export PERFSCANXX_CLANG_TIDY="$(brew --prefix llvm)/bin/clang-tidy"
 ## Usage
 
 ```bash
-perfscanxx -p build src/*.cpp        # report all findings (needs compile_commands.json)
-perfscanxx -checks PX1* src/a.cpp    # only copy checks
-perfscanxx -level 1 -fix src/a.cpp   # apply only L1 (idiomatic) fix-its
-perfscanxx -json -p build src/a.cpp  # machine-readable output
-perfscanxx -list                     # the PX check table
-perfscanxx -explain PX1001           # a check's documentation
+perfscanxx -p build ./...             # analyse the whole project (like `perfscan ./...`)
+perfscanxx -p build ./src/game/...    # just a subtree
+perfscanxx -checks PX1* -p build ./... # only copy checks
+perfscanxx -level 1 -fix -p build ./... # apply only L1 (idiomatic) fix-its
+perfscanxx -json -p build ./...       # machine-readable output
+perfscanxx -p build src/a.cpp         # a single translation unit
+perfscanxx -list                      # the PX check table
+perfscanxx -explain PX1001            # a check's documentation
 ```
+
+A path arg is a Go-style pattern or directory (`./...`, `./src/game/...`)
+expanded against the compilation database to the translation units under it; no
+args means `./...`. The `compile_commands.json` is found via `-p` or by walking
+up from the current directory.
 
 See [examples/](examples/) for an end-to-end sample and a recipe for running
 against a real C++ codebase (DDNet), plus [examples/validation.md](examples/validation.md)
