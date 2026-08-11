@@ -23,6 +23,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
+          cache-dependency-path: ${{ matrix.module }}/go.sum
       - name: Build
         working-directory: ${{ matrix.module }}
         run: go build ./...
@@ -42,6 +43,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: stable
+          cache-dependency-path: ${{ matrix.module }}/go.sum
       - name: gofmt
         working-directory: ${{ matrix.module }}
         run: |
@@ -69,6 +71,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: stable
+          cache-dependency-path: perfscan/go.sum
       - name: docs up to date
         run: |
           go run ./gendocs
