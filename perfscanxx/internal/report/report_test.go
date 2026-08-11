@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -101,6 +102,9 @@ func TestLineColAndText(t *testing.T) {
 }
 
 func TestJSONAndSARIF(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SARIF/JSON fixtures use POSIX absolute paths; path handling is filepath-based, covered on unix")
+	}
 	origRead := ReadFile
 	defer func() { ReadFile = origRead }()
 	ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }

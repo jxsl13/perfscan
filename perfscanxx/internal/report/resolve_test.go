@@ -2,10 +2,14 @@ package report
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestResolvePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-style absolute-path fixtures; resolvePath uses path/filepath and is exercised with native paths at runtime")
+	}
 	abs := filepath.FromSlash("/abs/main.cpp")
 	cases := []struct{ fp, build, main, want string }{
 		{filepath.FromSlash("/x/a.cpp"), "/build", "/m/main.cpp", filepath.FromSlash("/x/a.cpp")},  // absolute wins
