@@ -150,6 +150,18 @@ var entries = []Entry{
 		Title:  "std::find/count over an associative container; use the container's O(log n) member",
 		HasFix: true,
 	},
+	{
+		ID: "PX3006", TidyName: "performance-noexcept-swap",
+		Level: LevelStructured, Category: "moves",
+		Title:  "a swap() not marked noexcept blocks the noexcept-swap optimization; add noexcept",
+		HasFix: true,
+	},
+	{
+		ID: "PX3007", TidyName: "modernize-pass-by-value",
+		Level: LevelStructured, Category: "moves",
+		Title:  "sink parameter taken by const& then copied; take by value and std::move (one copy or move, not always a copy)",
+		HasFix: true,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
@@ -204,7 +216,7 @@ func ByID(id string) (Entry, bool) {
 func Select(selector string, maxLevel Level) []Entry {
 	include := make([]string, 0, 4)
 	exclude := make([]string, 0, 4)
-	for _, pat := range strings.Split(selector, ",") {
+	for pat := range strings.SplitSeq(selector, ",") {
 		pat = strings.TrimSpace(pat)
 		if pat == "" {
 			continue
@@ -295,7 +307,7 @@ func ClangTidyConfig(sel []Entry) string {
 		name := strings.TrimPrefix(e.TidyName, "custom-")
 		b.WriteString("  - Name: " + name + "\n")
 		b.WriteString("    Query: |\n")
-		for _, line := range strings.Split(e.Query, "\n") {
+		for line := range strings.SplitSeq(e.Query, "\n") {
 			b.WriteString("      " + line + "\n")
 		}
 		b.WriteString("    Diagnostic:\n")
