@@ -25,7 +25,7 @@ var PS1005 = register(&lint.Check{
 		Title: "a per-element accessor whose 2+ index args are enclosing-loop variables (a manual tensor walk)",
 		Text: `t.AtF64(i, j) inside for i { for j { … } } is a manual
 multi-dimensional tensor walk paying one dispatch per element — the shape
-with the biggest measured payoff in the goai reference, and also one of the
+with the biggest measured payoff in the reference corpus, and also one of the
 most share-dependent, so both numbers matter.
 
 Rank candidates by (a) the dispatch count — the product of the loop bounds
@@ -51,7 +51,7 @@ for i := 0; i < n; i++ {
 		os[row+j] = ws[row+j] * x
 	}
 }`,
-		MeasuredWin: "goai reference: SoftmaxRegression.PredictProba geomean -50.10% (2.0x), allocs -97.95%; but the same transform on a matmul-dominated path measured -0.61% — an 80x outcome spread from loop share",
+		MeasuredWin: "reference corpus: SoftmaxRegression.PredictProba geomean -50.10% (2.0x), allocs -97.95%; but the same transform on a matmul-dominated path measured -0.61% — an 80x outcome spread from loop share",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS1005",

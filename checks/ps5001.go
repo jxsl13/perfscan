@@ -44,7 +44,7 @@ excluded — their divide is a normalization, not a config-scalar divide.`,
 for i := range xs {   // and only where a 1-ulp shift rides a tolerance
 	xs[i] = xs[i] * invTemp
 }`,
-		MeasuredWin: "goai reference: -28.4% on memory-free arithmetic; indistinguishable from noise on anything that loads or stores — the quoted 1.2–1.5x is the memory-free ceiling",
+		MeasuredWin: "reference corpus: -28.4% on memory-free arithmetic; indistinguishable from noise on anything that loads or stores — the quoted 1.2–1.5x is the memory-free ceiling",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS5001",

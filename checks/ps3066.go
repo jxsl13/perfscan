@@ -40,7 +40,7 @@ for i := range state { state[i] += delta[i] }`,
 	s += state[i] * k[i]
 	state[i] += delta[i]
 }`,
-		MeasuredWin: "goai reference: Kimi delta-attention four passes merged into one, BenchmarkKDA_F64_256x128 8.71→7.33ms (-15.9%); same merge on an L1-resident 64×64 state: -1.8%",
+		MeasuredWin: "reference corpus: Kimi delta-attention four passes merged into one, BenchmarkKDA_F64_256x128 8.71→7.33ms (-15.9%); same merge on an L1-resident 64×64 state: -1.8%",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3066",

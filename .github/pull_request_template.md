@@ -12,7 +12,7 @@
 
 **New checks additionally:**
 
-- [ ] Stable ID claimed (free on `main` AND in open PRs); reference ports keep their goai number, originals use the category's `x1xx` block
+- [ ] Stable ID claimed (free on `main` AND in open PRs); reference ports keep their upstream number, originals use the category's `x1xx` block
 - [ ] Fix level chosen honestly (L1 mechanical/bit-identical, L2 restructuring, L3 benchmark-gated advisory)
 - [ ] `AutoFix` only for deterministic, bit-identical rewrites
 - [ ] Positive AND negative fixtures with `// want` comments (+ `.golden` for auto-fixes)

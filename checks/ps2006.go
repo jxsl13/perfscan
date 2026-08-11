@@ -45,7 +45,7 @@ mutate it in place before switching.`,
 for l := range m.cache.K {
 	m.cache.K[l] = m.kBuf[l].appendRow(k)
 }`,
-		MeasuredWin: "goai reference: width 2048, T=512: 101x time and 104x bytes on the append microbenchmark; 500-token GPT decode 2.21GB→159MB (13.9x) and 1.32x wall clock",
+		MeasuredWin: "reference corpus: width 2048, T=512: 101x time and 104x bytes on the append microbenchmark; 500-token GPT decode 2.21GB→159MB (13.9x) and 1.32x wall clock",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS2006",

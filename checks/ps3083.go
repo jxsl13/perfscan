@@ -51,7 +51,7 @@ for _, q := range queries {
 		if stamp[key.block] == gen { ... }
 	}
 }`,
-		MeasuredWin: "goai reference: MoBA top-K block selection -9.3% time, allocations -49.8% (20533→10301), mapaccess1_fast64 was 5.4% of the profile before",
+		MeasuredWin: "reference corpus: MoBA top-K block selection -9.3% time, allocations -49.8% (20533→10301), mapaccess1_fast64 was 5.4% of the profile before",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3083",

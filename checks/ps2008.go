@@ -44,7 +44,7 @@ slab := make([]float64, n*d)
 for i := range rows {
 	rows[i] = slab[i*d : (i+1)*d : (i+1)*d]
 }`,
-		MeasuredWin: "goai reference: classic DBSCAN block-allocator variant -66.18%/-74.13% allocs/op, -5.90%/-7.48% time (p=0.000, n=12); GMM PredictProba rows -11.17% at k=4 alongside allocs 605→94",
+		MeasuredWin: "reference corpus: classic DBSCAN block-allocator variant -66.18%/-74.13% allocs/op, -5.90%/-7.48% time (p=0.000, n=12); GMM PredictProba rows -11.17% at k=4 alongside allocs 605→94",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS2008",

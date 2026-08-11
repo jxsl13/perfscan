@@ -39,7 +39,7 @@ wrong.`,
 	// NaN falls through both bounds untouched, matching math.Min/Max order
 	xs[i] = r
 }`,
-		MeasuredWin: "goai reference: HQQ quantizer -51.0% (77.14ms→37.79ms, 2.04x) with archMin/archMax leaving the profile",
+		MeasuredWin: "reference corpus: HQQ quantizer -51.0% (77.14ms→37.79ms, 2.04x) with archMin/archMax leaving the profile",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3077",

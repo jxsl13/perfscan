@@ -36,7 +36,7 @@ one-hot matmul equals the gathered entry for finite tables, but NOT for
 fs := full.Storage().F64()
 v := fs[(pos*kk+k)*heads+h] // reads row pos, discards the rest`,
 		After:       `v := d.relBias.BiasRow(ctx, pos, k, h) // per-element rule, no matrix`,
-		MeasuredWin: "goai reference: T5 relative-position bias 130x at pos=32, 713x at pos=512; allocation 86.8MB→19.7KB per call; end-to-end decode 4.82x and 13.87GB→125MB",
+		MeasuredWin: "reference corpus: T5 relative-position bias 130x at pos=32, 713x at pos=512; allocation 86.8MB→19.7KB per call; end-to-end decode 4.82x and 13.87GB→125MB",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS2007",

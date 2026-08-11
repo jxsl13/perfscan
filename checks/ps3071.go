@@ -42,7 +42,7 @@ func (r *reader) u32() uint32 {
 	io.ReadFull(r.src, r.scratch[:4])
 	return binary.LittleEndian.Uint32(r.scratch[:4])
 }`,
-		MeasuredWin: "goai reference: GGUF header reader allocations -57.2% (223892→95804) and -17.3% time on the header-heavy cell",
+		MeasuredWin: "reference corpus: GGUF header reader allocations -57.2% (223892→95804) and -17.3% time on the header-heavy cell",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3071",

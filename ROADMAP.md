@@ -1,9 +1,8 @@
 # Roadmap
 
-perfscan generalizes the `internal/perfscan` engine of
-[goai](https://github.com/jxsl13/goai) into a standalone, staticcheck-style
-utility. This file tracks the porting state of the reference registry and the
-planned engine work. PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+perfscan generalizes an internal performance-scanner engine into a
+standalone, staticcheck-style utility. This file tracks the porting state
+of the original reference registry and the planned engine work. PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Engine
 
@@ -17,14 +16,15 @@ planned engine work. PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 - [x] Baseline/ratchet support (`-baseline` / `-write-baseline`, line-independent identity)
 - [x] Docs generated from the registry (`make docs`, CI drift gate)
 - [x] Project vocabulary config (perfscan.json, auto-discovery, starved-check
-      warnings)
+      warnings) — keeps the engine generic while supporting any domain codebase
+      given the right configuration
 - [ ] Package-level caching for large repos (staticcheck-style facts/caching)
 - [ ] `golangci-lint` plugin integration
 
-## Check porting status (goai reference registry)
+## Check porting status (reference registry)
 
-Ported checks keep their reference IDs. The reference has ~80 checks; the
-figures cited in their docs are goai's measured results.
+Ported checks keep their reference IDs. The reference registry has ~80
+checks; the figures cited in their docs are its measured results.
 
 ### Ported
 

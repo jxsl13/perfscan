@@ -16,8 +16,8 @@ make test
 
 ## Adding a check
 
-1. **Claim an ID.** IDs are stable and never reused. Checks ported from the
-   [goai reference registry](https://github.com/jxsl13/goai) keep their
+1. **Claim an ID.** IDs are stable and never reused. Checks ported from
+   the original reference registry keep their
    original PS number; new checks take the next free slot in the `x1xx`
    block of their category (PS2101, PS2102, … for allocation, PS3101… for
    indirection, and so on). An ID must be free on `main` *and* in every open

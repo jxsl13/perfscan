@@ -21,8 +21,8 @@ import (
 // than once per iteration — a floor is still worth taking.
 //
 // PS2101 is a perfscan-original check (the x1xx block per category is
-// reserved for checks that did not originate in the goai reference
-// registry).
+// reserved for checks that did not originate in the upstream
+// reference registry).
 var PS2101 = register(&lint.Check{
 	ID:       "PS2101",
 	Category: "alloc",

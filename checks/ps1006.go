@@ -45,7 +45,7 @@ for r := 0; r < rows; r++ { // contiguous walk
 	}
 }
 copy(out, sums)`,
-		MeasuredWin: "goai reference: MLA value-mix 1.13x/1.27x, spectral-norm power-iter 2.57x; WKV backward 2.2–2.9x via the gather/scatter form",
+		MeasuredWin: "reference corpus: MLA value-mix 1.13x/1.27x, spectral-norm power-iter 2.57x; WKV backward 2.2–2.9x via the gather/scatter form",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS1006",

@@ -26,7 +26,7 @@ var PS3007 = register(&lint.Check{
 		Text: `When a set's contents come from a slice the code already holds,
 the fix is often no map at all: scanning the source slice directly beats the
 map build plus one hash per probe as long as the source stays small (the
-goai reference measured the crossover at 8–16 elements on an M2 Pro). This
+reference corpus measured the crossover at 8–16 elements on an M2 Pro). This
 is a SMALL-SET transform — large sets should keep the map.
 
 Two narrowings keep the check honest, both inherited from the reference:
@@ -48,7 +48,7 @@ for _, tok := range window {
 		After: `for _, tok := range window {
 	if slices.Contains(seq, tok) { ... } // seq is small
 }`,
-		MeasuredWin: "goai reference: nlp applyDRY -18.72% (19.52µs→15.87µs, p=0.002) with runtime.mapaccess1_fast64 leaving the profile entirely",
+		MeasuredWin: "reference corpus: nlp applyDRY -18.72% (19.52µs→15.87µs, p=0.002) with runtime.mapaccess1_fast64 leaving the profile entirely",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3007",

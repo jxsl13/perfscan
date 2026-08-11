@@ -49,7 +49,7 @@ overlap, a pure permutation only -race.`,
 		dst[obase+j] = src[j*batch+b]
 	}
 })`,
-		MeasuredWin: "goai reference: GGUF weight transpose -66.3% (154.2→49.8ms) once banded; KAN fused spline 6.2x — both missed by PS3034's direct-name condition",
+		MeasuredWin: "reference corpus: GGUF weight transpose -66.3% (154.2→49.8ms) once banded; KAN fused spline 6.2x — both missed by PS3034's direct-name condition",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3059",

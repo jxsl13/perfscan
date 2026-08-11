@@ -48,7 +48,7 @@ the same value twice and only -race sees it.`,
 		}
 	})
 }`,
-		MeasuredWin: "goai reference: KAN fusedSpline 67.28→10.90ms (6.2x); eigendecomposition adjoint third product 18.63→8.17ms at n=256 (2.3x)",
+		MeasuredWin: "reference corpus: KAN fusedSpline 67.28→10.90ms (6.2x); eigendecomposition adjoint third product 18.63→8.17ms at n=256 (2.3x)",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3063",

@@ -40,7 +40,7 @@ size the test above the fan-out helper's work gate.`,
 		After: `parallel.For(len(cols), func(j int) {
 	cache[j] = kernelColumn(x, j) // disjoint slots, bit-identical
 })`,
-		MeasuredWin: "goai reference: RBF kernel cache BenchmarkSVCFit/n4000_rbf 6.99→5.48ms (-21.5%), from a fit that had scaled at 1.02x on twelve cores",
+		MeasuredWin: "reference corpus: RBF kernel cache BenchmarkSVCFit/n4000_rbf 6.99→5.48ms (-21.5%), from a fit that had scaled at 1.02x on twelve cores",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3065",

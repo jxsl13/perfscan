@@ -54,7 +54,7 @@ for i := range rows { // row-major: one contiguous pass
 for j := range mean {
 	mean[j] = sums[j] / float64(len(rows))
 }`,
-		MeasuredWin: "goai reference: GaussianNB.Fit -23.74% folding 2d column walks into two row-major passes; ballTree.build -18.71% on KNNFit; CholSolve's l[k][i] measured +3.74% and was reverted — confirm at the site",
+		MeasuredWin: "reference corpus: GaussianNB.Fit -23.74% folding 2d column walks into two row-major passes; ballTree.build -18.71% on KNNFit; CholSolve's l[k][i] measured +3.74% and was reverted — confirm at the site",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS1010",

@@ -43,7 +43,7 @@ func fmax(a, b float64) float64 {
 for _, v := range xs {
 	hi = fmax(hi, v)
 }`,
-		MeasuredWin: "goai reference: PPOClip batch 4096 -58.7% (100.5µs→41.6µs), GRPO -37.0%; converting an existing comparison chain measured +13% and was reverted",
+		MeasuredWin: "reference corpus: PPOClip batch 4096 -58.7% (100.5µs→41.6µs), GRPO -37.0%; converting an existing comparison chain measured +13% and was reverted",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3082",

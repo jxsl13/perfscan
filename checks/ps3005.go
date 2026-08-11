@@ -36,7 +36,7 @@ for i := range m {
 	key[i] = m[i][f]
 }
 sort.Slice(idx, func(a, b int) bool { return key[idx[a]] < key[idx[b]] })`,
-		MeasuredWin: "goai reference: GBM presort 1.05x (1.10x cumulative once the flat key enabled a radix pass), ball-tree median split 1.088x on KNN fit",
+		MeasuredWin: "reference corpus: GBM presort 1.05x (1.10x cumulative once the flat key enabled a radix pass), ball-tree median split 1.088x on KNN fit",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3005",

@@ -137,8 +137,8 @@ func TestPS3003(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS3003.Analyzer, "ps3003")
 }
 
-// goaiVocab mirrors the goai reference vocabulary used by domain fixtures.
-var goaiVocab = config.Config{
+// refVocab is the tensor-library vocabulary the domain fixtures use.
+var refVocab = config.Config{
 	ElementAccessors:    []string{"AtF64", "SetF64"},
 	FastPathHelpers:     []string{"flatF64", "flatF32"},
 	ElementCountMethods: []string{"Numel"},
@@ -148,12 +148,12 @@ var goaiVocab = config.Config{
 }
 
 func TestPS1001(t *testing.T) {
-	defer config.SetForTesting(goaiVocab)()
+	defer config.SetForTesting(refVocab)()
 	analysistest.Run(t, analysistest.TestData(), PS1001.Analyzer, "ps1001")
 }
 
 func TestPS1002(t *testing.T) {
-	defer config.SetForTesting(goaiVocab)()
+	defer config.SetForTesting(refVocab)()
 	analysistest.Run(t, analysistest.TestData(), PS1002.Analyzer, "ps1002")
 }
 
@@ -162,7 +162,7 @@ func TestPS1003(t *testing.T) {
 }
 
 func TestPS1004(t *testing.T) {
-	defer config.SetForTesting(goaiVocab)()
+	defer config.SetForTesting(refVocab)()
 	analysistest.Run(t, analysistest.TestData(), PS1004.Analyzer, "ps1004")
 }
 
@@ -175,7 +175,7 @@ func TestPS1010(t *testing.T) {
 }
 
 func TestPS1005(t *testing.T) {
-	defer config.SetForTesting(goaiVocab)()
+	defer config.SetForTesting(refVocab)()
 	analysistest.Run(t, analysistest.TestData(), PS1005.Analyzer, "ps1005")
 }
 

@@ -41,7 +41,7 @@ or both arms run serially and an overlapping-band mutation passes.`,
 		After: `parallel.For(len(params), func(i int) {
 	newtonSchulz(params[i]) // outer band overlaps the forks
 })`,
-		MeasuredWin: "goai reference: Muon optimizer step -34.1% with only two parameters; 62% of the profile was pthread_cond_wait/signal before",
+		MeasuredWin: "reference corpus: Muon optimizer step -34.1% with only two parameters; 62% of the profile was pthread_cond_wait/signal before",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3060",

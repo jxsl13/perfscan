@@ -48,7 +48,7 @@ for i := 0; i < n; i++ {
 		t.SetF64(f(t.AtF64(i)), i)
 	}
 }`,
-		MeasuredWin: "goai reference: removing only the store half of the dispatches in four weight permutations measured geomean -47.64% (all 8 cells -44.98%..-49.07%, p=0.000)",
+		MeasuredWin: "reference corpus: removing only the store half of the dispatches in four weight permutations measured geomean -47.64% (all 8 cells -44.98%..-49.07%, p=0.000)",
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS1001",
