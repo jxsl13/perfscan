@@ -77,5 +77,5 @@ jobs:
         run: cd plugin && go build ./...
       - name: micro-benchmarks compile and run once
         run: go test -run '^$' -bench . -benchtime=1x ./benchmarks/
-      - name: perfscan on perfscan (dogfood ratchet: fail on NEW self-findings)
+      - name: 'perfscan on perfscan (dogfood ratchet: fail on NEW self-findings)'
         run: go run . -level 3 -baseline .perfscan-baseline.yaml ./...
