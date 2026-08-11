@@ -6,6 +6,7 @@ import (
 	"go/printer"
 	"go/token"
 	"go/types"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -13,12 +14,12 @@ import (
 	"github.com/jxsl13/perfscan/lint"
 )
 
-// PS2101 reports a slice declared with no capacity immediately before a
-// loop that appends to it, when the loop's iteration source bounds the
-// element count. The bound is EXACT for one unconditional append per
-// iteration, an UPPER bound for filtered appends (the same worst case
-// append itself reserves), and a LOWER bound when the body appends more
-// than once per iteration — a floor is still worth taking.
+// PS2101 reports a slice declared with no capacity earlier in the block
+// of a loop that appends to it, when the loop's iteration source bounds
+// the element count. The check COUNTS appended values per iteration:
+// k unconditional values make k*bound exact; conditional values are
+// excluded, leaving the unconditional count as a lower bound; a
+// conditional-only fill keeps 1*bound as the upper bound.
 //
 // PS2101 is a perfscan-original check (the x1xx block per category is
 // reserved for checks that did not originate in the upstream
@@ -33,15 +34,21 @@ var PS2101 = register(&lint.Check{
 		Title: "a slice built by append in a bounded loop directly after an unsized declaration",
 		Text: `Appending into a slice declared without capacity grows the
 backing array geometrically — each growth allocates and copies everything
-appended so far. When the append target is declared immediately before a
-loop whose iteration count is known — a range over a slice or map, or a
-counted for loop — that count bounds the appends, so
-make([]T, 0, bound) removes every growth copy.
+appended so far. When the append target is declared earlier in the same
+block as a loop whose iteration count is known — a range over a slice or
+map, or a counted for loop — and nothing between the declaration and the
+loop touches it, that count bounds the appends, so make([]T, 0, k*bound)
+removes every growth copy. Standalone declarations count too: a loop
+filling several targets yields one finding per target.
 
-Bound semantics: for one unconditional append per iteration the bound is
-exact; for a filtered append it is an upper bound (the same worst case
-append itself reserves); for multiple appends per iteration it is a lower
-bound and still removes the early growth copies.
+Bound semantics — the check COUNTS the values appended per iteration:
+k unconditional values make k*bound EXACT; with conditional appends
+alongside, only the unconditional count is taken, a LOWER bound (the
+conditional tail may still grow, but every growth copy below the floor is
+removed); conditional-only appends leave 1*bound as the UPPER bound —
+the same worst case append itself reserves. Multi-value appends
+(append(s, a, b)) count each value; a spread append has an unknown count
+and falls back to the upper-bound form.
 
 The automatic fix rewrites the declaration when the bound is a plain
 identifier (or len of one) that the loop body does not reassign. Capacity
@@ -70,28 +77,54 @@ func runPS2101(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			for i := 0; i+1 < len(block.List); i++ {
-				name, typ, ok := unsizedSliceDecl(block.List[i])
-				if !ok {
+			for j, stmt := range block.List {
+				body := loopBodyOf(stmt)
+				if body == nil {
 					continue
 				}
-				loop := block.List[i+1]
-				body := loopBodyOf(loop)
-				if body == nil || !loopAppendsTo(body, name) {
-					continue
-				}
-				capExpr := loopCapacityExpr(pass, loop)
+				bound := loopCapacityExpr(pass, stmt)
 				// A range loop is always bounded by its source; a for
 				// loop only counts when a bound was derived.
-				if _, isRange := loop.(*ast.RangeStmt); !isRange && capExpr == "" {
+				if _, isRange := stmt.(*ast.RangeStmt); !isRange && bound == "" {
 					continue
 				}
-				reportPrealloc(pass, block.List[i], name, typ, capExpr)
+				// Every unsized declaration EARLIER in this block feeds
+				// this loop, as long as nothing between the declaration
+				// and the loop touches the variable.
+				for i := 0; i < j; i++ {
+					name, typ, ok := unsizedSliceDecl(block.List[i])
+					if !ok || stmtsMention(block.List[i+1:j], name) {
+						continue
+					}
+					uncond, cond, unknown := appendCounts(body, name)
+					if uncond == 0 && cond == 0 && !unknown {
+						continue
+					}
+					reportPrealloc(pass, block.List[i], name, typ, bound, uncond, cond, unknown)
+				}
 			}
 			return true
 		})
 	}
 	return nil, nil
+}
+
+// stmtsMention reports whether any of the statements references name.
+func stmtsMention(stmts []ast.Stmt, name string) bool {
+	for _, s := range stmts {
+		found := false
+		ast.Inspect(s, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok && id.Name == name {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
 }
 
 func loopBodyOf(s ast.Stmt) *ast.BlockStmt {
@@ -249,15 +282,30 @@ func unsizedSliceDecl(s ast.Stmt) (string, ast.Expr, bool) {
 	return "", nil, false
 }
 
-// loopAppendsTo reports whether body contains `name = append(name, ...)` in
-// its own iteration scope. Nested loops and closures are not descended
-// into: an append there is not bounded by THIS loop's trip count, and the
-// bound claim would be wrong.
-func loopAppendsTo(body *ast.BlockStmt, name string) bool {
-	found := false
-	ast.Inspect(body, func(n ast.Node) bool {
+// appendCounts counts the values appended to name per iteration of body,
+// separated into unconditional values (top-level statements of the body)
+// and conditional ones (under an if/switch/select). Nested loops and
+// closures are not descended into: an append there is not bounded by THIS
+// loop's trip count. A spread append (append(name, xs...)) has an unknown
+// per-call count and sets unknown.
+//
+// The per-iteration counts grade the capacity bound: k unconditional
+// values make k*bound EXACT (with no conditional appends), a LOWER bound
+// otherwise; conditional-only appends leave 1*bound as the UPPER bound
+// append itself would reserve.
+func appendCounts(body *ast.BlockStmt, name string) (uncond, cond int, unknown bool) {
+	condDepth := 0
+	var walk func(n ast.Node) bool
+	walk = func(n ast.Node) bool {
 		switch n.(type) {
 		case *ast.RangeStmt, *ast.ForStmt, *ast.FuncLit:
+			return false
+		case *ast.IfStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+			condDepth++
+			defer func() { condDepth-- }()
+			for _, c := range childrenOf(n) {
+				ast.Inspect(c, walk)
+			}
 			return false
 		}
 		as, ok := n.(*ast.AssignStmt)
@@ -272,24 +320,89 @@ func loopAppendsTo(body *ast.BlockStmt, name string) bool {
 		if !ok {
 			return true
 		}
-		if fn, ok := call.Fun.(*ast.Ident); ok && fn.Name == "append" && len(call.Args) > 0 {
-			if arg, ok := call.Args[0].(*ast.Ident); ok && arg.Name == name {
-				found = true
-				return false
-			}
+		fn, ok := call.Fun.(*ast.Ident)
+		if !ok || fn.Name != "append" || len(call.Args) == 0 {
+			return true
+		}
+		arg, ok := call.Args[0].(*ast.Ident)
+		if !ok || arg.Name != name {
+			return true
+		}
+		if call.Ellipsis.IsValid() {
+			unknown = true
+			return true
+		}
+		values := len(call.Args) - 1
+		if condDepth > 0 {
+			cond += values
+		} else {
+			uncond += values
 		}
 		return true
-	})
-	return found
+	}
+	ast.Inspect(body, walk)
+	return uncond, cond, unknown
 }
 
-func reportPrealloc(pass *analysis.Pass, decl ast.Stmt, name string, typ ast.Expr, capExpr string) {
+// childrenOf returns the walkable children of a conditional statement so
+// the conditional depth is tracked through its branches.
+func childrenOf(n ast.Node) []ast.Node {
+	var out []ast.Node
+	switch s := n.(type) {
+	case *ast.IfStmt:
+		if s.Body != nil {
+			out = append(out, s.Body)
+		}
+		if s.Else != nil {
+			out = append(out, s.Else)
+		}
+	case *ast.SwitchStmt:
+		if s.Body != nil {
+			out = append(out, s.Body)
+		}
+	case *ast.TypeSwitchStmt:
+		if s.Body != nil {
+			out = append(out, s.Body)
+		}
+	case *ast.SelectStmt:
+		if s.Body != nil {
+			out = append(out, s.Body)
+		}
+	}
+	return out
+}
+
+// capacityForCounts derives the capacity expression and its bound class
+// from the per-iteration counts.
+func capacityForCounts(bound string, uncond, cond int, unknown bool) (capExpr, class string) {
+	switch {
+	case uncond > 1 && cond == 0 && !unknown:
+		return strconv.Itoa(uncond) + "*" + bound, "exact: " + strconv.Itoa(uncond) + " unconditional value(s) per iteration"
+	case uncond == 1 && cond == 0 && !unknown:
+		return bound, "exact: one unconditional value per iteration"
+	case uncond > 0:
+		capExpr = bound
+		if uncond > 1 {
+			capExpr = strconv.Itoa(uncond) + "*" + bound
+		}
+		return capExpr, "a lower bound: " + strconv.Itoa(uncond) + " unconditional value(s) per iteration, conditional ones excluded"
+	default:
+		return bound, "an upper bound: all appends are conditional"
+	}
+}
+
+func reportPrealloc(pass *analysis.Pass, decl ast.Stmt, name string, typ ast.Expr, bound string, uncond, cond int, unknown bool) {
+	boundWord := bound
+	if boundWord == "" {
+		boundWord = "bound"
+	}
+	capExpr, class := capacityForCounts(boundWord, uncond, cond, unknown)
 	diag := analysis.Diagnostic{
 		Pos:     decl.Pos(),
 		End:     decl.End(),
-		Message: fmt.Sprintf("%s is appended to in the following bounded loop but declared without capacity; pre-size it with make(..., 0, bound) — exact for one unconditional append per iteration, an upper bound for filtered appends", name),
+		Message: fmt.Sprintf("%s is appended to in the following bounded loop but declared without capacity; pre-size it with make(..., 0, %s) — %s", name, capExpr, class),
 	}
-	if capExpr != "" { // bound already validated against body reassignment
+	if bound != "" { // bound already validated against body reassignment
 		var b strings.Builder
 		_ = printer.Fprint(&b, token.NewFileSet(), typ)
 		newDecl := fmt.Sprintf("%s := make(%s, 0, %s)", name, b.String(), capExpr)

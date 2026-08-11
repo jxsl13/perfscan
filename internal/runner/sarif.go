@@ -73,8 +73,8 @@ type sarifRegion struct {
 var Version = "dev"
 
 func emitSARIF(w io.Writer, findings []Finding) {
-	seenRule := map[string]bool{}
-	var rules []sarifRule
+	seenRule := make(map[string]bool, len(findings))
+	rules := make([]sarifRule, 0, len(findings))
 	results := make([]sarifResult, 0, len(findings))
 	for _, f := range findings {
 		if !seenRule[f.Check.ID] {

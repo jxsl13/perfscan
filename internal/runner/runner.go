@@ -341,7 +341,7 @@ func runCheck(c *lint.Check, pkg *packages.Package) []Finding {
 }
 
 func dedup(in []Finding) []Finding {
-	seen := map[string]bool{}
+	seen := make(map[string]bool, len(in))
 	out := make([]Finding, 0, len(in))
 	for _, f := range in {
 		key := f.Pos.Filename + ":" + strconv.Itoa(f.Pos.Line) + ":" + strconv.Itoa(f.Pos.Column) + ":" + f.Check.ID

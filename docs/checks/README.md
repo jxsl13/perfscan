@@ -45,7 +45,10 @@ Every check has a stable PS-prefixed ID and a fix level:
 | [PS3082](PS3082.md) | indirect | L2 |  | math.Min or math.Max called inside a loop |
 | [PS3083](PS3083.md) | indirect | L3 |  | an integer-keyed map allocated per outer iteration and probed in a nested loop |
 | [PS3101](PS3101.md) | indirect | L1 |  | a loop-invariant string↔[]byte conversion inside a loop |
+| [PS4001](PS4001.md) | vector | L2 |  | a per-element binary decode (encoding/binary) in a loop |
+| [PS4002](PS4002.md) | vector | L3 |  | a scalar math transcendental in a loop beside a vectorized sibling kernel |
 | [PS4008](PS4008.md) | vector | L3 |  | a matmul whose innermost loop is a serial scalar dot accumulator |
 | [PS4101](PS4101.md) | vector | L1 | yes | an element-copy loop replaceable by the copy builtin |
 | [PS5001](PS5001.md) | arith | L3 |  | a divide by a loop-invariant scalar on every element |
 | [PS5002](PS5002.md) | arith | L2 |  | a nested loop accumulating a full symmetric matrix |
+| [PS6004](PS6004.md) | verify | L2 |  | a fast-path/fallback dual path whose bit-identity claim needs coverage on both arms |

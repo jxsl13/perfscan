@@ -24,6 +24,23 @@ func TestPS2103(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS2103.Analyzer, "ps2103")
 }
 
+func TestPS4001(t *testing.T) {
+	defer config.SetForTesting(config.Config{BulkCopyHelpers: []string{"rawCopyLE"}})()
+	analysistest.Run(t, analysistest.TestData(), PS4001.Analyzer, "ps4001")
+}
+
+func TestPS4002(t *testing.T) {
+	defer config.SetForTesting(config.Config{VectorizedSiblingFuncs: []string{"vsiluF32"}})()
+	analysistest.Run(t, analysistest.TestData(), PS4002.Analyzer, "ps4002")
+}
+
+func TestPS6004(t *testing.T) {
+	defer config.SetForTesting(goodFastPaths)()
+	analysistest.Run(t, analysistest.TestData(), PS6004.Analyzer, "ps6004")
+}
+
+var goodFastPaths = config.Config{FastPathHelpers: []string{"flatF64", "flatF32"}}
+
 func TestPS4008(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS4008.Analyzer, "ps4008")
 }

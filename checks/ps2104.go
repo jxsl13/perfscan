@@ -10,10 +10,11 @@ import (
 	"github.com/jxsl13/perfscan/lint"
 )
 
-// PS2104 reports a map declared with no size hint immediately before a
-// bounded loop that inserts into it. Same bound semantics as PS2101:
-// len(src) is exact for one unconditional insert of distinct keys per
-// iteration, an upper bound otherwise — either way a valid make() hint.
+// PS2104 reports a map declared with no size hint earlier in the block
+// of a bounded loop that inserts into it. Same counted bound semantics as
+// PS2101: k unconditional inserts per iteration make k*bound the hint
+// (exact for distinct keys), conditional inserts are excluded (lower
+// bound), a conditional-only fill keeps 1*bound (upper bound).
 var PS2104 = register(&lint.Check{
 	ID:       "PS2104",
 	Category: "alloc",
@@ -25,12 +26,15 @@ var PS2104 = register(&lint.Check{
 		Text: `A map declared without a size hint starts at minimum capacity
 and rehashes its way up as the loop inserts — each growth re-buckets every
 key inserted so far. When the fill loop's iteration count is known (a range
-over a slice or map, or a counted loop), make(map[K]V, bound) reserves the
-buckets once.
+over a slice or map, or a counted loop) and nothing between the
+declaration and the loop touches the map, make(map[K]V, k*bound) reserves
+the buckets once.
 
-Bound semantics: the hint is exact for one unconditional insert of distinct
-keys per iteration and an upper bound for filtered inserts or repeated
-keys — a size hint may legally over-reserve, so both are safe.
+Bound semantics — inserts are COUNTED per iteration: k unconditional
+inserts make k*bound the hint (exact for distinct keys); conditional
+inserts are excluded, leaving a lower bound; a conditional-only fill keeps
+1*bound, the upper bound. A size hint may legally over-reserve, so every
+class is safe.
 
 The automatic fix rewrites the declaration when the bound is a plain
 identifier (or len of one) not reassigned in the loop body. A size hint is
@@ -59,44 +63,62 @@ func runPS2104(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			for i := 0; i+1 < len(block.List); i++ {
-				name, typ, ok := unsizedMapDecl(block.List[i])
-				if !ok {
+			for j, stmt := range block.List {
+				body := loopBodyOf(stmt)
+				if body == nil {
 					continue
 				}
-				loop := block.List[i+1]
-				body := loopBodyOf(loop)
-				if body == nil || !loopInsertsInto(body, name) {
-					continue
-				}
-				capExpr := loopCapacityExpr(pass, loop)
+				bound := loopCapacityExpr(pass, stmt)
 				// A range loop is always bounded by its source; a for
 				// loop only counts when a bound was derived.
-				if _, isRange := loop.(*ast.RangeStmt); !isRange && capExpr == "" {
+				if _, isRange := stmt.(*ast.RangeStmt); !isRange && bound == "" {
 					continue
 				}
-				diag := analysis.Diagnostic{
-					Pos:     block.List[i].Pos(),
-					End:     block.List[i].End(),
-					Message: name + " is filled in the following bounded loop but declared without a size hint; pre-size it with make(map[...]..., bound) — exact for distinct unconditional inserts, an upper bound otherwise",
-				}
-				if capExpr != "" {
-					var b printerBuf
-					_ = printer.Fprint(&b, token.NewFileSet(), typ)
-					newDecl := name + " := make(" + b.String() + ", " + capExpr + ")"
-					diag.SuggestedFixes = []analysis.SuggestedFix{{
-						Message: "pre-size " + name + " to " + capExpr,
-						TextEdits: []analysis.TextEdit{
-							{Pos: block.List[i].Pos(), End: block.List[i].End(), NewText: []byte(newDecl)},
-						},
-					}}
-				}
-				pass.Report(diag)
+				reportMapPrealloc(pass, block, j, bound)
 			}
 			return true
 		})
 	}
 	return nil, nil
+}
+
+// reportMapPrealloc pairs every earlier unsized map declaration in the
+// block with the loop at index j, as long as nothing between them touches
+// the variable.
+func reportMapPrealloc(pass *analysis.Pass, block *ast.BlockStmt, j int, bound string) {
+	body := loopBodyOf(block.List[j])
+	for i := 0; i < j; i++ {
+		name, typ, ok := unsizedMapDecl(block.List[i])
+		if !ok || stmtsMention(block.List[i+1:j], name) {
+			continue
+		}
+		uncond, cond := insertCounts(body, name)
+		if uncond == 0 && cond == 0 {
+			continue
+		}
+		boundWord := bound
+		if boundWord == "" {
+			boundWord = "bound"
+		}
+		capExpr, class := capacityForCounts(boundWord, uncond, cond, false)
+		diag := analysis.Diagnostic{
+			Pos:     block.List[i].Pos(),
+			End:     block.List[i].End(),
+			Message: name + " is filled in the following bounded loop but declared without a size hint; pre-size it with make(map[...]..., " + capExpr + ") — " + class + " (a hint may over-reserve for repeated keys)",
+		}
+		if bound != "" {
+			var b printerBuf
+			_ = printer.Fprint(&b, token.NewFileSet(), typ)
+			newDecl := name + " := make(" + b.String() + ", " + capExpr + ")"
+			diag.SuggestedFixes = []analysis.SuggestedFix{{
+				Message: "pre-size " + name + " to " + capExpr,
+				TextEdits: []analysis.TextEdit{
+					{Pos: block.List[i].Pos(), End: block.List[i].End(), NewText: []byte(newDecl)},
+				},
+			}}
+		}
+		pass.Report(diag)
+	}
 }
 
 type printerBuf struct{ b []byte }
@@ -133,14 +155,24 @@ func unsizedMapDecl(s ast.Stmt) (string, ast.Expr, bool) {
 	return "", nil, false
 }
 
-// loopInsertsInto reports whether body assigns to name[...] in its own
-// iteration scope. Nested loops and closures are not descended into: an
-// insert there is not bounded by THIS loop's trip count.
-func loopInsertsInto(body *ast.BlockStmt, name string) bool {
-	found := false
-	ast.Inspect(body, func(n ast.Node) bool {
+// insertCounts counts assignments to name[...] per iteration of body,
+// separated into unconditional (top-level statements) and conditional
+// (under an if/switch/select) inserts. Nested loops and closures are not
+// descended into: an insert there is not bounded by THIS loop's trip
+// count. A multi-assign statement counts each name[...] target.
+func insertCounts(body *ast.BlockStmt, name string) (uncond, cond int) {
+	condDepth := 0
+	var walk func(n ast.Node) bool
+	walk = func(n ast.Node) bool {
 		switch n.(type) {
 		case *ast.RangeStmt, *ast.ForStmt, *ast.FuncLit:
+			return false
+		case *ast.IfStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+			condDepth++
+			defer func() { condDepth-- }()
+			for _, c := range childrenOf(n) {
+				ast.Inspect(c, walk)
+			}
 			return false
 		}
 		as, ok := n.(*ast.AssignStmt)
@@ -153,11 +185,15 @@ func loopInsertsInto(body *ast.BlockStmt, name string) bool {
 				continue
 			}
 			if id, ok := ix.X.(*ast.Ident); ok && id.Name == name {
-				found = true
-				return false
+				if condDepth > 0 {
+					cond++
+				} else {
+					uncond++
+				}
 			}
 		}
 		return true
-	})
-	return found
+	}
+	ast.Inspect(body, walk)
+	return uncond, cond
 }

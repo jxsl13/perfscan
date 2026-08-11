@@ -55,15 +55,20 @@ checks; the figures cited in their docs are its measured results.
 - [x] PS3066 consecutive-loops-over-one-buffer (L2)
 - [x] PS3071 local-buffer-escapes-per-call (L2)
 - [x] PS3083 int-keyed-map-built-per-pass (L3, generation counter)
+- [x] PS4001 per-element-binary-decode (L2, bulkCopyHelpers suppression)
+- [x] PS4002 scalar-transcendental-vectorizable (domain, L3)
+- [x] PS6004 unverified-dual-path (domain, L2, verification-gap advisory)
 - [x] PS3077 minmax-clamp-in-a-loop (L3, advisory)
 - [x] PS3082 minmax-call-in-a-loop (L2, clamps excluded — PS3077 owns those)
 
 ### perfscan-original (generic low-hanging fruit, any repo)
 
-- [x] PS2101 append-without-prealloc (L1, auto-fix) — bounds from range over
-      slice/map AND counted loops; exact/upper/lower bound semantics documented
+- [x] PS2101 append-without-prealloc (L1, auto-fix) — COUNTED bounds: k
+      unconditional values/iteration → k*bound exact; conditional values
+      excluded (lower bound); conditional-only → upper bound; standalone
+      declarations anywhere earlier in the block are paired with their loop
 - [x] PS2102 string-concat-in-loop (L1)
-- [x] PS2104 map-without-prealloc (L1, auto-fix) — same bound semantics
+- [x] PS2104 map-without-prealloc (L1, auto-fix) — same counted bound semantics
 - [x] PS3101 invariant-conversion-in-loop (L1)
 - [x] PS4101 loop-copy → copy() (L1, auto-fix)
 - [x] PS2103 sprintf-concat-in-loop (L1)
@@ -78,8 +83,6 @@ checks; the figures cited in their docs are its measured results.
 - [x] PS3063 + PS3065 serial-nest/serial-loop (fanOutHelpers, L3)
 - [x] PS3034 + PS3059 serial-nest direct/derived writes (fanOutHelpers, L3)
 - [x] PS3060 serial-loop-over-parallel-work (fanOutHelpers, L3)
-- [ ] PS4001 bulk-copy, PS4002 scalar-transcendental-vectorizable
-- [ ] PS6004 unverified-dual-path
 
 ### New check ideas (bring benchmarks)
 
