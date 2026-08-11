@@ -47,6 +47,7 @@ checks' fixes.
 | [PS2117](PS2117.md) | alloc | L1 | yes | string([]byte) bound to a variable used only as a map key defeats the compiler's allocation-free lookup |
 | [PS2118](PS2118.md) | alloc | L1 | yes | io.WriteString(w, string(b)) allocates; w.Write(b) writes the bytes directly |
 | [PS2119](PS2119.md) | alloc | L1 | yes | ranging over strings.Split allocates the whole result slice; SplitSeq yields the same pieces lazily |
+| [PS2120](PS2120.md) | alloc | L1 | yes | w.WriteString(fmt.Sprintf(...)) builds a throwaway string; fmt.Fprintf writes straight to w |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
