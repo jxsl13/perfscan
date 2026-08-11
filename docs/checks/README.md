@@ -41,6 +41,10 @@ checks' fixes.
 | [PS2111](PS2111.md) | alloc | L1 | yes | w.Write([]byte(s)) allocates; w.WriteString(s) writes the string directly |
 | [PS2112](PS2112.md) | alloc | L1 | yes | append(append([]T(nil), a...), b...) is a hand-rolled concat; slices.Concat says it |
 | [PS2113](PS2113.md) | alloc | L1 | yes | w.Write([]byte(fmt.Sprintf(...))) builds a throwaway string+slice; fmt.Fprintf writes straight to w |
+| [PS2114](PS2114.md) | alloc | L2 |  | sync.Pool stores a non-pointer value, boxing it on every Put |
+| [PS2115](PS2115.md) | alloc | L1 |  | []rune(s)[i] allocates and decodes the whole string to read one rune |
+| [PS2116](PS2116.md) | alloc | L1 | yes | a slice zeroed element-by-element instead of with clear |
+| [PS2117](PS2117.md) | alloc | L1 | yes | string([]byte) bound to a variable used only as a map key defeats the compiler's allocation-free lookup |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
@@ -58,6 +62,7 @@ checks' fixes.
 | [PS3083](PS3083.md) | indirect | L3 |  | an integer-keyed map allocated per outer iteration and probed in a nested loop |
 | [PS3101](PS3101.md) | indirect | L1 | yes | a loop-invariant string↔[]byte conversion inside a loop |
 | [PS3102](PS3102.md) | indirect | L1 | yes | deleting every key in a range loop is O(n) with rehashing; clear(m) is the direct idiom |
+| [PS3103](PS3103.md) | indirect | L2 |  | ranging by value over large elements copies each one |
 | [PS4001](PS4001.md) | vector | L2 |  | a per-element binary decode (encoding/binary) in a loop |
 | [PS4002](PS4002.md) | vector | L3 |  | a scalar math transcendental in a loop beside a vectorized sibling kernel |
 | [PS4008](PS4008.md) | vector | L3 | yes | a matmul whose innermost loop is a serial scalar dot accumulator |
@@ -67,5 +72,6 @@ checks' fixes.
 | [PS5008](PS5008.md) | arith | L1 | yes | math.Sin and math.Cos on the same argument (fusable to math.Sincos) |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
+| [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
 | [PS6004](PS6004.md) | verify | L2 |  | a fast-path/fallback dual path whose bit-identity claim needs coverage on both arms |
 | [PS6010](PS6010.md) | verify | L3 | yes | an accumulator loop re-reading an operand invariant in the output index |
