@@ -448,8 +448,22 @@ func printExplain(stdout, stderr io.Writer, id string) int {
 	if e.HasFix {
 		fixLine = "clang-tidy fix-it available (-fix applies it)"
 	}
-	fmt.Fprintf(stdout, "%s (%s, %s)\n\n  %s\n\n  clang-tidy check: %s\n  fix: %s\n\n  Full upstream documentation:\n  https://clang.llvm.org/extra/clang-tidy/checks/performance/%s.html\n",
-		e.ID, e.Level, e.Category, e.Title, e.TidyName, fixLine,
-		strings.TrimPrefix(e.TidyName, "performance-"))
+	fmt.Fprintf(stdout, "%s (%s, %s)\n\n  %s\n\n  clang-tidy check: %s\n  fix: %s\n\n  %s\n",
+		e.ID, e.Level, e.Category, e.Title, e.TidyName, fixLine, explainDocLine(e))
 	return 0
+}
+
+// explainDocLine points at the correct upstream clang-tidy page. The doc URL is
+// namespaced by CHECK FAMILY (checks/<family>/<name>.html), so it must be built
+// from the TidyName's prefix — not hard-coded to performance/. Query-based custom
+// checks are perfscanxx-defined and have no upstream page.
+func explainDocLine(e catalog.Entry) string {
+	if e.Custom {
+		return "perfscanxx-defined query-based check (clang-tidy --experimental-custom-checks); no upstream clang-tidy page."
+	}
+	family, name, ok := strings.Cut(e.TidyName, "-")
+	if !ok {
+		return "Full upstream documentation: https://clang.llvm.org/extra/clang-tidy/checks/list.html"
+	}
+	return "Full upstream documentation:\n  https://clang.llvm.org/extra/clang-tidy/checks/" + family + "/" + name + ".html"
 }
