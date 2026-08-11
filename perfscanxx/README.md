@@ -48,6 +48,23 @@ expanded against the compilation database to the translation units under it; no
 args means `./...`. The `compile_commands.json` is found via `-p` or by walking
 up from the current directory.
 
+### CMake projects (opt-in auto-setup)
+
+perfscanxx needs a `compile_commands.json`. For a CMake project you can let it
+create one — and, if needed, generate build-time headers — instead of running
+CMake by hand:
+
+```bash
+perfscanxx -cmake ./...        # configure the detected CMake project -> compile_commands.json
+perfscanxx -cmake-build ./...  # also run `cmake --build` (incremental) to generate headers
+```
+
+`-cmake`/`-cmake-build` are opt-in because they execute the project's build
+system — only use them on trusted code. Discovery also checks common build
+subdirs (`build/`, `out/`, `cmake-build-*`), so an existing build is reused. If
+translation units fail on headers that are generated at build time, perfscanxx
+points you at `-cmake-build`.
+
 See [examples/](examples/) for an end-to-end sample and a recipe for running
 against a real C++ codebase (DDNet), plus [examples/validation.md](examples/validation.md)
 for validation results on fmt, spdlog, leveldb and abseil.

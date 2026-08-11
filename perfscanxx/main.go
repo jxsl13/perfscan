@@ -42,6 +42,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
+	"github.com/jxsl13/perfscan/perfscanxx/internal/cmake"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/compdb"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/fixes"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/report"
@@ -67,17 +68,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("perfscanxx", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		fix      = fs.Bool("fix", false, "apply the fix-its of every reported check; -level gates both reporting and fixing (e.g. -level 1 -fix applies only idiomatic fixes)")
-		list     = fs.Bool("list", false, "list all checks and exit")
-		explain  = fs.String("explain", "", "print the documentation of a check (e.g. PX1001) and exit")
-		sel      = fs.String("checks", "all", "comma-separated check selector: all, PX1001, PX1*, -PX3003, performance-avoid-endl")
-		maxLevel = fs.Int("level", 3, "report only checks whose fix level is <= N (1=idiomatic, 2=structured, 3=aggressive)")
-		jsonOut  = fs.Bool("json", false, "emit findings as JSON")
-		sarifOut = fs.Bool("sarif", false, "emit findings as SARIF 2.1.0 (GitHub Code Scanning)")
-		buildDir = fs.String("p", "", "build directory containing compile_commands.json (default: found by walking up from the cwd)")
-		tidyBin  = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
-		showVer  = fs.Bool("version", false, "print version and exit")
-		extra    stringSlice
+		fix        = fs.Bool("fix", false, "apply the fix-its of every reported check; -level gates both reporting and fixing (e.g. -level 1 -fix applies only idiomatic fixes)")
+		list       = fs.Bool("list", false, "list all checks and exit")
+		explain    = fs.String("explain", "", "print the documentation of a check (e.g. PX1001) and exit")
+		sel        = fs.String("checks", "all", "comma-separated check selector: all, PX1001, PX1*, -PX3003, performance-avoid-endl")
+		maxLevel   = fs.Int("level", 3, "report only checks whose fix level is <= N (1=idiomatic, 2=structured, 3=aggressive)")
+		jsonOut    = fs.Bool("json", false, "emit findings as JSON")
+		sarifOut   = fs.Bool("sarif", false, "emit findings as SARIF 2.1.0 (GitHub Code Scanning)")
+		buildDir   = fs.String("p", "", "build directory containing compile_commands.json (default: found by walking up from the cwd)")
+		tidyBin    = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
+		showVer    = fs.Bool("version", false, "print version and exit")
+		cmakeCfg   = fs.Bool("cmake", false, "if no compile_commands.json is found, auto-configure a detected CMake project to generate one (runs cmake configure; only use on trusted code)")
+		cmakeBuild = fs.Bool("cmake-build", false, "implies -cmake and also runs 'cmake --build' to generate build-time headers so TUs parse (executes the project build; incremental)")
+		extra      stringSlice
 	)
 	fs.Var(&extra, "extra-arg", "extra argument passed to the compiler via clang-tidy (repeatable), e.g. -extra-arg=-isysroot -extra-arg=$(xcrun --show-sdk-path)")
 	fs.Usage = func() { printUsage(stderr, fs) }
@@ -101,6 +104,34 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "perfscanxx: -level must be 1, 2 or 3")
 		return 2
 	}
+	// Optional CMake bootstrap: when no compilation database exists yet and the
+	// user opted in, configure a detected CMake project (and, with -cmake-build,
+	// build it to generate build-time headers). The produced build/ is then
+	// picked up by the normal auto-discovery below.
+	if (*cmakeCfg || *cmakeBuild) && *buildDir == "" {
+		if _, err := compdb.Find("", "."); err != nil {
+			if src, ok := cmake.FindProject("."); ok {
+				build := filepath.Join(src, "build")
+				if _, e := os.Stat(filepath.Join(build, compdb.Name)); e != nil {
+					fmt.Fprintf(stderr, "perfscanxx: no %s found — configuring CMake project at %s\n", compdb.Name, src)
+					if e := cmake.Configure(context.Background(), src, build); e != nil {
+						fmt.Fprintln(stderr, "perfscanxx:", e)
+						return 2
+					}
+				}
+				if *cmakeBuild {
+					fmt.Fprintln(stderr, "perfscanxx: cmake --build (incremental) to generate headers…")
+					if e := cmake.Build(context.Background(), build); e != nil {
+						fmt.Fprintln(stderr, "perfscanxx: warning:", e)
+						fmt.Fprintln(stderr, "perfscanxx: continuing with the configured database; some TUs may not parse")
+					}
+				}
+			} else {
+				fmt.Fprintln(stderr, "perfscanxx: -cmake set but no CMakeLists.txt found walking up from the current directory")
+			}
+		}
+	}
+
 	// Positional args are files, directories, or Go-style `./...` patterns.
 	// Directories and `...` patterns are expanded to the matching translation
 	// units in the compilation database — the C++ analog of `perfscan ./...`.
@@ -184,6 +215,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if res.ExitCode != 0 {
 		// clang-tidy exits non-zero on compile errors; surface its chatter.
 		fmt.Fprint(stderr, res.Stderr)
+		// A common cause is build-time generated headers that don't exist yet;
+		// point the user at -cmake-build, which generates them.
+		if !*cmakeBuild && countMissingHeaderErrors(findings) > 0 {
+			fmt.Fprintln(stderr, "perfscanxx: some translation units reference headers that are generated at build time and don't exist yet;")
+			fmt.Fprintln(stderr, "perfscanxx: re-run with -cmake-build to generate them (or build the project first).")
+		}
 		return 2
 	}
 	if len(findings) > 0 && !*fix {
@@ -254,6 +291,18 @@ func expandInputs(args []string, buildDir string) (files []string, effBuildDir s
 	return files, effBuildDir, nil
 }
 
+// countMissingHeaderErrors counts clang compile errors caused by a header that
+// could not be found — usually a build-time generated header.
+func countMissingHeaderErrors(findings []report.Finding) int {
+	n := 0
+	for _, f := range findings {
+		if f.TidyName == "clang-diagnostic-error" && strings.Contains(f.Message, "file not found") {
+			n++
+		}
+	}
+	return n
+}
+
 // underDir reports whether file is dir itself or lives beneath it.
 func underDir(file, dir string) bool {
 	if file == dir {
@@ -309,6 +358,8 @@ Examples:
 	perfscanxx -level 1 -fix -p build ./... report + apply only L1 fixes
 	perfscanxx -fix -p build ./...       default -level 3: apply every fix
 	perfscanxx -p build src/main.cpp     a single translation unit
+	perfscanxx -cmake ./...              auto-configure a CMake project (generate compile_commands.json)
+	perfscanxx -cmake-build ./...        also build it to generate build-time headers
 	perfscanxx -list                     the check table
 	perfscanxx -explain PX1001           one check's documentation
 
