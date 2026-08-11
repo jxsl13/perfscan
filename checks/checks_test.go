@@ -162,6 +162,12 @@ var refVocab = config.Config{
 	ShapeMethods:        []string{"Shape"},
 	IndexDecomposeFuncs: []string{"Unravel"},
 	PerElementVisitors:  []string{"readGen", "fillGen"},
+	DtypeMethods:        []string{"Dtype"},
+}
+
+func TestPS1009(t *testing.T) {
+	defer config.SetForTesting(refVocab)()
+	analysistest.Run(t, analysistest.TestData(), PS1009.Analyzer, "ps1009")
 }
 
 func TestPS1001(t *testing.T) {

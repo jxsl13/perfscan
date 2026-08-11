@@ -35,6 +35,7 @@ checks; the figures cited in their docs are its measured results.
 - [x] PS1005 manual-walk-dispatch (domain, L3 — PS1001's domain excluded)
 - [x] PS1006 strided-inner-reduction (L2, generic flat-index shape)
 - [x] PS1007 output-row-restreamed (L3, three-remedy guidance)
+- [x] PS1009 unconverted-dtype-arm (domain, L2 — dtypeMethods vocabulary; finished-state default suppressed)
 - [x] PS1010 column-walk-slice-of-slices (L2, generic; interchange-profitability + amortization narrowings)
 - [x] PS2001 alloc-in-loop (domain, L2)
 - [x] PS2002 unsized-builder (L1)
@@ -79,7 +80,6 @@ checks; the figures cited in their docs are its measured results.
 
 ### Domain checks (need vocabulary)
 
-- [ ] PS1009 unconverted-dtype-arm (needs dtype-switch vocabulary design)
 - [x] PS3063 + PS3065 serial-nest/serial-loop (fanOutHelpers, L3)
 - [x] PS3034 + PS3059 serial-nest direct/derived writes (fanOutHelpers, L3)
 - [x] PS3060 serial-loop-over-parallel-work (fanOutHelpers, L3)

@@ -124,7 +124,8 @@ lives in a JSON config, not in the engine:
   "allocatorFuncs":    ["New", "Zeros", "Cast"],
   "perElementVisitors": ["readGen", "fillGen"],
   "vectorizedSiblingFuncs": ["vexpF32", "vsiluF32"],
-  "fanOutHelpers":     ["parallel.For"]
+  "fanOutHelpers":     ["parallel.For"],
+  "dtypeMethods":      ["Dtype"]
 }
 ```
 

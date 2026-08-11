@@ -220,6 +220,7 @@ func warnStarvedChecks(enabled []*lint.Check, cfg config.Config, cfgPath string,
 		"bulkCopyHelpers":        len(cfg.BulkCopyHelpers),
 		"vectorizedSiblingFuncs": len(cfg.VectorizedSiblingFuncs),
 		"fanOutHelpers":          len(cfg.FanOutHelpers),
+		"dtypeMethods":           len(cfg.DtypeMethods),
 	}
 	starved := make([]string, 0, len(enabled))
 	for _, c := range enabled {

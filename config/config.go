@@ -69,6 +69,11 @@ type Config struct {
 	// (e.g. parallel.For); PS3xxx serial-nest checks report loops in
 	// packages that declare one but leave a hot nest serial.
 	FanOutHelpers []string `json:"fanOutHelpers,omitempty"`
+
+	// DtypeMethods are element-type discriminator methods (e.g. Dtype)
+	// whose switch statements PS1009 inspects for named cases left on the
+	// per-element accessor while a sibling case takes typed storage.
+	DtypeMethods []string `json:"dtypeMethods,omitempty"`
 }
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
@@ -83,6 +88,7 @@ type Sets struct {
 	BulkCopyHelpers        map[string]bool
 	VectorizedSiblingFuncs map[string]bool
 	FanOutHelpers          map[string]bool
+	DtypeMethods           map[string]bool
 }
 
 func toSet(xs []string) map[string]bool {
@@ -109,6 +115,7 @@ func (c Config) Compile() Sets {
 		BulkCopyHelpers:        toSet(c.BulkCopyHelpers),
 		VectorizedSiblingFuncs: toSet(c.VectorizedSiblingFuncs),
 		FanOutHelpers:          toSet(c.FanOutHelpers),
+		DtypeMethods:           toSet(c.DtypeMethods),
 	}
 }
 

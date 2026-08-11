@@ -16,6 +16,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 | [PS1005](PS1005.md) | access | L3 |  | a per-element accessor whose 2+ index args are enclosing-loop variables (a manual tensor walk) |
 | [PS1006](PS1006.md) | access | L2 |  | a reduction striding a flat array by the inner loop variable |
 | [PS1007](PS1007.md) | access | L3 |  | an inner loop accumulating into an output row that does not vary with the outer loop |
+| [PS1009](PS1009.md) | access | L2 |  | a named dtype-switch case on the per-element accessor beside a typed sibling case |
 | [PS1010](PS1010.md) | access | L2 |  | an inner loop reading one column of a [][]T (a row-jumping walk) |
 | [PS2001](PS2001.md) | alloc | L2 |  | a project allocation entry point called inside a loop |
 | [PS2002](PS2002.md) | alloc | L1 |  | a strings.Builder/bytes.Buffer written in a loop with no Grow |
