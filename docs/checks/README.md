@@ -35,6 +35,10 @@ checks' fixes.
 | [PS2105](PS2105.md) | alloc | L1 | yes | ranging over []rune(s) allocates a rune slice; range the string directly |
 | [PS2106](PS2106.md) | alloc | L1 | yes | consecutive appends to the same slice can be combined into one call |
 | [PS2107](PS2107.md) | alloc | L1 | yes | fmt.Sprintf of a single value has a faster strconv/hex equivalent |
+| [PS2108](PS2108.md) | alloc | L1 | yes | string([]byte(s)) round-trips a string through a byte slice for nothing |
+| [PS2109](PS2109.md) | alloc | L1 | yes | []byte(fmt.Sprintf(...)) allocates a string then copies it; fmt.Appendf writes bytes directly |
+| [PS2110](PS2110.md) | alloc | L1 | yes | append([]T(nil), s...) is a hand-rolled clone; slices.Clone/bytes.Clone say it directly |
+| [PS2111](PS2111.md) | alloc | L1 | yes | w.Write([]byte(s)) allocates; w.WriteString(s) writes the string directly |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
