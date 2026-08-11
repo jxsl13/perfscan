@@ -129,9 +129,11 @@ lives in a JSON config, not in the engine:
 }
 ```
 
-With no vocabulary a domain check stays silent — **and says so**: the runner
-names each starved check in a stderr warning, because a silent zero from a
-starved check reads as "no instances".
+Domain checks are **opt-in**: without their vocabulary they are skipped
+silently (the CONFIG column of `perfscan -list` shows what each needs).
+Naming one explicitly (`-checks PS1001`) without its vocabulary prints a
+warning saying exactly which fields are missing — an explicitly requested
+check that cannot fire is worth one loud line, a wildcard run is not.
 
 ## Editor integration
 

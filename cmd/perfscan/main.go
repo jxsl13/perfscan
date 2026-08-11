@@ -46,6 +46,7 @@ func main() {
 		writeBase  = flag.Bool("write-baseline", false, "write current findings to -baseline and exit 0")
 		showVer    = flag.Bool("version", false, "print version and exit")
 	)
+	flag.Usage = printUsage
 	flag.Parse()
 
 	if *showVer {
@@ -79,6 +80,54 @@ func main() {
 	os.Exit(code)
 }
 
+func printUsage() {
+	fmt.Fprintf(os.Stderr, `perfscan — a staticcheck-style performance linter for Go with graded auto-fixing
+
+Usage:
+
+	perfscan [flags] [packages]
+
+Examples:
+
+	perfscan ./...                       report all applicable findings
+	perfscan -checks PS2* ./...          only allocation checks
+	perfscan -checks all,-PS3003 ./...   everything except one check
+	perfscan -fix ./...                  apply L1 (idiomatic) auto-fixes
+	perfscan -fix -fix-level 2 ./...     also apply L2 (structured) fixes
+	perfscan -baseline b.json -write-baseline ./...   accept today's findings
+	perfscan -baseline b.json ./...      then fail only on NEW findings
+	perfscan -list                       the check table
+	perfscan -explain PS2005             one check's full documentation
+
+Fix levels (the maintainability cost of a check's remedy):
+
+	L1  idiomatic   mechanical, bit-identical rewrites; applied by plain -fix
+	L2  structured  restructures code; applied only with -fix-level 2
+	L3  aggressive  hyper-optimizations; advisory only, benchmark-gated
+
+Generic vs. domain checks:
+
+	Most checks are pure language/stdlib shapes and run on any module with
+	no configuration.
+
+	DOMAIN checks are OPT-IN: they key on your project's vocabulary
+	(element accessors, allocators, fan-out helpers, …) and activate only
+	when a perfscan.json / .perfscan.json (auto-discovered up to the
+	module root, or passed via -config) supplies the fields listed in the
+	CONFIG column of 'perfscan -list'. Without that vocabulary they are
+	skipped silently; naming one explicitly (-checks PS1001) without its
+	vocabulary prints a warning explaining what is missing.
+
+Suppressing a finding:
+
+	//perfscan:ignore PS2005 <reason>     on the finding's line or the line above
+
+Flags:
+
+`)
+	flag.PrintDefaults()
+}
+
 func printList() {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tCATEGORY\tLEVEL\tFIX\tCONFIG\tTITLE")
@@ -94,6 +143,7 @@ func printList() {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", c.ID, c.Category, c.Level, fix, cfg, c.Doc.Title)
 	}
 	w.Flush()
+	fmt.Println("\nChecks with a CONFIG column are domain checks: OPT-IN, active only when\nperfscan.json supplies that vocabulary (see perfscan -h).")
 }
 
 func printExplain(id string) {

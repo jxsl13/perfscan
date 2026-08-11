@@ -86,15 +86,36 @@ func Run(checks []*lint.Check, opts Options) int {
 		opts.FixLevel = lint.LevelIdiomatic
 	}
 
-	enabled, err := selectChecks(checks, opts.Checks, opts.MaxLevel)
+	cfg, cfgPath := loadConfig(opts)
+	config.Set(cfg.Compile())
+
+	enabled, explicit, err := selectChecks(checks, opts.Checks, opts.MaxLevel)
 	if err != nil {
 		fmt.Fprintln(opts.Stderr, "perfscan:", err)
 		return 2
 	}
-
-	cfg, cfgPath := loadConfig(opts)
-	config.Set(cfg.Compile())
-	warnStarvedChecks(enabled, cfg, cfgPath, opts.Stderr)
+	// Domain checks are OPT-IN: with no vocabulary they are skipped
+	// silently under "all"/wildcard selection. Explicitly naming one
+	// without its vocabulary keeps it (and warns) — the user asked for a
+	// check that cannot fire, which is worth one loud line.
+	kept := make([]*lint.Check, 0, len(enabled))
+	for _, c := range enabled {
+		missing := missingVocab(c, cfg)
+		if len(missing) == 0 {
+			kept = append(kept, c)
+			continue
+		}
+		if explicit[c.ID] {
+			kept = append(kept, c)
+			src := "no perfscan.json found"
+			if cfgPath != "" {
+				src = "config " + cfgPath
+			}
+			fmt.Fprintf(opts.Stderr, "perfscan: WARNING: %s was selected explicitly but stays silent: vocabulary %s missing (%s)\n",
+				c.ID, strings.Join(missing, ", "), src)
+		}
+	}
+	enabled = kept
 
 	pkgs, err := load(opts)
 	if err != nil {
@@ -205,10 +226,13 @@ func loadConfig(opts Options) (config.Config, string) {
 	return config.Discover(wd)
 }
 
-// warnStarvedChecks names every enabled domain check whose vocabulary is
-// empty. A silent zero from a starved check reads as "no instances", which
-// is the one failure mode that costs whole investigations.
-func warnStarvedChecks(enabled []*lint.Check, cfg config.Config, cfgPath string, w io.Writer) {
+// missingVocab returns the vocabulary fields a domain check needs that the
+// config does not supply. Empty for non-domain checks and fully-fed domain
+// checks.
+func missingVocab(c *lint.Check, cfg config.Config) []string {
+	if !c.NeedsConfig {
+		return nil
+	}
 	fields := map[string]int{
 		"elementAccessors":       len(cfg.ElementAccessors),
 		"fastPathHelpers":        len(cfg.FastPathHelpers),
@@ -222,38 +246,25 @@ func warnStarvedChecks(enabled []*lint.Check, cfg config.Config, cfgPath string,
 		"fanOutHelpers":          len(cfg.FanOutHelpers),
 		"dtypeMethods":           len(cfg.DtypeMethods),
 	}
-	starved := make([]string, 0, len(enabled))
-	for _, c := range enabled {
-		if !c.NeedsConfig {
-			continue
-		}
-		missing := make([]string, 0, len(c.Vocab))
-		for _, v := range c.Vocab {
-			if n, ok := fields[v]; ok && n == 0 {
-				missing = append(missing, v)
-			}
-		}
-		if len(missing) > 0 {
-			starved = append(starved, c.ID+" (no "+strings.Join(missing, ", ")+")")
+	missing := make([]string, 0, len(c.Vocab))
+	for _, v := range c.Vocab {
+		if n, ok := fields[v]; ok && n == 0 {
+			missing = append(missing, v)
 		}
 	}
-	if len(starved) == 0 {
-		return
-	}
-	src := "no perfscan.json found"
-	if cfgPath != "" {
-		src = "config " + cfgPath
-	}
-	fmt.Fprintf(w, "perfscan: WARNING: domain checks silent for lack of vocabulary (%s): %s\n",
-		src, strings.Join(starved, "; "))
+	return missing
 }
 
-func selectChecks(all []*lint.Check, sel string, maxLevel lint.Level) ([]*lint.Check, error) {
+// selectChecks resolves the -checks selector. The explicit set contains
+// IDs the user named exactly (not via "all" or a wildcard) — those opt a
+// vocabulary-starved domain check in, with a warning.
+func selectChecks(all []*lint.Check, sel string, maxLevel lint.Level) ([]*lint.Check, map[string]bool, error) {
 	if sel == "" {
 		sel = "all"
 	}
 	include := map[string]bool{}
 	exclude := map[string]bool{}
+	explicit := map[string]bool{}
 	for _, tok := range strings.Split(sel, ",") {
 		tok = strings.TrimSpace(tok)
 		if tok == "" {
@@ -269,11 +280,14 @@ func selectChecks(all []*lint.Check, sel string, maxLevel lint.Level) ([]*lint.C
 					exclude[c.ID] = true
 				} else {
 					include[c.ID] = true
+					if pat == c.ID {
+						explicit[c.ID] = true
+					}
 				}
 			}
 		}
 		if !matched && pat != "all" {
-			return nil, fmt.Errorf("no check matches %q (see perfscan -list)", tok)
+			return nil, nil, fmt.Errorf("no check matches %q (see perfscan -list)", tok)
 		}
 	}
 	out := make([]*lint.Check, 0, len(all))
@@ -286,7 +300,7 @@ func selectChecks(all []*lint.Check, sel string, maxLevel lint.Level) ([]*lint.C
 		}
 		out = append(out, c)
 	}
-	return out, nil
+	return out, explicit, nil
 }
 
 func matchCheck(id, pat string) bool {
