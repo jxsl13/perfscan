@@ -1,0 +1,138 @@
+package ps2122
+
+import (
+	"fmt"
+	"strings"
+)
+
+func sink(string) {}
+
+// Assignment context: no parentheses needed.
+func twoArgs(a, b string) string {
+	s := a + b // want `fmt\.Sprintf with a format of only %s verbs over plain strings boxes every argument and walks fmt's formatter state machine; direct \+ concatenation builds the identical string`
+	return s
+}
+
+// Three verbs, three args.
+func threeArgs(a, b, c string) string {
+	return a + b + c // want `fmt\.Sprintf with a format of only %s verbs over plain strings boxes every argument and walks fmt's formatter state machine; direct \+ concatenation builds the identical string`
+}
+
+// An argument that is itself a call stays verbatim.
+func callArg(a, b string) string {
+	return strings.ToUpper(a) + b // want `fmt\.Sprintf with a format of only %s verbs over plain strings boxes every argument and walks fmt's formatter state machine; direct \+ concatenation builds the identical string`
+}
+
+// An argument that is itself a + concatenation needs no parentheses:
+// string + is associative and the only string-producing binary operator.
+func concatArg(a, b, c string) string {
+	return a + b + c // want `fmt\.Sprintf with a format of only %s verbs over plain strings boxes every argument and walks fmt's formatter state machine; direct \+ concatenation builds the identical string`
+}
+
+// An untyped constant string argument defaults to plain string.
+func literalArg(b string) string {
+	return "pre-" + b // want `fmt\.Sprintf with a format of only %s verbs over plain strings boxes every argument and walks fmt's formatter state machine; direct \+ concatenation builds the identical string`
+}
+
+// Call-argument context is self-delimiting: no parentheses needed.
+func asArg(a, b string) {
+	sink(a + b) // want `fmt\.Sprintf with a format of only %s verbs over plain strings boxes every argument and walks fmt's formatter state machine; direct \+ concatenation builds the identical string`
+}
+
+// PRECEDENCE: indexing binds tighter than + — the whole replacement must
+// be parenthesized or the index would apply to the last operand only.
+func indexed(a, b string) byte {
+	return (a + b)[0] // want `fmt\.Sprintf with a format of only %s verbs over plain strings boxes every argument and walks fmt's formatter state machine; direct \+ concatenation builds the identical string`
+}
+
+// Operand of a further +: parenthesized as well — redundant but harmless.
+func merged(a, b, c string) string {
+	return (a + b) + c // want `fmt\.Sprintf with a format of only %s verbs over plain strings boxes every argument and walks fmt's formatter state machine; direct \+ concatenation builds the identical string`
+}
+
+// Reported but NOT fixed: a comment inside the rewritten scaffolding
+// would be destroyed by the edits.
+func commented(a, b string) string {
+	return fmt.Sprintf( // keep me // want `fmt\.Sprintf with a format of only %s verbs over plain strings boxes every argument and walks fmt's formatter state machine; direct \+ concatenation builds the identical string`
+		"%s%s", a, b)
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// A single %s belongs to PS2107 (sprintf-single-value), not here.
+func singleVerb(a string) string {
+	return fmt.Sprintf("%s", a)
+}
+
+// Literal text between the verbs — even a space — needs fmt (or a
+// different rewrite); out of scope.
+func spaced(a, b string) string {
+	return fmt.Sprintf("%s %s", a, b)
+}
+
+func dashed(a, b string) string {
+	return fmt.Sprintf("%s-%s", a, b)
+}
+
+// Any other verb disqualifies the format.
+func otherVerb(n int, b string) string {
+	return fmt.Sprintf("%d%s", n, b)
+}
+
+// %% is literal output, not a verb pair.
+func percentEscape(a string) string {
+	return fmt.Sprintf("%s%%", a)
+}
+
+// Argument count must equal the verb count.
+func missingArg(a, b string) string {
+	return fmt.Sprintf("%s%s%s", a, b)
+}
+
+// Non-string arguments: %s on them is not the identity.
+func intArg(a string, n int) string {
+	return fmt.Sprintf("%s%s", a, n)
+}
+
+func byteSliceArg(a string, b []byte) string {
+	return fmt.Sprintf("%s%s", a, b)
+}
+
+// A NAMED string type may implement fmt.Stringer/fmt.Formatter, which %s
+// would honor and + would not.
+type name string
+
+func (n name) String() string { return "Mx. " + string(n) }
+
+func namedStringArg(a string, n name) string {
+	return fmt.Sprintf("%s%s", a, n)
+}
+
+func errorArg(a string, err error) string {
+	return fmt.Sprintf("%s%s", a, err)
+}
+
+func stringerArg(a string, s fmt.Stringer) string {
+	return fmt.Sprintf("%s%s", a, s)
+}
+
+// A shadowed fmt is not the fmt package.
+type fakeFmt struct{}
+
+func (fakeFmt) Sprintf(format string, args ...any) string { return format }
+
+func shadowedFmt(a, b string) string {
+	fmt := fakeFmt{}
+	return fmt.Sprintf("%s%s", a, b)
+}
+
+// A spread call passes an unknown number of arguments.
+func spread(args ...any) string {
+	return fmt.Sprintf("%s%s", args...)
+}
+
+// A non-literal format proves nothing.
+func varFormat(a, b string) string {
+	f := "%s%s"
+	return fmt.Sprintf(f, a, b)
+}
