@@ -47,6 +47,12 @@ type Options struct {
 	ConfigPath string
 	// ExitZero forces exit code 0 even with findings.
 	ExitZero bool
+	// Baseline is a baseline file to filter against: findings covered by
+	// it are suppressed, so only regressions remain (the "ratchet").
+	Baseline string
+	// WriteBaseline writes the current findings to Baseline instead of
+	// reporting them, and exits 0.
+	WriteBaseline bool
 
 	Stdout io.Writer
 	Stderr io.Writer
@@ -127,6 +133,30 @@ func Run(checks []*lint.Check, opts Options) int {
 		return strings.Compare(a.Check.ID, b.Check.ID)
 	})
 	findings = dedup(findings)
+
+	if opts.WriteBaseline {
+		if opts.Baseline == "" {
+			fmt.Fprintln(opts.Stderr, "perfscan: -write-baseline requires -baseline <file>")
+			return 2
+		}
+		if err := writeBaseline(opts.Baseline, findings); err != nil {
+			fmt.Fprintln(opts.Stderr, "perfscan: baseline:", err)
+			return 2
+		}
+		fmt.Fprintf(opts.Stderr, "perfscan: wrote baseline with %d finding(s) to %s\n", len(findings), opts.Baseline)
+		return 0
+	}
+	if opts.Baseline != "" {
+		filtered, suppressed, err := applyBaseline(opts.Baseline, findings)
+		if err != nil {
+			fmt.Fprintln(opts.Stderr, "perfscan: baseline:", err)
+			return 2
+		}
+		findings = filtered
+		if suppressed > 0 {
+			fmt.Fprintf(opts.Stderr, "perfscan: %d baselined finding(s) suppressed (%s)\n", suppressed, opts.Baseline)
+		}
+	}
 
 	if opts.Fix {
 		applied, failed := applyFixes(findings, opts)

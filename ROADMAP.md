@@ -14,12 +14,12 @@ planned engine work. PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 - [x] `//perfscan:ignore` suppression directives
 - [x] Gated auto-fix (`-fix -fix-level N`) with gofmt post-formatting
 - [x] SARIF 2.1.0 output (`-sarif`; L3 advisories map to "note")
+- [x] Baseline/ratchet support (`-baseline` / `-write-baseline`, line-independent identity)
 - [x] Docs generated from the registry (`make docs`, CI drift gate)
 - [x] Project vocabulary config (perfscan.json, auto-discovery, starved-check
       warnings)
 - [ ] Package-level caching for large repos (staticcheck-style facts/caching)
 - [ ] `golangci-lint` plugin integration
-- [ ] Baseline file ("ratchet") support: fail only on new findings
 
 ## Check porting status (goai reference registry)
 

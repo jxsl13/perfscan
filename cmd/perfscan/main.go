@@ -42,6 +42,8 @@ func main() {
 		tests      = flag.Bool("tests", false, "also scan _test.go files")
 		configPath = flag.String("config", "", "path to perfscan.json (default: auto-discover up to the module root)")
 		exitZero   = flag.Bool("exit-zero", false, "always exit 0, even with findings")
+		baseline   = flag.String("baseline", "", "baseline file: suppress findings recorded in it (ratchet mode)")
+		writeBase  = flag.Bool("write-baseline", false, "write current findings to -baseline and exit 0")
 		showVer    = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
@@ -61,16 +63,18 @@ func main() {
 
 	runner.Version = version
 	code := runner.Run(checks.All(), runner.Options{
-		Patterns:   flag.Args(),
-		Checks:     *sel,
-		MaxLevel:   lint.Level(*maxLevel),
-		Tests:      *tests,
-		Fix:        *fix,
-		FixLevel:   lint.Level(*fixLevel),
-		JSON:       *jsonOut,
-		SARIF:      *sarifOut,
-		ConfigPath: *configPath,
-		ExitZero:   *exitZero,
+		Patterns:      flag.Args(),
+		Checks:        *sel,
+		MaxLevel:      lint.Level(*maxLevel),
+		Tests:         *tests,
+		Fix:           *fix,
+		FixLevel:      lint.Level(*fixLevel),
+		JSON:          *jsonOut,
+		SARIF:         *sarifOut,
+		ConfigPath:    *configPath,
+		ExitZero:      *exitZero,
+		Baseline:      *baseline,
+		WriteBaseline: *writeBase,
 	})
 	os.Exit(code)
 }

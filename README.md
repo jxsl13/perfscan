@@ -40,6 +40,21 @@ perfscan -explain PS2005           # a check's full documentation
 Findings print in the standard `file:line:col: message (PSid Ln)` shape, so
 any editor problem-matcher picks them up.
 
+## Adopting perfscan on an existing codebase (baseline / ratchet)
+
+Record the current findings once, then fail CI only on regressions while
+the backlog is burned down incrementally:
+
+```bash
+perfscan -baseline perfscan-baseline.json -write-baseline ./...  # accept today's findings
+perfscan -baseline perfscan-baseline.json ./...                  # exit 1 only on NEW findings
+```
+
+Baseline identity is line-independent (`{file, check, message}` with
+counts), so unrelated edits that shift line numbers do not resurrect
+accepted findings. Re-run `-write-baseline` after fixing a batch to ratchet
+the accepted set down.
+
 ## Fix levels: graded optimization
 
 Performance fixes differ wildly in what they cost the *reader*. perfscan
