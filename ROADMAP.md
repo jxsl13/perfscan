@@ -44,9 +44,14 @@ figures cited in their docs are goai's measured results.
 - [x] PS3077 minmax-clamp-in-a-loop (L3, advisory)
 - [x] PS3082 minmax-call-in-a-loop (L2, clamps excluded — PS3077 owns those)
 
-### perfscan-original
+### perfscan-original (generic low-hanging fruit, any repo)
 
-- [x] PS2101 append-without-prealloc (L1, auto-fix)
+- [x] PS2101 append-without-prealloc (L1, auto-fix) — bounds from range over
+      slice/map AND counted loops; exact/upper/lower bound semantics documented
+- [x] PS2102 string-concat-in-loop (L1)
+- [x] PS2104 map-without-prealloc (L1, auto-fix) — same bound semantics
+- [x] PS3101 invariant-conversion-in-loop (L1)
+- [x] PS4101 loop-copy → copy() (L1, auto-fix)
 
 ### Next up (generic, high value)
 
@@ -69,8 +74,7 @@ figures cited in their docs are goai's measured results.
 
 ### New check ideas (bring benchmarks)
 
-- [ ] string concatenation with `+=` in a loop (L1)
 - [ ] `fmt.Sprintf` for pure concatenation in a hot loop (L1)
-- [ ] byte/string conversion round-trips in loops (L2)
 - [ ] `time.Now()` in tight loops where coarse time suffices (L2)
 - [ ] defer-in-loop accumulation (L1)
+- [ ] PS2101/PS2104: derive bounds from selector sources (len(x.Items))

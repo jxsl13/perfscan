@@ -379,6 +379,7 @@ func applyFixes(findings []Finding, opts Options) (applied, failed int) {
 		start, end int
 		text       []byte
 	}
+	//perfscan:ignore PS2104 findings cluster in few files; len(findings) would over-reserve
 	perFile := map[string][]edit{}
 	for _, f := range findings {
 		if !f.Check.AutoFix || f.Check.Level > opts.FixLevel || len(f.Fixes) == 0 {

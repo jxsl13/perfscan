@@ -77,7 +77,7 @@ func checkConsecutiveLoops(pass *analysis.Pass, block *ast.BlockStmt) {
 			return
 		}
 		// Common buffer indexed by every loop in the run.
-		common := map[string]bool{}
+		common := make(map[string]bool, len(run[0].indexed))
 		for b := range run[0].indexed {
 			common[b] = true
 		}

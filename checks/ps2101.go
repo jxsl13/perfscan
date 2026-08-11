@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/printer"
 	"go/token"
+	"go/types"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -13,8 +14,11 @@ import (
 )
 
 // PS2101 reports a slice declared with no capacity immediately before a
-// range loop that appends to it. When the loop ranges over a plain
-// identifier, the fix pre-sizes the slice with make(T, 0, len(src)).
+// loop that appends to it, when the loop's iteration source bounds the
+// element count. The bound is EXACT for one unconditional append per
+// iteration, an UPPER bound for filtered appends (the same worst case
+// append itself reserves), and a LOWER bound when the body appends more
+// than once per iteration — a floor is still worth taking.
 //
 // PS2101 is a perfscan-original check (the x1xx block per category is
 // reserved for checks that did not originate in the goai reference
@@ -26,18 +30,23 @@ var PS2101 = register(&lint.Check{
 	Level:    lint.LevelIdiomatic,
 	AutoFix:  true,
 	Doc: lint.Documentation{
-		Title: "a slice built by append in a range loop directly after an unsized declaration",
+		Title: "a slice built by append in a bounded loop directly after an unsized declaration",
 		Text: `Appending into a slice declared without capacity grows the
 backing array geometrically — each growth allocates and copies everything
 appended so far. When the append target is declared immediately before a
-range loop, the range source bounds the element count, so
-make([]T, 0, len(src)) removes every growth copy.
+loop whose iteration count is known — a range over a slice or map, or a
+counted for loop — that count bounds the appends, so
+make([]T, 0, bound) removes every growth copy.
 
-The automatic fix rewrites the declaration when the loop ranges over a plain
-identifier that is not reassigned inside the loop. Filtered appends
-over-allocate at most len(src) elements, which is the same worst case append
-itself reserves. Capacity is not observable through append semantics, so the
-rewrite is bit-identical for the built slice's contents.`,
+Bound semantics: for one unconditional append per iteration the bound is
+exact; for a filtered append it is an upper bound (the same worst case
+append itself reserves); for multiple appends per iteration it is a lower
+bound and still removes the early growth copies.
+
+The automatic fix rewrites the declaration when the bound is a plain
+identifier (or len of one) that the loop body does not reassign. Capacity
+is not observable through append semantics, so the rewrite is
+bit-identical for the built slice's contents.`,
 		Before: `out := []string{}
 for _, s := range src {
 	out = append(out, s)
@@ -49,7 +58,7 @@ for _, s := range src {
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS2101",
-		Doc:  "append into unsized slice declared directly before the loop",
+		Doc:  "append into unsized slice declared directly before a bounded loop",
 		Run:  runPS2101,
 	},
 })
@@ -66,19 +75,105 @@ func runPS2101(pass *analysis.Pass) (any, error) {
 				if !ok {
 					continue
 				}
-				loop, ok := block.List[i+1].(*ast.RangeStmt)
-				if !ok {
+				loop := block.List[i+1]
+				body := loopBodyOf(loop)
+				if body == nil || !loopAppendsTo(body, name) {
 					continue
 				}
-				if !loopAppendsTo(loop.Body, name) {
+				capExpr := loopCapacityExpr(pass, loop)
+				// A range loop is always bounded by its source; a for
+				// loop only counts when a bound was derived.
+				if _, isRange := loop.(*ast.RangeStmt); !isRange && capExpr == "" {
 					continue
 				}
-				reportPrealloc(pass, block.List[i], name, typ, loop)
+				reportPrealloc(pass, block.List[i], name, typ, capExpr)
 			}
 			return true
 		})
 	}
 	return nil, nil
+}
+
+func loopBodyOf(s ast.Stmt) *ast.BlockStmt {
+	switch l := s.(type) {
+	case *ast.RangeStmt:
+		return l.Body
+	case *ast.ForStmt:
+		return l.Body
+	}
+	return nil
+}
+
+// loopCapacityExpr derives the capacity expression that bounds the loop's
+// iteration count, or "" when none is safely derivable.
+//
+//   - `for … := range src` with src a plain identifier of slice, array or
+//     map type → "len(src)"
+//   - `for i := 0; i < n; i++` with n a plain identifier → "n"
+//   - `for i := 0; i < len(src); i++` with src a plain identifier → "len(src)"
+func loopCapacityExpr(pass *analysis.Pass, s ast.Stmt) string {
+	switch l := s.(type) {
+	case *ast.RangeStmt:
+		src, ok := l.X.(*ast.Ident)
+		if !ok || reassigns(l.Body, src.Name) {
+			return ""
+		}
+		t := pass.TypesInfo.TypeOf(l.X)
+		if t == nil {
+			return ""
+		}
+		switch t.Underlying().(type) {
+		case *types.Slice, *types.Array, *types.Map:
+			return "len(" + src.Name + ")"
+		case *types.Pointer: // *[N]T range
+			return "len(" + src.Name + ")"
+		}
+		return ""
+	case *ast.ForStmt:
+		// i := <lit>; i < bound; i++ (or i += lit)
+		init, ok := l.Init.(*ast.AssignStmt)
+		if !ok || len(init.Lhs) != 1 {
+			return ""
+		}
+		iv, ok := init.Lhs[0].(*ast.Ident)
+		if !ok {
+			return ""
+		}
+		cond, ok := l.Cond.(*ast.BinaryExpr)
+		if !ok || (cond.Op != token.LSS && cond.Op != token.LEQ) {
+			return ""
+		}
+		lhs, ok := cond.X.(*ast.Ident)
+		if !ok || lhs.Name != iv.Name {
+			return ""
+		}
+		var bound string
+		switch b := cond.Y.(type) {
+		case *ast.Ident:
+			bound = b.Name
+		case *ast.CallExpr:
+			if len(b.Args) == 1 {
+				if id, ok := b.Args[0].(*ast.Ident); ok && calleeIsLen(b) {
+					bound = "len(" + id.Name + ")"
+				}
+			}
+		}
+		if bound == "" {
+			return ""
+		}
+		// The bound (or its subject) must not be reassigned in the body.
+		subject := strings.TrimSuffix(strings.TrimPrefix(bound, "len("), ")")
+		if reassigns(l.Body, subject) {
+			return ""
+		}
+		return bound
+	}
+	return ""
+}
+
+func calleeIsLen(call *ast.CallExpr) bool {
+	id, ok := call.Fun.(*ast.Ident)
+	return ok && id.Name == "len"
 }
 
 // unsizedSliceDecl matches `s := []T{}`, `s := make([]T, 0)` and
@@ -123,10 +218,17 @@ func unsizedSliceDecl(s ast.Stmt) (string, ast.Expr, bool) {
 	return "", nil, false
 }
 
-// loopAppendsTo reports whether body contains `name = append(name, ...)`.
+// loopAppendsTo reports whether body contains `name = append(name, ...)` in
+// its own iteration scope. Nested loops and closures are not descended
+// into: an append there is not bounded by THIS loop's trip count, and the
+// bound claim would be wrong.
 func loopAppendsTo(body *ast.BlockStmt, name string) bool {
 	found := false
 	ast.Inspect(body, func(n ast.Node) bool {
+		switch n.(type) {
+		case *ast.RangeStmt, *ast.ForStmt, *ast.FuncLit:
+			return false
+		}
 		as, ok := n.(*ast.AssignStmt)
 		if !ok || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
 			return true
@@ -150,20 +252,18 @@ func loopAppendsTo(body *ast.BlockStmt, name string) bool {
 	return found
 }
 
-func reportPrealloc(pass *analysis.Pass, decl ast.Stmt, name string, typ ast.Expr, loop *ast.RangeStmt) {
+func reportPrealloc(pass *analysis.Pass, decl ast.Stmt, name string, typ ast.Expr, capExpr string) {
 	diag := analysis.Diagnostic{
 		Pos:     decl.Pos(),
 		End:     decl.End(),
-		Message: fmt.Sprintf("%s is appended to in the following range loop but declared without capacity; pre-size it with make(..., 0, len(...))", name),
+		Message: fmt.Sprintf("%s is appended to in the following bounded loop but declared without capacity; pre-size it with make(..., 0, bound) — exact for one unconditional append per iteration, an upper bound for filtered appends", name),
 	}
-	// Deterministic fix only when the range source is a plain identifier
-	// that the loop body does not reassign.
-	if src, ok := loop.X.(*ast.Ident); ok && !reassigns(loop.Body, src.Name) {
+	if capExpr != "" { // bound already validated against body reassignment
 		var b strings.Builder
 		_ = printer.Fprint(&b, token.NewFileSet(), typ)
-		newDecl := fmt.Sprintf("%s := make(%s, 0, len(%s))", name, b.String(), src.Name)
+		newDecl := fmt.Sprintf("%s := make(%s, 0, %s)", name, b.String(), capExpr)
 		diag.SuggestedFixes = []analysis.SuggestedFix{{
-			Message: fmt.Sprintf("pre-size %s to len(%s)", name, src.Name),
+			Message: fmt.Sprintf("pre-size %s to %s", name, capExpr),
 			TextEdits: []analysis.TextEdit{
 				{Pos: decl.Pos(), End: decl.End(), NewText: []byte(newDecl)},
 			},

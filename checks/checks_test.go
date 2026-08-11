@@ -20,6 +20,22 @@ func TestPS2101(t *testing.T) {
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2101.Analyzer, "ps2101")
 }
 
+func TestPS2102(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), PS2102.Analyzer, "ps2102")
+}
+
+func TestPS2104(t *testing.T) {
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2104.Analyzer, "ps2104")
+}
+
+func TestPS3101(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), PS3101.Analyzer, "ps3101")
+}
+
+func TestPS4101(t *testing.T) {
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS4101.Analyzer, "ps4101")
+}
+
 func TestPS2003(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS2003.Analyzer, "ps2003")
 }
