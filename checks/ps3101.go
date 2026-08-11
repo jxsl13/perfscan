@@ -166,12 +166,24 @@ func hoistConvFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr, arg
 		return nil
 	}
 	// A string result is immutable, so sharing one across iterations is
-	// always safe. A []byte result is a fresh mutable slice per iteration:
-	// share it only when it is consumed directly by a read-only bytes.*
-	// predicate, where neither a write nor an alias can escape.
+	// always safe — PROVIDED the operand's bytes cannot change between the
+	// hoist point and the original site. A string operand is immutable; a
+	// SLICE operand (string(b) with b []byte) is not: b[i]++ inside the
+	// loop mutates what the conversion reads, and a hoisted snapshot would
+	// freeze the pre-mutation state (regression: go/doc/comment's inc()).
+	// A []byte result is a fresh mutable slice per iteration: share it
+	// only when it is consumed directly by a read-only bytes.* predicate,
+	// where neither a write nor an alias can escape.
 	if convText == "[]byte" {
 		if len(stack) == 0 || !byteConvReadOnly(stack[len(stack)-1], call) {
 			return nil
+		}
+	}
+	if convText == "string" {
+		if t := pass.TypesInfo.TypeOf(arg); t != nil {
+			if _, isSlice := t.Underlying().(*types.Slice); isSlice {
+				return nil // mutable operand: hoisting can freeze stale bytes
+			}
 		}
 	}
 	outer, ok := astutil.OutermostLoop(stack)

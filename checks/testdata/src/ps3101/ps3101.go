@@ -124,3 +124,19 @@ outer:
 		}
 	}
 }
+
+// Regression (go/doc/comment inc(), caught by the stdlib validation run):
+// the loop mutates b's ELEMENTS, so a hoisted string(b) would freeze the
+// pre-mutation bytes. string(X) with a slice-typed operand is never
+// hoisted.
+func incShape(s string) string {
+	b := []byte(s)
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] < '9' {
+			b[i]++
+			return string(b) // want `string\(b\) copies its operand on every iteration but b is loop-invariant; hoist the conversion above the loop`
+		}
+		b[i] = '0'
+	}
+	return "1" + string(b)
+}
