@@ -19,11 +19,11 @@ go install github.com/jxsl13/perfscan/perfscanxx@latest    # the C++ analyzer
 ```
 
 Or download a prebuilt binary from the
-[releases page](https://github.com/jxsl13/perfscan/releases). The two tools
-version and release independently via prefixed tags — `perfscan/vX.Y.Z` and
-`perfscanxx/vX.Y.Z` — so each release's assets are named
-`perfscan_<version>_<os>_<arch>.tar.gz` / `perfscanxx_<version>_<os>_<arch>.tar.gz`
-(`.zip` on Windows), for linux/darwin/windows × amd64/arm64.
+[releases page](https://github.com/jxsl13/perfscan/releases). Each `vX.Y.Z` tag
+publishes ONE release containing both tools — assets named
+`perfscan_<version>_<os>_<arch>.tar.gz` and
+`perfscanxx_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows), for
+linux/darwin/windows × amd64/arm64.
 
 perfscanxx additionally needs `clang-tidy` at runtime (LLVM ≥ 20 —
 `brew install llvm`); see [perfscanxx/README.md](perfscanxx/README.md).

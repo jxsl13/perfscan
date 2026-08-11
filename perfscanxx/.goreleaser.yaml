@@ -2,11 +2,9 @@ version: 2
 
 project_name: perfscanxx
 
-# Monorepo: this module lives in perfscanxx/ and is released on tags
-# prefixed "perfscanxx/vX.Y.Z" (the perfscan linter has its own "perfscan/vX.Y.Z").
-monorepo:
-  tag_prefix: perfscanxx/
-  dir: perfscanxx
+# Monorepo release: both tools ship in ONE GitHub release per vX.Y.Z tag.
+# This config builds the C++ analyzer; it appends its assets to the release the
+# perfscan run created first (namespaced checksums, keep-existing mode).
 
 builds:
   - id: perfscanxx
@@ -28,19 +26,15 @@ archives:
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
 
 checksum:
-  name_template: checksums.txt
-
-changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^chore:"
-      - "^test:"
+  name_template: "{{ .ProjectName }}_checksums.txt"
 
 release:
+  mode: keep-existing
   footer: |
     ---
     perfscanxx orchestrates clang-tidy — install it at runtime (`brew install llvm`).
 
     Install perfscanxx with `go install github.com/jxsl13/perfscan/perfscanxx@{{.Tag}}`
+
+changelog:
+  disable: true # the perfscan run owns the combined release notes
