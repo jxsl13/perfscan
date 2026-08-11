@@ -52,6 +52,35 @@ func TestPS3003(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS3003.Analyzer, "ps3003")
 }
 
+// goaiVocab mirrors the goai reference vocabulary used by domain fixtures.
+var goaiVocab = config.Config{
+	ElementAccessors:    []string{"AtF64", "SetF64"},
+	FastPathHelpers:     []string{"flatF64", "flatF32"},
+	ElementCountMethods: []string{"Numel"},
+	ShapeMethods:        []string{"Shape"},
+	IndexDecomposeFuncs: []string{"Unravel"},
+	PerElementVisitors:  []string{"readGen", "fillGen"},
+}
+
+func TestPS1001(t *testing.T) {
+	defer config.SetForTesting(goaiVocab)()
+	analysistest.Run(t, analysistest.TestData(), PS1001.Analyzer, "ps1001")
+}
+
+func TestPS1002(t *testing.T) {
+	defer config.SetForTesting(goaiVocab)()
+	analysistest.Run(t, analysistest.TestData(), PS1002.Analyzer, "ps1002")
+}
+
+func TestPS1003(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), PS1003.Analyzer, "ps1003")
+}
+
+func TestPS1005(t *testing.T) {
+	defer config.SetForTesting(goaiVocab)()
+	analysistest.Run(t, analysistest.TestData(), PS1005.Analyzer, "ps1005")
+}
+
 func TestPS2001(t *testing.T) {
 	restore := config.SetForTesting(config.Config{
 		AllocatorFuncs: []string{"New", "Zeros"},

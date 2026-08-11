@@ -28,6 +28,10 @@ figures cited in their docs are goai's measured results.
 
 ### Ported
 
+- [x] PS1001 per-element-dispatch (domain, L2, hasFlat suppression)
+- [x] PS1002 per-element-closure (domain, L2)
+- [x] PS1003 batch-single-elt (L2)
+- [x] PS1005 manual-walk-dispatch (domain, L3 — PS1001's domain excluded)
 - [x] PS2001 alloc-in-loop (domain, L2)
 - [x] PS2002 unsized-builder (L1)
 - [x] PS2003 strings-alloc-in-loop (L1)
@@ -46,7 +50,6 @@ figures cited in their docs are goai's measured results.
 
 ### Next up (generic, high value)
 
-- [ ] PS1003 batch-single-elt
 - [ ] PS2004 poolable-loop-scratch
 - [ ] PS2006 quadratic-cache-append
 - [ ] PS2007 build-nxn-use-one-row
@@ -59,9 +62,7 @@ figures cited in their docs are goai's measured results.
 
 ### Domain checks (need vocabulary)
 
-- [ ] PS1001 per-element-dispatch
-- [ ] PS1002 per-element-closure
-- [ ] PS1004–PS1010 per-element family
+- [ ] PS1004, PS1006–PS1010 per-element family (rest)
 - [ ] PS3034/PS3059/PS3060/PS3063/PS3065 serial-nest family (fanOutHelpers)
 - [ ] PS4001 bulk-copy, PS4002 scalar-transcendental-vectorizable
 - [ ] PS6004 unverified-dual-path
