@@ -162,6 +162,12 @@ var entries = []Entry{
 		Title:  "sink parameter taken by const& then copied; take by value and std::move (one copy or move, not always a copy)",
 		HasFix: true,
 	},
+	{
+		ID: "PX3008", TidyName: "readability-container-size-empty",
+		Level: LevelIdiomatic, Category: "containers",
+		Title:  "size() == 0 to test emptiness; empty() is guaranteed O(1) (size() can be O(n), e.g. std::list)",
+		HasFix: true,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
