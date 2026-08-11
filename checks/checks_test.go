@@ -253,3 +253,19 @@ func TestRegistryInvariant(t *testing.T) {
 		}
 	}
 }
+
+func TestPS5101(t *testing.T) {
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS5101.Analyzer, "ps5101")
+}
+
+func TestPS2105(t *testing.T) {
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2105.Analyzer, "ps2105")
+}
+
+func TestPS2106(t *testing.T) {
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2106.Analyzer, "ps2106")
+}
+
+func TestPS2107(t *testing.T) {
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2107.Analyzer, "ps2107")
+}

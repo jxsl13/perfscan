@@ -842,3 +842,118 @@ func BenchmarkPS2006_After(b *testing.B) {
 		sinkF = cache[len(cache)-1]
 	}
 }
+
+// PS5101 — bytes.Compare(...)==0 for equality vs bytes.Equal. One pair has
+// equal content (both must scan; Equal's memequal is tuned harder), one is
+// a proper prefix (Equal short-circuits on the length mismatch, Compare
+// scans the whole common prefix).
+func BenchmarkPS5101_Before(b *testing.B) {
+	b.ReportAllocs()
+	x := []byte(strings.Repeat("perfscan-", 128))
+	y := append([]byte(nil), x...)
+	p := x[:len(x)-1]
+	for range b.N {
+		eq := 0
+		if bytes.Compare(x, y) == 0 {
+			eq++
+		}
+		if bytes.Compare(x, p) != 0 {
+			eq++
+		}
+		sinkI = eq
+	}
+}
+
+func BenchmarkPS5101_After(b *testing.B) {
+	b.ReportAllocs()
+	x := []byte(strings.Repeat("perfscan-", 128))
+	y := append([]byte(nil), x...)
+	p := x[:len(x)-1]
+	for range b.N {
+		eq := 0
+		if bytes.Equal(x, y) {
+			eq++
+		}
+		if !bytes.Equal(x, p) {
+			eq++
+		}
+		sinkI = eq
+	}
+}
+
+// PS2105 — range over []rune(s) vs ranging the string directly. Lines
+// longer than the compiler's 32-rune stack buffer force the []rune
+// conversion to heap-allocate, as real-world text does.
+func BenchmarkPS2105_Before(b *testing.B) {
+	b.ReportAllocs()
+	line := strings.Join(words[:16], " ")
+	for range b.N {
+		total := 0
+		for range 128 {
+			for _, r := range []rune(line) {
+				total += int(r)
+			}
+		}
+		sinkI = total
+	}
+}
+
+func BenchmarkPS2105_After(b *testing.B) {
+	b.ReportAllocs()
+	line := strings.Join(words[:16], " ")
+	for range b.N {
+		total := 0
+		for range 128 {
+			for _, r := range line {
+				total += int(r)
+			}
+		}
+		sinkI = total
+	}
+}
+
+// PS2106 — consecutive single-value appends vs one combined call.
+func BenchmarkPS2106_Before(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		var out []string
+		out = append(out, words[0])
+		out = append(out, words[1])
+		out = append(out, words[2])
+		out = append(out, words[3])
+		out = append(out, words[4])
+		out = append(out, words[5])
+		out = append(out, words[6])
+		out = append(out, words[7])
+		sinkSS = out
+	}
+}
+
+func BenchmarkPS2106_After(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		var out []string
+		out = append(out, words[0], words[1], words[2], words[3],
+			words[4], words[5], words[6], words[7])
+		sinkSS = out
+	}
+}
+
+// PS2107 — single-verb Sprintf vs the direct strconv conversion.
+func BenchmarkPS2107_Before(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		for _, i := range ints {
+			sinkS = fmt.Sprintf("%d", i)
+		}
+	}
+}
+
+func BenchmarkPS2107_After(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		for _, i := range ints {
+			sinkS = strconv.Itoa(i)
+		}
+	}
+}
