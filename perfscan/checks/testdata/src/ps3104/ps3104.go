@@ -1,0 +1,20 @@
+package ps3104
+
+import (
+	"fmt"
+	"sort"
+)
+
+// Both helpers are rewritten; these two calls are the file's ONLY sort
+// references, so the fix also swaps the orphaned sort import for slices.
+func sortBoth(xs []int, ys []string) {
+	sort.Ints(xs)    // want `sort\.Ints is the legacy spelling of slices\.Sort \(an interface-dispatch sort on go1\.21, a one-line wrapper since go1\.22\); slices\.Sort sorts the concrete \[\]int directly with the identical ascending order`
+	sort.Strings(ys) // want `sort\.Strings is the legacy spelling of slices\.Sort \(an interface-dispatch sort on go1\.21, a one-line wrapper since go1\.22\); slices\.Sort sorts the concrete \[\]string directly with the identical ascending order`
+	fmt.Println(xs, ys)
+}
+
+// The argument expression is kept verbatim, however it is spelled.
+func sortField(w struct{ ids []int }) {
+	sort.Ints(w.ids) // want `sort\.Ints is the legacy spelling of slices\.Sort \(an interface-dispatch sort on go1\.21, a one-line wrapper since go1\.22\); slices\.Sort sorts the concrete \[\]int directly with the identical ascending order`
+	fmt.Println(w.ids)
+}
