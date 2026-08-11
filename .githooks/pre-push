@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Pre-push gate — mirrors .github/workflows/ci.yml so a push can never turn CI red.
+# Runs the exact CI gates locally for whichever module(s) changed vs the upstream:
+#   quality (both):        gofmt (excl. testdata), go vet, go build, go test -race, staticcheck
+#   perfscan-extras:       docs up to date, plugin builds, benchmarks run once, dogfood ratchet
+# Enable once with:  git config core.hooksPath .githooks   (or: scripts/install-hooks.sh)
+# Bypass in an emergency with:  git push --no-verify
+set -uo pipefail
+
+repo="$(git rev-parse --show-toplevel)"; cd "$repo"
+fail=0
+say(){ printf '\n\033[1m[pre-push] %s\033[0m\n' "$*"; }
+err(){ printf '\033[31m[pre-push] FAIL: %s\033[0m\n' "$*"; fail=1; }
+
+if ! command -v go >/dev/null 2>&1; then err "go not on PATH"; exit 1; fi
+
+# Determine changed modules vs the tracked upstream (fall back to checking both).
+base="$(git rev-parse --verify -q '@{upstream}' 2>/dev/null || true)"
+changed(){ # $1 = module dir; true if it changed (or upstream unknown)
+  [ -z "$base" ] && return 0
+  git diff --name-only "$base"...HEAD -- "$1/" | grep -q . && return 0 || return 1
+}
+
+SC="$(go env GOPATH)/bin/staticcheck"
+if [ ! -x "$SC" ]; then
+  say "installing staticcheck (one-time)"; go install honnef.co/go/tools/cmd/staticcheck@latest || err "staticcheck install"
+fi
+
+quality(){ # $1 = module dir
+  local m="$1"; say "quality + test: $m"
+  ( cd "$m" || exit 1
+    out=$(gofmt -l . | grep -v /testdata/ || true)
+    if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
+    go vet ./... || exit 1
+    go build ./... || exit 1
+    go test -race ./... || exit 1
+    "$SC" ./... || exit 1
+  ) || err "$m"
+}
+
+if changed perfscan; then
+  quality perfscan
+  say "perfscan-extras"
+  ( cd perfscan || exit 1
+    go run ./gendocs || exit 1
+    if ! git diff --quiet -- docs/checks/; then
+      echo "generated docs are stale — commit the ./gendocs output"; exit 1
+    fi
+    ( cd plugin && go build ./... ) || exit 1
+    go test -run '^$' -bench . -benchtime=1x ./benchmarks/ || exit 1
+    go run . -level 3 -baseline .perfscan-baseline.yaml ./... || exit 1
+  ) || err "perfscan-extras"
+fi
+
+if changed perfscanxx; then
+  quality perfscanxx
+fi
+
+if [ "$fail" -eq 0 ]; then say "all CI gates green locally — pushing"; exit 0; fi
+printf '\033[31m[pre-push] push blocked — fix the failures above, or bypass with: git push --no-verify\033[0m\n'
+exit 1
