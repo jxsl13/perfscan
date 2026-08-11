@@ -7,6 +7,11 @@ import (
 
 func unsized(parts []string) string {
 	var b strings.Builder
+	psTotal10 := 0
+	for _, s := range parts {
+		psTotal10 += len(s)
+	}
+	b.Grow(psTotal10)
 	for _, s := range parts {
 		b.WriteString(s) // want `b is written in a loop with no b\.Grow call in this function; a capacity hint removes the geometric growth copies`
 	}

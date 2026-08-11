@@ -31,15 +31,17 @@ func replacer(names []string) {
 
 func hoistable(n int) {
 	sep := "-"
+	psStr35 := strings.ReplaceAll("a-b-c", sep, "_")
 	for i := 0; i < n; i++ {
-		emit(strings.ReplaceAll("a-b-c", sep, "_")) // want `strings\.ReplaceAll in a loop allocates a fresh string per iteration; hoist the transform, build a strings\.Replacer once, or reuse a byte buffer`
+		emit(psStr35) // want `strings\.ReplaceAll in a loop allocates a fresh string per iteration; hoist the transform, build a strings\.Replacer once, or reuse a byte buffer`
 	}
 }
 
 func nested(rows [][]string) {
+	psStr42 := strings.Repeat("x", 3)
 	for _, row := range rows {
 		for range row {
-			emit(strings.Repeat("x", 3)) // want `strings\.Repeat in a loop allocates a fresh string per iteration; hoist the transform, build a strings\.Replacer once, or reuse a byte buffer`
+			emit(psStr42) // want `strings\.Repeat in a loop allocates a fresh string per iteration; hoist the transform, build a strings\.Replacer once, or reuse a byte buffer`
 		}
 	}
 }
@@ -53,8 +55,9 @@ func mutated(n int) {
 }
 
 func mapHoist(lines []string) {
+	psStr57 := strings.Map(swap, "abc")
 	for range lines {
-		emit(strings.Map(swap, "abc")) // want `strings\.Map in a loop allocates a fresh string per iteration; hoist the transform, build a strings\.Replacer once, or reuse a byte buffer`
+		emit(psStr57) // want `strings\.Map in a loop allocates a fresh string per iteration; hoist the transform, build a strings\.Replacer once, or reuse a byte buffer`
 	}
 }
 

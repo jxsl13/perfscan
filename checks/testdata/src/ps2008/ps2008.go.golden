@@ -2,8 +2,9 @@ package ps2008
 
 func perRow(n, d int) [][]float64 {
 	rows := make([][]float64, n)
+	psSlab5 := make([]float64, len(rows)*(d))
 	for i := range rows {
-		rows[i] = make([]float64, d) // want `rows\[i\] gets its own make per iteration with a loop-invariant length; one slab plus 3-index views cuts the allocations to one \(rows must die together and not be appended to\)`
+		rows[i] = psSlab5[i*(d) : (i+1)*(d) : (i+1)*(d)]
 	}
 	return rows
 }
@@ -12,16 +13,18 @@ type cfg struct{ dim int }
 
 func selectorLen(n int, c cfg) [][]int {
 	rows := make([][]int, n)
+	psSlab15 := make([]int, len(rows)*(c.dim))
 	for i := range rows {
-		rows[i] = make([]int, c.dim) // want `rows\[i\] gets its own make per iteration with a loop-invariant length; one slab plus 3-index views cuts the allocations to one \(rows must die together and not be appended to\)`
+		rows[i] = psSlab15[i*(c.dim) : (i+1)*(c.dim) : (i+1)*(c.dim)]
 	}
 	return rows
 }
 
 func productLen(n, r, c int) [][]byte {
 	rows := make([][]byte, n)
+	psSlab23 := make([]byte, len(rows)*(r * c))
 	for i := range rows {
-		rows[i] = make([]byte, r*c) // want `rows\[i\] gets its own make per iteration with a loop-invariant length; one slab plus 3-index views cuts the allocations to one \(rows must die together and not be appended to\)`
+		rows[i] = psSlab23[i*(r * c) : (i+1)*(r * c) : (i+1)*(r * c)]
 	}
 	return rows
 }

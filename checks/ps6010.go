@@ -1,8 +1,10 @@
 package checks
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
+	"strings"
 
 	"golang.org/x/tools/go/analysis"
 
@@ -17,6 +19,7 @@ var PS6010 = register(&lint.Check{
 	Category: "verify",
 	Slug:     "output-invariant-operand-reload",
 	Level:    lint.LevelAggressive,
+	AutoFix:  true,
 	Doc: lint.Documentation{
 		Title: "an accumulator loop re-reading an operand invariant in the output index",
 		Text: `for o { for i { acc += A[i] * B[f(i,o)] } } re-streams all of A
@@ -107,13 +110,224 @@ func runPS6010(pass *analysis.Pass) (any, error) {
 			if hit == nil {
 				return true
 			}
-			pass.Report(analysis.Diagnostic{
+			diag := analysis.Diagnostic{
 				Pos:     hit.Pos(),
 				End:     hit.End(),
 				Message: "this operand does not vary with the output index " + ov + " but is re-streamed once per output element; unroll the output loop by 4 with independent accumulators to amortize the load (bit-identical per output)",
-			})
+			}
+			if fix := ps6010Fix(pass, outerLoop, n); fix != nil {
+				diag.SuggestedFixes = []analysis.SuggestedFix{*fix}
+			}
+			pass.Report(diag)
 			return true
 		})
 	}
 	return nil, nil
+}
+
+// ps6010CountedHeader matches the counted loop header `for v := 0; v < BOUND;
+// v++` and returns the loop variable name and the bound expression.
+func ps6010CountedHeader(l *ast.ForStmt) (string, ast.Expr, bool) {
+	init, ok := l.Init.(*ast.AssignStmt)
+	if !ok || init.Tok != token.DEFINE || len(init.Lhs) != 1 || len(init.Rhs) != 1 {
+		return "", nil, false
+	}
+	iv, ok := init.Lhs[0].(*ast.Ident)
+	if !ok {
+		return "", nil, false
+	}
+	zero, ok := init.Rhs[0].(*ast.BasicLit)
+	if !ok || zero.Kind != token.INT || zero.Value != "0" {
+		return "", nil, false
+	}
+	cond, ok := l.Cond.(*ast.BinaryExpr)
+	if !ok || cond.Op != token.LSS {
+		return "", nil, false
+	}
+	if lhs, ok := cond.X.(*ast.Ident); !ok || lhs.Name != iv.Name {
+		return "", nil, false
+	}
+	post, ok := l.Post.(*ast.IncDecStmt)
+	if !ok || post.Tok != token.INC {
+		return "", nil, false
+	}
+	if pv, ok := post.X.(*ast.Ident); !ok || pv.Name != iv.Name {
+		return "", nil, false
+	}
+	return iv.Name, cond.Y, true
+}
+
+// ps6010Fix builds the unroll-by-4 rewrite for the exact canonical matvec
+// shape and nothing else:
+//
+//	for o := 0; o < out; o++ {
+//		acc := 0.0
+//		for i := 0; i < n; i++ {
+//			acc += a[i] * w[i*out+o]
+//		}
+//		dst[o] = acc
+//	}
+//
+// with every name a plain identifier and out/n side-effect-free invariant
+// expressions. The replacement keeps each output's accumulation order, so the
+// per-output sums are bit-identical; a serial tail loop (sharing the hoisted
+// index variable) handles the remainder. Any deviation from the canonical
+// shape returns nil and the diagnostic stays advisory.
+func ps6010Fix(pass *analysis.Pass, outer, inner ast.Node) *analysis.SuggestedFix {
+	ol, ok := outer.(*ast.ForStmt)
+	if !ok {
+		return nil
+	}
+	il, ok := inner.(*ast.ForStmt)
+	if !ok {
+		return nil
+	}
+	o, outBound, ok := ps6010CountedHeader(ol)
+	if !ok {
+		return nil
+	}
+	i, nBound, ok := ps6010CountedHeader(il)
+	if !ok || i == o {
+		return nil
+	}
+	out := simpleExprText(outBound)
+	n := simpleExprText(nBound)
+	if out == "" || n == "" ||
+		exprMentions(outBound, o) || exprMentions(outBound, i) ||
+		exprMentions(nBound, o) || exprMentions(nBound, i) {
+		return nil
+	}
+	// Outer body: exactly { acc := 0.0; <inner loop>; dst[o] = acc }.
+	if len(ol.Body.List) != 3 || ol.Body.List[1] != ast.Stmt(il) {
+		return nil
+	}
+	accInit, ok := ol.Body.List[0].(*ast.AssignStmt)
+	if !ok || accInit.Tok != token.DEFINE || len(accInit.Lhs) != 1 || len(accInit.Rhs) != 1 {
+		return nil
+	}
+	accID, ok := accInit.Lhs[0].(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	seed, ok := accInit.Rhs[0].(*ast.BasicLit)
+	if !ok || seed.Kind != token.FLOAT || seed.Value != "0.0" {
+		return nil
+	}
+	acc := accID.Name
+	store, ok := ol.Body.List[2].(*ast.AssignStmt)
+	if !ok || store.Tok != token.ASSIGN || len(store.Lhs) != 1 || len(store.Rhs) != 1 {
+		return nil
+	}
+	dstIx, ok := store.Lhs[0].(*ast.IndexExpr)
+	if !ok {
+		return nil
+	}
+	dstID, ok := dstIx.X.(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	if ix, ok := dstIx.Index.(*ast.Ident); !ok || ix.Name != o {
+		return nil
+	}
+	if rhs, ok := store.Rhs[0].(*ast.Ident); !ok || rhs.Name != acc {
+		return nil
+	}
+	dst := dstID.Name
+	// Inner body: exactly { acc += a[i] * w[i*out+o] }.
+	if len(il.Body.List) != 1 {
+		return nil
+	}
+	as, ok := il.Body.List[0].(*ast.AssignStmt)
+	if !ok || as.Tok != token.ADD_ASSIGN || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+		return nil
+	}
+	if lhs, ok := as.Lhs[0].(*ast.Ident); !ok || lhs.Name != acc {
+		return nil
+	}
+	mul, ok := as.Rhs[0].(*ast.BinaryExpr)
+	if !ok || mul.Op != token.MUL {
+		return nil
+	}
+	aIx, ok := mul.X.(*ast.IndexExpr)
+	if !ok {
+		return nil
+	}
+	aID, ok := aIx.X.(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	if ix, ok := aIx.Index.(*ast.Ident); !ok || ix.Name != i {
+		return nil
+	}
+	wIx, ok := mul.Y.(*ast.IndexExpr)
+	if !ok {
+		return nil
+	}
+	wID, ok := wIx.X.(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	sum, ok := wIx.Index.(*ast.BinaryExpr)
+	if !ok || sum.Op != token.ADD {
+		return nil
+	}
+	stride, ok := sum.X.(*ast.BinaryExpr)
+	if !ok || stride.Op != token.MUL {
+		return nil
+	}
+	if sx, ok := stride.X.(*ast.Ident); !ok || sx.Name != i {
+		return nil
+	}
+	if simpleExprText(stride.Y) != out {
+		return nil
+	}
+	if oy, ok := sum.Y.(*ast.Ident); !ok || oy.Name != o {
+		return nil
+	}
+	a, w := aID.Name, wID.Name
+	// The unrolled version delays each block's dst stores past later reads
+	// of a and w; refuse when dst shares a name with a read operand.
+	if dst == a || dst == w {
+		return nil
+	}
+	pos := pass.Fset.Position(ol.Pos())
+	po := fmt.Sprintf("psO%d", pos.Line)
+	// Names introduced by the rewrite must not capture anything the
+	// templated body references.
+	fresh := map[string]bool{po: true, "a0": true, "a1": true, "a2": true, "a3": true, "ai": true}
+	for _, name := range []string{o, i, acc, a, w, dst, rootIdentName(outBound), rootIdentName(nBound)} {
+		if fresh[name] {
+			return nil
+		}
+	}
+	// Assume gofmt indentation (tabs): the loop starts at column pos.Column,
+	// i.e. pos.Column-1 tabs of indentation.
+	ind := strings.Repeat("\t", pos.Column-1)
+	var b strings.Builder
+	wf := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
+	wf("%s := 0\n", po)
+	wf("%sfor ; %s+3 < %s; %s += 4 {\n", ind, po, out, po)
+	wf("%s\tvar a0, a1, a2, a3 float64\n", ind)
+	wf("%s\tfor %s := 0; %s < %s; %s++ {\n", ind, i, i, n, i)
+	wf("%s\t\tai := %s[%s]\n", ind, a, i)
+	wf("%s\t\ta0 += ai * %s[%s*%s+%s]\n", ind, w, i, out, po)
+	wf("%s\t\ta1 += ai * %s[%s*%s+%s+1]\n", ind, w, i, out, po)
+	wf("%s\t\ta2 += ai * %s[%s*%s+%s+2]\n", ind, w, i, out, po)
+	wf("%s\t\ta3 += ai * %s[%s*%s+%s+3]\n", ind, w, i, out, po)
+	wf("%s\t}\n", ind)
+	wf("%s\t%s[%s], %s[%s+1], %s[%s+2], %s[%s+3] = a0, a1, a2, a3\n", ind, dst, po, dst, po, dst, po, dst, po)
+	wf("%s}\n", ind)
+	wf("%sfor ; %s < %s; %s++ {\n", ind, po, out, po)
+	wf("%s\t%s := 0.0\n", ind, acc)
+	wf("%s\tfor %s := 0; %s < %s; %s++ {\n", ind, i, i, n, i)
+	wf("%s\t\t%s += %s[%s] * %s[%s*%s+%s]\n", ind, acc, a, i, w, i, out, po)
+	wf("%s\t}\n", ind)
+	wf("%s\t%s[%s] = %s\n", ind, dst, po, acc)
+	wf("%s}", ind)
+	return &analysis.SuggestedFix{
+		Message: "unroll the output loop by 4 with independent accumulators (serial tail)",
+		TextEdits: []analysis.TextEdit{
+			{Pos: ol.Pos(), End: ol.End(), NewText: []byte(b.String())},
+		},
+	}
 }

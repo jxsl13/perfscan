@@ -14,26 +14,26 @@ Every check has a stable PS-prefixed ID and a fix level:
 | [PS1003](PS1003.md) | access | L2 |  | a batch API called with a single-element slice literal inside a loop |
 | [PS1004](PS1004.md) | access | L2 |  | a variadic accessor spread call (At(idx...)) in a loop |
 | [PS1005](PS1005.md) | access | L3 |  | a per-element accessor whose 2+ index args are enclosing-loop variables (a manual tensor walk) |
-| [PS1006](PS1006.md) | access | L2 |  | a reduction striding a flat array by the inner loop variable |
+| [PS1006](PS1006.md) | access | L2 | yes | a reduction striding a flat array by the inner loop variable |
 | [PS1007](PS1007.md) | access | L3 |  | an inner loop accumulating into an output row that does not vary with the outer loop |
 | [PS1009](PS1009.md) | access | L2 |  | a named dtype-switch case on the per-element accessor beside a typed sibling case |
 | [PS1010](PS1010.md) | access | L2 |  | an inner loop reading one column of a [][]T (a row-jumping walk) |
 | [PS2001](PS2001.md) | alloc | L2 |  | a project allocation entry point called inside a loop |
-| [PS2002](PS2002.md) | alloc | L1 |  | a strings.Builder/bytes.Buffer written in a loop with no Grow |
-| [PS2003](PS2003.md) | alloc | L1 |  | an allocating strings transform (Replace/Map/Repeat) in a loop |
+| [PS2002](PS2002.md) | alloc | L1 | yes | a strings.Builder/bytes.Buffer written in a loop with no Grow |
+| [PS2003](PS2003.md) | alloc | L1 | yes | an allocating strings transform (Replace/Map/Repeat) in a loop |
 | [PS2004](PS2004.md) | alloc | L2 |  | per-call scratch make() bound to a non-escaping local in a pointer-method loop |
 | [PS2005](PS2005.md) | alloc | L1 | yes | a regexp.Compile/MustCompile inside a loop |
 | [PS2006](PS2006.md) | alloc | L3 |  | a per-token cache slot reassigned to a concat of itself and a new row |
 | [PS2007](PS2007.md) | alloc | L3 |  | an N×N object materialized to consume one row |
-| [PS2008](PS2008.md) | alloc | L2 |  | a loop that allocates one uniform slice per iteration into ARR[i] |
+| [PS2008](PS2008.md) | alloc | L2 | yes | a loop that allocates one uniform slice per iteration into ARR[i] |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 |  | string concatenation with += inside a loop |
-| [PS2103](PS2103.md) | alloc | L1 |  | fmt.Sprintf in a loop for simple concatenation or conversion |
+| [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
 | [PS2104](PS2104.md) | alloc | L1 | yes | a map filled in a bounded loop directly after a declaration with no size hint |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
-| [PS3002](PS3002.md) | indirect | L2 |  | a package sort (sort.Slice/SliceStable) with a comparator closure |
+| [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
-| [PS3005](PS3005.md) | indirect | L2 |  | an index-slice sort whose comparator dereferences into a 2-D structure |
+| [PS3005](PS3005.md) | indirect | L2 | yes | an index-slice sort whose comparator dereferences into a 2-D structure |
 | [PS3007](PS3007.md) | indirect | L2 |  | a membership set built from a slice the caller already owns, probed in a loop |
 | [PS3034](PS3034.md) | indirect | L3 |  | a serial nest whose every write names the outermost loop variable |
 | [PS3059](PS3059.md) | indirect | L3 |  | a serial nest writing through a base derived from the outermost loop variable |
@@ -42,16 +42,16 @@ Every check has a stable PS-prefixed ID and a fix level:
 | [PS3065](PS3065.md) | indirect | L3 |  | a single serial loop over an expensive call, with a fan-out helper available |
 | [PS3066](PS3066.md) | indirect | L2 |  | three or more sibling loops over the same bound, all touching one buffer |
 | [PS3071](PS3071.md) | indirect | L2 |  | a method-local fixed-size buffer sliced into an interface-taking call |
-| [PS3077](PS3077.md) | indirect | L3 |  | math.Min wrapped around math.Max (a clamp) inside a loop |
+| [PS3077](PS3077.md) | indirect | L3 | yes | math.Min wrapped around math.Max (a clamp) inside a loop |
 | [PS3082](PS3082.md) | indirect | L2 |  | math.Min or math.Max called inside a loop |
 | [PS3083](PS3083.md) | indirect | L3 |  | an integer-keyed map allocated per outer iteration and probed in a nested loop |
-| [PS3101](PS3101.md) | indirect | L1 |  | a loop-invariant string↔[]byte conversion inside a loop |
+| [PS3101](PS3101.md) | indirect | L1 | yes | a loop-invariant string↔[]byte conversion inside a loop |
 | [PS4001](PS4001.md) | vector | L2 |  | a per-element binary decode (encoding/binary) in a loop |
 | [PS4002](PS4002.md) | vector | L3 |  | a scalar math transcendental in a loop beside a vectorized sibling kernel |
-| [PS4008](PS4008.md) | vector | L3 |  | a matmul whose innermost loop is a serial scalar dot accumulator |
+| [PS4008](PS4008.md) | vector | L3 | yes | a matmul whose innermost loop is a serial scalar dot accumulator |
 | [PS4101](PS4101.md) | vector | L1 | yes | an element-copy loop replaceable by the copy builtin |
 | [PS5001](PS5001.md) | arith | L3 |  | a divide by a loop-invariant scalar on every element |
-| [PS5002](PS5002.md) | arith | L2 |  | a nested loop accumulating a full symmetric matrix |
-| [PS5008](PS5008.md) | arith | L1 |  | math.Sin and math.Cos on the same argument (fusable to math.Sincos) |
+| [PS5002](PS5002.md) | arith | L2 | yes | a nested loop accumulating a full symmetric matrix |
+| [PS5008](PS5008.md) | arith | L1 | yes | math.Sin and math.Cos on the same argument (fusable to math.Sincos) |
 | [PS6004](PS6004.md) | verify | L2 |  | a fast-path/fallback dual path whose bit-identity claim needs coverage on both arms |
-| [PS6010](PS6010.md) | verify | L3 |  | an accumulator loop re-reading an operand invariant in the output index |
+| [PS6010](PS6010.md) | verify | L3 | yes | an accumulator loop re-reading an operand invariant in the output index |

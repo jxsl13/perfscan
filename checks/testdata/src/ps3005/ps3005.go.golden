@@ -3,16 +3,24 @@ package ps3005
 import "sort"
 
 func indirect(idx []int, m [][]float64, f int) {
+	psKey6 := make([]float64, len(m))
+	for psI := range m {
+		psKey6[psI] = m[psI][f]
+	}
 	sort.Slice(idx, func(a, b int) bool { // want `the comparator sorting idx dereferences m\[idx\[…\]\]\[…\] on every comparison — a row-pointer load plus an index, O\(n log n\) times, for a value that depends only on the element; fill a flat id-indexed key column once and compare that \(same predicate, identical permutation\)`
-		return m[idx[a]][f] < m[idx[b]][f]
+		return psKey6[idx[a]] < psKey6[idx[b]]
 	})
 }
 
 // Descending order is the same shape with a and b swapped; the rewrite keeps
 // the predicate, so it is fixable too.
 func indirectDesc(idx []int, m [][]float64, f int) {
+	psKey14 := make([]float64, len(m))
+	for psI := range m {
+		psKey14[psI] = m[psI][f]
+	}
 	sort.SliceStable(idx, func(a, b int) bool { // want `the comparator sorting idx dereferences m\[idx\[…\]\]\[…\] on every comparison — a row-pointer load plus an index, O\(n log n\) times, for a value that depends only on the element; fill a flat id-indexed key column once and compare that \(same predicate, identical permutation\)`
-		return m[idx[b]][f] < m[idx[a]][f]
+		return psKey14[idx[b]] < psKey14[idx[a]]
 	})
 }
 
@@ -20,8 +28,12 @@ type conf struct{ col int }
 
 // A selector-chain key index is invariant and simple: fixable.
 func indirectSel(idx []int, m [][]int, c conf) {
+	psKey23 := make([]int, len(m))
+	for psI := range m {
+		psKey23[psI] = m[psI][c.col]
+	}
 	sort.Slice(idx, func(a, b int) bool { // want `the comparator sorting idx dereferences m\[idx\[…\]\]\[…\] on every comparison — a row-pointer load plus an index, O\(n log n\) times, for a value that depends only on the element; fill a flat id-indexed key column once and compare that \(same predicate, identical permutation\)`
-		return m[idx[a]][c.col] < m[idx[b]][c.col]
+		return psKey23[idx[a]] < psKey23[idx[b]]
 	})
 }
 

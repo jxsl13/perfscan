@@ -2,8 +2,13 @@ package ps5002
 
 func gram(m [][]float64, x []float64) {
 	for i := range x {
-		for j := range x {
-			m[i][j] += x[i] * x[j] // want `m\[i\]\[j\] accumulates a symmetric product over full ranges of i and j — every off-diagonal element is computed twice; accumulate one triangle and mirror it once \(bit-identical\)`
+		for j := 0; j <= i; j++ {
+			m[i][j] += x[i] * x[j]
+		}
+	}
+	for i := range x { // mirror once
+		for j := i + 1; j < len(x); j++ {
+			m[i][j] = m[j][i]
 		}
 	}
 }
@@ -11,8 +16,13 @@ func gram(m [][]float64, x []float64) {
 // Counted form with a shared bound: fixed the same way.
 func gramCounted(m [][]float64, x []float64, n int) {
 	for i := 0; i < n; i++ {
-		for j := 0; j < n; j++ {
-			m[i][j] += x[i] * x[j] // want `m\[i\]\[j\] accumulates a symmetric product over full ranges of i and j — every off-diagonal element is computed twice; accumulate one triangle and mirror it once \(bit-identical\)`
+		for j := 0; j <= i; j++ {
+			m[i][j] += x[i] * x[j]
+		}
+	}
+	for i := 0; i < n; i++ { // mirror once
+		for j := i + 1; j < n; j++ {
+			m[i][j] = m[j][i]
 		}
 	}
 }
@@ -20,8 +30,13 @@ func gramCounted(m [][]float64, x []float64, n int) {
 // Counted form bounded by len(x) on both loops: fixed.
 func gramLen(m [][]float64, x []float64) {
 	for i := 0; i < len(x); i++ {
-		for j := 0; j < len(x); j++ {
-			m[i][j] += x[i] * x[j] // want `m\[i\]\[j\] accumulates a symmetric product over full ranges of i and j — every off-diagonal element is computed twice; accumulate one triangle and mirror it once \(bit-identical\)`
+		for j := 0; j <= i; j++ {
+			m[i][j] += x[i] * x[j]
+		}
+	}
+	for i := 0; i < len(x); i++ { // mirror once
+		for j := i + 1; j < len(x); j++ {
+			m[i][j] = m[j][i]
 		}
 	}
 }

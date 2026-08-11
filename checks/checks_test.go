@@ -9,7 +9,7 @@ import (
 )
 
 func TestPS2002(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS2002.Analyzer, "ps2002")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2002.Analyzer, "ps2002")
 }
 
 func TestPS2005(t *testing.T) {
@@ -21,7 +21,7 @@ func TestPS2101(t *testing.T) {
 }
 
 func TestPS2103(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS2103.Analyzer, "ps2103")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2103.Analyzer, "ps2103")
 }
 
 func TestPS4001(t *testing.T) {
@@ -42,7 +42,7 @@ func TestPS6004(t *testing.T) {
 var goodFastPaths = config.Config{FastPathHelpers: []string{"flatF64", "flatF32"}}
 
 func TestPS4008(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS4008.Analyzer, "ps4008")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS4008.Analyzer, "ps4008")
 }
 
 func TestPS5001(t *testing.T) {
@@ -50,15 +50,15 @@ func TestPS5001(t *testing.T) {
 }
 
 func TestPS5008(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS5008.Analyzer, "ps5008")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS5008.Analyzer, "ps5008")
 }
 
 func TestPS6010(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS6010.Analyzer, "ps6010")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS6010.Analyzer, "ps6010")
 }
 
 func TestPS5002(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS5002.Analyzer, "ps5002")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS5002.Analyzer, "ps5002")
 }
 
 func TestPS2102(t *testing.T) {
@@ -70,7 +70,7 @@ func TestPS2104(t *testing.T) {
 }
 
 func TestPS3101(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS3101.Analyzer, "ps3101")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3101.Analyzer, "ps3101")
 }
 
 func TestPS4101(t *testing.T) {
@@ -86,7 +86,7 @@ func TestPS2007(t *testing.T) {
 }
 
 func TestPS3005(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS3005.Analyzer, "ps3005")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3005.Analyzer, "ps3005")
 }
 
 func TestPS2006(t *testing.T) {
@@ -94,11 +94,11 @@ func TestPS2006(t *testing.T) {
 }
 
 func TestPS2003(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS2003.Analyzer, "ps2003")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2003.Analyzer, "ps2003")
 }
 
 func TestPS2008(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS2008.Analyzer, "ps2008")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2008.Analyzer, "ps2008")
 }
 
 func TestPS3007(t *testing.T) {
@@ -143,7 +143,7 @@ func TestPS3083(t *testing.T) {
 }
 
 func TestPS3077(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS3077.Analyzer, "ps3077")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3077.Analyzer, "ps3077")
 }
 
 func TestPS3082(t *testing.T) {
@@ -155,7 +155,7 @@ func TestPS3001(t *testing.T) {
 }
 
 func TestPS3002(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS3002.Analyzer, "ps3002")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3002.Analyzer, "ps3002")
 }
 
 func TestPS3003(t *testing.T) {
@@ -198,7 +198,7 @@ func TestPS1004(t *testing.T) {
 }
 
 func TestPS1006(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS1006.Analyzer, "ps1006")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS1006.Analyzer, "ps1006")
 }
 
 func TestPS1007(t *testing.T) {

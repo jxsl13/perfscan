@@ -3,7 +3,9 @@ package checks
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
+	"strings"
 
 	"golang.org/x/tools/go/analysis"
 
@@ -18,6 +20,7 @@ var PS2002 = register(&lint.Check{
 	Category: "alloc",
 	Slug:     "unsized-builder",
 	Level:    lint.LevelIdiomatic,
+	AutoFix:  true,
 	Doc: lint.Documentation{
 		Title: "a strings.Builder/bytes.Buffer written in a loop with no Grow",
 		Text: `A builder written in a loop without a capacity hint grows its
@@ -25,8 +28,11 @@ backing array geometrically: each growth is an allocation plus a copy of
 everything written so far. One Grow call with an estimate (even a rough
 lower bound) removes most of the copies.
 
-Advisory: the right size is a fact about the data, not the syntax, so the
-fix is left to the reader.`,
+The automatic fix covers only the simplest shape — a loop whose sole
+statement is B.WriteString(s) over a []string — by inserting an exact
+pre-count loop and a Grow call before it. Grow is a hint, so the rewrite is
+behavior-preserving. Every other shape stays advisory: the right size is a
+fact about the data, not the syntax, so the fix is left to the reader.`,
 		Before: `var b strings.Builder
 for _, s := range parts {
 	b.WriteString(s)
@@ -126,11 +132,123 @@ func checkBuilderFunc(pass *analysis.Pass, fn *ast.FuncDecl) {
 			return true
 		}
 		reported[id.Name] = true
-		pass.Report(analysis.Diagnostic{
+		diag := analysis.Diagnostic{
 			Pos:     call.Pos(),
 			End:     call.End(),
 			Message: fmt.Sprintf("%s is written in a loop with no %s.Grow call in this function; a capacity hint removes the geometric growth copies", id.Name, id.Name),
-		})
+		}
+		if fix := growBuilderFix(pass, fn, stack, call, sel, id); fix != nil {
+			diag.SuggestedFixes = []analysis.SuggestedFix{*fix}
+		}
+		pass.Report(diag)
 		return true
 	})
+}
+
+// growBuilderFix builds the pre-count-and-Grow fix for the one shape where
+// the exact total is mechanically computable: the builder is written in
+// exactly one loop of the form
+//
+//	for _, s := range src { b.WriteString(s) }
+//
+// with src a plain identifier of type []string and s the range value. The
+// fix inserts, immediately before that loop at the same indentation,
+//
+//	psTotalN := 0
+//	for _, s := range src {
+//		psTotalN += len(s)
+//	}
+//	b.Grow(psTotalN)
+//
+// (N = loop line number). Grow is a capacity hint, so the rewrite is
+// behavior-preserving. Anything else — multiple writes, other write methods,
+// derived arguments, non-ident sources — stays advisory.
+func growBuilderFix(pass *analysis.Pass, fn *ast.FuncDecl, stack []ast.Node, call *ast.CallExpr, sel *ast.SelectorExpr, builder *ast.Ident) *analysis.SuggestedFix {
+	if sel.Sel.Name != "WriteString" || len(call.Args) != 1 {
+		return nil
+	}
+	loopNode, ok := astutil.InLoop(stack)
+	if !ok {
+		return nil
+	}
+	rng, ok := loopNode.(*ast.RangeStmt)
+	if !ok || rng.Tok != token.DEFINE {
+		return nil
+	}
+	// The write must be the loop body's only statement.
+	if len(rng.Body.List) != 1 {
+		return nil
+	}
+	expr, ok := rng.Body.List[0].(*ast.ExprStmt)
+	if !ok || expr.X != ast.Expr(call) {
+		return nil
+	}
+	// for _, s := range src — blank key, named value.
+	key, ok := rng.Key.(*ast.Ident)
+	if !ok || key.Name != "_" {
+		return nil
+	}
+	val, ok := rng.Value.(*ast.Ident)
+	if !ok || val.Name == "_" {
+		return nil
+	}
+	// The argument must be exactly the range value.
+	arg, ok := call.Args[0].(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	valObj := pass.TypesInfo.ObjectOf(val)
+	if valObj == nil || pass.TypesInfo.ObjectOf(arg) != valObj {
+		return nil
+	}
+	// src must be a plain identifier of type []string, so re-ranging it
+	// before the loop is side-effect free and len(s) is the byte count.
+	src, ok := rng.X.(*ast.Ident)
+	if !ok || src.Name == "_" {
+		return nil
+	}
+	slice, ok := pass.TypesInfo.TypeOf(src).(*types.Slice)
+	if !ok {
+		return nil
+	}
+	elem, ok := slice.Elem().(*types.Basic)
+	if !ok || elem.Kind() != types.String {
+		return nil
+	}
+	// The matched loop must hold the only in-loop write to this builder in
+	// the function; otherwise the counted total is not the whole story.
+	writes := 0
+	astutil.WithStack(fn.Body, func(n ast.Node, st []ast.Node) bool {
+		c, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		s, ok := c.Fun.(*ast.SelectorExpr)
+		if !ok || !builderWriteMethods[s.Sel.Name] {
+			return true
+		}
+		if id, ok := s.X.(*ast.Ident); !ok || id.Name != builder.Name {
+			return true
+		}
+		if _, in := astutil.InLoop(st); in {
+			writes++
+		}
+		return true
+	})
+	if writes != 1 {
+		return nil
+	}
+	loopPos := pass.Fset.Position(rng.Pos())
+	name := fmt.Sprintf("psTotal%d", loopPos.Line)
+	// Assume gofmt indentation (tabs): the loop starts at column
+	// loopPos.Column, i.e. loopPos.Column-1 tabs of indentation.
+	indent := strings.Repeat("\t", loopPos.Column-1)
+	text := fmt.Sprintf("%[1]s := 0\n%[2]sfor _, %[3]s := range %[4]s {\n%[2]s\t%[1]s += len(%[3]s)\n%[2]s}\n%[2]s%[5]s.Grow(%[1]s)\n%[2]s",
+		name, indent, val.Name, src.Name, builder.Name)
+	return &analysis.SuggestedFix{
+		Message: fmt.Sprintf("pre-count the total size and call %s.Grow before the loop", builder.Name),
+		TextEdits: []analysis.TextEdit{
+			{Pos: rng.Pos(), End: rng.Pos(), NewText: []byte(text)},
+		},
+	}
 }

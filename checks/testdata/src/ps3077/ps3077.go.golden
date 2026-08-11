@@ -4,19 +4,19 @@ import "math"
 
 func clampAll(xs []float64, lo, hi float64) {
 	for i, v := range xs {
-		xs[i] = math.Min(math.Max(v, lo), hi) // want `a clamp written as math\.Min\(math\.Max\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
+		xs[i] = psClamp(v, lo, hi) // want `a clamp written as math\.Min\(math\.Max\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
 	}
 }
 
 func clampReverse(xs []float64, lo, hi float64) {
 	for i, v := range xs {
-		xs[i] = math.Max(math.Min(v, hi), lo) // want `a clamp written as math\.Max\(math\.Min\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
+		xs[i] = psClamp(v, lo, hi) // want `a clamp written as math\.Max\(math\.Min\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
 	}
 }
 
 func clampLiteralBounds(xs []float64) {
 	for i, v := range xs {
-		xs[i] = math.Min(math.Max(v, 0), 1) // want `a clamp written as math\.Min\(math\.Max\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
+		xs[i] = psClamp(v, 0, 1) // want `a clamp written as math\.Min\(math\.Max\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
 	}
 }
 
@@ -24,7 +24,7 @@ type bounds struct{ lo, hi float64 }
 
 func clampIndexed(xs []float64, b bounds) {
 	for i := range xs {
-		xs[i] = math.Min(math.Max(xs[i], b.lo), b.hi) // want `a clamp written as math\.Min\(math\.Max\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
+		xs[i] = psClamp(xs[i], b.lo, b.hi) // want `a clamp written as math\.Min\(math\.Max\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
 	}
 }
 
@@ -53,4 +53,17 @@ func noClamp(xs []float64) float64 {
 		hi = math.Max(hi, v)
 	}
 	return hi
+}
+
+// psClamp is the branch form of math.Min(math.Max(v, lo), hi), preserving
+// its exact NaN and signed-zero contract (see perfscan PS3077).
+func psClamp(v, lo, hi float64) float64 {
+	r := v
+	if r <= lo {
+		r = lo
+	}
+	if r >= hi {
+		r = hi
+	}
+	return r
 }

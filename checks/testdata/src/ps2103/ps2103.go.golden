@@ -20,7 +20,7 @@ func keys(users []user) []string {
 func hostports(hosts []string, port string) []string {
 	out := make([]string, 0, len(hosts))
 	for _, h := range hosts {
-		out = append(out, fmt.Sprintf("%s:%s", h, port)) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
+		out = append(out, h+":"+port) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
 	}
 	return out
 }
@@ -30,7 +30,7 @@ func hostports(hosts []string, port string) []string {
 func labeled(names []string) []string {
 	out := make([]string, 0, len(names))
 	for _, n := range names {
-		out = append(out, fmt.Sprintf("name=%v", n)) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
+		out = append(out, "name="+n) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
 	}
 	return out
 }
@@ -40,7 +40,7 @@ func labeled(names []string) []string {
 func joined(pairs [][2]string) []string {
 	out := make([]string, 0, len(pairs))
 	for _, p := range pairs {
-		out = append(out, fmt.Sprintf("%s\t%s!", p[0], p[1])) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
+		out = append(out, p[0]+"\t"+p[1]+"!") // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
 	}
 	return out
 }

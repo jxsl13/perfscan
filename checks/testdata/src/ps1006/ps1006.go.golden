@@ -1,24 +1,26 @@
 package ps1006
 
 func columnSums(a []float64, rows, cols int, out []float64) {
-	for c := 0; c < cols; c++ {
-		s := 0.0
-		for r := 0; r < rows; r++ {
-			s += a[r*cols+c] // want `the inner loop variable is the multiplied \(high-stride\) part of this flat index — the array is strided every inner step; interchange the loops so it is walked contiguously \(bit-identical per output element\), or gather into contiguous scratch when the scan cannot be interchanged`
+	psSums4 := make([]float64, cols)
+	for r := 0; r < rows; r++ {
+		psBase := r * cols
+		for c := 0; c < cols; c++ {
+			psSums4[c] += a[psBase+c]
 		}
-		out[c] = s
 	}
+	copy(out[:cols], psSums4)
 }
 
 // An int accumulator: the fix reuses its type for the scratch slice.
 func columnCounts(a []int, rows, cols int, out []int) {
-	for c := 0; c < cols; c++ {
-		s := 0
-		for r := 0; r < rows; r++ {
-			s += a[r*cols+c] // want `the inner loop variable is the multiplied \(high-stride\) part of this flat index — the array is strided every inner step; interchange the loops so it is walked contiguously \(bit-identical per output element\), or gather into contiguous scratch when the scan cannot be interchanged`
+	psSums15 := make([]int, cols)
+	for r := 0; r < rows; r++ {
+		psBase := r * cols
+		for c := 0; c < cols; c++ {
+			psSums15[c] += a[psBase+c]
 		}
-		out[c] = s
 	}
+	copy(out[:cols], psSums15)
 }
 
 // Reported but NOT auto-fixed: the final write is not `out[c] = s`, so the

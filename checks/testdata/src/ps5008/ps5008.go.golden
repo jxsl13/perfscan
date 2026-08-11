@@ -3,15 +3,13 @@ package ps5008
 import "math"
 
 func rotate(theta float64) (float64, float64) {
-	s := math.Sin(theta) // want `math\.Sin and math\.Cos are both computed on theta — each repeats the full argument reduction; fuse to sin, cos := math\.Sincos\(theta\) \(bit-identical\)`
-	c := math.Cos(theta)
+	s, c := math.Sincos(theta)
 	return s, c
 }
 
 // Cos first: still fusable; the fixed Lhs order follows Sincos's (sin, cos).
 func cosFirst(theta float64) (float64, float64) {
-	c := math.Cos(theta)
-	s := math.Sin(theta) // want `math\.Sin and math\.Cos are both computed on theta — each repeats the full argument reduction; fuse to sin, cos := math\.Sincos\(theta\) \(bit-identical\)`
+	s, c := math.Sincos(theta) // want `math\.Sin and math\.Cos are both computed on theta — each repeats the full argument reduction; fuse to sin, cos := math\.Sincos\(theta\) \(bit-identical\)`
 	return s, c
 }
 

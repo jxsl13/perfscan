@@ -13,15 +13,15 @@ type item struct {
 }
 
 func sortItems(xs []item) {
-	sort.Slice(xs, func(i, j int) bool { return xs[i].key < xs[j].key }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+	slices.SortFunc(xs, func(a, b item) int { return cmp.Compare(a.key, b.key) }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
 }
 
 func sortStable(xs []item) {
-	sort.SliceStable(xs, func(i, j int) bool { return xs[i].key < xs[j].key }) // want `sort\.SliceStable swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+	slices.SortStableFunc(xs, func(a, b item) int { return cmp.Compare(a.key, b.key) }) // want `sort\.SliceStable swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
 }
 
 func sortStrings(xs []string) {
-	sort.Slice(xs, func(i, j int) bool { return xs[i] < xs[j] }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+	slices.SortFunc(xs, func(a, b string) int { return cmp.Compare(a, b) }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
 }
 
 // Descending order: the left operand indexes with j, not i. Advisory only.

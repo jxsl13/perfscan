@@ -3,11 +3,12 @@ package ps4008
 func matmul(a, b, c [][]float64) {
 	for i := range a {
 		for j := range b[0] {
-			sum := 0.0
-			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
-				sum += a[i][k] * b[k][j]
+			c[i][j] = 0
+		}
+		for k := range b {
+			for j := range b[0] {
+				c[i][j] += a[i][k] * b[k][j]
 			}
-			c[i][j] = sum
 		}
 	}
 }

@@ -9,24 +9,27 @@ func sink([]byte) {}
 func useStr(string) {}
 
 func invariantConv(lines [][]byte, sep string) {
+	psConv13_28 := []byte(sep)
 	for _, line := range lines {
-		use(bytes.Contains(line, []byte(sep))) // want `\[\]byte\(sep\) copies its operand on every iteration but sep is loop-invariant; hoist the conversion above the loop`
+		use(bytes.Contains(line, psConv13_28)) // want `\[\]byte\(sep\) copies its operand on every iteration but sep is loop-invariant; hoist the conversion above the loop`
 	}
 }
 
 func stringConv(bufs [][]byte, key []byte) map[string]bool {
 	seen := map[string]bool{}
+	psConv20_8 := string(key)
 	for range bufs {
-		seen[string(key)] = true // want `string\(key\) copies its operand on every iteration but key is loop-invariant; hoist the conversion above the loop`
+		seen[psConv20_8] = true // want `string\(key\) copies its operand on every iteration but key is loop-invariant; hoist the conversion above the loop`
 	}
 	return seen
 }
 
 // Invariant across both loops: the fix hoists before the OUTERMOST loop.
 func nestedInvariant(lines [][]byte, sep string) {
+	psConv29_29 := []byte(sep)
 	for i := 0; i < 3; i++ {
 		for _, line := range lines {
-			use(bytes.Contains(line, []byte(sep))) // want `\[\]byte\(sep\) copies its operand on every iteration but sep is loop-invariant; hoist the conversion above the loop`
+			use(bytes.Contains(line, psConv29_29)) // want `\[\]byte\(sep\) copies its operand on every iteration but sep is loop-invariant; hoist the conversion above the loop`
 		}
 	}
 }
