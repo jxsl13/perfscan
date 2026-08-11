@@ -21,9 +21,9 @@ check: vet test
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then \
 		echo "gofmt needed on:"; echo "$$out"; exit 1; fi
 
-# Dogfood: run perfscan on itself (fails on L1/L2 findings).
+# Dogfood: run perfscan on itself at every level.
 selfscan:
-	$(GO) run ./cmd/perfscan -level 2 ./...
+	$(GO) run ./cmd/perfscan -level 3 ./...
 
 hooks:
 	git config core.hooksPath .githooks
