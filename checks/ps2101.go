@@ -51,9 +51,13 @@ the same worst case append itself reserves. Multi-value appends
 and falls back to the upper-bound form.
 
 The automatic fix rewrites the declaration when the bound is a plain
-identifier (or len of one) that the loop body does not reassign. Capacity
-is not observable through append semantics, so the rewrite is
-bit-identical for the built slice's contents.`,
+identifier (or len of one) that the loop body does not reassign — and only
+for the already-non-nil forms ([]T{} and make([]T, 0)). Capacity is not
+observable, but NIL-NESS is: rewriting 'var s []T' would turn a nil result
+into an empty non-nil slice whenever zero elements are appended, which
+cmp.Diff, JSON (null vs []) and == nil all see — a Kubernetes scheduler
+test caught exactly this. The var form is therefore advisory only, with
+the caveat spelled out in its message.`,
 		Before: `out := []string{}
 for _, s := range src {
 	out = append(out, s)
@@ -92,7 +96,7 @@ func runPS2101(pass *analysis.Pass) (any, error) {
 				// this loop, as long as nothing between the declaration
 				// and the loop touches the variable.
 				for i := 0; i < j; i++ {
-					name, typ, ok := unsizedSliceDecl(block.List[i])
+					name, typ, isNil, ok := unsizedSliceDecl(block.List[i])
 					if !ok || stmtsMention(block.List[i+1:j], name) {
 						continue
 					}
@@ -105,11 +109,14 @@ func runPS2101(pass *analysis.Pass) (any, error) {
 					// defined between the declaration and the loop
 					// (b := []byte(s)) would leave the fix referencing
 					// an undefined name. Advisory only in that case.
-					fixBound := bound
-					if definesIdent(block.List[i+1:j], boundSubject(stmt)) {
-						fixBound = ""
-					}
-					reportPrealloc(pass, block.List[i], name, typ, fixBound, uncond, cond, unknown)
+					// A nil declaration must stay nil when zero elements
+					// are appended: nil-ness is observable (a Kubernetes
+					// scheduler test caught exactly this via cmp.Diff),
+					// so the var form is advisory only. The bound still
+					// names the concrete capacity in the message.
+					emitFix := bound != "" && !isNil &&
+						!definesIdent(block.List[i+1:j], boundSubject(stmt))
+					reportPrealloc(pass, block.List[i], name, typ, isNil, bound, emitFix, uncond, cond, unknown)
 				}
 			}
 			return true
@@ -304,27 +311,30 @@ func rootIdentName(e ast.Expr) string {
 }
 
 // unsizedSliceDecl matches `s := []T{}`, `s := make([]T, 0)` and
-// `var s []T`, returning the variable name and the slice type expression.
-func unsizedSliceDecl(s ast.Stmt) (string, ast.Expr, bool) {
+// `var s []T`, returning the variable name, the slice type expression, and
+// whether the declared value is NIL (the var form) — nil-ness is
+// observable (cmp.Diff, JSON null vs [], == nil), so the auto-fix must not
+// change it.
+func unsizedSliceDecl(s ast.Stmt) (string, ast.Expr, bool, bool) {
 	switch st := s.(type) {
 	case *ast.AssignStmt:
 		if st.Tok != token.DEFINE || len(st.Lhs) != 1 || len(st.Rhs) != 1 {
-			return "", nil, false
+			return "", nil, false, false
 		}
 		id, ok := st.Lhs[0].(*ast.Ident)
 		if !ok {
-			return "", nil, false
+			return "", nil, false, false
 		}
 		switch rhs := st.Rhs[0].(type) {
 		case *ast.CompositeLit:
 			if at, ok := rhs.Type.(*ast.ArrayType); ok && at.Len == nil && len(rhs.Elts) == 0 {
-				return id.Name, rhs.Type, true
+				return id.Name, rhs.Type, false, true
 			}
 		case *ast.CallExpr:
 			if fn, ok := rhs.Fun.(*ast.Ident); ok && fn.Name == "make" && len(rhs.Args) == 2 {
 				if at, ok := rhs.Args[0].(*ast.ArrayType); ok && at.Len == nil {
 					if lit, ok := rhs.Args[1].(*ast.BasicLit); ok && lit.Value == "0" {
-						return id.Name, rhs.Args[0], true
+						return id.Name, rhs.Args[0], false, true
 					}
 				}
 			}
@@ -332,17 +342,17 @@ func unsizedSliceDecl(s ast.Stmt) (string, ast.Expr, bool) {
 	case *ast.DeclStmt:
 		gd, ok := st.Decl.(*ast.GenDecl)
 		if !ok || gd.Tok != token.VAR || len(gd.Specs) != 1 {
-			return "", nil, false
+			return "", nil, false, false
 		}
 		vs, ok := gd.Specs[0].(*ast.ValueSpec)
 		if !ok || len(vs.Names) != 1 || len(vs.Values) != 0 {
-			return "", nil, false
+			return "", nil, false, false
 		}
 		if at, ok := vs.Type.(*ast.ArrayType); ok && at.Len == nil {
-			return vs.Names[0].Name, vs.Type, true
+			return vs.Names[0].Name, vs.Type, true, true
 		}
 	}
-	return "", nil, false
+	return "", nil, false, false
 }
 
 // appendCounts counts the values appended to name per iteration of body,
@@ -454,18 +464,22 @@ func capacityForCounts(bound string, uncond, cond int, unknown bool) (capExpr, c
 	}
 }
 
-func reportPrealloc(pass *analysis.Pass, decl ast.Stmt, name string, typ ast.Expr, bound string, uncond, cond int, unknown bool) {
+func reportPrealloc(pass *analysis.Pass, decl ast.Stmt, name string, typ ast.Expr, isNil bool, bound string, emitFix bool, uncond, cond int, unknown bool) {
 	boundWord := bound
 	if boundWord == "" {
 		boundWord = "bound"
 	}
 	capExpr, class := capacityForCounts(boundWord, uncond, cond, unknown)
+	msg := fmt.Sprintf("%s is appended to in the following bounded loop but declared without capacity; pre-size it with make(..., 0, %s) — %s", name, capExpr, class)
+	if isNil {
+		msg += " (declared nil: pre-size only if no caller distinguishes nil from empty)"
+	}
 	diag := analysis.Diagnostic{
 		Pos:     decl.Pos(),
 		End:     decl.End(),
-		Message: fmt.Sprintf("%s is appended to in the following bounded loop but declared without capacity; pre-size it with make(..., 0, %s) — %s", name, capExpr, class),
+		Message: msg,
 	}
-	if bound != "" { // bound already validated against body reassignment
+	if emitFix { // bound already validated against body reassignment
 		var b strings.Builder
 		_ = printer.Fprint(&b, token.NewFileSet(), typ)
 		newDecl := fmt.Sprintf("%s := make(%s, 0, %s)", name, b.String(), capExpr)

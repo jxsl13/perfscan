@@ -10,8 +10,10 @@ func filtered(src []string) []string {
 	return out
 }
 
+// The nil var form stays advisory: pre-sizing would turn a nil result into
+// an empty non-nil slice on zero appends.
 func varDecl(src []int) []int {
-	var out []int // want `out is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(src\)\) — exact: one unconditional value per iteration`
+	var out []int // want `out is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(src\)\) — exact: one unconditional value per iteration \(declared nil: pre-size only if no caller distinguishes nil from empty\)`
 	for _, v := range src {
 		out = append(out, v*2)
 	}
@@ -120,7 +122,7 @@ func twoTargets(src map[string]int) ([]string, []int) {
 // stays, but no fix may reference b at the declaration site (found by
 // auto-fixing a real-world codebase).
 func indentString(s string) []byte {
-	var res []byte // want `res is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, bound\) — an upper bound: all appends are conditional`
+	var res []byte // want `res is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(b\)\) — an upper bound: all appends are conditional \(declared nil: pre-size only if no caller distinguishes nil from empty\)`
 	b := []byte(s)
 	for _, c := range b {
 		if c != 0 {
