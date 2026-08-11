@@ -4,7 +4,7 @@
 //   ./perfscanxx       — perfscan++ for C++, a clang-tidy orchestrator
 // perfscan and perfscanxx do not import each other; the workspace only ties
 // them for local dev.
-go 1.24
+go 1.25.0
 
 use (
 	./perfscan

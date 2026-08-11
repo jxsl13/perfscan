@@ -20,10 +20,10 @@ jobs:
         module: [perfscan, perfscanxx]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       # Test the module before releasing it (only for the tagged module).
@@ -35,7 +35,7 @@ jobs:
       # version from the prefixed tag and only runs for its own tag.
       - name: Release ${{ matrix.module }}
         if: startsWith(github.ref_name, format('{0}/', matrix.module))
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"

@@ -1,11 +1,11 @@
 module github.com/jxsl13/perfscan/perfscan/plugin
 
-go 1.23.0
+go 1.25.0
 
 require (
-	github.com/golangci/plugin-module-register v0.1.1
+	github.com/golangci/plugin-module-register v0.1.2
 	github.com/jxsl13/perfscan/perfscan v0.8.0
-	golang.org/x/tools v0.36.0
+	golang.org/x/tools v0.48.0
 )
 
 require gopkg.in/yaml.v3 v3.0.1 // indirect
