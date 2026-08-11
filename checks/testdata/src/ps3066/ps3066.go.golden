@@ -62,11 +62,7 @@ func interrupted(state []float64, decay float64) float64 {
 func scaleShiftSquare(buf []float64) {
 	for i := range buf { // want `3 consecutive loops over the same bound stream buf once each; if the per-index work is independent across the loops, merge them so the buffer stays in cache \(a later loop needing ALL of an earlier one's output cannot merge\)`
 		buf[i] *= 2
-	}
-	for i := range buf {
 		buf[i]++
-	}
-	for i := range buf {
 		buf[i] = buf[i] * buf[i]
 	}
 }
@@ -77,11 +73,7 @@ func threeMoments(a []float64) (float64, float64, float64) {
 	m1, m2, m3 := 0.0, 0.0, 0.0
 	for i := range a { // want `3 consecutive loops over the same bound stream a once each; if the per-index work is independent across the loops, merge them so the buffer stays in cache \(a later loop needing ALL of an earlier one's output cannot merge\)`
 		m1 += a[i]
-	}
-	for i := range a {
 		m2 += a[i] * a[i]
-	}
-	for i := range a {
 		m3 += a[i] * a[i] * a[i]
 	}
 	return m1, m2, m3

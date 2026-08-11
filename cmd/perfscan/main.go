@@ -9,7 +9,7 @@
 //	perfscan ./...                     report all findings
 //	perfscan -checks PS2* ./...        only allocation checks
 //	perfscan -fix ./...                apply L1 (idiomatic) fixes
-//	perfscan -fix -fix-level 2 ./...   also apply L2 (structured) fixes
+//	perfscan -fix=2 ./...              also apply L2 (structured) fixes
 //	perfscan -json ./...               machine-readable output
 //	perfscan -list                     print the check table
 //	perfscan -explain PS2005           print a check's documentation
@@ -19,6 +19,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -30,13 +31,13 @@ import (
 var version = "dev" // set by goreleaser
 
 func main() {
+	var fix fixFlag
+	flag.Var(&fix, "fix", "apply auto-fixes: -fix (L1 idiomatic only), -fix=2 (also L2 structured), -fix=3 (also L3 aggressive)")
 	var (
 		list       = flag.Bool("list", false, "list all checks and exit")
 		explain    = flag.String("explain", "", "print the documentation of a check (e.g. PS2005) and exit")
 		sel        = flag.String("checks", "all", "comma-separated check selector: all, PS2005, PS2*, -PS3003")
 		maxLevel   = flag.Int("level", 3, "report only checks whose fix level is <= N (1=idiomatic, 2=structured, 3=aggressive)")
-		fix        = flag.Bool("fix", false, "apply auto-fixes (gated by -fix-level)")
-		fixLevel   = flag.Int("fix-level", 1, "apply fixes only for checks whose level is <= N (default 1: idiomatic, bit-identical rewrites only)")
 		jsonOut    = flag.Bool("json", false, "emit findings as JSON")
 		sarifOut   = flag.Bool("sarif", false, "emit findings as SARIF 2.1.0 (GitHub Code Scanning)")
 		tests      = flag.Bool("tests", false, "also scan _test.go files")
@@ -68,8 +69,8 @@ func main() {
 		Checks:        *sel,
 		MaxLevel:      lint.Level(*maxLevel),
 		Tests:         *tests,
-		Fix:           *fix,
-		FixLevel:      lint.Level(*fixLevel),
+		Fix:           fix.level > 0,
+		FixLevel:      lint.Level(max(int(fix.level), 1)),
 		JSON:          *jsonOut,
 		SARIF:         *sarifOut,
 		ConfigPath:    *configPath,
@@ -78,6 +79,38 @@ func main() {
 		WriteBaseline: *writeBase,
 	})
 	os.Exit(code)
+}
+
+// fixFlag is the -fix flag: absent = off, bare -fix = level 1 (idiomatic
+// fixes only), -fix=2 / -fix=3 raise the applied fix level.
+type fixFlag struct {
+	level int
+}
+
+func (f *fixFlag) String() string {
+	if f == nil || f.level == 0 {
+		return "false"
+	}
+	return strconv.Itoa(f.level)
+}
+
+func (f *fixFlag) IsBoolFlag() bool { return true }
+
+func (f *fixFlag) Set(s string) error {
+	switch s {
+	case "true":
+		f.level = 1
+		return nil
+	case "false":
+		f.level = 0
+		return nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 || n > 3 {
+		return fmt.Errorf("want -fix, -fix=2 or -fix=3, got -fix=%s", s)
+	}
+	f.level = n
+	return nil
 }
 
 func printUsage() {
@@ -93,7 +126,8 @@ Examples:
 	perfscan -checks PS2* ./...          only allocation checks
 	perfscan -checks all,-PS3003 ./...   everything except one check
 	perfscan -fix ./...                  apply L1 (idiomatic) auto-fixes
-	perfscan -fix -fix-level 2 ./...     also apply L2 (structured) fixes
+	perfscan -fix=2 ./...                also apply L2 (structured) fixes
+	perfscan -fix=3 ./...                also apply L3 (aggressive) fixes
 	perfscan -baseline b.yaml -write-baseline ./...   accept today's findings
 	perfscan -baseline b.yaml ./...      then fail only on NEW findings
 	perfscan -list                       the check table
@@ -102,8 +136,8 @@ Examples:
 Fix levels (the maintainability cost of a check's remedy):
 
 	L1  idiomatic   mechanical, bit-identical rewrites; applied by plain -fix
-	L2  structured  restructures code; applied only with -fix-level 2
-	L3  aggressive  hyper-optimizations; advisory only, benchmark-gated
+	L2  structured  restructures code; applied only with -fix=2
+	L3  aggressive  hyper-optimizations; applied only with the explicit -fix=3 opt-in
 
 Generic vs. domain checks:
 

@@ -11,7 +11,7 @@ of the original reference registry and the planned engine work. PRs welcome — 
 - [x] Runner: package loading, check selection (`-checks PS2*,-PS3003`),
       level filter (`-level`), text + JSON output, exit codes
 - [x] `//perfscan:ignore` suppression directives
-- [x] Gated auto-fix (`-fix -fix-level N`) with gofmt post-formatting
+- [x] Gated auto-fix (`-fix[=N]`) with gofmt post-formatting
 - [x] SARIF 2.1.0 output (`-sarif`; L3 advisories map to "note")
 - [x] Baseline/ratchet support (`-baseline` / `-write-baseline`, line-independent identity)
 - [x] golangci-lint module plugin (`plugin/`, maxLevel + vocabulary settings)

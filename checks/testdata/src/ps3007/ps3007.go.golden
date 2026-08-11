@@ -11,12 +11,8 @@ func report(map[int64]bool) {}
 func keepSlices(xs []int64, x int64) bool { return slices.Contains(xs, x) }
 
 func probeOnly(seq []int64, window []int64) {
-	breakers := make(map[int64]bool, len(seq))
-	for _, b := range seq {
-		breakers[b] = true
-	}
 	for _, tok := range window {
-		use(breakers[tok]) // want `set breakers is built from slice seq and only probed; for a small source, scanning seq directly beats the map build plus a hash per probe \(crossover ≈8–16 elements\)`
+		use(slices.Contains(seq, tok)) // want `set breakers is built from slice seq and only probed; for a small source, scanning seq directly beats the map build plus a hash per probe \(crossover ≈8–16 elements\)`
 	}
 }
 
@@ -62,12 +58,8 @@ func thresholdGuarded(seq []int64, window []int64) {
 // An emptiness guard is not a threshold: still reported.
 func emptinessGuarded(seq []int64, window []int64) {
 	if len(seq) > 0 {
-		breakers := make(map[int64]bool, len(seq))
-		for _, b := range seq {
-			breakers[b] = true
-		}
 		for _, tok := range window {
-			use(breakers[tok]) // want `set breakers is built from slice seq and only probed; for a small source, scanning seq directly beats the map build plus a hash per probe \(crossover ≈8–16 elements\)`
+			use(slices.Contains(seq, tok)) // want `set breakers is built from slice seq and only probed; for a small source, scanning seq directly beats the map build plus a hash per probe \(crossover ≈8–16 elements\)`
 		}
 	}
 }
@@ -85,26 +77,18 @@ func probeOnce(seq []int64, tok int64) bool {
 // Every probe is rewritten by the fix: the looped one that triggers the
 // report and the plain read after it.
 func multiProbe(seq []int64, window []int64) bool {
-	breakers := make(map[int64]bool, len(seq))
-	for _, b := range seq {
-		breakers[b] = true
-	}
 	for _, tok := range window {
-		if breakers[tok] { // want `set breakers is built from slice seq and only probed; for a small source, scanning seq directly beats the map build plus a hash per probe \(crossover ≈8–16 elements\)`
+		if slices.Contains(seq, tok) { // want `set breakers is built from slice seq and only probed; for a small source, scanning seq directly beats the map build plus a hash per probe \(crossover ≈8–16 elements\)`
 			return true
 		}
 	}
-	return breakers[window[0]]
+	return slices.Contains(seq, window[0])
 }
 
 // A composite-literal declaration builds the same shape.
 func literalDecl(names []string, words []string) {
-	set := map[string]bool{}
-	for _, n := range names {
-		set[n] = true
-	}
 	for _, w := range words {
-		use(set[w]) // want `set set is built from slice names and only probed; for a small source, scanning names directly beats the map build plus a hash per probe \(crossover ≈8–16 elements\)`
+		use(slices.Contains(names, w)) // want `set set is built from slice names and only probed; for a small source, scanning names directly beats the map build plus a hash per probe \(crossover ≈8–16 elements\)`
 	}
 }
 

@@ -30,7 +30,7 @@ func main() {
 
 Every check has a stable PS-prefixed ID and a fix level:
 **L1** idiomatic (mechanical, bit-identical — applied by plain ` + "`perfscan -fix`" + `),
-**L2** structured (restructuring; ` + "`-fix -fix-level 2`" + `),
+**L2** structured (restructuring; ` + "`-fix=2`" + `),
 **L3** aggressive (hyper-optimization; advisory, benchmark-gated).
 
 | ID | Category | Level | Auto-fix | Title |

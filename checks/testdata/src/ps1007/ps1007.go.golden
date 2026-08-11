@@ -1,10 +1,18 @@
 package ps1007
 
 func axpyRestream(out, w, in []float64, n, dim int) {
-	for i := 0; i < n; i++ {
-		v := w[i]
+	psI4 := 0
+	for ; psI4+1 < n; psI4 += 2 {
+		v0, v1 := w[psI4], w[psI4+1]
 		for d := 0; d < dim; d++ {
-			out[d] += v * in[i*dim+d] // want `this inner loop accumulates into an output row invariant in outer variable i — all of it is loaded and stored once per outer step; the remedy depends on whether the input is contiguous in d \(strip-mine the gather, outer-unroll the rank-1 update, register-tile a band\) — see PS1007 docs`
+			out[d] += v0 * in[psI4*dim+d]
+			out[d] += v1 * in[(psI4+1)*dim+d]
+		}
+	}
+	for ; psI4 < n; psI4++ {
+		v := w[psI4]
+		for d := 0; d < dim; d++ {
+			out[d] += v * in[psI4*dim+d]
 		}
 	}
 }
@@ -51,9 +59,17 @@ func scalarSum(in []float64, n, dim int) float64 {
 // Un-hoisted variant: the weight is read directly per element — the same
 // canonical rank-1 update, rewritten the same way.
 func axpyDirect(out, w, in []float64, n, dim int) {
-	for i := 0; i < n; i++ {
+	psI54 := 0
+	for ; psI54+1 < n; psI54 += 2 {
+		v0, v1 := w[psI54], w[psI54+1]
 		for d := 0; d < dim; d++ {
-			out[d] += w[i] * in[i*dim+d] // want `this inner loop accumulates into an output row invariant in outer variable i — all of it is loaded and stored once per outer step; the remedy depends on whether the input is contiguous in d \(strip-mine the gather, outer-unroll the rank-1 update, register-tile a band\) — see PS1007 docs`
+			out[d] += v0 * in[psI54*dim+d]
+			out[d] += v1 * in[(psI54+1)*dim+d]
+		}
+	}
+	for ; psI54 < n; psI54++ {
+		for d := 0; d < dim; d++ {
+			out[d] += w[psI54] * in[psI54*dim+d]
 		}
 	}
 }

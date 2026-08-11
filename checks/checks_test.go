@@ -62,7 +62,7 @@ func TestPS5002(t *testing.T) {
 }
 
 func TestPS2102(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS2102.Analyzer, "ps2102")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2102.Analyzer, "ps2102")
 }
 
 func TestPS2104(t *testing.T) {
@@ -102,7 +102,7 @@ func TestPS2008(t *testing.T) {
 }
 
 func TestPS3007(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS3007.Analyzer, "ps3007")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3007.Analyzer, "ps3007")
 }
 
 func TestPS3034(t *testing.T) {
@@ -131,7 +131,7 @@ func TestPS3065(t *testing.T) {
 }
 
 func TestPS3066(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS3066.Analyzer, "ps3066")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3066.Analyzer, "ps3066")
 }
 
 func TestPS3071(t *testing.T) {
@@ -147,7 +147,7 @@ func TestPS3077(t *testing.T) {
 }
 
 func TestPS3082(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS3082.Analyzer, "ps3082")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3082.Analyzer, "ps3082")
 }
 
 func TestPS3001(t *testing.T) {
@@ -202,11 +202,11 @@ func TestPS1006(t *testing.T) {
 }
 
 func TestPS1007(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS1007.Analyzer, "ps1007")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS1007.Analyzer, "ps1007")
 }
 
 func TestPS1010(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS1010.Analyzer, "ps1010")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS1010.Analyzer, "ps1010")
 }
 
 func TestPS1005(t *testing.T) {

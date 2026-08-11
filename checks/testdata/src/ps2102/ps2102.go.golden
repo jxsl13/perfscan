@@ -1,10 +1,13 @@
 package ps2102
 
+import "strings"
+
 func concat(parts []string) string {
-	s := ""
+	var psSb4 strings.Builder
 	for _, p := range parts {
-		s += p // want `string s grows by concatenation in a loop — O\(n²\) copy traffic; build it with a strings\.Builder`
+		psSb4.WriteString(p) // want `string s grows by concatenation in a loop — O\(n²\) copy traffic; build it with a strings\.Builder`
 	}
+	s := psSb4.String()
 	return s
 }
 
@@ -30,20 +33,22 @@ func outsideLoop(a, b string) string {
 }
 
 func indexed(parts []string) string {
-	s := ""
+	var psSb33 strings.Builder
 	for i := 0; i < len(parts); i++ {
-		s += parts[i] // want `string s grows by concatenation in a loop — O\(n²\) copy traffic; build it with a strings\.Builder`
+		psSb33.WriteString(parts[i]) // want `string s grows by concatenation in a loop — O\(n²\) copy traffic; build it with a strings\.Builder`
 	}
+	s := psSb33.String()
 	return s
 }
 
 func multiWrite(parts []string) string {
-	s := ""
+	var psSb41 strings.Builder
 	for _, p := range parts {
-		s += p // want `string s grows by concatenation in a loop — O\(n²\) copy traffic; build it with a strings\.Builder`
+		psSb41.WriteString(p) // want `string s grows by concatenation in a loop — O\(n²\) copy traffic; build it with a strings\.Builder`
 
-		s += "," // want `string s grows by concatenation in a loop — O\(n²\) copy traffic; build it with a strings\.Builder`
+		psSb41.WriteString(",") // want `string s grows by concatenation in a loop — O\(n²\) copy traffic; build it with a strings\.Builder`
 	}
+	s := psSb41.String()
 	return s
 }
 
