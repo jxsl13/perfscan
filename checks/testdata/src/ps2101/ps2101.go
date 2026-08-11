@@ -1,0 +1,37 @@
+package ps2101
+
+func filtered(src []string) []string {
+	out := []string{} // want `out is appended to in the following range loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(\.\.\.\)\)`
+	for _, s := range src {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func varDecl(src []int) []int {
+	var out []int // want `out is appended to in the following range loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(\.\.\.\)\)`
+	for _, v := range src {
+		out = append(out, v*2)
+	}
+	return out
+}
+
+func presized(src []string) []string {
+	out := make([]string, 0, len(src))
+	for _, s := range src {
+		out = append(out, s)
+	}
+	return out
+}
+
+func notAdjacent(src []string) []string {
+	out := []string{}
+	n := 0
+	_ = n
+	for _, s := range src {
+		out = append(out, s)
+	}
+	return out
+}

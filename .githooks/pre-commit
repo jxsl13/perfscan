@@ -1,0 +1,27 @@
+#!/bin/sh
+# perfscan pre-commit hook: gofmt, vet, build, tests, self-scan.
+# Install with `make hooks` (sets core.hooksPath=.githooks).
+set -e
+
+echo "pre-commit: gofmt"
+out=$(gofmt -l .)
+if [ -n "$out" ]; then
+	echo "gofmt needed on:"
+	echo "$out"
+	echo "run: make fmt"
+	exit 1
+fi
+
+echo "pre-commit: go vet"
+go vet ./...
+
+echo "pre-commit: go build"
+go build ./...
+
+echo "pre-commit: go test"
+go test ./...
+
+echo "pre-commit: perfscan self-scan (L1+L2)"
+go run ./cmd/perfscan -level 2 ./...
+
+echo "pre-commit: ok"

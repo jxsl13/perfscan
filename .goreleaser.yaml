@@ -1,0 +1,50 @@
+version: 2
+
+project_name: perfscan
+
+builds:
+  - id: perfscan
+    main: ./cmd/perfscan
+    binary: perfscan
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  groups:
+    - title: New checks
+      regexp: '^.*?feat\(check.*$'
+      order: 0
+    - title: Features
+      regexp: '^.*?feat.*$'
+      order: 1
+    - title: Bug fixes
+      regexp: '^.*?fix.*$'
+      order: 2
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
+
+release:
+  footer: |
+    ---
+    Install with `go install github.com/jxsl13/perfscan/cmd/perfscan@{{.Tag}}`
