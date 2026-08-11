@@ -5,7 +5,12 @@ set -e
 
 for mod in perfscan perfscanxx; do
 	echo "pre-commit [$mod]: gofmt"
-	out=$(cd "$mod" && gofmt -l $(git ls-files '*.go' | grep -v /testdata/ | sed "s#^$mod/##") 2>/dev/null)
+	# Scope gofmt to THIS module with `gofmt -l .` (recursive, relative). Do NOT
+	# use `git ls-files '*.go'`: inside a hook, git lists repo-root-relative paths
+	# for every module, so the sibling module's files leak in and gofmt (run from
+	# $mod/) fails on paths that don't exist under it — aborting every commit.
+	# Exclude testdata (analysistest fixtures need exact // want anchoring).
+	out=$(cd "$mod" && gofmt -l . | grep -v /testdata/ || true)
 	if [ -n "$out" ]; then
 		echo "gofmt needed on (in $mod):"; echo "$out"; echo "run: gofmt -w $mod"; exit 1
 	fi
