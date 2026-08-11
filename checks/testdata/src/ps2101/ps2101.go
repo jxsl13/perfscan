@@ -131,3 +131,17 @@ func indentString(s string) []byte {
 	}
 	return res
 }
+
+// Regression (Kubernetes scheduler TestMergePlugins): a nil-declared
+// slice with only CONDITIONAL appends can end the loop with zero appends;
+// pre-sizing would turn that nil result into an empty non-nil slice,
+// observable via cmp.Diff/JSON/== nil. Advisory only, never fixed.
+func nilPreserved(src []string, keep func(string) bool) []string {
+	var out []string // want `out is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(src\)\) — an upper bound: all appends are conditional \(declared nil: pre-size only if no caller distinguishes nil from empty\)`
+	for _, s := range src {
+		if keep(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}

@@ -50,6 +50,16 @@ make test
    `benchmarks/README.md` with the reason.
 7. `make check` must pass.
 
+## Fixing bugs
+
+**Every regression fix ships a regression test.** When a check or fix
+misbehaves (wrong edit, changed semantics, false positive), the fix commit
+must contain a fixture case (or unit test) that reproduces the original
+breakage and pins the corrected behavior — named or commented after the
+failure it guards (see the nilPreserved case in the PS2101 fixtures, born
+from a Kubernetes scheduler test catching a nil-vs-empty rewrite). A fix
+without its regression test is not done.
+
 ## Design rules
 
 - **A finding is a candidate, not a verdict.** Static analysis sees syntax,
