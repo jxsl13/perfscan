@@ -4,7 +4,7 @@ project_name: perfscan
 
 builds:
   - id: perfscan
-    main: ./cmd/perfscan
+    main: .
     binary: perfscan
     env:
       - CGO_ENABLED=0
@@ -47,4 +47,4 @@ changelog:
 release:
   footer: |
     ---
-    Install with `go install github.com/jxsl13/perfscan/cmd/perfscan@{{.Tag}}`
+    Install with `go install github.com/jxsl13/perfscan@{{.Tag}}`

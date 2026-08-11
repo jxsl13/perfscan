@@ -18,7 +18,7 @@ given the right configuration.
 ## Install
 
 ```bash
-go install github.com/jxsl13/perfscan/cmd/perfscan@latest
+go install github.com/jxsl13/perfscan@latest
 ```
 
 Or download a release binary from the

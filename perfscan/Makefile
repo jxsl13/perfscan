@@ -23,7 +23,7 @@ check: vet test
 
 # Dogfood: run perfscan on itself at every level.
 selfscan:
-	$(GO) run ./cmd/perfscan -level 3 ./...
+	$(GO) run . -level 3 ./...
 
 # Run every Before/After micro-benchmark pair once (compile+run sanity).
 bench:
@@ -31,7 +31,7 @@ bench:
 
 # Regenerate docs/checks/ from the registry.
 docs:
-	$(GO) run ./cmd/gendocs
+	$(GO) run ./gendocs
 
 hooks:
 	git config core.hooksPath .githooks

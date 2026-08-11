@@ -72,11 +72,11 @@ jobs:
           go-version: stable
       - name: docs up to date
         run: |
-          go run ./cmd/gendocs
+          go run ./gendocs
           git diff --exit-code docs/checks/
       - name: golangci-lint plugin module builds
         run: cd plugin && go build ./...
       - name: micro-benchmarks compile and run once
         run: go test -run '^$' -bench . -benchtime=1x ./benchmarks/
       - name: perfscan on perfscan (dogfood ratchet: fail on NEW self-findings)
-        run: go run ./cmd/perfscan -level 3 -baseline .perfscan-baseline.yaml ./...
+        run: go run . -level 3 -baseline .perfscan-baseline.yaml ./...

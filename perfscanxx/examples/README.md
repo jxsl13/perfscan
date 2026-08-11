@@ -13,5 +13,5 @@ not committed:
 Then run perfscanxx (keg-only brew llvm is not on PATH):
 
     PERFSCANXX_CLANG_TIDY="$(brew --prefix llvm)/bin/clang-tidy" \
-      go run ../cmd/perfscanxx -p . sample.cpp          # report
-    PERFSCANXX_CLANG_TIDY=... go run ../cmd/perfscanxx -fix -p . sample.cpp
+      go run .. -p . sample.cpp          # report
+    PERFSCANXX_CLANG_TIDY=... go run .. -fix -p . sample.cpp
