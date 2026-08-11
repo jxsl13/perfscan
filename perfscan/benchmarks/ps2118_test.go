@@ -33,6 +33,7 @@ func BenchmarkPS2118_Before(b *testing.B) {
 	for range b.N {
 		buf.Reset()
 		for _, line := range ps2118Lines {
+			//lint:ignore SA6006 this benchmark deliberately measures the io.WriteString(w, string(b)) anti-pattern that PS2118 fixes
 			io.WriteString(w, string(line))
 		}
 		sinkI = buf.Len()
