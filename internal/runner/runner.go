@@ -10,7 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -103,7 +103,7 @@ func Run(checks []*lint.Check, opts Options) int {
 		return 2
 	}
 
-	var findings []Finding
+	findings := make([]Finding, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		for _, c := range enabled {
 			findings = append(findings, runCheck(c, pkg)...)
@@ -111,18 +111,17 @@ func Run(checks []*lint.Check, opts Options) int {
 	}
 
 	findings = filterIgnored(findings)
-	sort.Slice(findings, func(i, j int) bool {
-		a, b := findings[i], findings[j]
-		if a.Pos.Filename != b.Pos.Filename {
-			return a.Pos.Filename < b.Pos.Filename
+	slices.SortFunc(findings, func(a, b Finding) int {
+		if c := strings.Compare(a.Pos.Filename, b.Pos.Filename); c != 0 {
+			return c
 		}
-		if a.Pos.Line != b.Pos.Line {
-			return a.Pos.Line < b.Pos.Line
+		if c := a.Pos.Line - b.Pos.Line; c != 0 {
+			return c
 		}
-		if a.Pos.Column != b.Pos.Column {
-			return a.Pos.Column < b.Pos.Column
+		if c := a.Pos.Column - b.Pos.Column; c != 0 {
+			return c
 		}
-		return a.Check.ID < b.Check.ID
+		return strings.Compare(a.Check.ID, b.Check.ID)
 	})
 	findings = dedup(findings)
 
@@ -186,12 +185,12 @@ func warnStarvedChecks(enabled []*lint.Check, cfg config.Config, cfgPath string,
 		"vectorizedSiblingFuncs": len(cfg.VectorizedSiblingFuncs),
 		"fanOutHelpers":          len(cfg.FanOutHelpers),
 	}
-	var starved []string
+	starved := make([]string, 0, len(enabled))
 	for _, c := range enabled {
 		if !c.NeedsConfig {
 			continue
 		}
-		var missing []string
+		missing := make([]string, 0, len(c.Vocab))
 		for _, v := range c.Vocab {
 			if n, ok := fields[v]; ok && n == 0 {
 				missing = append(missing, v)
@@ -240,7 +239,7 @@ func selectChecks(all []*lint.Check, sel string, maxLevel lint.Level) ([]*lint.C
 			return nil, fmt.Errorf("no check matches %q (see perfscan -list)", tok)
 		}
 	}
-	var out []*lint.Check
+	out := make([]*lint.Check, 0, len(all))
 	for _, c := range all {
 		if len(include) > 0 && !include[c.ID] {
 			continue
@@ -307,7 +306,7 @@ func runCheck(c *lint.Check, pkg *packages.Package) []Finding {
 
 func dedup(in []Finding) []Finding {
 	seen := map[string]bool{}
-	var out []Finding
+	out := make([]Finding, 0, len(in))
 	for _, f := range in {
 		key := fmt.Sprintf("%s:%d:%d:%s", f.Pos.Filename, f.Pos.Line, f.Pos.Column, f.Check.ID)
 		if seen[key] {
@@ -363,7 +362,7 @@ func filterIgnored(findings []Finding) []Finding {
 		}
 		return false
 	}
-	var out []Finding
+	out := make([]Finding, 0, len(findings))
 	for _, f := range findings {
 		if covered(f, f.Pos.Line) || covered(f, f.Pos.Line-1) {
 			continue
@@ -387,7 +386,7 @@ func applyFixes(findings []Finding, opts Options) (applied, failed int) {
 		}
 		fix := f.Fixes[0]
 		ok := true
-		var edits []edit
+		edits := make([]edit, 0, len(fix.TextEdits))
 		for _, te := range fix.TextEdits {
 			file := f.fset.File(te.Pos)
 			if file == nil {
@@ -415,7 +414,7 @@ func applyFixes(findings []Finding, opts Options) (applied, failed int) {
 			failed++
 			continue
 		}
-		sort.Slice(edits, func(i, j int) bool { return edits[i].start > edits[j].start })
+		slices.SortFunc(edits, func(a, b edit) int { return b.start - a.start })
 		overlap := false
 		for i := 1; i < len(edits); i++ {
 			if edits[i].end > edits[i-1].start {

@@ -8,7 +8,8 @@ package checks
 
 import (
 	"fmt"
-	"sort"
+	"slices"
+	"strings"
 
 	"github.com/jxsl13/perfscan/lint"
 )
@@ -42,6 +43,6 @@ func register(c *lint.Check) *lint.Check {
 		}
 	}
 	registry = append(registry, c)
-	sort.Slice(registry, func(i, j int) bool { return registry[i].ID < registry[j].ID })
+	slices.SortFunc(registry, func(a, b *lint.Check) int { return strings.Compare(a.ID, b.ID) })
 	return c
 }
