@@ -1,0 +1,118 @@
+package ps2117
+
+func sideEffect() {}
+
+// Simple lookup: the variable exists only to key one map read.
+func lookup(m map[string]int, b []byte) int {
+	k := string(b) // want `k := string\(b\) allocates a string used only as a map key; the compiler elides the allocation when the conversion is inline in the index: m\[string\(b\)\]`
+	return m[k]
+}
+
+// Comma-ok read.
+func commaOk(m map[string]int, b []byte) (int, bool) {
+	k := string(b) // want `k := string\(b\) allocates a string used only as a map key; the compiler elides the allocation when the conversion is inline in the index: m\[string\(b\)\]`
+	v, ok := m[k]
+	return v, ok
+}
+
+// Use inside an if-init: the container statement is still a sibling.
+func hit(cache map[string]int, b []byte) int {
+	k := string(b) // want `k := string\(b\) allocates a string used only as a map key; the compiler elides the allocation when the conversion is inline in the index: m\[string\(b\)\]`
+	if v, ok := cache[k]; ok {
+		return v
+	}
+	return -1
+}
+
+// Two maps keyed by the same conversion: both indexes get the inline form.
+func two(m, n map[string]int, b []byte) int {
+	k := string(b) // want `k := string\(b\) allocates a string used only as a map key; the compiler elides the allocation when the conversion is inline in the index: m\[string\(b\)\]`
+	return m[k] + n[k]
+}
+
+// delete(m, string(b)) is elided by the compiler just like the read.
+func del(m map[string]int, b []byte) {
+	k := string(b) // want `k := string\(b\) allocates a string used only as a map key; the compiler elides the allocation when the conversion is inline in the index: m\[string\(b\)\]`
+	delete(m, k)
+}
+
+// --- advisory-only: reported, but no fix may be attached ---
+
+// A call between declaration and use could mutate b's backing bytes.
+func callBetween(m map[string]int, b []byte) int {
+	k := string(b) // want `k := string\(b\) allocates a string used only as a map key; the compiler elides the allocation when the conversion is inline in the index: m\[string\(b\)\]`
+	sideEffect()
+	return m[k]
+}
+
+// An element write between declaration and use: the snapshot and the
+// inline conversion would read different bytes.
+func mutatedBetween(m map[string]int, b []byte) int {
+	k := string(b) // want `k := string\(b\) allocates a string used only as a map key; the compiler elides the allocation when the conversion is inline in the index: m\[string\(b\)\]`
+	b[0] = 'x'
+	return m[k]
+}
+
+// A use captured by a closure runs at an unknowable time.
+func closure(m map[string]int, b []byte) func() int {
+	k := string(b) // want `k := string\(b\) allocates a string used only as a map key; the compiler elides the allocation when the conversion is inline in the index: m\[string\(b\)\]`
+	return func() int { return m[k] }
+}
+
+// --- guards: none of the following may be reported ---
+
+// A map write needs the materialized key string.
+func insert(m map[string]int, b []byte) {
+	k := string(b)
+	m[k] = 1
+}
+
+// A compound assignment writes the entry too.
+func bump(m map[string]int, b []byte) {
+	k := string(b)
+	m[k] += 1
+}
+
+// A non-map use keeps the variable (and its allocation) alive.
+func mixed(m map[string]int, b []byte) (int, int) {
+	k := string(b)
+	return m[k], len(k)
+}
+
+// A named string conversion is not the canonical compiler-elided spelling.
+type myKey string
+
+func named(m map[myKey]int, b []byte) int {
+	k := myKey(b)
+	return m[k]
+}
+
+// A string operand allocates nothing to begin with.
+func fromString(m map[string]int, s string) int {
+	k := string(s)
+	return m[k]
+}
+
+// A non-identifier operand is out of scope.
+type holder struct{ b []byte }
+
+func fieldOperand(m map[string]int, h holder) int {
+	k := string(h.b)
+	return m[k]
+}
+
+// A shadowed `string` is a call of a local function, not the canonical
+// compiler-elided conversion.
+type str = string
+
+func shadowedString(m map[string]int, b []byte) int {
+	string := func(bb []byte) str { return str(bb) }
+	k := string(b)
+	return m[k]
+}
+
+// Multi-assign declarations are out of scope.
+func multi(m map[string]int, b []byte) int {
+	k, i := string(b), 0
+	return m[k] + i
+}
