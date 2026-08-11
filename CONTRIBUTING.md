@@ -40,7 +40,15 @@ make test
    `checks/testdata/src/psXXXX/`, with `// want` comments, plus a `.golden`
    file when the check auto-fixes. Register the test in
    `checks/checks_test.go`.
-6. `make check` must pass.
+6. **Add the micro-benchmark pair.** Every rule whose remedy can be
+   expressed as an isolated micro-benchmark ships one in `benchmarks/`:
+   `BenchmarkPSxxxx_Before` / `BenchmarkPSxxxx_After`, the two arms being
+   the check's documented Before/After shapes. CI runs each once; humans
+   compare with benchstat. If the rule genuinely cannot be
+   micro-benchmarked (parallel machine-dependence, project-specific
+   dispatch, verification advisories), add it to the exemption list in
+   `benchmarks/README.md` with the reason.
+7. `make check` must pass.
 
 ## Design rules
 

@@ -25,6 +25,10 @@ check: vet test
 selfscan:
 	$(GO) run ./cmd/perfscan -level 3 ./...
 
+# Run every Before/After micro-benchmark pair once (compile+run sanity).
+bench:
+	$(GO) test -run '^$$' -bench . -benchtime=1x ./benchmarks/
+
 # Regenerate docs/checks/ from the registry.
 docs:
 	$(GO) run ./cmd/gendocs

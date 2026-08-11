@@ -17,3 +17,4 @@
 - [ ] `AutoFix` only for deterministic, bit-identical rewrites
 - [ ] Positive AND negative fixtures with `// want` comments (+ `.golden` for auto-fixes)
 - [ ] Measured evidence in `Doc.MeasuredWin` or the PR description
+- [ ] Micro-benchmark pair in `benchmarks/` (or an entry in its README exemption list with the reason)

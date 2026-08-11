@@ -52,6 +52,8 @@ jobs:
           git diff --exit-code docs/checks/
       - name: golangci-lint plugin module builds
         run: cd plugin && go build ./...
+      - name: micro-benchmarks compile and run once
+        run: go test -run '^$' -bench . -benchtime=1x ./benchmarks/
 
   selfscan:
     # Dogfood: perfscan must run clean on itself at every level.

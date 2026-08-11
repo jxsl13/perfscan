@@ -8,6 +8,8 @@ require (
 	golang.org/x/tools v0.36.0
 )
 
+require gopkg.in/yaml.v3 v3.0.1 // indirect
+
 // Local development: build against the sibling checkout. Ignored when this
 // module is consumed as a dependency (golangci-lint custom builds resolve
 // the require line above).
