@@ -1,0 +1,137 @@
+package ps2121
+
+import (
+	"bytes"
+	"strings"
+)
+
+func process(int) {}
+
+// Literal separator, assignment context: no parentheses needed.
+func countFields(s string) int {
+	n := strings.Count(s, ",") + 1 // want `len\(strings\.Split\(\.\.\.\)\) allocates the whole result slice just to count the pieces; strings\.Count\(\.\.\.\) \+ 1 is the same value with zero allocation \(non-empty separator\)`
+	return n
+}
+
+// Named non-empty string constant: constant evaluation proves it.
+const fieldSep = ";"
+
+func namedConst(s string) int {
+	return strings.Count(s, fieldSep) + 1 // want `len\(strings\.Split\(\.\.\.\)\) allocates the whole result slice just to count the pieces; strings\.Count\(\.\.\.\) \+ 1 is the same value with zero allocation \(non-empty separator\)`
+}
+
+// Call-argument context is self-delimiting: no parentheses needed.
+func asArg(s string) {
+	process(strings.Count(s, "|") + 1) // want `len\(strings\.Split\(\.\.\.\)\) allocates the whole result slice just to count the pieces; strings\.Count\(\.\.\.\) \+ 1 is the same value with zero allocation \(non-empty separator\)`
+}
+
+// PRECEDENCE: * binds tighter than + — the replacement must be
+// parenthesized or the result would be 2*Count(...) + 1.
+func precedenceMul(s string) int {
+	x := 2 * (strings.Count(s, ",") + 1) // want `len\(strings\.Split\(\.\.\.\)\) allocates the whole result slice just to count the pieces; strings\.Count\(\.\.\.\) \+ 1 is the same value with zero allocation \(non-empty separator\)`
+	return x
+}
+
+// Unary minus binds tighter than + too.
+func precedenceNeg(s string) int {
+	return -(strings.Count(s, ",") + 1) // want `len\(strings\.Split\(\.\.\.\)\) allocates the whole result slice just to count the pieces; strings\.Count\(\.\.\.\) \+ 1 is the same value with zero allocation \(non-empty separator\)`
+}
+
+// Comparison context: parenthesized as well — redundant but harmless.
+func compared(s string) bool {
+	return (strings.Count(s, ",") + 1) == 3 // want `len\(strings\.Split\(\.\.\.\)\) allocates the whole result slice just to count the pieces; strings\.Count\(\.\.\.\) \+ 1 is the same value with zero allocation \(non-empty separator\)`
+}
+
+// Index context is delimited by the brackets: no parentheses needed.
+func asIndex(s string, a []int) int {
+	return a[strings.Count(s, ",")+1] // want `len\(strings\.Split\(\.\.\.\)\) allocates the whole result slice just to count the pieces; strings\.Count\(\.\.\.\) \+ 1 is the same value with zero allocation \(non-empty separator\)`
+}
+
+// bytes twin: []byte("...") conversion of a non-empty constant string.
+func bytesConv(b []byte) int {
+	return bytes.Count(b, []byte(",")) + 1 // want `len\(bytes\.Split\(\.\.\.\)\) allocates the whole result slice just to count the pieces; bytes\.Count\(\.\.\.\) \+ 1 is the same value with zero allocation \(non-empty separator\)`
+}
+
+// bytes twin: non-empty []byte{...} composite literal.
+func bytesLit(b []byte) int {
+	n := bytes.Count(b, []byte{','}) + 1 // want `len\(bytes\.Split\(\.\.\.\)\) allocates the whole result slice just to count the pieces; bytes\.Count\(\.\.\.\) \+ 1 is the same value with zero allocation \(non-empty separator\)`
+	return n
+}
+
+// Reported but NOT fixed: a comment inside the rewritten scaffolding
+// would be destroyed by the edits.
+func commented(s string) int {
+	return len( // keep me // want `len\(strings\.Split\(\.\.\.\)\) allocates the whole result slice just to count the pieces; strings\.Count\(\.\.\.\) \+ 1 is the same value with zero allocation \(non-empty separator\)`
+		strings.Split(s, ","))
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// EMPTY separator: len(Split(s, "")) is the rune count, Count(s, "")+1
+// is the rune count plus two — the identity breaks, stay silent.
+func emptySep(s string) int {
+	return len(strings.Split(s, ""))
+}
+
+// Empty named constant likewise.
+const emptyConst = ""
+
+func emptyNamedConst(s string) int {
+	return len(strings.Split(s, emptyConst))
+}
+
+// A variable separator is not provably non-empty — silent, no advisory.
+func varSep(s, sep string) int {
+	return len(strings.Split(s, sep))
+}
+
+// bytes: a variable separator proves nothing.
+func bytesVarSep(b, sep []byte) int {
+	return len(bytes.Split(b, sep))
+}
+
+// bytes: an empty composite literal has length zero.
+func bytesEmptyLit(b []byte) int {
+	return len(bytes.Split(b, []byte{}))
+}
+
+// bytes: a conversion of the empty string is empty too.
+func bytesEmptyConv(b []byte) int {
+	return len(bytes.Split(b, []byte("")))
+}
+
+// SplitN is N-limited: its piece count is not Count+1.
+func splitN(s string) int {
+	return len(strings.SplitN(s, ",", 3))
+}
+
+// SplitAfter/Fields count differently or take different arguments.
+func splitAfter(s string) int {
+	return len(strings.SplitAfter(s, ","))
+}
+
+func fields(s string) int {
+	return len(strings.Fields(s))
+}
+
+// The result stored first may have other consumers — out of scope.
+func storedFirst(s string) int {
+	parts := strings.Split(s, ",")
+	return len(parts)
+}
+
+// A shadowed strings is not the strings package.
+type fakeStrings struct{}
+
+func (fakeStrings) Split(s, sep string) []string { return []string{s} }
+
+func shadowedPkg(s string) int {
+	strings := fakeStrings{}
+	return len(strings.Split(s, ","))
+}
+
+// A shadowed len is not the builtin.
+func shadowedLen(s string) int {
+	len := func([]string) int { return 0 }
+	return len(strings.Split(s, ","))
+}
