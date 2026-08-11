@@ -99,7 +99,7 @@ func TestUniqueIDs(t *testing.T) {
 			continue
 		}
 		builtin := false
-		for _, p := range []string{"performance-", "modernize-", "bugprone-", "readability-"} {
+		for _, p := range []string{"performance-", "modernize-", "bugprone-", "readability-", "cppcoreguidelines-"} {
 			if strings.HasPrefix(e.TidyName, p) {
 				builtin = true
 				break
