@@ -1,0 +1,159 @@
+package ps2119
+
+import (
+	"bytes"
+	"strings"
+)
+
+func process(string) {}
+
+func splitDirect(s string) {
+	for part := range strings.SplitSeq(s, ",") { // want `ranging directly over strings\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		process(part)
+	}
+}
+
+func fieldsDirect(s string) int {
+	n := 0
+	for f := range strings.FieldsSeq(s) { // want `ranging directly over strings\.Fields allocates the whole result slice per loop entry; strings\.FieldsSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		n += len(f)
+	}
+	return n
+}
+
+func splitAfterDirect(s string) {
+	for part := range strings.SplitAfterSeq(s, ";") { // want `ranging directly over strings\.SplitAfter allocates the whole result slice per loop entry; strings\.SplitAfterSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		process(part)
+	}
+}
+
+func bytesSplitDirect(b []byte) int {
+	n := 0
+	for part := range bytes.SplitSeq(b, []byte{','}) { // want `ranging directly over bytes\.Split allocates the whole result slice per loop entry; bytes\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		n += len(part)
+	}
+	return n
+}
+
+func bytesFieldsDirect(b []byte) int {
+	n := 0
+	for f := range bytes.FieldsSeq(b) { // want `ranging directly over bytes\.Fields allocates the whole result slice per loop entry; bytes\.FieldsSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		n += len(f)
+	}
+	return n
+}
+
+// No key and no value at all: `for range` maps straight onto the Seq form.
+func countPieces(s string) int {
+	n := 0
+	for range strings.SplitSeq(s, ",") { // want `ranging directly over strings\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		n++
+	}
+	return n
+}
+
+// Assignment form (=, not :=): the token is preserved, only `_,` is dropped.
+func assignForm(s string) string {
+	var last string
+	for last = range strings.SplitSeq(s, ",") { // want `ranging directly over strings\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		process(last)
+	}
+	return last
+}
+
+// Early break visits the same prefix in both forms.
+func firstNonEmpty(s string) string {
+	for part := range strings.SplitSeq(s, ",") { // want `ranging directly over strings\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		if part != "" {
+			return part
+		}
+	}
+	return ""
+}
+
+// Reported but NOT fixed: a comment inside the deleted `_,` span would be
+// destroyed by the rewrite.
+func commented(s string) {
+	for _ /* keep me */, part := range strings.Split(s, ",") { // want `ranging directly over strings\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		process(part)
+	}
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// The index is used: the Seq form is single-value, no rewrite exists.
+func indexUsed(s string) int {
+	for i, part := range strings.Split(s, ",") {
+		if part == "" {
+			return i
+		}
+	}
+	return -1
+}
+
+// Key-only form uses the index too.
+func keyOnly(s string) int {
+	last := -1
+	for i := range strings.Split(s, ",") {
+		last = i
+	}
+	return last
+}
+
+// The result slice is stored first: it might be indexed, reused or
+// returned — out of scope.
+func storedFirst(s string) []string {
+	parts := strings.Split(s, ",")
+	for _, part := range parts {
+		process(part)
+	}
+	return parts
+}
+
+// A shadowed strings is not the strings package.
+type fakeStrings struct{}
+
+func (fakeStrings) Split(s, sep string) []string { return []string{s} }
+
+func shadowed(s string) {
+	strings := fakeStrings{}
+	for _, part := range strings.Split(s, ",") {
+		process(part)
+	}
+}
+
+// A local function named Split on a same-named receiver is not matched.
+type splitter struct{}
+
+func (splitter) Fields(s string) []string { return []string{s} }
+
+func method(s string) {
+	var sp splitter
+	for _, part := range sp.Fields(s) {
+		process(part)
+	}
+}
+
+// SplitN is N-limited — different semantics, no Seq counterpart.
+func splitN(s string) {
+	for _, part := range strings.SplitN(s, ",", 3) {
+		process(part)
+	}
+}
+
+// SplitAfterN likewise.
+func splitAfterN(s string) {
+	for _, part := range strings.SplitAfterN(s, ",", 3) {
+		process(part)
+	}
+}
+
+// Split outside a range clause is out of scope: the slice is a value.
+func returned(s string) []string {
+	return strings.Split(s, ",")
+}
+
+func assigned(s string) int {
+	parts := strings.Split(s, ",")
+	return len(parts)
+}
