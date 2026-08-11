@@ -96,8 +96,17 @@ func TestUniqueIDs(t *testing.T) {
 			if !strings.HasPrefix(e.TidyName, "custom-") {
 				t.Errorf("%s: custom TidyName %q must start with custom-", e.ID, e.TidyName)
 			}
-		} else if !strings.HasPrefix(e.TidyName, "performance-") {
-			t.Errorf("%s: TidyName %q is not a performance-* check", e.ID, e.TidyName)
+			continue
+		}
+		builtin := false
+		for _, p := range []string{"performance-", "modernize-", "bugprone-", "readability-"} {
+			if strings.HasPrefix(e.TidyName, p) {
+				builtin = true
+				break
+			}
+		}
+		if !builtin {
+			t.Errorf("%s: TidyName %q is not a known clang-tidy check family", e.ID, e.TidyName)
 		}
 	}
 }

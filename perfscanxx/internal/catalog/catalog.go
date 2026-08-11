@@ -94,7 +94,25 @@ var entries = []Entry{
 		ID: "PX2001", TidyName: "performance-inefficient-vector-operation",
 		Level: LevelStructured, Category: "allocation",
 		Title:  "push_back in a counted loop without reserve(); pre-size the vector",
-		HasFix: false,
+		HasFix: true, // clang-tidy inserts v.reserve(n) before the loop
+	},
+	{
+		ID: "PX2003", TidyName: "modernize-use-emplace",
+		Level: LevelIdiomatic, Category: "allocation",
+		Title:  "push_back(T(args)) constructs a temporary then moves; emplace_back(args) builds in place",
+		HasFix: true,
+	},
+	{
+		ID: "PX2004", TidyName: "modernize-make-shared",
+		Level: LevelIdiomatic, Category: "allocation",
+		Title:  "shared_ptr(new T) does two allocations; make_shared does one",
+		HasFix: true,
+	},
+	{
+		ID: "PX2005", TidyName: "modernize-make-unique",
+		Level: LevelIdiomatic, Category: "allocation",
+		Title:  "unique_ptr(new T) -> make_unique<T>(...) (clearer, exception-safe)",
+		HasFix: true,
 	},
 	{
 		ID: "PX2002", TidyName: "performance-inefficient-string-concatenation",
@@ -118,6 +136,18 @@ var entries = []Entry{
 		ID: "PX3003", TidyName: "performance-avoid-endl",
 		Level: LevelIdiomatic, Category: "io",
 		Title:  "std::endl flushes the stream every time; use '\\n'",
+		HasFix: true,
+	},
+	{
+		ID: "PX3004", TidyName: "performance-noexcept-move-constructor",
+		Level: LevelStructured, Category: "moves",
+		Title:  "a move constructor/assignment not marked noexcept forces containers to copy; add noexcept",
+		HasFix: true,
+	},
+	{
+		ID: "PX3005", TidyName: "performance-inefficient-algorithm",
+		Level: LevelStructured, Category: "algorithms",
+		Title:  "std::find/count over an associative container; use the container's O(log n) member",
 		HasFix: true,
 	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
