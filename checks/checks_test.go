@@ -161,6 +161,19 @@ func TestPS1003(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS1003.Analyzer, "ps1003")
 }
 
+func TestPS1004(t *testing.T) {
+	defer config.SetForTesting(goaiVocab)()
+	analysistest.Run(t, analysistest.TestData(), PS1004.Analyzer, "ps1004")
+}
+
+func TestPS1006(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), PS1006.Analyzer, "ps1006")
+}
+
+func TestPS1010(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), PS1010.Analyzer, "ps1010")
+}
+
 func TestPS1005(t *testing.T) {
 	defer config.SetForTesting(goaiVocab)()
 	analysistest.Run(t, analysistest.TestData(), PS1005.Analyzer, "ps1005")

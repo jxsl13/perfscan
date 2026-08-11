@@ -12,7 +12,10 @@ Every check has a stable PS-prefixed ID and a fix level:
 | [PS1001](PS1001.md) | access | L2 |  | per-element accessor dispatch in an element-count loop with no typed fast path |
 | [PS1002](PS1002.md) | access | L2 |  | a per-element visitor fed a closure (an indirect call per element) |
 | [PS1003](PS1003.md) | access | L2 |  | a batch API called with a single-element slice literal inside a loop |
+| [PS1004](PS1004.md) | access | L2 |  | a variadic accessor spread call (At(idx...)) in a loop |
 | [PS1005](PS1005.md) | access | L3 |  | a per-element accessor whose 2+ index args are enclosing-loop variables (a manual tensor walk) |
+| [PS1006](PS1006.md) | access | L2 |  | a reduction striding a flat array by the inner loop variable |
+| [PS1010](PS1010.md) | access | L2 |  | an inner loop reading one column of a [][]T (a row-jumping walk) |
 | [PS2001](PS2001.md) | alloc | L2 |  | a project allocation entry point called inside a loop |
 | [PS2002](PS2002.md) | alloc | L1 |  | a strings.Builder/bytes.Buffer written in a loop with no Grow |
 | [PS2003](PS2003.md) | alloc | L1 |  | an allocating strings transform (Replace/Map/Repeat) in a loop |

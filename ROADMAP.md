@@ -31,7 +31,10 @@ figures cited in their docs are goai's measured results.
 - [x] PS1001 per-element-dispatch (domain, L2, hasFlat suppression)
 - [x] PS1002 per-element-closure (domain, L2)
 - [x] PS1003 batch-single-elt (L2)
+- [x] PS1004 spread-accessor-in-loop (domain, L2)
 - [x] PS1005 manual-walk-dispatch (domain, L3 — PS1001's domain excluded)
+- [x] PS1006 strided-inner-reduction (L2, generic flat-index shape)
+- [x] PS1010 column-walk-slice-of-slices (L2, generic; interchange-profitability + amortization narrowings)
 - [x] PS2001 alloc-in-loop (domain, L2)
 - [x] PS2002 unsized-builder (L1)
 - [x] PS2003 strings-alloc-in-loop (L1)
@@ -70,7 +73,7 @@ figures cited in their docs are goai's measured results.
 
 ### Domain checks (need vocabulary)
 
-- [ ] PS1004, PS1006–PS1010 per-element family (rest)
+- [ ] PS1007, PS1009 per-element family (rest)
 - [x] PS3063 + PS3065 serial-nest/serial-loop (fanOutHelpers, L3)
 - [x] PS3034 + PS3059 serial-nest direct/derived writes (fanOutHelpers, L3)
 - [x] PS3060 serial-loop-over-parallel-work (fanOutHelpers, L3)
