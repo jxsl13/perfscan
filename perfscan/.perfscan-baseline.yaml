@@ -1,0 +1,26 @@
+version: 1
+entries:
+    - file: checks/ps2117.go
+      id: PS3101
+      message: '[]byte(repl) copies its operand on every iteration but repl is loop-invariant; hoist the conversion above the loop'
+      count: 1
+    - file: internal/runner/baseline.go
+      id: PS3103
+      message: ranging by value copies a 136-byte Finding element on every iteration; iterate by index and take a pointer to the element where aliasing is safe
+      count: 2
+    - file: internal/runner/runner.go
+      id: PS2110
+      message: append([]byte{}, e.text...) is a hand-rolled clone; bytes.Clone(e.text) says it directly
+      count: 1
+    - file: internal/runner/runner.go
+      id: PS2112
+      message: chained spread appends onto an empty base hand-roll a concatenation, growing the result per append; slices.Concat sizes and allocates it once
+      count: 1
+    - file: internal/runner/runner.go
+      id: PS3103
+      message: ranging by value copies a 136-byte Finding element on every iteration; iterate by index and take a pointer to the element where aliasing is safe
+      count: 5
+    - file: internal/runner/sarif.go
+      id: PS3103
+      message: ranging by value copies a 136-byte Finding element on every iteration; iterate by index and take a pointer to the element where aliasing is safe
+      count: 1

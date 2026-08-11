@@ -14,6 +14,6 @@ for mod in perfscan perfscanxx; do
 done
 
 echo "pre-commit: perfscan self-scan (all levels)"
-( cd perfscan && go run ./cmd/perfscan -level 3 ./... )
+( cd perfscan && go run ./cmd/perfscan -level 3 -baseline .perfscan-baseline.yaml ./... )
 
 echo "pre-commit: ok"

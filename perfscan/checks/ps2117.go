@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"slices"
 
 	"golang.org/x/tools/go/analysis"
 
@@ -214,7 +215,7 @@ func ps2117KeyOnlyUses(pass *analysis.Pass, body *ast.BlockStmt, obj *types.Var)
 				bad = true
 				return false
 			}
-			uses = append(uses, ps2117Use{id: id, stack: append([]ast.Node(nil), stack...)})
+			uses = append(uses, ps2117Use{id: id, stack: slices.Clone(stack)})
 		case *ast.CallExpr:
 			fn, ok := p.Fun.(*ast.Ident)
 			if !ok || len(p.Args) != 2 || p.Args[1] != ast.Expr(id) {
@@ -229,7 +230,7 @@ func ps2117KeyOnlyUses(pass *analysis.Pass, body *ast.BlockStmt, obj *types.Var)
 				bad = true
 				return false
 			}
-			uses = append(uses, ps2117Use{id: id, stack: append([]ast.Node(nil), stack...), del: p})
+			uses = append(uses, ps2117Use{id: id, stack: slices.Clone(stack), del: p})
 		default:
 			bad = true
 			return false
@@ -305,7 +306,7 @@ func ps2117Fix(pass *analysis.Pass, f *ast.File, declStack []ast.Node, as *ast.A
 	// Every use must sit in a sibling statement after the declaration, with
 	// no function literal between (a closure runs at an unknowable time),
 	// and both b and "string" must still resolve to the same objects there.
-	deleteCalls := map[*ast.CallExpr]bool{}
+	deleteCalls := make(map[*ast.CallExpr]bool, len(uses))
 	lastIdx := di
 	for _, u := range uses {
 		ci, ok := ps2117Container(block, u.stack)
