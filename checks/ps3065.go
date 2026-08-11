@@ -57,7 +57,7 @@ func runPS3065(pass *analysis.Pass) (any, error) {
 	// Package facts: which declared functions loop, and whether any file
 	// declares or calls a fan-out helper.
 	loopingFuncs := map[string]bool{}
-	packageHasFanOut := false
+	hasFanOut := false
 	for _, f := range pass.Files {
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
@@ -65,17 +65,17 @@ func runPS3065(pass *analysis.Pass) (any, error) {
 				continue
 			}
 			if fanout[fn.Name.Name] {
-				packageHasFanOut = true
+				hasFanOut = true
 			}
 			if callsFanOut(fn.Body, fanout) {
-				packageHasFanOut = true
+				hasFanOut = true
 			}
 			if containsLoop(fn.Body) {
 				loopingFuncs[fn.Name.Name] = true
 			}
 		}
 	}
-	if !packageHasFanOut {
+	if !hasFanOut {
 		return nil, nil
 	}
 

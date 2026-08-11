@@ -30,6 +30,8 @@ Every check has a stable PS-prefixed ID and a fix level:
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
 | [PS3005](PS3005.md) | indirect | L2 |  | an index-slice sort whose comparator dereferences into a 2-D structure |
 | [PS3007](PS3007.md) | indirect | L2 |  | a membership set built from a slice the caller already owns, probed in a loop |
+| [PS3034](PS3034.md) | indirect | L3 |  | a serial nest whose every write names the outermost loop variable |
+| [PS3059](PS3059.md) | indirect | L3 |  | a serial nest writing through a base derived from the outermost loop variable |
 | [PS3063](PS3063.md) | indirect | L3 |  | a serial nest inside a function that already fans out elsewhere |
 | [PS3065](PS3065.md) | indirect | L3 |  | a single serial loop over an expensive call, with a fan-out helper available |
 | [PS3066](PS3066.md) | indirect | L2 |  | three or more sibling loops over the same bound, all touching one buffer |
