@@ -40,6 +40,15 @@ import (
 
 var version = "dev" // set by goreleaser
 
+// stringSlice is a repeatable string flag (-extra-arg=a -extra-arg=b).
+type stringSlice []string
+
+func (s *stringSlice) String() string { return strings.Join(*s, ",") }
+func (s *stringSlice) Set(v string) error {
+	*s = append(*s, v)
+	return nil
+}
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -58,7 +67,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		buildDir = fs.String("p", "", "build directory containing compile_commands.json (forwarded to clang-tidy -p)")
 		tidyBin  = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
 		showVer  = fs.Bool("version", false, "print version and exit")
+		extra    stringSlice
 	)
+	fs.Var(&extra, "extra-arg", "extra argument passed to the compiler via clang-tidy (repeatable), e.g. -extra-arg=-isysroot -extra-arg=$(xcrun --show-sdk-path)")
 	fs.Usage = func() { printUsage(stderr, fs) }
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -96,12 +107,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		tidyChecks = append(tidyChecks, e.TidyName)
 	}
 
+	var extraArgs []string
+	for _, e := range extra {
+		extraArgs = append(extraArgs, "--extra-arg="+e)
+	}
 	res, err := tidy.Run(context.Background(), tidy.Options{
-		Binary:   *tidyBin,
-		BuildDir: *buildDir,
-		Checks:   tidyChecks,
-		Fix:      *fix,
-		Files:    files,
+		Binary:    *tidyBin,
+		BuildDir:  *buildDir,
+		Checks:    tidyChecks,
+		Fix:       *fix,
+		Files:     files,
+		ExtraArgs: extraArgs,
 	})
 	if err != nil {
 		fmt.Fprintln(stderr, "perfscanxx:", err)

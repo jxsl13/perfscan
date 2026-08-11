@@ -1,0 +1,16 @@
+# perfscanxx query-based custom checks — ZERO compiled C++.
+# Each check is a clang-query matcher string + a message. Run via:
+#   clang-tidy --experimental-custom-checks --config-file=perfscanxx-custom.clang-tidy ...
+# (LLVM >= 20; see https://clang.llvm.org/extra/clang-tidy/QueryBasedCustomChecks.html)
+Checks: '-*,custom-reserve-before-loop'
+CustomChecks:
+  - Name: reserve-before-loop
+    Query: |
+      match cxxMemberCallExpr(
+        callee(cxxMethodDecl(hasAnyName("push_back", "emplace_back"))),
+        hasAncestor(forStmt())
+      ).bind("grow")
+    Diagnostic:
+      - BindName: grow
+        Message: "vector grown via push_back/emplace_back inside a loop; reserve() before the loop to avoid repeated reallocation (perfscanxx PS2101 analog, query-based, no C++)"
+        Level: Warning
