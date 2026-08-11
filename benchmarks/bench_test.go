@@ -20,9 +20,7 @@ var (
 	sinkS  string
 	sinkI  int
 	sinkF  float64
-	sinkB  bool
 	sinkSS []string
-	sinkBs []byte
 )
 
 const n = 1024
