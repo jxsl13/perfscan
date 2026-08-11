@@ -94,24 +94,26 @@ func Run(checks []*lint.Check, opts Options) int {
 		fmt.Fprintln(opts.Stderr, "perfscan:", err)
 		return 2
 	}
-	// Domain checks are OPT-IN: with no vocabulary they are skipped
-	// silently under "all"/wildcard selection. Explicitly naming one
-	// without its vocabulary keeps it (and warns) — the user asked for a
-	// check that cannot fire, which is worth one loud line.
+	// Domain checks are OPT-IN: a FULLY starved one (every vocabulary
+	// field empty) is skipped silently under "all"/wildcard selection —
+	// a partially fed check runs on whatever signals it has. Explicitly
+	// naming a check with missing vocabulary keeps it and warns: the
+	// user asked for a check that may not fire, which is worth one loud
+	// line.
 	kept := make([]*lint.Check, 0, len(enabled))
 	for _, c := range enabled {
 		missing := missingVocab(c, cfg)
-		if len(missing) == 0 {
-			kept = append(kept, c)
+		fullyStarved := c.NeedsConfig && len(missing) == len(c.Vocab)
+		if fullyStarved && !explicit[c.ID] {
 			continue
 		}
-		if explicit[c.ID] {
-			kept = append(kept, c)
+		kept = append(kept, c)
+		if len(missing) > 0 && explicit[c.ID] {
 			src := "no perfscan.json found"
 			if cfgPath != "" {
 				src = "config " + cfgPath
 			}
-			fmt.Fprintf(opts.Stderr, "perfscan: WARNING: %s was selected explicitly but stays silent: vocabulary %s missing (%s)\n",
+			fmt.Fprintf(opts.Stderr, "perfscan: WARNING: %s was selected explicitly but vocabulary %s is missing (%s)\n",
 				c.ID, strings.Join(missing, ", "), src)
 		}
 	}
