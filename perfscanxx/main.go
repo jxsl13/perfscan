@@ -32,6 +32,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -94,6 +95,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if *list {
+		if *jsonOut {
+			if err := printListJSON(stdout, *fixable); err != nil {
+				fmt.Fprintln(stderr, "perfscanxx:", err)
+				return 2
+			}
+			return 0
+		}
 		printList(stdout, *fixable)
 		return 0
 	}
@@ -388,6 +396,7 @@ Examples:
 	perfscanxx -cmake-build ./...        also build it to generate build-time headers
 	perfscanxx -list                     the check table (with an auto-fix coverage summary)
 	perfscanxx -list -fixable            only the auto-fixable checks
+	perfscanxx -list -json               the catalog as machine-readable JSON
 	perfscanxx -explain PX1001           one check's documentation
 
 Fix levels (the maintainability cost of a check's remedy):
@@ -433,6 +442,34 @@ func printList(w io.Writer, fixableOnly bool) {
 	} else {
 		fmt.Fprintf(w, "\n%d checks — %d auto-fixable (-fix applies them), %d advisory. Use -fixable to list only the auto-fixable ones.\n", total, fixable, total-fixable)
 	}
+}
+
+// printListJSON emits the catalog as a machine-readable JSON array (for tooling,
+// CI dashboards, editor integrations). `-list -json -fixable` narrows to the
+// auto-fixable checks.
+func printListJSON(w io.Writer, fixableOnly bool) error {
+	type check struct {
+		ID       string `json:"id"`
+		Level    int    `json:"level"`
+		Category string `json:"category"`
+		TidyName string `json:"tidyCheck"`
+		Title    string `json:"title"`
+		HasFix   bool   `json:"autoFix"`
+		Custom   bool   `json:"queryBased"`
+	}
+	out := make([]check, 0, len(catalog.All()))
+	for _, e := range catalog.All() {
+		if fixableOnly && !e.HasFix {
+			continue
+		}
+		out = append(out, check{
+			ID: e.ID, Level: int(e.Level), Category: e.Category,
+			TidyName: e.TidyName, Title: e.Title, HasFix: e.HasFix, Custom: e.Custom,
+		})
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 func printExplain(stdout, stderr io.Writer, id string) int {
