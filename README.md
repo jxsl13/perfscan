@@ -157,6 +157,35 @@ ranges, byte offsets, replacement text) for quick-fix integrations.
 Because every check is a plain `analysis.Analyzer`, you can also embed them
 in your own multichecker or `go vet -vettool` binary.
 
+## golangci-lint integration
+
+perfscan ships a [module plugin](plugin/) for golangci-lint's custom build
+system:
+
+```yaml
+# .custom-gcl.yml
+version: v2.1.0
+plugins:
+  - module: 'github.com/jxsl13/perfscan/plugin'
+    version: latest
+```
+
+```yaml
+# .golangci.yml
+linters:
+  enable: [perfscan]
+  settings:
+    custom:
+      perfscan:
+        type: module
+        settings:
+          maxLevel: 2          # only L1/L2 findings
+          vocabulary:          # optional domain vocabulary (perfscan.json shape)
+            fanOutHelpers: [parallelFor]
+```
+
+Then `golangci-lint custom` builds the binary.
+
 ## Status & roadmap
 
 perfscan is young. The engine, CLI, fix-level gating, vocabulary config and

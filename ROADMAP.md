@@ -14,12 +14,12 @@ of the original reference registry and the planned engine work. PRs welcome — 
 - [x] Gated auto-fix (`-fix -fix-level N`) with gofmt post-formatting
 - [x] SARIF 2.1.0 output (`-sarif`; L3 advisories map to "note")
 - [x] Baseline/ratchet support (`-baseline` / `-write-baseline`, line-independent identity)
+- [x] golangci-lint module plugin (`plugin/`, maxLevel + vocabulary settings)
 - [x] Docs generated from the registry (`make docs`, CI drift gate)
 - [x] Project vocabulary config (perfscan.json, auto-discovery, starved-check
       warnings) — keeps the engine generic while supporting any domain codebase
       given the right configuration
 - [ ] Package-level caching for large repos (staticcheck-style facts/caching)
-- [ ] `golangci-lint` plugin integration
 
 ## Check porting status (reference registry)
 
@@ -34,6 +34,7 @@ checks; the figures cited in their docs are its measured results.
 - [x] PS1004 spread-accessor-in-loop (domain, L2)
 - [x] PS1005 manual-walk-dispatch (domain, L3 — PS1001's domain excluded)
 - [x] PS1006 strided-inner-reduction (L2, generic flat-index shape)
+- [x] PS1007 output-row-restreamed (L3, three-remedy guidance)
 - [x] PS1010 column-walk-slice-of-slices (L2, generic; interchange-profitability + amortization narrowings)
 - [x] PS2001 alloc-in-loop (domain, L2)
 - [x] PS2002 unsized-builder (L1)
@@ -69,11 +70,11 @@ checks; the figures cited in their docs are its measured results.
 
 ### Next up (generic, high value)
 
-- [ ] PS3064 jagged-matrix-allocated-row-by-row (overlaps PS2008; decide split)
+- PS3064: NOT ported — PS2008 covers the shape (ARR[i] = make with invariant length); the ID stays a documented hole
 
 ### Domain checks (need vocabulary)
 
-- [ ] PS1007, PS1009 per-element family (rest)
+- [ ] PS1009 unconverted-dtype-arm (needs dtype-switch vocabulary design)
 - [x] PS3063 + PS3065 serial-nest/serial-loop (fanOutHelpers, L3)
 - [x] PS3034 + PS3059 serial-nest direct/derived writes (fanOutHelpers, L3)
 - [x] PS3060 serial-loop-over-parallel-work (fanOutHelpers, L3)

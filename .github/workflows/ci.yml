@@ -50,6 +50,8 @@ jobs:
         run: |
           go run ./cmd/gendocs
           git diff --exit-code docs/checks/
+      - name: golangci-lint plugin module builds
+        run: cd plugin && go build ./...
 
   selfscan:
     # Dogfood: perfscan must run clean on itself at every level.
