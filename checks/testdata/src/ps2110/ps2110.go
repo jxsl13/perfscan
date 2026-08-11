@@ -1,0 +1,96 @@
+package ps2110
+
+import (
+	"fmt"
+)
+
+// Local defined by a non-empty literal and never reassigned: the []T(nil)
+// form can only diverge from slices.Clone on a non-nil empty source, which
+// is impossible here — fixed.
+func fixNilForm() []int {
+	src := []int{1, 2, 3}
+	return append([]int(nil), src...) // want `append\(\[\]int\(nil\), src\.\.\.\) is a hand-rolled clone; slices\.Clone\(src\) says it directly`
+}
+
+// Local defined by make (never nil) and never reassigned: the []T{} form
+// can only diverge on a nil source — fixed.
+func fixEmptyLitForm() []int {
+	buf := make([]int, 8)
+	return append([]int{}, buf...) // want `append\(\[\]int\{\}, buf\.\.\.\) is a hand-rolled clone; slices\.Clone\(buf\) says it directly`
+}
+
+// Byte element: bytes.Clone is the direct spelling.
+func fixBytes() []byte {
+	raw := []byte{1, 2}
+	return append([]byte(nil), raw...) // want `append\(\[\]byte\(nil\), raw\.\.\.\) is a hand-rolled clone; bytes\.Clone\(raw\) says it directly`
+}
+
+// A parameter can be non-nil empty, where append([]int(nil), s...) yields
+// nil but slices.Clone(s) stays non-nil — reported, no fix.
+func advisoryParamNil(s []int) []int {
+	return append([]int(nil), s...) // want `append\(\[\]int\(nil\), s\.\.\.\) is a hand-rolled clone; slices\.Clone\(s\) says it directly`
+}
+
+// A parameter can be nil, where append([]int{}, s...) yields non-nil but
+// slices.Clone(s) yields nil — reported, no fix.
+func advisoryParamEmpty(s []int) []int {
+	return append([]int{}, s...) // want `append\(\[\]int\{\}, s\.\.\.\) is a hand-rolled clone; slices\.Clone\(s\) says it directly`
+}
+
+type ints []int
+
+// Named source type: slices.Clone(v) returns ints, not []int — the static
+// type of the expression would change. Reported, no fix.
+func advisoryNamed(v ints) []int {
+	return append([]int(nil), v...) // want `append\(\[\]int\(nil\), v\.\.\.\) is a hand-rolled clone; slices\.Clone\(v\) says it directly`
+}
+
+// Reassigned local: nil can reach the clone — reported, no fix.
+func advisoryReassigned(cond bool) []int {
+	src := []int{1}
+	if cond {
+		src = nil
+	}
+	return append([]int{}, src...) // want `append\(\[\]int\{\}, src\.\.\.\) is a hand-rolled clone; slices\.Clone\(src\) says it directly`
+}
+
+// make with a runtime length can be empty — the []T(nil) form stays
+// advisory.
+func advisoryRuntimeLen(n int) []int {
+	buf := make([]int, n)
+	return append([]int(nil), buf...) // want `append\(\[\]int\(nil\), buf\.\.\.\) is a hand-rolled clone; slices\.Clone\(buf\) says it directly`
+}
+
+// The slices package name is shadowed at the call site: the rewrite could
+// not reference the package — reported, no fix.
+func advisoryShadowed() []int {
+	slices := 0
+	_ = slices
+	src := []int{1, 2}
+	return append([]int(nil), src...) // want `append\(\[\]int\(nil\), src\.\.\.\) is a hand-rolled clone; slices\.Clone\(src\) says it directly`
+}
+
+// Appending onto a non-empty destination is not a clone: silent.
+func silentDst(dst, s []int) []int {
+	return append(dst, s...)
+}
+
+// A string spread over []byte(nil) is a conversion idiom, not a slice
+// clone: silent.
+func silentString(s string) []byte {
+	return append([]byte(nil), s...)
+}
+
+// A non-empty literal seed is not a clone: silent.
+func silentSeeded(s []int) []int {
+	return append([]int{0}, s...)
+}
+
+// No spread: silent.
+func silentNoSpread(x int) []int {
+	return append([]int{}, x)
+}
+
+func keepFmt() {
+	fmt.Println("keep the import group non-empty")
+}
