@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/printer"
 	"go/token"
@@ -79,14 +78,14 @@ func runPS2104(pass *analysis.Pass) (any, error) {
 				diag := analysis.Diagnostic{
 					Pos:     block.List[i].Pos(),
 					End:     block.List[i].End(),
-					Message: fmt.Sprintf("%s is filled in the following bounded loop but declared without a size hint; pre-size it with make(map[...]..., bound) — exact for distinct unconditional inserts, an upper bound otherwise", name),
+					Message: name + " is filled in the following bounded loop but declared without a size hint; pre-size it with make(map[...]..., bound) — exact for distinct unconditional inserts, an upper bound otherwise",
 				}
 				if capExpr != "" {
 					var b printerBuf
 					_ = printer.Fprint(&b, token.NewFileSet(), typ)
-					newDecl := fmt.Sprintf("%s := make(%s, %s)", name, b.String(), capExpr)
+					newDecl := name + " := make(" + b.String() + ", " + capExpr + ")"
 					diag.SuggestedFixes = []analysis.SuggestedFix{{
-						Message: fmt.Sprintf("pre-size %s to %s", name, capExpr),
+						Message: "pre-size " + name + " to " + capExpr,
 						TextEdits: []analysis.TextEdit{
 							{Pos: block.List[i].Pos(), End: block.List[i].End(), NewText: []byte(newDecl)},
 						},

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -197,7 +198,7 @@ func warnStarvedChecks(enabled []*lint.Check, cfg config.Config, cfgPath string,
 			}
 		}
 		if len(missing) > 0 {
-			starved = append(starved, fmt.Sprintf("%s (no %s)", c.ID, strings.Join(missing, ", ")))
+			starved = append(starved, c.ID+" (no "+strings.Join(missing, ", ")+")")
 		}
 	}
 	if len(starved) == 0 {
@@ -308,7 +309,7 @@ func dedup(in []Finding) []Finding {
 	seen := map[string]bool{}
 	out := make([]Finding, 0, len(in))
 	for _, f := range in {
-		key := fmt.Sprintf("%s:%d:%d:%s", f.Pos.Filename, f.Pos.Line, f.Pos.Column, f.Check.ID)
+		key := f.Pos.Filename + ":" + strconv.Itoa(f.Pos.Line) + ":" + strconv.Itoa(f.Pos.Column) + ":" + f.Check.ID
 		if seen[key] {
 			continue
 		}

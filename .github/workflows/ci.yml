@@ -48,7 +48,7 @@ jobs:
           install-go: false
 
   selfscan:
-    # Dogfood: perfscan must run clean on itself (L1+L2 findings fail CI).
+    # Dogfood: perfscan must run clean on itself at every level.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,4 +56,4 @@ jobs:
         with:
           go-version: stable
       - name: perfscan on perfscan
-        run: go run ./cmd/perfscan -level 2 ./...
+        run: go run ./cmd/perfscan -level 3 ./...

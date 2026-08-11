@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/printer"
 	"go/token"
@@ -115,7 +114,7 @@ func runPS2006(pass *analysis.Pass) (any, error) {
 					pass.Report(analysis.Diagnostic{
 						Pos:     as.Pos(),
 						End:     as.End(),
-						Message: fmt.Sprintf("%s is reassigned to %s of ITSELF plus a new row inside a loop of per-token step %s — a T-token run moves O(T²) bytes; replace with an amortized row buffer returning a zero-copy prefix view (AUDIT FOR ALIASING FIRST)", exprTextRendered(target), name, fn.Name.Name),
+						Message: exprTextRendered(target) + " is reassigned to " + name + " of ITSELF plus a new row inside a loop of per-token step " + fn.Name.Name + " — a T-token run moves O(T²) bytes; replace with an amortized row buffer returning a zero-copy prefix view (AUDIT FOR ALIASING FIRST)",
 					})
 				}
 				return true

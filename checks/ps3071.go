@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/types"
 
@@ -118,7 +117,7 @@ func checkEscapingBuffer(pass *analysis.Pass, fn *ast.FuncDecl) {
 			pass.Report(analysis.Diagnostic{
 				Pos:     se.Pos(),
 				End:     se.End(),
-				Message: fmt.Sprintf("local array %s sliced into an interface parameter escapes and is heap-allocated on every call; hang the buffer on the receiver (check the type is not used concurrently)", id.Name),
+				Message: "local array " + id.Name + " sliced into an interface parameter escapes and is heap-allocated on every call; hang the buffer on the receiver (check the type is not used concurrently)",
 			})
 		}
 		return true

@@ -44,6 +44,9 @@ figures cited in their docs are goai's measured results.
 - [x] PS2006 quadratic-cache-append (L3)
 - [x] PS2007 build-nxn-use-one-row (L3, derivation-chain tracking)
 - [x] PS3005 indirect-key-comparator (L2)
+- [x] PS4008 serial-dot-matmul (L3)
+- [x] PS5001 loop-invariant-divide (L3, "most findings should be declined")
+- [x] PS5002 symmetric-accumulation (L2)
 - [x] PS3007 set-map-from-slice (L2, with read-only + size-threshold narrowings)
 - [x] PS3066 consecutive-loops-over-one-buffer (L2)
 - [x] PS3071 local-buffer-escapes-per-call (L2)
@@ -59,11 +62,11 @@ figures cited in their docs are goai's measured results.
 - [x] PS2104 map-without-prealloc (L1, auto-fix) — same bound semantics
 - [x] PS3101 invariant-conversion-in-loop (L1)
 - [x] PS4101 loop-copy → copy() (L1, auto-fix)
+- [x] PS2103 sprintf-concat-in-loop (L1)
 
 ### Next up (generic, high value)
 
 - [ ] PS3064 jagged-matrix-allocated-row-by-row (overlaps PS2008; decide split)
-- [ ] PS4008, PS5001, PS5002 (arithmetic/vectorization generic subset)
 
 ### Domain checks (need vocabulary)
 
@@ -74,6 +77,5 @@ figures cited in their docs are goai's measured results.
 
 ### New check ideas (bring benchmarks)
 
-- [ ] `fmt.Sprintf` for pure concatenation in a hot loop (L1)
 - [ ] `time.Now()` in tight loops where coarse time suffices (L2)
 - [ ] defer-in-loop accumulation (L1)

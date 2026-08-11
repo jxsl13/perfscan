@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -91,7 +90,7 @@ func runPS2004(pass *analysis.Pass) (any, error) {
 					pass.Report(analysis.Diagnostic{
 						Pos:     loop.Pos(),
 						End:     as.End(),
-						Message: fmt.Sprintf("%s: make() per iteration of a pointer-method loop, bound to a non-escaping local — per-call scratch reallocated every call; hoist to a reused receiver field (grow-on-demand, zero only if read before written)", id.Name),
+						Message: id.Name + ": make() per iteration of a pointer-method loop, bound to a non-escaping local — per-call scratch reallocated every call; hoist to a reused receiver field (grow-on-demand, zero only if read before written)",
 					})
 				}
 				return true

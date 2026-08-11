@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -91,7 +90,7 @@ func runPS2008(pass *analysis.Pass) (any, error) {
 				pass.Report(analysis.Diagnostic{
 					Pos:     as.Pos(),
 					End:     as.End(),
-					Message: fmt.Sprintf("%s[%s] gets its own make per iteration with a loop-invariant length; one slab plus 3-index views cuts the allocations to one (rows must die together and not be appended to)", arr.Name, loopVar),
+					Message: arr.Name + "[" + loopVar + "] gets its own make per iteration with a loop-invariant length; one slab plus 3-index views cuts the allocations to one (rows must die together and not be appended to)",
 				})
 			}
 			return true

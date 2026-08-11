@@ -46,9 +46,14 @@ func IsLoop(n ast.Node) bool {
 
 // InLoop reports whether the stack contains a for/range loop whose BODY
 // encloses the current node, and returns the innermost such loop. A node in
-// a loop's init/cond/post or range expression is not "in" the loop.
+// a loop's init/cond/post or range expression is not "in" the loop, and a
+// function literal is a boundary: code inside a closure is not lexically on
+// the enclosing loop's iteration path.
 func InLoop(stack []ast.Node) (ast.Node, bool) {
 	for i := len(stack) - 1; i >= 1; i-- {
+		if _, isLit := stack[i-1].(*ast.FuncLit); isLit {
+			return nil, false
+		}
 		if IsLoop(stack[i-1]) {
 			if body := LoopBody(stack[i-1]); body != nil && stack[i] == ast.Node(body) {
 				return stack[i-1], true
@@ -58,9 +63,17 @@ func InLoop(stack []ast.Node) (ast.Node, bool) {
 	return nil, false
 }
 
-// OutermostLoop returns the outermost enclosing loop (by body) on the stack.
+// OutermostLoop returns the outermost enclosing loop (by body) on the
+// stack, honoring the same function-literal boundary as InLoop.
 func OutermostLoop(stack []ast.Node) (ast.Node, bool) {
-	for i := 1; i < len(stack); i++ {
+	boundary := 0
+	for i := len(stack) - 1; i >= 0; i-- {
+		if _, isLit := stack[i].(*ast.FuncLit); isLit {
+			boundary = i + 1
+			break
+		}
+	}
+	for i := boundary + 1; i < len(stack); i++ {
 		if IsLoop(stack[i-1]) {
 			if body := LoopBody(stack[i-1]); body != nil && stack[i] == ast.Node(body) {
 				return stack[i-1], true

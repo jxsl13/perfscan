@@ -7,8 +7,8 @@
 package checks
 
 import (
-	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/jxsl13/perfscan/lint"
@@ -35,11 +35,11 @@ var registry []*lint.Check
 
 func register(c *lint.Check) *lint.Check {
 	if c.Analyzer.Name != c.ID {
-		panic(fmt.Sprintf("check %s: analyzer name %q must equal ID", c.ID, c.Analyzer.Name))
+		panic("check " + c.ID + ": analyzer name " + strconv.Quote(c.Analyzer.Name) + " must equal ID")
 	}
 	for _, existing := range registry {
 		if existing.ID == c.ID {
-			panic(fmt.Sprintf("duplicate check ID %s", c.ID))
+			panic("duplicate check ID " + c.ID)
 		}
 	}
 	registry = append(registry, c)
