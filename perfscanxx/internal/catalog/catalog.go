@@ -192,6 +192,18 @@ var entries = []Entry{
 		Title:  "std::less<T> etc. as a container comparator; the transparent std::less<> enables heterogeneous lookup without temporaries",
 		HasFix: true,
 	},
+	{
+		ID: "PX3013", TidyName: "modernize-use-equals-default",
+		Level: LevelStructured, Category: "moves",
+		Title:  "empty-body special member ({}) instead of = default; the user-provided body makes the type non-trivial and blocks memcpy/trivial-copy optimizations",
+		HasFix: true,
+	},
+	{
+		ID: "PX3014", TidyName: "readability-string-compare",
+		Level: LevelIdiomatic, Category: "strings",
+		Title:  "s.compare(t) == 0 for (in)equality; s == t / s != t is clearer and length-checks first",
+		HasFix: true,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
