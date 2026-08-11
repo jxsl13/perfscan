@@ -16,7 +16,7 @@ of the original reference registry and the planned engine work. PRs welcome — 
 - [x] Baseline/ratchet support (`-baseline` / `-write-baseline`, line-independent identity)
 - [x] golangci-lint module plugin (`plugin/`, maxLevel + vocabulary settings)
 - [x] Docs generated from the registry (`make docs`, CI drift gate)
-- [x] Project vocabulary config (perfscan.json, auto-discovery, starved-check
+- [x] Project vocabulary config (perfscan.yaml, auto-discovery, starved-check
       warnings) — keeps the engine generic while supporting any domain codebase
       given the right configuration
 - [ ] Package-level caching for large repos (staticcheck-style facts/caching)

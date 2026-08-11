@@ -71,12 +71,10 @@ func collect(src []string) []string {
 func main() {}
 `
 
-const corpusVocab = `{
-  "elementAccessors": ["AtF64", "SetF64"],
-  "elementCountMethods": ["Numel"],
-  "allocatorFuncs": ["Zeros"],
-  "fanOutHelpers": ["parallelFor"]
-}
+const corpusVocab = `elementAccessors: [AtF64, SetF64]
+elementCountMethods: [Numel]
+allocatorFuncs: [Zeros]
+fanOutHelpers: [parallelFor]
 `
 
 func runOnCorpus(t *testing.T, withConfig bool) (string, int) {
@@ -91,7 +89,7 @@ func runOnCorpus(t *testing.T, withConfig bool) (string, int) {
 	write("go.mod", corpusGoMod)
 	write("main.go", corpusMain)
 	if withConfig {
-		write("perfscan.json", corpusVocab)
+		write("perfscan.yaml", corpusVocab)
 	}
 
 	wd, err := os.Getwd()

@@ -2,7 +2,7 @@ package checks
 
 // Shared machinery of the PS1xxx per-element-access family. The vocabulary
 // (element accessors, count methods, index decomposers, fast-path helpers)
-// comes from the perfscan.json config — see the config package.
+// comes from the perfscan.yaml config — see the config package.
 
 import (
 	"go/ast"

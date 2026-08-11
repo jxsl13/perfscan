@@ -96,7 +96,13 @@ func reportMapPrealloc(pass *analysis.Pass, block *ast.BlockStmt, j int, bound s
 		if uncond == 0 && cond == 0 {
 			continue
 		}
-		boundWord := bound
+		// The fix rewrites the declaration; the bound's subject must be
+		// in scope there (see PS2101's definesIdent guard).
+		fixBound := bound
+		if definesIdent(block.List[i+1:j], boundSubject(block.List[j])) {
+			fixBound = ""
+		}
+		boundWord := fixBound
 		if boundWord == "" {
 			boundWord = "bound"
 		}
@@ -106,7 +112,7 @@ func reportMapPrealloc(pass *analysis.Pass, block *ast.BlockStmt, j int, bound s
 			End:     block.List[i].End(),
 			Message: name + " is filled in the following bounded loop but declared without a size hint; pre-size it with make(map[...]..., " + capExpr + ") — " + class + " (a hint may over-reserve for repeated keys)",
 		}
-		if bound != "" {
+		if fixBound != "" {
 			var b printerBuf
 			_ = printer.Fprint(&b, token.NewFileSet(), typ)
 			newDecl := name + " := make(" + b.String() + ", " + capExpr + ")"

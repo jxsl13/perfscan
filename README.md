@@ -48,8 +48,8 @@ Record the current findings once, then fail CI only on regressions while
 the backlog is burned down incrementally:
 
 ```bash
-perfscan -baseline perfscan-baseline.json -write-baseline ./...  # accept today's findings
-perfscan -baseline perfscan-baseline.json ./...                  # exit 1 only on NEW findings
+perfscan -baseline perfscan-baseline.yaml -write-baseline ./...  # accept today's findings
+perfscan -baseline perfscan-baseline.yaml ./...                  # exit 1 only on NEW findings
 ```
 
 Baseline identity is line-independent (`{file, check, message}` with
@@ -115,18 +115,17 @@ configuration. **Domain checks** key on a project's own vocabulary — its
 element accessors, allocators, fast-path helpers, vectorized kernels — which
 lives in a JSON config, not in the engine:
 
-```jsonc
-// perfscan.json (auto-discovered up to the module root, or -config file.json)
-{
-  "elementAccessors":  ["AtF64", "SetF64"],
-  "fastPathHelpers":   ["flatF64", "flatF32"],
-  "elementCountMethods": ["Numel"],
-  "allocatorFuncs":    ["New", "Zeros", "Cast"],
-  "perElementVisitors": ["readGen", "fillGen"],
-  "vectorizedSiblingFuncs": ["vexpF32", "vsiluF32"],
-  "fanOutHelpers":     ["parallel.For"],
-  "dtypeMethods":      ["Dtype"]
-}
+```yaml
+# perfscan.yaml (auto-discovered up to the module root, or -config file.yaml;
+# JSON files still parse — YAML is a superset)
+elementAccessors: [AtF64, SetF64]
+fastPathHelpers: [flatF64, flatF32]
+elementCountMethods: [Numel]
+allocatorFuncs: [New, Zeros, Cast]
+perElementVisitors: [readGen, fillGen]
+vectorizedSiblingFuncs: [vexpF32, vsiluF32]
+fanOutHelpers: [parallel.For]
+dtypeMethods: [Dtype]
 ```
 
 Domain checks are **opt-in**: without their vocabulary they are skipped
@@ -183,7 +182,7 @@ linters:
         type: module
         settings:
           maxLevel: 2          # only L1/L2 findings
-          vocabulary:          # optional domain vocabulary (perfscan.json shape)
+          vocabulary:          # optional domain vocabulary (perfscan.yaml shape)
             fanOutHelpers: [parallelFor]
 ```
 

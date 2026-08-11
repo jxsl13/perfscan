@@ -28,7 +28,7 @@ element. Replace the closure with a typed bulk loop over the backing slice,
 or specialize the visitor for the hot dtype.
 
 Domain check: which helpers count as per-element visitors is project
-vocabulary (perElementVisitors in perfscan.json).`,
+vocabulary (perElementVisitors in perfscan.yaml).`,
 		Before: `readGen(t, func(i int, v float64) {
 	sum += v
 })`,

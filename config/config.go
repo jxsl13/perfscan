@@ -5,22 +5,24 @@
 // majority of checks are pure language/stdlib shapes and run on any Go module
 // with no configuration. Domain checks, however, key on a project's own
 // vocabulary — its element accessors, allocators, fast-path helpers and
-// vectorized kernels — which lives in a JSON config, not in the engine.
+// vectorized kernels — which lives in a YAML config, not in the engine.
 //
 // With no config those checks stay silent, and the runner names each starved
 // check in a loud stderr warning: a silent zero from a starved check reads as
 // "no instances", which is the one failure mode that costs whole
 // investigations.
 //
-// Supply a config with -config file.json, or place a perfscan.json /
-// .perfscan.json in the module root (auto-discovered).
+// Supply a config with -config file.yaml, or place a perfscan.yaml /
+// .perfscan.yaml in the module root (auto-discovered). YAML is the config
+// format; JSON files still parse (YAML is a superset).
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Config is the project vocabulary for domain checks. All fields are
@@ -28,52 +30,52 @@ import (
 type Config struct {
 	// ElementAccessors are per-element get/set methods (e.g. AtF64, SetF64)
 	// whose per-call dispatch inside hot loops PS1xxx checks report.
-	ElementAccessors []string `json:"elementAccessors,omitempty"`
+	ElementAccessors []string `json:"elementAccessors,omitempty" yaml:"elementAccessors"`
 
 	// FastPathHelpers are typed fast-path helpers (e.g. flatF64) whose
 	// presence silences a fallback loop. Keep this list COMPLETE: a
 	// comma-ok helper missing from the list makes the per-element checks
 	// report the very fallback the fast path exists to guard.
-	FastPathHelpers []string `json:"fastPathHelpers,omitempty"`
+	FastPathHelpers []string `json:"fastPathHelpers,omitempty" yaml:"fastPathHelpers"`
 
 	// ElementCountMethods are methods whose result used as a loop bound
 	// marks the loop as per-element (e.g. Numel).
-	ElementCountMethods []string `json:"elementCountMethods,omitempty"`
+	ElementCountMethods []string `json:"elementCountMethods,omitempty" yaml:"elementCountMethods"`
 
 	// ShapeMethods return dimension slices; a loop bounded by
 	// t.Shape()[i] walks elements exactly as an element count does.
-	ShapeMethods []string `json:"shapeMethods,omitempty"`
+	ShapeMethods []string `json:"shapeMethods,omitempty" yaml:"shapeMethods"`
 
 	// IndexDecomposeFuncs convert flat indices to multi-indices
 	// (e.g. Unravel); their use marks a per-element loop.
-	IndexDecomposeFuncs []string `json:"indexDecomposeFuncs,omitempty"`
+	IndexDecomposeFuncs []string `json:"indexDecomposeFuncs,omitempty" yaml:"indexDecomposeFuncs"`
 
 	// AllocatorFuncs are allocation entry points (e.g. New, Zeros, Cast)
 	// that PS2001 reports when called inside a per-element loop.
-	AllocatorFuncs []string `json:"allocatorFuncs,omitempty"`
+	AllocatorFuncs []string `json:"allocatorFuncs,omitempty" yaml:"allocatorFuncs"`
 
 	// PerElementVisitors are helpers fed a per-element closure (an
 	// indirect call per element) that PS1002 reports.
-	PerElementVisitors []string `json:"perElementVisitors,omitempty"`
+	PerElementVisitors []string `json:"perElementVisitors,omitempty" yaml:"perElementVisitors"`
 
 	// BulkCopyHelpers are bulk copy routines whose presence silences a
 	// genuine-decode path for PS4001.
-	BulkCopyHelpers []string `json:"bulkCopyHelpers,omitempty"`
+	BulkCopyHelpers []string `json:"bulkCopyHelpers,omitempty" yaml:"bulkCopyHelpers"`
 
 	// VectorizedSiblingFuncs are SIMD kernels that exist beside a scalar
 	// math.X call; PS4002 reports the scalar call when a vectorized
 	// sibling is available.
-	VectorizedSiblingFuncs []string `json:"vectorizedSiblingFuncs,omitempty"`
+	VectorizedSiblingFuncs []string `json:"vectorizedSiblingFuncs,omitempty" yaml:"vectorizedSiblingFuncs"`
 
 	// FanOutHelpers are the project's parallel fan-out entry points
 	// (e.g. parallel.For); PS3xxx serial-nest checks report loops in
 	// packages that declare one but leave a hot nest serial.
-	FanOutHelpers []string `json:"fanOutHelpers,omitempty"`
+	FanOutHelpers []string `json:"fanOutHelpers,omitempty" yaml:"fanOutHelpers"`
 
 	// DtypeMethods are element-type discriminator methods (e.g. Dtype)
 	// whose switch statements PS1009 inspects for named cases left on the
 	// per-element accessor while a sibling case takes typed storage.
-	DtypeMethods []string `json:"dtypeMethods,omitempty"`
+	DtypeMethods []string `json:"dtypeMethods,omitempty" yaml:"dtypeMethods"`
 }
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
@@ -126,14 +128,14 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	if err := json.Unmarshal(b, &c); err != nil {
+	if err := yaml.Unmarshal(b, &c); err != nil {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
 	return c, nil
 }
 
-// Discover walks from dir upward looking for perfscan.json or
-// .perfscan.json, stopping at the first directory containing go.mod (the
+// Discover walks from dir upward looking for perfscan.yaml or
+// .perfscan.yaml, stopping at the first directory containing go.mod (the
 // module root) or the filesystem root. It returns the loaded config and the
 // path it came from, or a zero Config and "" when none exists.
 func Discover(dir string) (Config, string) {
@@ -142,7 +144,9 @@ func Discover(dir string) (Config, string) {
 		return Config{}, ""
 	}
 	for {
-		for _, name := range []string{"perfscan.json", ".perfscan.json"} {
+		// YAML is the config format; JSON names remain readable as a
+		// legacy fallback (YAML is a JSON superset).
+		for _, name := range []string{"perfscan.yaml", "perfscan.yml", ".perfscan.yaml", ".perfscan.yml", "perfscan.yaml", ".perfscan.yaml"} {
 			p := filepath.Join(dir, name)
 			if _, err := os.Stat(p); err == nil {
 				c, err := Load(p)

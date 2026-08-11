@@ -115,3 +115,17 @@ func twoTargets(src map[string]int) ([]string, []int) {
 	}
 	return keys, vals
 }
+
+// The bound's subject is defined AFTER the declaration: the advisory
+// stays, but no fix may reference b at the declaration site (found by
+// auto-fixing a real-world codebase).
+func indentString(s string) []byte {
+	var res []byte // want `res is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, bound\) — an upper bound: all appends are conditional`
+	b := []byte(s)
+	for _, c := range b {
+		if c != 0 {
+			res = append(res, c)
+		}
+	}
+	return res
+}

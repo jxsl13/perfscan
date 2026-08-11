@@ -1,12 +1,13 @@
 package runner
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Baseline support ("ratchet"): a baseline file records the accepted
@@ -22,17 +23,17 @@ import (
 
 type baselineFile struct {
 	// Version guards the format for future changes.
-	Version int `json:"version"`
+	Version int `json:"version" yaml:"version"`
 	// Entries maps "file\x00id\x00message" → accepted count. Serialized
 	// as a sorted list for stable diffs.
-	Entries []baselineEntry `json:"entries"`
+	Entries []baselineEntry `json:"entries" yaml:"entries"`
 }
 
 type baselineEntry struct {
-	File    string `json:"file"`
-	ID      string `json:"id"`
-	Message string `json:"message"`
-	Count   int    `json:"count"`
+	File    string `json:"file" yaml:"file"`
+	ID      string `json:"id" yaml:"id"`
+	Message string `json:"message" yaml:"message"`
+	Count   int    `json:"count" yaml:"count"`
 }
 
 func baselineKey(f Finding) string {
@@ -68,7 +69,7 @@ func writeBaseline(path string, findings []Finding) error {
 		}
 		return strings.Compare(a.Message, b.Message)
 	})
-	b, err := json.MarshalIndent(baselineFile{Version: 1, Entries: entries}, "", "  ")
+	b, err := yaml.Marshal(baselineFile{Version: 1, Entries: entries})
 	if err != nil {
 		return err
 	}
@@ -77,7 +78,7 @@ func writeBaseline(path string, findings []Finding) error {
 			return err
 		}
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return os.WriteFile(path, b, 0o644)
 }
 
 // applyBaseline drops findings covered by the baseline, consuming counts.
@@ -88,7 +89,7 @@ func applyBaseline(path string, findings []Finding) ([]Finding, int, error) {
 		return findings, 0, err
 	}
 	var bf baselineFile
-	if err := json.Unmarshal(raw, &bf); err != nil {
+	if err := yaml.Unmarshal(raw, &bf); err != nil {
 		return findings, 0, fmt.Errorf("%s: %w", path, err)
 	}
 	if bf.Version != 1 {

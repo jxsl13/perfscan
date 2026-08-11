@@ -46,7 +46,7 @@ type Settings struct {
 	// (1=idiomatic, 2=structured, 3=aggressive). Default 3.
 	MaxLevel int `json:"maxLevel"`
 	// Vocabulary is the project vocabulary for domain checks — the same
-	// shape as perfscan.json.
+	// shape as perfscan.yaml.
 	Vocabulary config.Config `json:"vocabulary"`
 }
 

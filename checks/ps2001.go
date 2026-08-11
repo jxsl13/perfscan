@@ -12,7 +12,7 @@ import (
 )
 
 // PS2001 reports calls to project allocator functions inside loops. Domain
-// check: the allocator vocabulary comes from the perfscan.json config
+// check: the allocator vocabulary comes from the perfscan.yaml config
 // (allocatorFuncs); with an empty vocabulary the check stays silent and the
 // runner warns.
 var PS2001 = register(&lint.Check{
@@ -29,7 +29,7 @@ per-item loop allocates and initializes a fresh object every iteration.
 Hoist the allocation and reuse the buffer, or take scratch from a pool.
 
 Domain check: which functions count as allocators is project vocabulary,
-supplied via the allocatorFuncs list in perfscan.json.`,
+supplied via the allocatorFuncs list in perfscan.yaml.`,
 		Before: `for i := range batches {
 	tmp := tensor.Zeros(tensor.F64, n)
 	process(batches[i], tmp)

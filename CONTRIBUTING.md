@@ -54,7 +54,7 @@ make test
   suppressions (the reference registry documents several hard-won ones).
 - **Domain vocabulary lives in config, not code.** The engine must run on
   any Go module with zero configuration; anything project-specific
-  (accessors, allocators, fan-out helpers) comes from `perfscan.json`.
+  (accessors, allocators, fan-out helpers) comes from `perfscan.yaml`.
 - **Starved checks must be loud.** A domain check with no vocabulary stays
   silent and the runner warns — never let a silent zero read as "no
   instances".

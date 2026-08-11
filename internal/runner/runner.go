@@ -109,7 +109,7 @@ func Run(checks []*lint.Check, opts Options) int {
 		}
 		kept = append(kept, c)
 		if len(missing) > 0 && explicit[c.ID] {
-			src := "no perfscan.json found"
+			src := "no perfscan.yaml found"
 			if cfgPath != "" {
 				src = "config " + cfgPath
 			}
@@ -309,8 +309,8 @@ func matchCheck(id, pat string) bool {
 	if pat == "all" {
 		return true
 	}
-	if strings.HasSuffix(pat, "*") {
-		return strings.HasPrefix(id, strings.TrimSuffix(pat, "*"))
+	if prefix, ok := strings.CutSuffix(pat, "*"); ok {
+		return strings.HasPrefix(id, prefix)
 	}
 	return id == pat
 }
@@ -396,11 +396,11 @@ func filterIgnored(findings []Finding) []Finding {
 			return false
 		}
 		text := l[line-1]
-		i := strings.Index(text, "//perfscan:ignore")
-		if i < 0 {
+		_, after, found := strings.Cut(text, "//perfscan:ignore")
+		if !found {
 			return false
 		}
-		rest := strings.TrimSpace(text[i+len("//perfscan:ignore"):])
+		rest := strings.TrimSpace(after)
 		if rest == "" {
 			return true
 		}

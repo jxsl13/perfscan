@@ -100,13 +100,76 @@ func runPS2101(pass *analysis.Pass) (any, error) {
 					if uncond == 0 && cond == 0 && !unknown {
 						continue
 					}
-					reportPrealloc(pass, block.List[i], name, typ, bound, uncond, cond, unknown)
+					// The fix rewrites the DECLARATION, so the bound's
+					// subject must already be in scope there — a source
+					// defined between the declaration and the loop
+					// (b := []byte(s)) would leave the fix referencing
+					// an undefined name. Advisory only in that case.
+					fixBound := bound
+					if definesIdent(block.List[i+1:j], boundSubject(stmt)) {
+						fixBound = ""
+					}
+					reportPrealloc(pass, block.List[i], name, typ, fixBound, uncond, cond, unknown)
 				}
 			}
 			return true
 		})
 	}
 	return nil, nil
+}
+
+// boundSubject returns the root identifier of a loop's bound source: the
+// range subject's root, or the counted-loop bound's root.
+func boundSubject(s ast.Stmt) string {
+	switch l := s.(type) {
+	case *ast.RangeStmt:
+		return rootIdentName(l.X)
+	case *ast.ForStmt:
+		if cond, ok := l.Cond.(*ast.BinaryExpr); ok {
+			switch b := cond.Y.(type) {
+			case *ast.Ident, *ast.SelectorExpr:
+				return rootIdentName(cond.Y)
+			case *ast.CallExpr:
+				if len(b.Args) == 1 {
+					return rootIdentName(b.Args[0])
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// definesIdent reports whether any of the statements DEFINES name (:=, or
+// a var declaration) — i.e. the name is not in scope before them.
+func definesIdent(stmts []ast.Stmt, name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, s := range stmts {
+		switch st := s.(type) {
+		case *ast.AssignStmt:
+			if st.Tok == token.DEFINE {
+				for _, lhs := range st.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok && id.Name == name {
+						return true
+					}
+				}
+			}
+		case *ast.DeclStmt:
+			if gd, ok := st.Decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+				for _, spec := range gd.Specs {
+					if vs, ok := spec.(*ast.ValueSpec); ok {
+						for _, n := range vs.Names {
+							if n.Name == name {
+								return true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // stmtsMention reports whether any of the statements references name.

@@ -40,7 +40,7 @@ func main() {
 		jsonOut    = flag.Bool("json", false, "emit findings as JSON")
 		sarifOut   = flag.Bool("sarif", false, "emit findings as SARIF 2.1.0 (GitHub Code Scanning)")
 		tests      = flag.Bool("tests", false, "also scan _test.go files")
-		configPath = flag.String("config", "", "path to perfscan.json (default: auto-discover up to the module root)")
+		configPath = flag.String("config", "", "path to perfscan.yaml (default: auto-discover up to the module root; JSON still parses)")
 		exitZero   = flag.Bool("exit-zero", false, "always exit 0, even with findings")
 		baseline   = flag.String("baseline", "", "baseline file: suppress findings recorded in it (ratchet mode)")
 		writeBase  = flag.Bool("write-baseline", false, "write current findings to -baseline and exit 0")
@@ -94,8 +94,8 @@ Examples:
 	perfscan -checks all,-PS3003 ./...   everything except one check
 	perfscan -fix ./...                  apply L1 (idiomatic) auto-fixes
 	perfscan -fix -fix-level 2 ./...     also apply L2 (structured) fixes
-	perfscan -baseline b.json -write-baseline ./...   accept today's findings
-	perfscan -baseline b.json ./...      then fail only on NEW findings
+	perfscan -baseline b.yaml -write-baseline ./...   accept today's findings
+	perfscan -baseline b.yaml ./...      then fail only on NEW findings
 	perfscan -list                       the check table
 	perfscan -explain PS2005             one check's full documentation
 
@@ -112,7 +112,7 @@ Generic vs. domain checks:
 
 	DOMAIN checks are OPT-IN: they key on your project's vocabulary
 	(element accessors, allocators, fan-out helpers, …) and activate only
-	when a perfscan.json / .perfscan.json (auto-discovered up to the
+	when a perfscan.yaml / .perfscan.yaml (auto-discovered up to the
 	module root, or passed via -config) supplies the fields listed in the
 	CONFIG column of 'perfscan -list'. Without that vocabulary they are
 	skipped silently; naming one explicitly (-checks PS1001) without its
@@ -143,7 +143,7 @@ func printList() {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", c.ID, c.Category, c.Level, fix, cfg, c.Doc.Title)
 	}
 	w.Flush()
-	fmt.Println("\nChecks with a CONFIG column are domain checks: OPT-IN, active only when\nperfscan.json supplies that vocabulary (see perfscan -h).")
+	fmt.Println("\nChecks with a CONFIG column are domain checks: OPT-IN, active only when\nperfscan.yaml supplies that vocabulary (see perfscan -h).")
 }
 
 func printExplain(id string) {
@@ -162,7 +162,7 @@ func printExplain(id string) {
 		fmt.Printf("\nMeasured: %s\n", c.Doc.MeasuredWin)
 	}
 	if c.NeedsConfig {
-		fmt.Printf("\nDomain check: requires vocabulary %s in perfscan.json.\n", strings.Join(c.Vocab, ", "))
+		fmt.Printf("\nDomain check: requires vocabulary %s in perfscan.yaml.\n", strings.Join(c.Vocab, ", "))
 	}
 }
 

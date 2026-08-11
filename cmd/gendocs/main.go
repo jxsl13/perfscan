@@ -66,7 +66,7 @@ func writeCheckPage(dir string, c *lint.Check) error {
 		b.WriteString("- Auto-fix: no (advisory)\n")
 	}
 	if c.NeedsConfig {
-		fmt.Fprintf(&b, "- Domain check: requires vocabulary `%s` in perfscan.json\n", strings.Join(c.Vocab, "`, `"))
+		fmt.Fprintf(&b, "- Domain check: requires vocabulary `%s` in perfscan.yaml\n", strings.Join(c.Vocab, "`, `"))
 	}
 	b.WriteString("\n")
 	b.WriteString(strings.TrimSpace(c.Doc.Text))

@@ -98,7 +98,7 @@ type Check struct {
 	AutoFix bool
 
 	// NeedsConfig marks domain checks whose vocabulary (element accessors,
-	// allocators, fan-out helpers, …) comes from a perfscan.json config.
+	// allocators, fan-out helpers, …) comes from a perfscan.yaml config.
 	// With no vocabulary the check stays silent — and the runner says so
 	// loudly, because a silent zero from a starved check reads as "no
 	// instances".
