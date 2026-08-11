@@ -168,6 +168,18 @@ var entries = []Entry{
 		Title:  "size() == 0 to test emptiness; empty() is guaranteed O(1) (size() can be O(n), e.g. std::list)",
 		HasFix: true,
 	},
+	{
+		ID: "PX3009", TidyName: "readability-redundant-string-cstr",
+		Level: LevelIdiomatic, Category: "strings",
+		Title:  "s.c_str() where a std::string is expected reconstructs a string (strlen + copy); pass s directly",
+		HasFix: true,
+	},
+	{
+		ID: "PX3010", TidyName: "readability-container-contains",
+		Level: LevelIdiomatic, Category: "containers",
+		Title:  "count()/find() != end() membership test; .contains() is clearer and never over-counts (C++20)",
+		HasFix: true,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
