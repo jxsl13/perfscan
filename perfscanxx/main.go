@@ -70,6 +70,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var (
 		fix        = fs.Bool("fix", false, "apply the fix-its of every reported check; -level gates both reporting and fixing (e.g. -level 1 -fix applies only idiomatic fixes)")
 		list       = fs.Bool("list", false, "list all checks and exit")
+		fixable    = fs.Bool("fixable", false, "with -list: show only checks that carry an auto-fix (-fix applies them)")
 		explain    = fs.String("explain", "", "print the documentation of a check (e.g. PX1001) and exit")
 		sel        = fs.String("checks", "all", "comma-separated check selector: all, PX1001, PX1*, -PX3003, performance-avoid-endl")
 		maxLevel   = fs.Int("level", 3, "report only checks whose fix level is <= N (1=idiomatic, 2=structured, 3=aggressive)")
@@ -93,7 +94,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if *list {
-		printList(stdout)
+		printList(stdout, *fixable)
 		return 0
 	}
 	if *explain != "" {
@@ -385,7 +386,8 @@ Examples:
 	perfscanxx -p build src/main.cpp     a single translation unit
 	perfscanxx -cmake ./...              auto-configure a CMake project (generate compile_commands.json)
 	perfscanxx -cmake-build ./...        also build it to generate build-time headers
-	perfscanxx -list                     the check table
+	perfscanxx -list                     the check table (with an auto-fix coverage summary)
+	perfscanxx -list -fixable            only the auto-fixable checks
 	perfscanxx -explain PX1001           one check's documentation
 
 Fix levels (the maintainability cost of a check's remedy):
@@ -406,10 +408,18 @@ Flags:
 	fs.PrintDefaults()
 }
 
-func printList(w io.Writer) {
+func printList(w io.Writer, fixableOnly bool) {
 	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tLEVEL\tFIX\tCATEGORY\tCLANG-TIDY CHECK\tTITLE")
+	total, fixable := 0, 0
 	for _, e := range catalog.All() {
+		total++
+		if e.HasFix {
+			fixable++
+		}
+		if fixableOnly && !e.HasFix {
+			continue
+		}
 		fixMark := ""
 		if e.HasFix {
 			fixMark = "yes"
@@ -418,6 +428,11 @@ func printList(w io.Writer) {
 			e.ID, e.Level, fixMark, e.Category, e.TidyName, e.Title)
 	}
 	tw.Flush()
+	if fixableOnly {
+		fmt.Fprintf(w, "\n%d auto-fixable check(s) of %d total (the rest are advisory: no clang-tidy fix-it).\n", fixable, total)
+	} else {
+		fmt.Fprintf(w, "\n%d checks — %d auto-fixable (-fix applies them), %d advisory. Use -fixable to list only the auto-fixable ones.\n", total, fixable, total-fixable)
+	}
 }
 
 func printExplain(stdout, stderr io.Writer, id string) int {
