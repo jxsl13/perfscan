@@ -49,6 +49,14 @@ func TestPS5001(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS5001.Analyzer, "ps5001")
 }
 
+func TestPS5008(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), PS5008.Analyzer, "ps5008")
+}
+
+func TestPS6010(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), PS6010.Analyzer, "ps6010")
+}
+
 func TestPS5002(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS5002.Analyzer, "ps5002")
 }

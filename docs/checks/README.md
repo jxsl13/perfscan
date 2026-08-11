@@ -52,4 +52,6 @@ Every check has a stable PS-prefixed ID and a fix level:
 | [PS4101](PS4101.md) | vector | L1 | yes | an element-copy loop replaceable by the copy builtin |
 | [PS5001](PS5001.md) | arith | L3 |  | a divide by a loop-invariant scalar on every element |
 | [PS5002](PS5002.md) | arith | L2 |  | a nested loop accumulating a full symmetric matrix |
+| [PS5008](PS5008.md) | arith | L1 |  | math.Sin and math.Cos on the same argument (fusable to math.Sincos) |
 | [PS6004](PS6004.md) | verify | L2 |  | a fast-path/fallback dual path whose bit-identity claim needs coverage on both arms |
+| [PS6010](PS6010.md) | verify | L3 |  | an accumulator loop re-reading an operand invariant in the output index |

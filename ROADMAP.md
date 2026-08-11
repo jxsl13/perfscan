@@ -52,6 +52,8 @@ checks; the figures cited in their docs are its measured results.
 - [x] PS4008 serial-dot-matmul (L3)
 - [x] PS5001 loop-invariant-divide (L3, "most findings should be declined")
 - [x] PS5002 symmetric-accumulation (L2)
+- [x] PS5008 sincos-fusable (L1, bit-identical fusion)
+- [x] PS6010 output-invariant-operand-reload (L3, unroll-and-jam)
 - [x] PS3007 set-map-from-slice (L2, with read-only + size-threshold narrowings)
 - [x] PS3066 consecutive-loops-over-one-buffer (L2)
 - [x] PS3071 local-buffer-escapes-per-call (L2)
@@ -76,7 +78,15 @@ checks; the figures cited in their docs are its measured results.
 
 ### Next up (generic, high value)
 
-- PS3064: NOT ported — PS2008 covers the shape (ARR[i] = make with invariant length); the ID stays a documented hole
+
+### Not ported (documented holes — IDs stay reserved)
+
+- PS3064 jagged-matrix-row-by-row: PS2008 covers the shape
+- PS6009 reflect-swapper-sort: PS3002 covers the shape (slices.SortFunc advice)
+- PS6011 strided-inner-walk: PS1006 (flat strided reduction) and PS1010
+  (slice-of-slices column walk) cover the main shapes
+- PS7004 per-dispatch-invariant-upload: cgo/device-specific; revisit if an
+  uploadFuncs vocabulary field earns its keep
 
 ### Domain checks (need vocabulary)
 
