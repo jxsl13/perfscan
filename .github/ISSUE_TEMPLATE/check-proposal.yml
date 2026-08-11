@@ -1,0 +1,61 @@
+name: New check proposal
+description: Propose a new performance check. perfscan checks are benchmark-verified patterns, not lint folklore.
+title: "[check] <slug>: <one-line anti-pattern>"
+labels: ["check-proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Please read [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) first —
+        the bar for a new check is a **measured win**, a positive + negative
+        fixture, and a stable ID.
+  - type: textarea
+    id: pattern
+    attributes:
+      label: The anti-pattern
+      description: What shape does the check detect? Show a minimal code example.
+      render: go
+    validations:
+      required: true
+  - type: textarea
+    id: remedy
+    attributes:
+      label: The remedy
+      description: The rewrite, and its preconditions (aliasing, bit-identity, lifetimes…).
+      render: go
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Measured evidence
+      description: |
+        Benchmark numbers justifying the check (benchstat output preferred:
+        before/after, p-values, sample counts). "It should be faster" is not
+        evidence.
+    validations:
+      required: true
+  - type: dropdown
+    id: level
+    attributes:
+      label: Proposed fix level
+      options:
+        - "L1 — idiomatic (mechanical, bit-identical)"
+        - "L2 — structured (restructures code, review expected)"
+        - "L3 — aggressive (hyper-optimization, benchmark-gated advisory)"
+    validations:
+      required: true
+  - type: dropdown
+    id: domain
+    attributes:
+      label: Scope
+      options:
+        - "Generic — any Go module, no configuration"
+        - "Domain — needs perfscan.json vocabulary (say which fields below)"
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Known false-positive shapes / narrowings
+      description: Which benign code shapes must stay silent, and how?

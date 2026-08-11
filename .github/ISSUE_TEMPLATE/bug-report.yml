@@ -1,0 +1,25 @@
+name: Bug report
+description: Crashes, wrong fixes, broken output formats.
+title: "[bug] <short description>"
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Command line, minimal input, expected vs. actual.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: perfscan version + Go version + OS
+      placeholder: v0.3.0, go1.26, darwin/arm64
+    validations:
+      required: true

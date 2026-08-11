@@ -73,7 +73,7 @@ figures cited in their docs are goai's measured results.
 - [ ] PS1004, PS1006–PS1010 per-element family (rest)
 - [x] PS3063 + PS3065 serial-nest/serial-loop (fanOutHelpers, L3)
 - [x] PS3034 + PS3059 serial-nest direct/derived writes (fanOutHelpers, L3)
-- [ ] PS3060 serial-loop-over-parallel-work
+- [x] PS3060 serial-loop-over-parallel-work (fanOutHelpers, L3)
 - [ ] PS4001 bulk-copy, PS4002 scalar-transcendental-vectorizable
 - [ ] PS6004 unverified-dual-path
 

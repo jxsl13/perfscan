@@ -1,0 +1,35 @@
+name: False positive
+description: A check fired on code where the advice does not apply.
+title: "[fp] PSxxxx: <short description>"
+labels: ["false-positive"]
+body:
+  - type: input
+    id: check
+    attributes:
+      label: Check ID
+      placeholder: PS2101
+    validations:
+      required: true
+  - type: textarea
+    id: code
+    attributes:
+      label: Minimal reproducing code
+      description: Small self-contained snippet the check fires on.
+      render: go
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why the advice does not apply here
+      description: |
+        Precision beats recall in perfscan: a check that cries wolf gets
+        disabled. Explain the property that makes this site benign — that
+        property is usually exactly the narrowing the check needs.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: perfscan version
+      placeholder: v0.3.0
