@@ -1,10 +1,26 @@
 package compdb
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+// writeDB marshals entries to compile_commands.json under dir (json.Marshal
+// escapes Windows backslashes correctly, unlike string concatenation).
+func writeDB(t *testing.T, dir string, entries []map[string]string) string {
+	t.Helper()
+	data, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, Name)
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
 
 func TestFindAndLoad(t *testing.T) {
 	dir := t.TempDir()
@@ -12,23 +28,18 @@ func TestFindAndLoad(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	db := filepath.Join(dir, Name)
-	os.WriteFile(db, []byte(`[
-	  {"directory":"`+dir+`","file":"x.cpp"},
-	  {"directory":"`+dir+`","file":"`+filepath.Join(dir, "y.cpp")+`"},
-	  {"directory":"`+dir+`","file":"x.cpp"}
-	]`), 0o644)
+	db := writeDB(t, dir, []map[string]string{
+		{"directory": dir, "file": "x.cpp"},                     // relative -> resolved
+		{"directory": dir, "file": filepath.Join(dir, "y.cpp")}, // absolute
+		{"directory": dir, "file": "x.cpp"},                     // duplicate
+	})
 
-	// Find walks up from a nested start.
-	got, err := Find("", sub)
-	if err != nil || got != db {
+	if got, err := Find("", sub); err != nil || got != db {
 		t.Fatalf("Find=%q,%v want %q", got, err, db)
 	}
-	// -p takes precedence.
-	if got, err := Find(dir, "/nowhere"); err != nil || got != db {
+	if got, err := Find(dir, filepath.Join(dir, "nowhere")); err != nil || got != db {
 		t.Fatalf("Find(-p)=%q,%v want %q", got, err, db)
 	}
-	// Load resolves + dedups + absolutizes.
 	tus, err := Load(db)
 	if err != nil {
 		t.Fatal(err)
