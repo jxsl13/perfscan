@@ -1,0 +1,9 @@
+package ps3104
+
+import "sort"
+
+// A single non-parenthesized import declaration whose only user is the
+// rewritten call: the whole spec is swapped for "slices" in place.
+func single(ys []string) {
+	sort.Strings(ys) // want `sort\.Strings is the legacy spelling of slices\.Sort \(an interface-dispatch sort on go1\.21, a one-line wrapper since go1\.22\); slices\.Sort sorts the concrete \[\]string directly with the identical ascending order`
+}

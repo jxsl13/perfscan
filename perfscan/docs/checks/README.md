@@ -65,6 +65,7 @@ checks' fixes.
 | [PS3101](PS3101.md) | indirect | L1 | yes | a loop-invariant string↔[]byte conversion inside a loop |
 | [PS3102](PS3102.md) | indirect | L1 | yes | deleting every key in a range loop is O(n) with rehashing; clear(m) is the direct idiom |
 | [PS3103](PS3103.md) | indirect | L2 |  | ranging by value over large elements copies each one |
+| [PS3104](PS3104.md) | indirect | L1 | yes | sort.Ints/sort.Strings are the legacy spelling of slices.Sort; call the generic sort directly |
 | [PS4001](PS4001.md) | vector | L2 |  | a per-element binary decode (encoding/binary) in a loop |
 | [PS4002](PS4002.md) | vector | L3 |  | a scalar math transcendental in a loop beside a vectorized sibling kernel |
 | [PS4008](PS4008.md) | vector | L3 | yes | a matmul whose innermost loop is a serial scalar dot accumulator |
