@@ -2,7 +2,28 @@ package checks
 
 import (
 	"go/ast"
+	"go/types"
+
+	"golang.org/x/tools/go/analysis"
 )
+
+// pkgRefCount counts identifiers in file that resolve to the named
+// package import — the guard fixes use to avoid orphaning an import by
+// rewriting a file's last reference to it.
+func pkgRefCount(pass *analysis.Pass, file *ast.File, path string) int {
+	n := 0
+	ast.Inspect(file, func(node ast.Node) bool {
+		id, ok := node.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if pn, ok := pass.TypesInfo.Uses[id].(*types.PkgName); ok && pn.Imported().Path() == path {
+			n++
+		}
+		return true
+	})
+	return n
+}
 
 // baseIdentName returns the root identifier name of x, x.f, x[i], (x), &x.
 func baseIdentName(e ast.Expr) string {

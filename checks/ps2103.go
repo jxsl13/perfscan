@@ -60,6 +60,15 @@ var simpleVerbFormat = regexp.MustCompile(`^(?:[^%]|%[sdv])*$`)
 
 func runPS2103(pass *analysis.Pass) (any, error) {
 	for _, f := range pass.Files {
+		// Collect first: fixes are suppressed when applying all of them
+		// would rewrite the file's last fmt reference and orphan the
+		// import (the runner never prunes imports).
+		type site struct {
+			call *ast.CallExpr
+			fix  *analysis.SuggestedFix
+		}
+		var sites []site
+		fixable := 0
 		astutil.WithStack(f, func(n ast.Node, stack []ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok || len(call.Args) < 2 {
@@ -79,17 +88,25 @@ func runPS2103(pass *analysis.Pass) (any, error) {
 			if _, inLoop := astutil.InLoop(stack); !inLoop {
 				return true
 			}
-			diag := analysis.Diagnostic{
-				Pos:     call.Pos(),
-				End:     call.End(),
-				Message: "fmt.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead",
+			fix := sprintfConcatFix(pass, stack, call, lit)
+			if fix != nil {
+				fixable++
 			}
-			if fix := sprintfConcatFix(pass, stack, call, lit); fix != nil {
-				diag.SuggestedFixes = []analysis.SuggestedFix{*fix}
-			}
-			pass.Report(diag)
+			sites = append(sites, site{call, fix})
 			return true
 		})
+		emitFixes := fixable > 0 && pkgRefCount(pass, f, "fmt") > fixable
+		for _, st := range sites {
+			diag := analysis.Diagnostic{
+				Pos:     st.call.Pos(),
+				End:     st.call.End(),
+				Message: "fmt.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead",
+			}
+			if emitFixes && st.fix != nil {
+				diag.SuggestedFixes = []analysis.SuggestedFix{*st.fix}
+			}
+			pass.Report(diag)
+		}
 	}
 	return nil, nil
 }

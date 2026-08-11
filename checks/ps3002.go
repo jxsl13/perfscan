@@ -55,6 +55,17 @@ var sortSliceFuncs = map[string]bool{
 
 func runPS3002(pass *analysis.Pass) (any, error) {
 	for _, f := range pass.Files {
+		// Two passes per file: collect first, so the fixes can be
+		// suppressed when applying ALL of them would rewrite the file's
+		// last sort.* reference and orphan the import (the runner never
+		// prunes imports; same guard as PS3077's math handling).
+		type site struct {
+			call *ast.CallExpr
+			name string
+			fix  *analysis.SuggestedFix
+		}
+		var sites []site
+		fixable := 0
 		ast.Inspect(f, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -64,17 +75,28 @@ func runPS3002(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			diag := analysis.Diagnostic{
-				Pos:     call.Pos(),
-				End:     call.End(),
-				Message: "sort." + name + " swaps through reflection and calls its comparator indirectly; slices.SortFunc sorts the concrete type directly",
+			fix := sortFuncFix(pass, call, name)
+			if fix != nil {
+				fixable++
 			}
-			if fix := sortFuncFix(pass, call, name); fix != nil {
-				diag.SuggestedFixes = []analysis.SuggestedFix{*fix}
-			}
-			pass.Report(diag)
+			sites = append(sites, site{call, name, fix})
 			return true
 		})
+		// Each fixable call holds exactly one sort reference (its
+		// selector); if those are ALL of the file's sort references, the
+		// fixes would orphan the import — advisory only then.
+		emitFixes := fixable > 0 && pkgRefCount(pass, f, "sort") > fixable
+		for _, st := range sites {
+			diag := analysis.Diagnostic{
+				Pos:     st.call.Pos(),
+				End:     st.call.End(),
+				Message: "sort." + st.name + " swaps through reflection and calls its comparator indirectly; slices.SortFunc sorts the concrete type directly",
+			}
+			if emitFixes && st.fix != nil {
+				diag.SuggestedFixes = []analysis.SuggestedFix{*st.fix}
+			}
+			pass.Report(diag)
+		}
 	}
 	return nil, nil
 }

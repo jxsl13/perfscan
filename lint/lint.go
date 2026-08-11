@@ -9,8 +9,8 @@
 //
 // Performance fixes differ wildly in how much maintainability they cost.
 // perfscan makes that cost explicit: every check carries a Level describing
-// the character of its remedy, and `perfscan -fix[=N]` only applies fixes
-// whose level is at or below the requested level (bare -fix means N=1).
+// the character of its remedy; one -level knob gates both reporting and
+// fixing, so `perfscan -fix` applies exactly the reported checks' fixes.
 //
 //   - LevelIdiomatic (L1): the fix is idiomatic Go a reviewer waves through —
 //     hoisting a regexp.MustCompile out of a loop, pre-sizing a builder or

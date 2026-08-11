@@ -8,8 +8,8 @@
 //
 //	perfscan ./...                     report all findings
 //	perfscan -checks PS2* ./...        only allocation checks
-//	perfscan -fix ./...                apply L1 (idiomatic) fixes
-//	perfscan -fix=2 ./...              also apply L2 (structured) fixes
+//	perfscan -level 1 -fix ./...       apply only L1 (idiomatic) fixes
+//	perfscan -fix ./...                apply every available fix (-level gates)
 //	perfscan -json ./...               machine-readable output
 //	perfscan -list                     print the check table
 //	perfscan -explain PS2005           print a check's documentation
@@ -19,7 +19,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -31,9 +30,8 @@ import (
 var version = "dev" // set by goreleaser
 
 func main() {
-	var fix fixFlag
-	flag.Var(&fix, "fix", "apply auto-fixes: -fix (L1 idiomatic only), -fix=2 (also L2 structured), -fix=3 (also L3 aggressive)")
 	var (
+		fix        = flag.Bool("fix", false, "apply the auto-fixes of every reported check; -level gates both reporting and fixing (e.g. -level 1 -fix applies only idiomatic fixes)")
 		list       = flag.Bool("list", false, "list all checks and exit")
 		explain    = flag.String("explain", "", "print the documentation of a check (e.g. PS2005) and exit")
 		sel        = flag.String("checks", "all", "comma-separated check selector: all, PS2005, PS2*, -PS3003")
@@ -69,8 +67,7 @@ func main() {
 		Checks:        *sel,
 		MaxLevel:      lint.Level(*maxLevel),
 		Tests:         *tests,
-		Fix:           fix.level > 0,
-		FixLevel:      lint.Level(max(int(fix.level), 1)),
+		Fix:           *fix,
 		JSON:          *jsonOut,
 		SARIF:         *sarifOut,
 		ConfigPath:    *configPath,
@@ -79,38 +76,6 @@ func main() {
 		WriteBaseline: *writeBase,
 	})
 	os.Exit(code)
-}
-
-// fixFlag is the -fix flag: absent = off, bare -fix = level 1 (idiomatic
-// fixes only), -fix=2 / -fix=3 raise the applied fix level.
-type fixFlag struct {
-	level int
-}
-
-func (f *fixFlag) String() string {
-	if f == nil || f.level == 0 {
-		return "false"
-	}
-	return strconv.Itoa(f.level)
-}
-
-func (f *fixFlag) IsBoolFlag() bool { return true }
-
-func (f *fixFlag) Set(s string) error {
-	switch s {
-	case "true":
-		f.level = 1
-		return nil
-	case "false":
-		f.level = 0
-		return nil
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 1 || n > 3 {
-		return fmt.Errorf("want -fix, -fix=2 or -fix=3, got -fix=%s", s)
-	}
-	f.level = n
-	return nil
 }
 
 func printUsage() {
@@ -125,9 +90,9 @@ Examples:
 	perfscan ./...                       report all applicable findings
 	perfscan -checks PS2* ./...          only allocation checks
 	perfscan -checks all,-PS3003 ./...   everything except one check
-	perfscan -fix ./...                  apply L1 (idiomatic) auto-fixes
-	perfscan -fix=2 ./...                also apply L2 (structured) fixes
-	perfscan -fix=3 ./...                also apply L3 (aggressive) fixes
+	perfscan -level 1 -fix ./...         report + apply only L1 (idiomatic) fixes
+	perfscan -level 2 -fix ./...         report + apply L1 and L2 fixes
+	perfscan -fix ./...                  default -level 3: apply every available fix
 	perfscan -baseline b.yaml -write-baseline ./...   accept today's findings
 	perfscan -baseline b.yaml ./...      then fail only on NEW findings
 	perfscan -list                       the check table
@@ -135,9 +100,13 @@ Examples:
 
 Fix levels (the maintainability cost of a check's remedy):
 
-	L1  idiomatic   mechanical, bit-identical rewrites; applied by plain -fix
-	L2  structured  restructures code; applied only with -fix=2
-	L3  aggressive  hyper-optimizations; applied only with the explicit -fix=3 opt-in
+	L1  idiomatic   mechanical, bit-identical rewrites
+	L2  structured  restructures code
+	L3  aggressive  hyper-optimizations; every emitted fix is still provably
+	                behavior-preserving for its matched shape
+
+	ONE knob: -level filters what is reported, and -fix applies the fixes of
+	exactly the reported checks. Lower -level to restrict fixing.
 
 Generic vs. domain checks:
 

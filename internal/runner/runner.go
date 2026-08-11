@@ -33,12 +33,9 @@ type Options struct {
 	MaxLevel lint.Level
 	// Tests includes _test.go files.
 	Tests bool
-	// Fix applies suggested fixes of auto-fixable checks whose level is
-	// <= FixLevel.
+	// Fix applies the suggested fixes of every reported auto-fixable
+	// check — MaxLevel gates both reporting and fixing.
 	Fix bool
-	// FixLevel gates which fixes -fix applies (default L1: only
-	// idiomatic, bit-identical rewrites).
-	FixLevel lint.Level
 	// JSON emits findings as JSON instead of text.
 	JSON bool
 	// SARIF emits findings as SARIF 2.1.0 (for GitHub Code Scanning).
@@ -81,9 +78,6 @@ func Run(checks []*lint.Check, opts Options) int {
 	}
 	if opts.MaxLevel == 0 {
 		opts.MaxLevel = lint.LevelAggressive
-	}
-	if opts.FixLevel == 0 {
-		opts.FixLevel = lint.LevelIdiomatic
 	}
 
 	cfg, cfgPath := loadConfig(opts)
@@ -425,8 +419,9 @@ func filterIgnored(findings []Finding) []Finding {
 	return out
 }
 
-// applyFixes applies the suggested fixes of auto-fixable checks whose level
-// is within opts.FixLevel, then gofmt-formats touched files.
+// applyFixes applies the suggested fixes of the reported auto-fixable
+// checks (the enabled set is already MaxLevel-gated), then gofmt-formats
+// touched files.
 func applyFixes(findings []Finding, opts Options) (applied, failed int) {
 	type edit struct {
 		start, end int
@@ -435,7 +430,7 @@ func applyFixes(findings []Finding, opts Options) (applied, failed int) {
 	//perfscan:ignore PS2104 findings cluster in few files; len(findings) would over-reserve
 	perFile := map[string][]edit{}
 	for _, f := range findings {
-		if !f.Check.AutoFix || f.Check.Level > opts.FixLevel || len(f.Fixes) == 0 {
+		if !f.Check.AutoFix || len(f.Fixes) == 0 {
 			continue
 		}
 		fix := f.Fixes[0]

@@ -31,9 +31,9 @@ perfscan ./...                     # report all findings
 perfscan -checks PS2* ./...        # only allocation checks
 perfscan -checks all,-PS3003 ./... # everything except one check
 perfscan -level 1 ./...            # only findings with idiomatic (L1) fixes
-perfscan -fix ./...                # apply L1 auto-fixes in place
-perfscan -fix=2 ./...              # also apply L2 (structured) fixes
-perfscan -fix=3 ./...              # explicit opt-in: also L3 (aggressive) fixes
+perfscan -level 1 -fix ./...       # report + apply only L1 (idiomatic) fixes
+perfscan -level 2 -fix ./...       # report + apply L1 and L2 fixes
+perfscan -fix ./...                # default -level 3: apply every available fix
 perfscan -json ./...               # machine-readable output (editor quick-fixes)
 perfscan -sarif ./...              # SARIF 2.1.0 (GitHub Code Scanning)
 perfscan -list                     # the check table
@@ -62,13 +62,13 @@ the accepted set down.
 
 Performance fixes differ wildly in what they cost the *reader*. perfscan
 makes that cost a first-class property: every check carries a **level**, and
-`-fix[=N]` never applies a rewrite above the requested level (bare `-fix` is N=1).
+one `-level` knob gates **both** what is reported and what `-fix` applies: you fix exactly what you see.
 
 | Level | Name | Character | Auto-fix policy |
 |------:|------|-----------|-----------------|
-| **L1** | idiomatic | The fix is idiomatic Go a reviewer waves through: hoist a `regexp.MustCompile` out of the loop, pre-size a slice or builder. Deterministic, mechanical, bit-identical. | Applied by plain `perfscan -fix`. |
-| **L2** | structured | The fix restructures code: loop interchange, slab allocation, `sync.Pool` scratch, map→slice densification. Correct, but it changes the shape of the code. | Applied only with `-fix=2`; review + benchmark expected. |
-| **L3** | aggressive | Hyper-optimization: unroll-and-jam, register tiling, band parallelization, branchless clamps — what the reference corpus does on its hot kernels. Buys the last factor at a real maintainability price. | Applied only with the explicit `-fix=3` opt-in, and only where the shape makes the rewrite provably safe; everything else stays advisory pending an A/B benchmark. |
+| **L1** | idiomatic | The fix is idiomatic Go a reviewer waves through: hoist a `regexp.MustCompile` out of the loop, pre-size a slice or builder. Deterministic, mechanical, bit-identical. | Fixed whenever reported (`-fix`). |
+| **L2** | structured | The fix restructures code: loop interchange, slab allocation, `sync.Pool` scratch, map→slice densification. Correct, but it changes the shape of the code. | Fixed when reported (`-level` ≥ 2 with `-fix`); review + benchmark expected. |
+| **L3** | aggressive | Hyper-optimization: unroll-and-jam, register tiling, band parallelization, branchless clamps — what the reference corpus does on its hot kernels. Buys the last factor at a real maintainability price. | Fixed when reported (default `-level 3` with `-fix`), and only where the shape makes the rewrite provably behavior-preserving; everything else stays advisory pending an A/B benchmark. |
 
 The philosophy is inherited from the reference tool's pattern catalog:
 **every finding is a candidate, not a verdict**. Static analysis sees syntax,
