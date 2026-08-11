@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: all build test check fmt vet lint selfscan hooks clean
+.PHONY: all build test check fmt vet lint selfscan docs hooks clean
 
 all: check build
 
@@ -24,6 +24,10 @@ check: vet test
 # Dogfood: run perfscan on itself at every level.
 selfscan:
 	$(GO) run ./cmd/perfscan -level 3 ./...
+
+# Regenerate docs/checks/ from the registry.
+docs:
+	$(GO) run ./cmd/gendocs
 
 hooks:
 	git config core.hooksPath .githooks

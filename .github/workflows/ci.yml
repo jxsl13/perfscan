@@ -46,6 +46,10 @@ jobs:
         with:
           version: latest
           install-go: false
+      - name: docs up to date
+        run: |
+          go run ./cmd/gendocs
+          git diff --exit-code docs/checks/
 
   selfscan:
     # Dogfood: perfscan must run clean on itself at every level.
