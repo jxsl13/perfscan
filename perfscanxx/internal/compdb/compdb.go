@@ -22,9 +22,15 @@ type entry struct {
 	File      string `json:"file"`
 }
 
+// buildSubdirs are the conventional locations a build system drops the
+// compilation database into, checked at each directory level (nearest wins) so
+// `perfscanxx ./...` works from a project root without -p.
+var buildSubdirs = []string{".", "build", "out", "cmake-build-debug", "cmake-build-release"}
+
 // Find locates the compilation database. If buildDir is non-empty it must
-// contain compile_commands.json; otherwise the directory tree is walked upward
-// from start (default ".") until one is found.
+// contain compile_commands.json. Otherwise, walking upward from start
+// (default "."), each level is checked both directly and in the conventional
+// build subdirectories (build/, out/, cmake-build-*) — the nearest one wins.
 func Find(buildDir, start string) (string, error) {
 	if buildDir != "" {
 		p := filepath.Join(buildDir, Name)
@@ -41,13 +47,15 @@ func Find(buildDir, start string) (string, error) {
 		return "", err
 	}
 	for {
-		p := filepath.Join(dir, Name)
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
+		for _, sub := range buildSubdirs {
+			p := filepath.Join(dir, sub, Name)
+			if _, err := os.Stat(p); err == nil {
+				return p, nil
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("no %s found (searched up from %q); pass -p <build-dir> or generate one with `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`", Name, start)
+			return "", fmt.Errorf("no %s found (searched %q and build/, out/, cmake-build-* up from %q); pass -p <build-dir> or generate one with `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`", Name, filepath.Base(start), start)
 		}
 		dir = parent
 	}

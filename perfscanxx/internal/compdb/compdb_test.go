@@ -50,6 +50,19 @@ func TestFindAndLoad(t *testing.T) {
 	}
 }
 
+func TestFindInBuildSubdir(t *testing.T) {
+	root := t.TempDir()
+	build := filepath.Join(root, "build")
+	if err := os.MkdirAll(build, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db := writeDB(t, build, []map[string]string{{"directory": build, "file": "x.cpp"}})
+	// From the project root (no -p), Find should locate build/compile_commands.json.
+	if got, err := Find("", root); err != nil || got != db {
+		t.Fatalf("Find(root)=%q,%v want %q", got, err, db)
+	}
+}
+
 func TestFindMissing(t *testing.T) {
 	if _, err := Find(t.TempDir(), ""); err == nil {
 		t.Error("expected error for -p without compile_commands.json")
