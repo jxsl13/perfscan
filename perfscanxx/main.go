@@ -196,7 +196,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	findings := report.FromExport(ef, catalog.Level(*maxLevel))
+	// Separate real performance findings from clang parse errors
+	// (clang-diagnostic-*): the latter mean a TU didn't compile (often a
+	// missing build-time header), which we summarize rather than interleave
+	// with — and drown out — the actual findings.
+	all := report.FromExport(ef, catalog.Level(*maxLevel))
+	var findings, parseErrs []report.Finding
+	for _, f := range all {
+		if strings.HasPrefix(f.TidyName, "clang-diagnostic-") {
+			parseErrs = append(parseErrs, f)
+		} else {
+			findings = append(findings, f)
+		}
+	}
+
 	switch {
 	case *sarifOut:
 		if err := report.SARIF(stdout, findings); err != nil {
@@ -212,17 +225,23 @@ func run(args []string, stdout, stderr io.Writer) int {
 		report.Text(stdout, findings)
 	}
 
-	if res.ExitCode != 0 {
-		// clang-tidy exits non-zero on compile errors; surface its chatter.
-		fmt.Fprint(stderr, res.Stderr)
-		// A common cause is build-time generated headers that don't exist yet;
-		// point the user at -cmake-build, which generates them.
-		if !*cmakeBuild && countMissingHeaderErrors(findings) > 0 {
-			fmt.Fprintln(stderr, "perfscanxx: some translation units reference headers that are generated at build time and don't exist yet;")
-			fmt.Fprintln(stderr, "perfscanxx: re-run with -cmake-build to generate them (or build the project first).")
+	// Summarize TUs that failed to parse instead of dumping clang-tidy's
+	// per-file progress/errors (which can be hundreds of lines).
+	if len(parseErrs) > 0 {
+		files := map[string]bool{}
+		for _, f := range parseErrs {
+			files[f.File] = true
 		}
+		fmt.Fprintf(stderr, "perfscanxx: %d translation unit(s) did not fully parse and were partially analyzed\n", len(files))
+		if missing := countMissingHeaderErrors(parseErrs); missing > 0 && !*cmakeBuild {
+			fmt.Fprintln(stderr, "perfscanxx: some reference headers generated at build time — re-run with -cmake-build to generate them.")
+		}
+	} else if res.ExitCode != 0 {
+		// Non-zero exit with no parsed diagnostics = a real invocation error.
+		fmt.Fprint(stderr, res.Stderr)
 		return 2
 	}
+
 	if len(findings) > 0 && !*fix {
 		return 1
 	}
@@ -276,6 +295,12 @@ func expandInputs(args []string, buildDir string) (files []string, effBuildDir s
 			return nil, "", err
 		}
 		for _, tu := range tus {
+			// Skip TUs listed in the database that don't exist on disk yet —
+			// typically generated sources (build/src/generated/*.cpp) that a
+			// codegen step would produce; without it clang-tidy errors on them.
+			if fi, e := os.Stat(tu); e != nil || fi.IsDir() {
+				continue
+			}
 			for _, p := range prefixes {
 				if underDir(tu, p) {
 					set[tu] = true
