@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
+	"strings"
 )
 
 // Baseline support ("ratchet"): a baseline file records the accepted
@@ -40,7 +41,7 @@ func baselineKey(f Finding) string {
 
 // writeBaseline writes the current findings as the accepted baseline.
 func writeBaseline(path string, findings []Finding) error {
-	counts := map[string]*baselineEntry{}
+	counts := make(map[string]*baselineEntry, len(findings))
 	for _, f := range findings {
 		k := baselineKey(f)
 		if e, ok := counts[k]; ok {
@@ -58,15 +59,14 @@ func writeBaseline(path string, findings []Finding) error {
 	for _, e := range counts {
 		entries = append(entries, *e)
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		a, b := entries[i], entries[j]
-		if a.File != b.File {
-			return a.File < b.File
+	slices.SortFunc(entries, func(a, b baselineEntry) int {
+		if c := strings.Compare(a.File, b.File); c != 0 {
+			return c
 		}
-		if a.ID != b.ID {
-			return a.ID < b.ID
+		if c := strings.Compare(a.ID, b.ID); c != 0 {
+			return c
 		}
-		return a.Message < b.Message
+		return strings.Compare(a.Message, b.Message)
 	})
 	b, err := json.MarshalIndent(baselineFile{Version: 1, Entries: entries}, "", "  ")
 	if err != nil {
@@ -94,7 +94,7 @@ func applyBaseline(path string, findings []Finding) ([]Finding, int, error) {
 	if bf.Version != 1 {
 		return findings, 0, fmt.Errorf("%s: unsupported baseline version %d", path, bf.Version)
 	}
-	budget := map[string]int{}
+	budget := make(map[string]int, len(bf.Entries))
 	for _, e := range bf.Entries {
 		budget[e.File+"\x00"+e.ID+"\x00"+e.Message] += e.Count
 	}
