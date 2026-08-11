@@ -40,7 +40,10 @@ figures cited in their docs are goai's measured results.
 - [x] PS3001 reflection-in-loop (L1)
 - [x] PS3002 closure-comparator-sort (L2)
 - [x] PS3003 int-key-map-in-loop (L2)
+- [x] PS2004 poolable-loop-scratch (L2, escape analysis)
 - [x] PS2006 quadratic-cache-append (L3)
+- [x] PS2007 build-nxn-use-one-row (L3, derivation-chain tracking)
+- [x] PS3005 indirect-key-comparator (L2)
 - [x] PS3007 set-map-from-slice (L2, with read-only + size-threshold narrowings)
 - [x] PS3066 consecutive-loops-over-one-buffer (L2)
 - [x] PS3071 local-buffer-escapes-per-call (L2)
@@ -59,9 +62,6 @@ figures cited in their docs are goai's measured results.
 
 ### Next up (generic, high value)
 
-- [ ] PS2004 poolable-loop-scratch
-- [ ] PS2007 build-nxn-use-one-row
-- [ ] PS3005 indirect-key-comparator
 - [ ] PS3064 jagged-matrix-allocated-row-by-row (overlaps PS2008; decide split)
 - [ ] PS4008, PS5001, PS5002 (arithmetic/vectorization generic subset)
 
