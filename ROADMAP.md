@@ -30,10 +30,15 @@ figures cited in their docs are goai's measured results.
 
 - [x] PS2001 alloc-in-loop (domain, L2)
 - [x] PS2002 unsized-builder (L1)
+- [x] PS2003 strings-alloc-in-loop (L1)
 - [x] PS2005 regexp-compile-in-loop (L1, auto-fix)
+- [x] PS2008 per-row-make-slab (L2)
 - [x] PS3001 reflection-in-loop (L1)
 - [x] PS3002 closure-comparator-sort (L2)
 - [x] PS3003 int-key-map-in-loop (L2)
+- [x] PS3007 set-map-from-slice (L2, with read-only + size-threshold narrowings)
+- [x] PS3077 minmax-clamp-in-a-loop (L3, advisory)
+- [x] PS3082 minmax-call-in-a-loop (L2, clamps excluded — PS3077 owns those)
 
 ### perfscan-original
 
@@ -42,18 +47,13 @@ figures cited in their docs are goai's measured results.
 ### Next up (generic, high value)
 
 - [ ] PS1003 batch-single-elt
-- [ ] PS2003 strings-alloc-in-loop
 - [ ] PS2004 poolable-loop-scratch
 - [ ] PS2006 quadratic-cache-append
 - [ ] PS2007 build-nxn-use-one-row
-- [ ] PS2008 per-row-make-slab
 - [ ] PS3005 indirect-key-comparator
-- [ ] PS3007 set-map-from-slice
-- [ ] PS3064 jagged-matrix-allocated-row-by-row
+- [ ] PS3064 jagged-matrix-allocated-row-by-row (overlaps PS2008; decide split)
 - [ ] PS3066 consecutive-loops-over-one-buffer
 - [ ] PS3071 local-buffer-escapes-per-call
-- [ ] PS3077 minmax-clamp-in-a-loop
-- [ ] PS3082 minmax-call-in-a-loop
 - [ ] PS3083 integer-keyed-map-in-a-loop (build+probe shape)
 - [ ] PS4008, PS5001, PS5002 (arithmetic/vectorization generic subset)
 
