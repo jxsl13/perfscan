@@ -111,14 +111,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 	for _, e := range extra {
 		extraArgs = append(extraArgs, "--extra-arg="+e)
 	}
-	res, err := tidy.Run(context.Background(), tidy.Options{
+	opts := tidy.Options{
 		Binary:    *tidyBin,
 		BuildDir:  *buildDir,
 		Checks:    tidyChecks,
 		Fix:       *fix,
 		Files:     files,
 		ExtraArgs: extraArgs,
-	})
+	}
+	// Query-based custom checks need their CustomChecks definitions in a
+	// config file plus --experimental-custom-checks (zero compiled C++).
+	if catalog.AnyCustom(selected) {
+		cfgPath, cleanup, cErr := writeTidyConfig(catalog.ClangTidyConfig(selected))
+		if cErr != nil {
+			fmt.Fprintln(stderr, "perfscanxx:", cErr)
+			return 2
+		}
+		defer cleanup()
+		opts.ConfigFile = cfgPath
+		opts.Experimental = true
+	}
+	res, err := tidy.Run(context.Background(), opts)
 	if err != nil {
 		fmt.Fprintln(stderr, "perfscanxx:", err)
 		return 2
@@ -155,6 +168,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// writeTidyConfig writes a generated .clang-tidy config to a temp file and
+// returns its path plus a cleanup func. Used to carry query-based custom
+// checks (their CustomChecks block) into the clang-tidy invocation.
+func writeTidyConfig(content string) (path string, cleanup func(), err error) {
+	f, err := os.CreateTemp("", "perfscanxx-*.clang-tidy")
+	if err != nil {
+		return "", func() {}, err
+	}
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", func() {}, err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", func() {}, err
+	}
+	return f.Name(), func() { os.Remove(f.Name()) }, nil
 }
 
 func printUsage(w io.Writer, fs *flag.FlagSet) {

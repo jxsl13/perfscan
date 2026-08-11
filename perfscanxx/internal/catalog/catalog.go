@@ -55,6 +55,18 @@ type Entry struct {
 	Title string
 	// HasFix reports whether clang-tidy emits fix-its for this check.
 	HasFix bool
+
+	// Custom marks a perfscanxx-defined query-based custom check (run via
+	// clang-tidy --experimental-custom-checks). Its TidyName is the
+	// "custom-<name>" clang-tidy emits. For these, Query/Bind/Message below
+	// define the check declaratively — NO compiled C++.
+	Custom bool
+	// Query is the clang-query matcher (a "match ..." command binding Bind).
+	Query string
+	// Bind is the matcher's bound node name the diagnostic anchors on.
+	Bind string
+	// Message is the diagnostic text for a custom check.
+	Message string
 }
 
 // entries is the seed catalog. Every TidyName is a real clang-tidy
@@ -107,6 +119,20 @@ var entries = []Entry{
 		Level: LevelIdiomatic, Category: "io",
 		Title:  "std::endl flushes the stream every time; use '\\n'",
 		HasFix: true,
+	},
+	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
+	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
+	{
+		ID: "PX2101", TidyName: "custom-reserve-before-loop",
+		Level: LevelStructured, Category: "allocation",
+		Title:  "vector grown via push_back/emplace_back in a loop with no prior reserve()",
+		HasFix: false,
+		Custom: true,
+		Bind:   "grow",
+		Query: `match cxxMemberCallExpr(` +
+			`callee(cxxMethodDecl(hasAnyName("push_back", "emplace_back"))), ` +
+			`hasAncestor(forStmt())).bind("grow")`,
+		Message: "vector grown via push_back/emplace_back inside a loop; reserve() before the loop to avoid repeated reallocation (perfscanxx PS2101 analog, query-based)",
 	},
 }
 
@@ -205,4 +231,55 @@ func TidyChecksArg(sel []Entry) string {
 		parts = append(parts, e.TidyName)
 	}
 	return strings.Join(parts, ",")
+}
+
+// AnyCustom reports whether the selection contains a query-based custom check
+// (which requires clang-tidy --experimental-custom-checks and a config file).
+func AnyCustom(sel []Entry) bool {
+	for _, e := range sel {
+		if e.Custom {
+			return true
+		}
+	}
+	return false
+}
+
+// ClangTidyConfig renders a .clang-tidy YAML enabling exactly sel: a Checks
+// line for all entries and a CustomChecks block defining the query-based ones.
+// Used when the selection contains custom checks — clang-tidy reads the custom
+// definitions from the config and enables them via Checks.
+func ClangTidyConfig(sel []Entry) string {
+	var b strings.Builder
+	b.WriteString("Checks: '" + TidyChecksArg(sel) + "'\n")
+	var custom []Entry
+	for _, e := range sel {
+		if e.Custom {
+			custom = append(custom, e)
+		}
+	}
+	if len(custom) == 0 {
+		return b.String()
+	}
+	b.WriteString("CustomChecks:\n")
+	for _, e := range custom {
+		name := strings.TrimPrefix(e.TidyName, "custom-")
+		b.WriteString("  - Name: " + name + "\n")
+		b.WriteString("    Query: |\n")
+		for _, line := range strings.Split(e.Query, "\n") {
+			b.WriteString("      " + line + "\n")
+		}
+		b.WriteString("    Diagnostic:\n")
+		b.WriteString("      - BindName: " + e.Bind + "\n")
+		b.WriteString("        Message: " + yamlQuote(e.Message) + "\n")
+		b.WriteString("        Level: Warning\n")
+	}
+	return b.String()
+}
+
+// yamlQuote double-quotes a scalar and escapes embedded quotes/backslashes so
+// messages with parentheses, colons, etc. round-trip safely.
+func yamlQuote(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return `"` + s + `"`
 }

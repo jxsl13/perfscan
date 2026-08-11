@@ -33,8 +33,15 @@ type Options struct {
 	// BuildDir is the directory holding compile_commands.json (-p).
 	BuildDir string
 	// Checks are the exact clang-tidy check names to enable; everything
-	// else is disabled with a leading "-*".
+	// else is disabled with a leading "-*". Ignored when ConfigFile is set.
 	Checks []string
+	// ConfigFile, when non-empty, is passed as --config-file and drives
+	// check selection (used for query-based custom checks, whose CustomChecks
+	// definitions live in that config); the cmdline --checks is then omitted.
+	ConfigFile string
+	// Experimental enables clang-tidy --experimental-custom-checks, required
+	// for query-based custom checks (LLVM >= 20).
+	Experimental bool
 	// Fix makes clang-tidy apply its fix-its in place.
 	Fix bool
 	// ExportFixes is the --export-fixes destination. Empty means: use a
@@ -56,8 +63,17 @@ func Argv(o Options) []string {
 	if o.BuildDir != "" {
 		args = append(args, "-p", o.BuildDir)
 	}
-	checks := append([]string{"-*"}, o.Checks...)
-	args = append(args, "--checks="+strings.Join(checks, ","))
+	if o.Experimental {
+		args = append(args, "--experimental-custom-checks")
+	}
+	if o.ConfigFile != "" {
+		// The config file supplies both Checks and any CustomChecks; a
+		// cmdline --checks would override its Checks line, so omit it.
+		args = append(args, "--config-file="+o.ConfigFile)
+	} else {
+		checks := append([]string{"-*"}, o.Checks...)
+		args = append(args, "--checks="+strings.Join(checks, ","))
+	}
 	if o.ExportFixes != "" {
 		args = append(args, "--export-fixes="+o.ExportFixes)
 	}

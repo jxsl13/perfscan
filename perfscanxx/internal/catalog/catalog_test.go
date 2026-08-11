@@ -90,7 +90,13 @@ func TestUniqueIDs(t *testing.T) {
 			t.Errorf("duplicate catalog ID %s", e.ID)
 		}
 		seen[e.ID] = true
-		if !strings.HasPrefix(e.TidyName, "performance-") {
+		// Built-in entries wrap a performance-* clang-tidy check; custom
+		// entries are perfscanxx query-based checks named "custom-*".
+		if e.Custom {
+			if !strings.HasPrefix(e.TidyName, "custom-") {
+				t.Errorf("%s: custom TidyName %q must start with custom-", e.ID, e.TidyName)
+			}
+		} else if !strings.HasPrefix(e.TidyName, "performance-") {
 			t.Errorf("%s: TidyName %q is not a performance-* check", e.ID, e.TidyName)
 		}
 	}
