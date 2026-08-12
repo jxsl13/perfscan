@@ -361,3 +361,28 @@ loop) simply don't occur in abseil's hot paths, so the checks add **zero** noise
 positives on the largest corpus**, matching its low corpus frequency elsewhere (leveldb
 0, spdlog 1, fmt 1). The `isExpansionInMainFile()` gate keeps every one of them off
 abseil's deep header stack.
+
+## `-baseline` ratchet: suppress the backlog, fail only on new findings (leveldb, 2026-08-12)
+
+The `-baseline` ratchet lets a team adopt perfscanxx on a codebase that already has
+findings: seed a baseline once, then CI fails only when a NEW finding appears, while
+the pre-existing backlog is burned down. Validated end-to-end on real code (leveldb):
+
+```
+# seed: record the current PX2101 findings as the accepted baseline
+perfscanxx -level 3 -checks PX2101 -p build -baseline base.yaml ./...
+  → wrote 20 finding(s) to base.yaml
+
+# re-run against the baseline: all 20 are known, so nothing new
+perfscanxx -level 3 -checks PX2101 -p build -baseline base.yaml ./...
+  → 0 findings, exit 0
+
+# regression: enable another check — its findings are NOT in the baseline
+perfscanxx -level 3 -checks PX2101,PX3013 -p build -baseline base.yaml ./...
+  → 6 PX3013 findings reported (the 20 baselined PX2101 stay suppressed)
+```
+
+So the ratchet both **suppresses the recorded backlog** (line-independent, per the
+`baseline` package's file/id/message keying) AND **surfaces genuinely new findings** on
+real corpus code — the two properties a CI ratchet needs to burn down a backlog without
+letting regressions slip in.
