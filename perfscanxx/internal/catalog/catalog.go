@@ -242,6 +242,19 @@ var entries = []Entry{
 			`hasAncestor(forStmt())).bind("grow")`,
 		Message: "vector grown via push_back/emplace_back inside a loop; reserve() before the loop to avoid repeated reallocation (perfscanxx PS2101 analog, query-based)",
 	},
+	{
+		ID: "PX2102", TidyName: "custom-pessimizing-move",
+		Level: LevelStructured, Category: "moves",
+		Title:  "return std::move(local) blocks copy/move elision (NRVO); return the local directly",
+		HasFix: false,
+		Custom: true,
+		Bind:   "mv",
+		Query: `match returnStmt(hasReturnValue(ignoringParenImpCasts(` +
+			`cxxConstructExpr(hasArgument(0, ignoringParenImpCasts(` +
+			`callExpr(callee(functionDecl(hasName("::std::move"))), ` +
+			`hasArgument(0, declRefExpr(to(varDecl(hasLocalStorage()))))).bind("mv")))))))`,
+		Message: "std::move of a local in a return statement pessimizes NRVO — the compiler can elide the copy/move entirely if you return the local directly (query-based, no auto-fix)",
+	},
 }
 
 // All returns the full catalog in stable ID order.
