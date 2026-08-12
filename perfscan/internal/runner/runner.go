@@ -623,6 +623,21 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		}
 		return false
 	}
+	// selfOverlaps reports whether a single fix's own edits overlap each other.
+	// A well-formed SuggestedFix never does (the go/analysis contract), but the
+	// greedy loop applies an accepted fix's edits verbatim, so a malformed one
+	// would corrupt the file instead of being skipped as the old flat overlap
+	// check did — reject it whole rather than splice overlapping edits.
+	selfOverlaps := func(es []edit) bool {
+		for i := range es {
+			for j := i + 1; j < len(es); j++ {
+				if es[i].start < es[j].end && es[j].start < es[i].end {
+					return true
+				}
+			}
+		}
+		return false
+	}
 
 	files = make(map[string]patchedFile, len(perFile))
 	for path, fixes := range perFile {
@@ -662,12 +677,17 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		slices.SortStableFunc(fixes, func(a, b fileFix) int { return fixMinStart(a) - fixMinStart(b) })
 		var accepted []edit
 		for i := range fixes {
-			if conflicts(fixes[i].edits, accepted) {
+			if selfOverlaps(fixes[i].edits) || conflicts(fixes[i].edits, accepted) {
 				failed++
 				continue
 			}
 			accepted = append(accepted, fixes[i].edits...)
 			applied++
+		}
+		// Every fix for this file was rejected (all conflicting or malformed):
+		// leave it untouched rather than rewriting it with only a gofmt pass.
+		if len(accepted) == 0 {
+			continue
 		}
 		// Apply accepted edits back-to-front so earlier offsets stay valid.
 		slices.SortFunc(accepted, func(a, b edit) int { return b.start - a.start })

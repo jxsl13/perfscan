@@ -115,3 +115,38 @@ func TestFixConflictResolution(t *testing.T) {
 		t.Errorf("disjoint fixes: applied=%d failed=%d, want applied=2 failed=0", applied, failed)
 	}
 }
+
+// Regression: a single (malformed) fix whose OWN edits overlap must be rejected
+// whole, not spliced — the greedy loop applies an accepted fix's edits
+// verbatim, so applying overlapping ones would corrupt the file. The file is
+// left unmodified.
+func TestSelfOverlappingFixRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "q.go")
+	content := []byte("package q\nvar x = 100000\n") // "100000" at [18,24)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	tf := fset.AddFile(path, -1, len(content))
+
+	f := Finding{
+		Check: &lint.Check{ID: "PS9999", AutoFix: true},
+		fset:  fset,
+		Fixes: []analysis.SuggestedFix{{
+			TextEdits: []analysis.TextEdit{
+				{Pos: tf.Pos(18), End: tf.Pos(24), NewText: []byte("A")}, // [18,24)
+				{Pos: tf.Pos(20), End: tf.Pos(22), NewText: []byte("B")}, // [20,22) — overlaps
+			},
+		}},
+	}
+	files, applied, failed := patchedFiles([]Finding{f}, Options{Stderr: io.Discard})
+	if applied != 0 || failed != 1 {
+		t.Fatalf("self-overlapping fix: applied=%d failed=%d, want applied=0 failed=1", applied, failed)
+	}
+	// With no fix applied, the file must not be written at all (not even a
+	// gofmt-only rewrite) — so it is absent from the patched set.
+	if _, ok := files[path]; ok {
+		t.Fatalf("file must be left untouched when its only fix is rejected, but it was patched")
+	}
+}
