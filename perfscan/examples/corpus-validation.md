@@ -331,3 +331,36 @@ is aiming for: a handful of real, actionable structural hints and **zero** noisy
 or unsafe autofixes. It complements the busier corpora (etcd, kubernetes,
 compress) by pinning the quiet end — perfscan does not manufacture findings where
 the code is already clean.
+
+## Re-validation after the self-recursion + labeled-loop safety changes (`k8s.io/apimachinery`)
+
+The two correctness changes shipped this batch — suppressing self-recursive
+Write-family fixes (PS2111/2113/2118/2120/2129) and extending prealloc coverage
+to labeled loops (PS2101/2104) — were re-validated against **`k8s.io/apimachinery`**
+(a serialization/reflection-heavy staging module: runtime schemes, JSON
+serializers, label selectors, strategic-merge patch). `perfscan -fix -level 3 ./...`
+rewrote **28 files** and the module `go build`s exit 0. Its own test suites then
+**pass unchanged** on every package that does not depend on an out-of-tree fixture
+(15 packages green; the only 2 failures — `util/managedfields{,/internal}` — fail
+**identically on the un-fixed baseline**, a missing `api/openapi-spec/swagger.json`
+that lives outside the copied module, so they are not `-fix` regressions).
+
+The complex **PS2128** loop-concat→`strings.Builder` rewrite fired again on real
+code (`pkg/api/apitesting/naming/naming.go`) and is byte-identical:
+
+```go
+str := "Type parents:\n"                  var str strings.Builder
+for i, tp := range parents {          →    str.WriteString("Type parents:\n")
+    str += fmt.Sprintf("%s%v\n", …)        for i, tp := range parents {
+}                                              str.WriteString(fmt.Sprintf("%s%v\n", …))
+return str                                 }
+                                           return str.String()
+```
+
+A `sort.Slice` with a **multi-field index comparator** (`compatibility.go:152`,
+Group→Version→… tie-break chain) is correctly left **advisory** by PS3002 — the
+index-based `func(i, j int) bool` → element-based `func(a, b T) int` conversion is
+not yet a safe mechanical rewrite — while the adjacent `sort.Strings`→`slices.Sort`
+IS auto-fixed. Net: the recent safety work is confirmed behavior-preserving on a
+large production codebase, with the auto-fix boundary landing exactly where the
+bit-identical guarantee holds.
