@@ -16,10 +16,12 @@ import (
 
 // PS2101 reports a slice declared with no capacity earlier in the block
 // of a loop that appends to it, when the loop's iteration source bounds
-// the element count. The check COUNTS appended values per iteration:
-// k unconditional values make k*bound exact; conditional values are
-// excluded, leaving the unconditional count as a lower bound; a
-// conditional-only fill keeps 1*bound as the upper bound.
+// the element count. The check COUNTS appended values per iteration and
+// only flags slices that receive at least one UNCONDITIONAL append per
+// iteration: k unconditional values make k*bound exact; conditional
+// values are excluded, leaving the unconditional count as a lower bound.
+// A conditional-only fill is NOT flagged — pre-sizing it to the loop
+// bound would over-allocate when few iterations append.
 //
 // PS2101 is a perfscan-original check (the x1xx block per category is
 // reserved for checks that did not originate in the upstream
@@ -41,14 +43,16 @@ loop touches it, that count bounds the appends, so make([]T, 0, k*bound)
 removes every growth copy. Standalone declarations count too: a loop
 filling several targets yields one finding per target.
 
-Bound semantics — the check COUNTS the values appended per iteration:
-k unconditional values make k*bound EXACT; with conditional appends
-alongside, only the unconditional count is taken, a LOWER bound (the
-conditional tail may still grow, but every growth copy below the floor is
-removed); conditional-only appends leave 1*bound as the UPPER bound —
-the same worst case append itself reserves. Multi-value appends
-(append(s, a, b)) count each value; a spread append has an unknown count
-and falls back to the upper-bound form.
+Bound semantics — the check COUNTS the values appended per iteration and
+only flags slices that receive at least one UNCONDITIONAL append per
+iteration: k unconditional values make k*bound EXACT; with conditional
+appends alongside, only the unconditional count is taken, a LOWER bound
+(the conditional tail may still grow, but every growth copy below the
+floor is removed). A conditional-only fill is NOT flagged — pre-sizing it
+to the loop bound would over-allocate when few iterations append.
+Multi-value appends (append(s, a, b)) count each value; a spread append
+has an unknown per-call count and does not add to the unconditional
+count.
 
 The automatic fix rewrites the declaration when the bound is a plain
 identifier (or len of one) that the loop body does not reassign — and only
@@ -101,7 +105,11 @@ func runPS2101(pass *analysis.Pass) (any, error) {
 						continue
 					}
 					uncond, cond, unknown := appendCounts(body, name)
-					if uncond == 0 && cond == 0 && !unknown {
+					// A conditional-only fill (zero unconditional appends
+					// per iteration) is not flagged: pre-sizing it to the
+					// loop bound would over-allocate when few iterations
+					// append. This also skips loops with no appends at all.
+					if uncond == 0 {
 						continue
 					}
 					// The fix rewrites the DECLARATION, so the bound's
@@ -429,8 +437,8 @@ func unsizedSliceDecl(s ast.Stmt) (string, ast.Expr, bool, bool) {
 //
 // The per-iteration counts grade the capacity bound: k unconditional
 // values make k*bound EXACT (with no conditional appends), a LOWER bound
-// otherwise; conditional-only appends leave 1*bound as the UPPER bound
-// append itself would reserve.
+// otherwise; a slice with zero unconditional appends is not reported at
+// all.
 func appendCounts(body *ast.BlockStmt, name string) (uncond, cond int, unknown bool) {
 	condDepth := 0
 	var walk func(n ast.Node) bool
@@ -511,21 +519,20 @@ func childrenOf(n ast.Node) []ast.Node {
 }
 
 // capacityForCounts derives the capacity expression and its bound class
-// from the per-iteration counts.
+// from the per-iteration counts. Callers guarantee uncond >= 1: a
+// conditional-only fill is never reported.
 func capacityForCounts(bound string, uncond, cond int, unknown bool) (capExpr, class string) {
 	switch {
 	case uncond > 1 && cond == 0 && !unknown:
 		return strconv.Itoa(uncond) + "*" + bound, "exact: " + strconv.Itoa(uncond) + " unconditional value(s) per iteration"
 	case uncond == 1 && cond == 0 && !unknown:
 		return bound, "exact: one unconditional value per iteration"
-	case uncond > 0:
+	default: // uncond >= 1 with conditional or unknown appends alongside
 		capExpr = bound
 		if uncond > 1 {
 			capExpr = strconv.Itoa(uncond) + "*" + bound
 		}
 		return capExpr, "a lower bound: " + strconv.Itoa(uncond) + " unconditional value(s) per iteration, conditional ones excluded"
-	default:
-		return bound, "an upper bound: all appends are conditional"
 	}
 }
 
