@@ -65,3 +65,29 @@ func notAdjacent(src []string) map[string]int {
 	}
 	return index
 }
+
+// Regression: a conditional-only fill must NOT be flagged — the loop
+// bound is the potential maximum, and a size hint of it over-reserves
+// buckets when few iterations actually insert.
+func conditionalOnly(src []string) map[string]int {
+	m := map[string]int{}
+	for _, s := range src {
+		if len(s) > 3 {
+			m[s] = len(s)
+		}
+	}
+	return m
+}
+
+// An unconditional insert alongside a conditional one is still reported:
+// the unconditional count is a lower bound.
+func mixed(src []string) map[string]int {
+	m := make(map[string]int, len(src)) // want `m is filled in the following bounded loop but declared without a size hint; pre-size it with make\(map\[\.\.\.\]\.\.\., len\(src\)\) — a lower bound: 1 unconditional value\(s\) per iteration, conditional ones excluded \(a hint may over-reserve for repeated keys\)`
+	for i, s := range src {
+		m[s] = i
+		if len(s) > 3 {
+			m[s+"!"] = i
+		}
+	}
+	return m
+}
