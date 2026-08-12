@@ -88,6 +88,19 @@ func genericPair[T any](p pair[T]) {
 	_ = p.a
 }
 
+// Concrete large instantiation of a generic type: unlike a free type parameter,
+// box[int] has a determinate size, so a >128-byte by-value param must STILL be
+// reported. Regression guard: the free-type-param skip must not over-suppress
+// concrete instantiations (box[int] = 4104 + 8 = 4112 bytes).
+type box[T any] struct {
+	a Big
+	v T
+}
+
+func concreteBox(b box[int]) { // want `parameter b of type box\[int\] is 4112 bytes; passing it by value copies 4112 bytes on every call — take a \*box\[int\] for large values \(advisory\)`
+	sinkInt(b.a.ID)
+}
+
 // String param: a 16-byte header regardless of length, not reported.
 func stringParam(s string) {
 	sinkInt(int64(len(s)))
