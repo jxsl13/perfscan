@@ -39,7 +39,8 @@ func sortByLen(xs []item) {
 	sort.Slice(xs, func(i, j int) bool { return len(xs[i].name) < len(xs[j].name) }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
 }
 
-// '>' comparison, not '<'. Advisory only.
+// Single-field DESCENDING '>': fixed with the cmp.Compare operands SWAPPED —
+// cmp.Compare(b.key, a.key) < 0 iff a.key > b.key, the comparator's result.
 func sortGreater(xs []item) {
 	sort.Slice(xs, func(i, j int) bool { return xs[i].key > xs[j].key }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
 }
@@ -162,7 +163,8 @@ func sortGuardMismatch(xs []gvk) {
 	})
 }
 
-// A descending '>' in one field. Advisory only.
+// A descending '>' in the final field behind an ascending guard: fixed, the
+// descending field alone gets swapped operands.
 func sortDescendingField(xs []gvk) {
 	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
 		if xs[i].group != xs[j].group {
@@ -221,5 +223,45 @@ func sortDifferentSlice(xs, ys []gvk) {
 			return xs[i].group < xs[j].group
 		}
 		return ys[i].kind < ys[j].kind
+	})
+}
+
+// MIXED directions: group DESCENDING, then version ASCENDING — each field
+// keeps its own operand order in the cmp.Compare chain.
+func sortMixedDirections(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].group != xs[j].group {
+			return xs[i].group > xs[j].group
+		}
+		return xs[i].version < xs[j].version
+	})
+}
+
+// SliceStable single-field descending becomes slices.SortStableFunc with the
+// operands swapped.
+func sortStableDescending(xs []item) {
+	sort.SliceStable(xs, func(i, j int) bool { return xs[i].key > xs[j].key }) // want `sort\.SliceStable swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
+
+// Whole-element DESCENDING stays advisory: slices.Sort is ascending only and
+// there is no comparator whose operands could be swapped.
+func sortIntsWholeDescending(xs []int) {
+	sort.Slice(xs, func(i, j int) bool { return xs[i] > xs[j] }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
+
+// A descending FLOAT field stays advisory: the NaN exclusion applies to
+// every field regardless of direction.
+func sortFloatFieldDescending(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { return xs[i].score > xs[j].score }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
+
+// The guard tests one field but the '>' return orders ANOTHER: not the
+// canonical tie-break, the chains diverge on ties. Advisory only.
+func sortGuardMismatchDescending(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].group != xs[j].group {
+			return xs[i].version > xs[j].version
+		}
+		return xs[i].kind < xs[j].kind
 	})
 }
