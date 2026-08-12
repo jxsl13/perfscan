@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -17,6 +18,7 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
 
 	"github.com/jxsl13/perfscan/perfscan/config"
@@ -739,12 +741,92 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		for _, e := range accepted {
 			src = append(src[:e.start], append(append([]byte{}, e.text...), src[e.end:]...)...)
 		}
+		// Drop any import the applied fixes just orphaned. Independent checks
+		// can EACH remove the last-but-one reference to a shared package —
+		// PS3002 rewriting sort.Slice and PS3104 rewriting sort.Strings in one
+		// file both drop a "sort" reference, but neither alone sees the import
+		// as orphaned, so without this the file is left with an "imported and
+		// not used" error. Best-effort and centralized here so it covers every
+		// check pair, not just the sort family.
+		src = pruneOrphanedImports(src)
 		if formatted, err := format.Source(src); err == nil {
 			src = formatted
 		}
 		files[path] = patchedFile{orig: orig, fixed: src}
 	}
 	return files, applied, overlapping, failed
+}
+
+// pruneOrphanedImports removes import specs that the just-applied fixes left
+// unused, so cross-check rewrites that each drop the last reference to a
+// shared package cannot leave an "imported and not used" compile error. It is
+// best-effort: a parse problem, a cgo file (import "C"), or a //line-directive
+// file (generated/preprocessed source whose import block must not be
+// rewritten) returns the input unchanged. Blank (_) and dot (.) imports are
+// never pruned — a blank import is deliberately unreferenced. Only
+// standard-library imports are considered (see the loop): for those the
+// package name equals the last path segment so usage detection is reliable,
+// whereas a versioned third-party path (k8s.io/klog/v2, package "klog") would
+// be misjudged. The source compiled BEFORE the fixes, so any stdlib import
+// unused AFTER them was orphaned by them, never pre-existing.
+func pruneOrphanedImports(src []byte) []byte {
+	if bytes.Contains(src, []byte("//line ")) || bytes.Contains(src, []byte("/*line ")) {
+		return src
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
+	if err != nil {
+		return src
+	}
+	for _, imp := range f.Imports {
+		if imp.Path.Value == `"C"` {
+			return src // cgo: leave the preprocessed import block untouched
+		}
+	}
+	// Collect the orphans first: DeleteNamedImport mutates f.Imports, so
+	// deleting inside `range f.Imports` would nil-deref. UsesImport is computed
+	// on the original file before any deletion (deleting one import never
+	// changes whether another is used).
+	type orphan struct{ name, path string }
+	var orphans []orphan
+	for _, imp := range f.Imports {
+		var name string
+		if imp.Name != nil {
+			name = imp.Name.Name
+			if name == "_" || name == "." {
+				continue // side-effect or dot import: never unused-prune
+			}
+		}
+		path, uerr := strconv.Unquote(imp.Path.Value)
+		if uerr != nil {
+			continue
+		}
+		// Only STANDARD-LIBRARY imports (no dot in the path). For those the
+		// package name always equals the last path segment, so astutil.UsesImport
+		// — which infers the name from the path — is reliable. A third-party path
+		// like k8s.io/klog/v2 has package name "klog" != last segment "v2", and
+		// UsesImport would wrongly report it unused and prune a live import
+		// (observed on kubernetes). The cross-check orphan bug this guards against
+		// is a stdlib one (sort), so restricting to stdlib loses nothing.
+		if strings.Contains(path, ".") {
+			continue
+		}
+		if astutil.UsesImport(f, path) {
+			continue
+		}
+		orphans = append(orphans, orphan{name, path})
+	}
+	if len(orphans) == 0 {
+		return src
+	}
+	for _, o := range orphans {
+		astutil.DeleteNamedImport(fset, f, o.name, o.path)
+	}
+	var buf bytes.Buffer
+	if err := format.Node(&buf, fset, f); err != nil {
+		return src
+	}
+	return buf.Bytes()
 }
 
 // applyFixes applies the suggested fixes of the reported auto-fixable
