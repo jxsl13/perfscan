@@ -101,3 +101,74 @@ func TestRunMissingBinary(t *testing.T) {
 		t.Fatalf("Run without clang-tidy: err = %v, want ErrNotFound", err)
 	}
 }
+
+// TestArgvVariants pins the invocation contract's branches that TestArgv leaves
+// uncovered — most importantly that ConfigFile mode OMITS --checks (a stray
+// --checks would override the config's Checks line and silently break the
+// query-based custom checks that config drives).
+func TestArgvVariants(t *testing.T) {
+	joined := func(o Options) string { return strings.Join(Argv(o), " ") }
+
+	t.Run("config-file mode omits --checks", func(t *testing.T) {
+		got := Argv(Options{
+			BuildDir:     "b",
+			ConfigFile:   "/tmp/cfg.yaml",
+			Experimental: true,
+			Checks:       []string{"performance-avoid-endl"}, // must be ignored
+			Files:        []string{"a.cpp"},
+		})
+		s := strings.Join(got, " ")
+		if !strings.Contains(s, "--config-file=/tmp/cfg.yaml") {
+			t.Errorf("argv %q lacks --config-file", got)
+		}
+		if strings.Contains(s, "--checks") {
+			t.Errorf("argv %q must NOT carry --checks in config-file mode (it would override the config)", got)
+		}
+		if !strings.Contains(s, "--experimental-custom-checks") {
+			t.Errorf("argv %q lacks --experimental-custom-checks", got)
+		}
+	})
+
+	t.Run("default binary", func(t *testing.T) {
+		if got := Argv(Options{Files: []string{"a.cpp"}}); got[0] != "clang-tidy" {
+			t.Errorf("argv[0] = %q, want clang-tidy", got[0])
+		}
+	})
+
+	t.Run("binary override", func(t *testing.T) {
+		if got := Argv(Options{Binary: "clang-tidy-20", Files: []string{"a.cpp"}}); got[0] != "clang-tidy-20" {
+			t.Errorf("argv[0] = %q, want clang-tidy-20", got[0])
+		}
+	})
+
+	t.Run("extra args precede files, files come last", func(t *testing.T) {
+		got := Argv(Options{
+			Checks:    []string{"performance-avoid-endl"},
+			ExtraArgs: []string{"-extra-arg=-isysroot", "-extra-arg=/sdk"},
+			Files:     []string{"x.cpp", "y.cpp"},
+		})
+		if got[len(got)-2] != "x.cpp" || got[len(got)-1] != "y.cpp" {
+			t.Errorf("files must be the final args; got tail %q", got[len(got)-3:])
+		}
+		xi, ei := indexOf(got, "x.cpp"), indexOf(got, "-extra-arg=-isysroot")
+		if ei < 0 || xi < 0 || ei > xi {
+			t.Errorf("extra args must precede files; argv=%q", got)
+		}
+	})
+
+	t.Run("export-fixes and fix flags", func(t *testing.T) {
+		s := joined(Options{Checks: []string{"c"}, ExportFixes: "/tmp/f.yaml", Fix: true, Files: []string{"a.cpp"}})
+		if !strings.Contains(s, "--export-fixes=/tmp/f.yaml") || !strings.Contains(s, "--fix") {
+			t.Errorf("argv %q missing --export-fixes/--fix", s)
+		}
+	})
+}
+
+func indexOf(ss []string, want string) int {
+	for i, s := range ss {
+		if s == want {
+			return i
+		}
+	}
+	return -1
+}
