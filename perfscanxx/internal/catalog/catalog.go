@@ -217,12 +217,6 @@ var entries = []Entry{
 		HasFix: true,
 	},
 	{
-		ID: "PX3017", TidyName: "modernize-use-default-member-init",
-		Level: LevelStructured, Category: "init",
-		Title:  "member initialized to a constant in every constructor body; a default member initializer states it once at the declaration",
-		HasFix: true,
-	},
-	{
 		ID: "PX3018", TidyName: "readability-redundant-string-init",
 		Level: LevelIdiomatic, Category: "strings",
 		Title:  `std::string s = "" constructs from a C string; the default constructor is empty and cheaper`,
@@ -266,6 +260,20 @@ var entries = []Entry{
 		Message: "exception caught by value copies the exception object (and can slice a derived type to its base); catch by const reference (query-based, no auto-fix)",
 	},
 }
+
+// Deliberately NOT in the catalog (do not re-add on a future audit):
+//
+//   - modernize-use-default-member-init — NOT a performance check (identical
+//     codegen; the real perf case, moving a constructor body assignment into
+//     the member-initializer list, is PX3015 prefer-member-initializer). Worse,
+//     its fix-it is UNSAFE on real code: for a member with a trailing attribute
+//     macro it inserts the brace-init before the attribute, e.g.
+//     `T* p_ GUARDED_BY(m_);` becomes `T* p_{nullptr} GUARDED_BY(m_);`, which
+//     fails to compile ("expected ';'") wherever GUARDED_BY/ABSL_GUARDED_BY
+//     expands to a real thread-safety attribute. Empirically broke leveldb's
+//     build under `-fix` (db_impl.h). See examples/validation.md.
+//   - performance-type-promotion-in-math-fn, performance-move-constructor-init,
+//     performance-inefficient-string-concatenation — clang-tidy emits no fix-it.
 
 // All returns the full catalog in stable ID order.
 func All() []Entry {

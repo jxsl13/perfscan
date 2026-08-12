@@ -42,7 +42,7 @@ Stable **`PX` + four digits**, grouped by the leading digit; IDs are never reuse
 |-------|----------|
 | **PX1xxx** | copies (for-range-copy, unnecessary value param / copy init) |
 | **PX2xxx** | allocation & containers (reserve/emplace, make_shared/unique, container-contains/size-empty) |
-| **PX3xxx** | moves, strings, io, algorithms, init, callables (pass-by-value, noexcept, faster-string-find, avoid-endl, use-equals-default, prefer-member-initializer, avoid-bind, …) |
+| **PX3xxx** | moves, strings, io, algorithms, callables (pass-by-value, noexcept, faster-string-find, avoid-endl, use-equals-default, prefer-member-initializer, avoid-bind, …) |
 | **PX2101 +** | perfscanxx-defined **query-based custom checks** — see below |
 
 ## Backing: built-in fix-its vs. query-based custom checks (ZERO compiled C++)
