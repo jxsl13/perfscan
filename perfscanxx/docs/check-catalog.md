@@ -64,9 +64,12 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   > the minimal-C++ directive, custom checks are declarative clang-query matcher
   > strings, not a C++ module.
 
-`PX2002` (inefficient-string-concatenation) is the one built-in check that stays
-advisory because clang-tidy emits no fix-it for it. So the advisory set is exactly
-`{PX2002, PX2101, PX2102, PX2103, PX2104}`; everything else is auto-fixable.
+Two built-in checks stay advisory because clang-tidy emits no fix-it for them:
+`PX2002` (inefficient-string-concatenation) and `PX3020`
+(rvalue-reference-param-not-moved — a missed move, where inserting the corrected
+`std::move` needs to know the parameter is dead afterwards). So the advisory set is
+exactly `{PX2002, PX3020, PX2101, PX2102, PX2103, PX2104}`; everything else is
+auto-fixable.
 
 ## Provenance
 
