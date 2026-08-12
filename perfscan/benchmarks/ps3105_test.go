@@ -47,3 +47,32 @@ func BenchmarkPS3105_After(b *testing.B) {
 		sinkI = scratch[0]
 	}
 }
+
+// The sort.Stable spelling is matched by PS3105 too and rewrites to the
+// same slices.Sort. It drives the SAME sort.Interface adapter, only via a
+// stable pdqsort variant, so its Before/After story mirrors the sort.Sort
+// numbers above; this pair keeps the benchmark honest for the stable
+// spelling (and, by compiling, confirms the rewrite target exists).
+func BenchmarkPS3105_Stable_Before(b *testing.B) {
+	b.ReportAllocs()
+	scratch := make([]int, len(ps3105Ints))
+	for range b.N {
+		copy(scratch, ps3105Ints)
+		// staticcheck's S1032 deliberately does NOT rewrite sort.Stable
+		// here (it would turn a stable sort into the unstable slices.Sort);
+		// PS3105 does, because for []int stability is unobservable — so no
+		// //lint:ignore is needed on this line.
+		sort.Stable(sort.IntSlice(scratch))
+		sinkI = scratch[0]
+	}
+}
+
+func BenchmarkPS3105_Stable_After(b *testing.B) {
+	b.ReportAllocs()
+	scratch := make([]int, len(ps3105Ints))
+	for range b.N {
+		copy(scratch, ps3105Ints)
+		slices.Sort(scratch)
+		sinkI = scratch[0]
+	}
+}
