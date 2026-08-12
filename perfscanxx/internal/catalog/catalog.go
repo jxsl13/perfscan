@@ -231,6 +231,12 @@ var entries = []Entry{
 	{
 		// Advisory (clang-tidy emits no fix-it): the corrected std::move can't be
 		// inserted mechanically without knowing the parameter is dead afterwards.
+		// KNOWN false positives: clang-tidy only recognizes std::move(param) /
+		// std::forward(param). A parameter consumed some OTHER way — member-wise
+		// (std::move(other.member_)) or via std::make_move_iterator(other.begin())
+		// — is still flagged though it IS moved-from. This mostly hits container /
+		// allocator-extended move constructors (e.g. abseil), so it is near-silent
+		// on ordinary application code; see examples/validation.md.
 		ID: "PX3020", TidyName: "cppcoreguidelines-rvalue-reference-param-not-moved",
 		Level: LevelStructured, Category: "moves",
 		Title:  "an rvalue-reference parameter never std::move'd is a missed move — it copies where it could have moved",
