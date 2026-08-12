@@ -36,6 +36,10 @@ type Options struct {
 	// Fix applies the suggested fixes of every reported auto-fixable
 	// check — MaxLevel gates both reporting and fixing.
 	Fix bool
+	// Diff prints a unified diff of what Fix would change, without
+	// modifying any file, and exits 1 when at least one file would
+	// change. Mutually exclusive with Fix.
+	Diff bool
 	// JSON emits findings as JSON instead of text.
 	JSON bool
 	// SARIF emits findings as SARIF 2.1.0 (for GitHub Code Scanning).
@@ -78,6 +82,10 @@ func Run(checks []*lint.Check, opts Options) int {
 	}
 	if opts.MaxLevel == 0 {
 		opts.MaxLevel = lint.LevelAggressive
+	}
+	if opts.Diff && opts.Fix {
+		fmt.Fprintln(opts.Stderr, "perfscan: -diff and -fix are mutually exclusive")
+		return 2
 	}
 
 	cfg, cfgPath := loadConfig(opts)
@@ -173,6 +181,12 @@ func Run(checks []*lint.Check, opts Options) int {
 		if suppressed > 0 {
 			fmt.Fprintf(opts.Stderr, "perfscan: %d baselined finding(s) suppressed (%s)\n", suppressed, opts.Baseline)
 		}
+	}
+
+	if opts.Diff {
+		// Dry-run: the diff IS the output — findings text is suppressed
+		// (stdout must stay a valid patch); the summary goes to stderr.
+		return diffFixes(findings, opts)
 	}
 
 	if opts.Fix {
@@ -419,10 +433,18 @@ func filterIgnored(findings []Finding) []Finding {
 	return out
 }
 
-// applyFixes applies the suggested fixes of the reported auto-fixable
-// checks (the enabled set is already MaxLevel-gated), then gofmt-formats
-// touched files.
-func applyFixes(findings []Finding, opts Options) (applied, failed int) {
+// patchedFile pairs a file's on-disk bytes with the bytes -fix would leave
+// behind for it.
+type patchedFile struct {
+	orig, fixed []byte
+}
+
+// patchedFiles computes, per file, the bytes -fix would write: it groups
+// the suggested fixes of the reported auto-fixable checks (the enabled set
+// is already MaxLevel-gated), merges the sorted TextEdits, and
+// gofmt-formats the result — everything applyFixes does except the final
+// write. applyFixes writes the results; the -diff path renders them.
+func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFile, applied, failed int) {
 	type edit struct {
 		start, end int
 		text       []byte
@@ -456,6 +478,7 @@ func applyFixes(findings []Finding, opts Options) (applied, failed int) {
 		applied++
 	}
 
+	files = make(map[string]patchedFile, len(perFile))
 	for path, edits := range perFile {
 		src, err := os.ReadFile(path)
 		if err != nil {
@@ -463,6 +486,7 @@ func applyFixes(findings []Finding, opts Options) (applied, failed int) {
 			failed++
 			continue
 		}
+		orig := slices.Clone(src)
 		slices.SortFunc(edits, func(a, b edit) int { return b.start - a.start })
 		overlap := false
 		for i := 1; i < len(edits); i++ {
@@ -482,7 +506,18 @@ func applyFixes(findings []Finding, opts Options) (applied, failed int) {
 		if formatted, err := format.Source(src); err == nil {
 			src = formatted
 		}
-		if err := os.WriteFile(path, src, 0o644); err != nil {
+		files[path] = patchedFile{orig: orig, fixed: src}
+	}
+	return files, applied, failed
+}
+
+// applyFixes applies the suggested fixes of the reported auto-fixable
+// checks (the enabled set is already MaxLevel-gated), then gofmt-formats
+// touched files.
+func applyFixes(findings []Finding, opts Options) (applied, failed int) {
+	files, applied, failed := patchedFiles(findings, opts)
+	for path, pf := range files {
+		if err := os.WriteFile(path, pf.fixed, 0o644); err != nil {
 			fmt.Fprintf(opts.Stderr, "perfscan: fix %s: %v\n", path, err)
 			failed++
 		}

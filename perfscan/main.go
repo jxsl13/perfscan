@@ -10,6 +10,7 @@
 //	perfscan -checks PS2* ./...        only allocation checks
 //	perfscan -level 1 -fix ./...       apply only L1 (idiomatic) fixes
 //	perfscan -fix ./...                apply every available fix (-level gates)
+//	perfscan -diff ./...               dry run: unified diff of what -fix would do
 //	perfscan -json ./...               machine-readable output
 //	perfscan -list                     print the check table
 //	perfscan -explain PS2005           print a check's documentation
@@ -32,6 +33,7 @@ var version = "dev" // set by the release workflow via -ldflags
 func main() {
 	var (
 		fix        = flag.Bool("fix", false, "apply the auto-fixes of every reported check; -level gates both reporting and fixing (e.g. -level 1 -fix applies only idiomatic fixes)")
+		diff       = flag.Bool("diff", false, "print a unified diff of what -fix would change, without modifying files; exit 1 if anything would change")
 		list       = flag.Bool("list", false, "list all checks and exit")
 		explain    = flag.String("explain", "", "print the documentation of a check (e.g. PS2005) and exit")
 		sel        = flag.String("checks", "all", "comma-separated check selector: all, PS2005, PS2*, -PS3003")
@@ -68,6 +70,7 @@ func main() {
 		MaxLevel:      lint.Level(*maxLevel),
 		Tests:         *tests,
 		Fix:           *fix,
+		Diff:          *diff,
 		JSON:          *jsonOut,
 		SARIF:         *sarifOut,
 		ConfigPath:    *configPath,
@@ -93,6 +96,9 @@ Examples:
 	perfscan -level 1 -fix ./...         report + apply only L1 (idiomatic) fixes
 	perfscan -level 2 -fix ./...         report + apply L1 and L2 fixes
 	perfscan -fix ./...                  default -level 3: apply every available fix
+	perfscan -diff ./...                 dry run: print what -fix would change as a
+	                                     unified diff, change nothing, exit 1 if
+	                                     anything is pending (CI gate)
 	perfscan -baseline b.yaml -write-baseline ./...   accept today's findings
 	perfscan -baseline b.yaml ./...      then fail only on NEW findings
 	perfscan -list                       the check table

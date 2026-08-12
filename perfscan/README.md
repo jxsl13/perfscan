@@ -36,6 +36,8 @@ perfscan -level 1 ./...            # only findings with idiomatic (L1) fixes
 perfscan -level 1 -fix ./...       # report + apply only L1 (idiomatic) fixes
 perfscan -level 2 -fix ./...       # report + apply L1 and L2 fixes
 perfscan -fix ./...                # default -level 3: apply every available fix
+perfscan -diff ./...               # dry run: unified diff of what -fix would do,
+                                   #   changes nothing, exit 1 if fixes are pending
 perfscan -json ./...               # machine-readable output (editor quick-fixes)
 perfscan -sarif ./...              # SARIF 2.1.0 (GitHub Code Scanning)
 perfscan -list                     # the check table
