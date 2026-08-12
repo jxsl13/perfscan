@@ -671,3 +671,68 @@ func TestPathExcluded(t *testing.T) {
 		t.Error("no excludes must never match")
 	}
 }
+
+// TestExcludeFiltersInvocation is an integration test over run(): -exclude must
+// remove matching files from the actual clang-tidy invocation (so they are
+// neither analyzed nor, under -fix, rewritten). Concrete file args bypass the
+// compile-database lookup, so no compile_commands.json is needed; a stub tidy
+// captures the argv.
+func TestExcludeFiltersInvocation(t *testing.T) {
+	dir := t.TempDir()
+	keep := filepath.Join(dir, "src", "keep.cpp")
+	drop := filepath.Join(dir, "vendor", "drop.cpp")
+	for _, f := range []string{keep, drop} {
+		if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(f, []byte("int x;\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var gotArgv []string
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+	tidy.Executor = func(_ context.Context, argv []string, stdout, stderr *bytes.Buffer) (int, error) {
+		gotArgv = append([]string(nil), argv...)
+		for _, a := range argv {
+			if strings.HasPrefix(a, "--export-fixes=") {
+				_ = os.WriteFile(strings.TrimPrefix(a, "--export-fixes="), nil, 0o644)
+			}
+		}
+		return 0, nil
+	}
+	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
+
+	// Without -exclude: both files reach clang-tidy.
+	gotArgv = nil
+	runCLI(keep, drop)
+	base := strings.Join(gotArgv, " ")
+	if !strings.Contains(base, keep) || !strings.Contains(base, drop) {
+		t.Fatalf("baseline: both files should be passed, got argv: %v", gotArgv)
+	}
+
+	// With -exclude vendor/: the vendored file is dropped from the invocation.
+	gotArgv = nil
+	runCLI("-exclude", "vendor/", keep, drop)
+	joined := strings.Join(gotArgv, " ")
+	if !strings.Contains(joined, keep) {
+		t.Errorf("kept file must still be passed to clang-tidy, argv: %v", gotArgv)
+	}
+	if strings.Contains(joined, drop) {
+		t.Errorf("excluded file must NOT be passed to clang-tidy, argv: %v", gotArgv)
+	}
+
+	// Excluding every input is an error, not an empty clang-tidy run.
+	gotArgv = nil
+	_, errOut, code := runCLI("-exclude", "src/,vendor/", keep, drop)
+	if code != 2 {
+		t.Errorf("all-excluded: exit = %d, want 2", code)
+	}
+	if len(gotArgv) != 0 {
+		t.Errorf("all-excluded: clang-tidy must not run, but got argv: %v", gotArgv)
+	}
+	if !strings.Contains(errOut, "removed by -exclude") {
+		t.Errorf("all-excluded: want a helpful stderr message, got %q", errOut)
+	}
+}
