@@ -1,43 +1,216 @@
 package ps4101
 
-func rangeIdx(dst, src []float64) {
+// --- Provably safe: one operand is a FRESH, non-escaping local buffer, so the
+// two slices cannot share backing -> report + fix. ---
+
+func freshMakeRangeIdx(src []float64) []float64 {
+	dst := make([]float64, len(src))
 	for i := range src { // want `element-copy loop from src to dst is a single memmove; replace with copy\(dst, src\)`
 		dst[i] = src[i]
 	}
+	return dst
 }
 
-func rangeVal(dst, src []int) {
+func freshMakeRangeVal(src []int) []int {
+	dst := make([]int, len(src))
 	for i, v := range src { // want `element-copy loop from src to dst is a single memmove; replace with copy\(dst, src\)`
 		dst[i] = v
 	}
+	return dst
 }
 
-func counted(dst, src []byte) {
+func freshMakeCounted(src []byte) []byte {
+	dst := make([]byte, len(src))
 	for i := 0; i < len(src); i++ { // want `element-copy loop from src to dst is a single memmove; replace with copy\(dst, src\)`
+		dst[i] = src[i]
+	}
+	return dst
+}
+
+// make sized by cap(src) is also >= len(src): fire + fix.
+func freshMakeCap(src []int) []int {
+	dst := make([]int, cap(src))
+	for i := range src { // want `element-copy loop from src to dst is a single memmove; replace with copy\(dst, src\)`
+		dst[i] = src[i]
+	}
+	return dst[:len(src)]
+}
+
+// --- Length divergence: dst may be SHORTER than src -> loop panics, copy
+// truncates. Not sized from src, so SILENT. ---
+
+// A slice composite literal is not provably >= len(src).
+func literalNotSized(src []int) []int {
+	dst := []int{0, 0, 0, 0}
+	for i := range src {
+		dst[i] = src[i]
+	}
+	return dst
+}
+
+// make with an arbitrary length is not provably >= len(src).
+func makeArbitraryLen(src []byte, n int) []byte {
+	dst := make([]byte, n)
+	for i := range src {
+		dst[i] = src[i]
+	}
+	return dst
+}
+
+// A fresh SOURCE does not bound dst's length (dst is an unsized param).
+func freshSrcParamDst(dst []byte, s string) {
+	src := []byte(s)
+	for i := range src {
 		dst[i] = src[i]
 	}
 }
 
-// A transform is not a copy: silent.
+// --- Not PROVABLY distinct -> SILENT (no diagnostic, no fix). ---
+
+// Two parameters could alias via an overlapping caller: not provable.
+func paramToParam(dst, src []int) {
+	for i := range src {
+		dst[i] = src[i]
+	}
+}
+
+// Both operands are reslices of the same backing array — the LZ overlapping
+// back-reference; copy() would corrupt output.
+func overlapReslice(out []byte, start, t, ml int) {
+	src := out[start : start+ml]
+	dst := out[t:]
+	dst = dst[:len(src)]
+	for i := range src {
+		dst[i] = src[i]
+	}
+}
+
+// Fresh dst but it ESCAPES (passed to a func) before the loop, so its backing
+// may now be aliased by src.
+func freshButEscapes(src []byte, sink func([]byte)) {
+	dst := make([]byte, len(src))
+	sink(dst)
+	for i := range src {
+		dst[i] = src[i]
+	}
+}
+
+// Fresh dst but src is sliced FROM it before the loop (aliased).
+func freshButSrcFromDst(n int) {
+	dst := make([]byte, n)
+	src := dst[1:]
+	for i := range src {
+		dst[i] = src[i]
+	}
+}
+
+// A transform is not a copy.
 func scaled(dst, src []float64, k float64) {
 	for i := range src {
 		dst[i] = src[i] * k
 	}
 }
 
-// Different element types cannot memmove: silent.
+// Different element types cannot memmove.
 func widened(dst []float64, src []float32) {
 	for i := range src {
 		dst[i] = float64(src[i])
 	}
 }
 
-// Extra work in the body: silent.
-func twoStatements(dst, src []int) {
-	n := 0
+// --- Regression fixtures for adversarially-found soundness breaks (all SILENT). ---
+
+// []T(sliceValue) is an identity conversion sharing backing — NOT fresh.
+func sliceConvNotFresh(out []int) {
+	src := out[0:4]
+	dst := []int(out[1:5])
 	for i := range src {
 		dst[i] = src[i]
-		n++
 	}
-	_ = n
+}
+
+// A shadowed, user-defined make is not the allocating builtin.
+func shadowedMake(out []int) {
+	make := func(int) []int { return out[1:] }
+	dst := make(4)
+	src := out[0:4]
+	for i := range src {
+		dst[i] = src[i]
+	}
+}
+
+// Fresh dst reassigned to an alias inside an ENCLOSING loop: the copy re-executes,
+// so the lexically-later reassignment runs before the next copy.
+func reassignInOuterLoop(out []int) {
+	src := out[0:4]
+	dst := make([]int, 4)
+	for k := 0; k < 2; k++ {
+		for i := range src {
+			dst[i] = src[i]
+		}
+		if k == 0 {
+			dst = out[1:5]
+		}
+	}
+}
+
+// Counted-for whose Post reassigns dst to an alias — must not match (Post != i++),
+// and must never be rewritten (that would drop the Post side effect).
+func countedForBadPost(out []int) {
+	src := out[0:4]
+	dst := make([]int, 4)
+	for i := 0; i < len(src); i, dst = i+1, out[1:5] {
+		dst[i] = src[i]
+	}
+}
+
+// --- Round-3 regressions: src length not stable, or index not loop-local (SILENT). ---
+
+var pkgSrc = []int{1, 2, 3}
+
+func growPkgSrc() { pkgSrc = append(pkgSrc, 9) }
+
+// src is a package-level var a callee can grow between make and loop.
+func pkgSrcGrows() []int {
+	dst := make([]int, len(pkgSrc))
+	growPkgSrc()
+	for i := range pkgSrc {
+		dst[i] = pkgSrc[i]
+	}
+	return dst
+}
+
+// src's address is taken, so a callee can reassign it.
+func srcAddrTaken(src []int, grow func(*[]int)) []int {
+	dst := make([]int, len(src))
+	grow(&src)
+	for i := range src {
+		dst[i] = src[i]
+	}
+	return dst
+}
+
+// range key is a pre-declared variable observable after the loop.
+func rangeKeyEscapes(src []int) (int, []int) {
+	var i int
+	dst := make([]int, len(src))
+	for i = range src {
+		dst[i] = src[i]
+	}
+	return i, dst
+}
+
+// --- Round-4 regression: the builtin copy is shadowed at the fix site, so the
+// emitted copy(dst, src) must NOT be inserted (would misbehave or not compile).
+// The package-level-shadow variant lives in testdata/src/ps4101_copyshadow. ---
+
+// A local variable named copy shadows the builtin: copy(dst,src) would not compile.
+func shadowedCopyLocalVar(src []int) []int {
+	copy := 0
+	dst := make([]int, len(src))
+	for i := range src {
+		dst[i] = src[i]
+	}
+	_ = copy
+	return dst
 }
