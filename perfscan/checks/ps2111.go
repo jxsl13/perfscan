@@ -44,6 +44,14 @@ WriteString equally callable. A value whose Write is value-receiver but
 whose WriteString is pointer-receiver is skipped: on a non-addressable
 receiver the rewrite would not compile.
 
+One position is excluded entirely: w.Write([]byte(s)) lexically inside
+w's own WriteString method — the standard WriteString-delegates-to-Write
+implementation. There the rewrite would make WriteString call itself
+(unbounded recursion, a stack overflow that still compiles), and the
+original delegation is already the correct code, so the check reports
+nothing. Writing to a different object (a field like w.buf, another
+variable) inside WriteString is still reported.
+
 The automatic fix renames the selected method to WriteString and deletes
 only the conversion's "[]byte(" and ")" around the argument, leaving the
 receiver and the argument expression untouched in place — same
@@ -91,6 +99,13 @@ func runPS2111(pass *analysis.Pass) (any, error) {
 			}
 			wt := pass.TypesInfo.TypeOf(sel.X)
 			if wt == nil || !ps2111CanWriteString(wt) {
+				return true
+			}
+			// Inside the receiver's own WriteString method the rewrite
+			// w.WriteString(s) would call the enclosing method itself —
+			// the classic WriteString-delegates-to-Write implementation.
+			// The original code is the correct delegation: stay silent.
+			if writeFixSelfDispatches(pass, call, sel.X, "WriteString") {
 				return true
 			}
 			diag := analysis.Diagnostic{

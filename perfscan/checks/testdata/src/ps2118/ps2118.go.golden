@@ -93,3 +93,24 @@ func take(s string) int { return len(s) }
 func otherCallee(b []byte) int {
 	return take(string(b))
 }
+
+// A Write that delegates through io.WriteString to its type's
+// WriteString: rewriting io.WriteString(e, string(p)) to e.Write(p) here
+// would make Write call ITSELF — unbounded recursion that still
+// compiles. The delegation is the correct code; nothing is reported.
+type selfE struct{ b []byte }
+
+func (e *selfE) WriteString(s string) (int, error) {
+	e.b = append(e.b, s...)
+	return len(s), nil
+}
+
+func (e *selfE) Write(p []byte) (int, error) {
+	return io.WriteString(e, string(p))
+}
+
+// Writing to a DIFFERENT writer inside Write is still reported: w is not
+// the receiver.
+func (e *selfE) copyTo(w io.Writer, p []byte) (int, error) {
+	return w.Write(p) // want `io\.WriteString\(w, string\(b\)\) allocates a string copy of the byte slice just to write it; w\.Write\(b\) writes the bytes directly`
+}

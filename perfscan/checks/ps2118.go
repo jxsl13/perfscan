@@ -44,6 +44,14 @@ converts and remains assignable to Write's []byte parameter, so it
 qualifies; a string, []rune, single rune, or a slice of a NAMED byte type
 (convertible to string but not assignable to []byte) does not.
 
+One position is excluded entirely: io.WriteString(w, string(b)) lexically
+inside w's own Write method — a Write that delegates through
+io.WriteString to its type's WriteString. There the rewrite w.Write(b)
+would make Write call itself (unbounded recursion that still compiles),
+and the original delegation is already the correct code, so the check
+reports nothing. Writing to a different object (a field, another
+variable) inside Write is still reported.
+
 The automatic fix replaces the whole call with w.Write(b), rendering both
 argument expressions as written (a non-selectable w such as &buf is
 parenthesized). Each rewrite removes the file's io.WriteString selector,
@@ -99,6 +107,13 @@ func runPS2118(pass *analysis.Pass) (any, error) {
 			}
 			_, inner := ps2118ByteSliceConv(pass, call.Args[1])
 			if inner == nil {
+				return true
+			}
+			// Inside the writer's own Write method the rewrite w.Write(b)
+			// would call the enclosing method itself — the classic
+			// Write-delegates-to-WriteString implementation. The original
+			// code is the correct delegation: stay silent.
+			if writeFixSelfDispatches(pass, call, call.Args[0], "Write") {
 				return true
 			}
 			fix := ps2118Fix(f, call, call.Args[0], inner)

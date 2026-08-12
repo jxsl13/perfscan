@@ -37,6 +37,13 @@ equivalence), so routing the same bytes through Write instead is not
 observable for conforming writers. Operand evaluation order is
 unchanged: w, then the format, then the arguments.
 
+One position is excluded entirely: w.WriteString(fmt.Sprintf(...))
+lexically inside w's own Write method. fmt.Fprintf writes through
+w.Write, so the rewrite would dispatch back to the enclosing method
+itself — unbounded recursion that still compiles. The check reports
+nothing there; writing to a different object (a field, another variable)
+inside Write is still reported.
+
 The automatic fix requires the argument to be exactly a call type-pinned
 to the standard library's fmt.Sprintf/Sprint/Sprintln, and the callee to
 be a method with io.StringWriter's exact WriteString signature. Because
@@ -75,6 +82,13 @@ func runPS2120(pass *analysis.Pass) (any, error) {
 			}
 			recv, inner, qual, sname, ok := ps2120Match(pass, outer)
 			if !ok {
+				return true
+			}
+			// fmt.Fprintf(w, ...) writes through w.Write: inside the
+			// receiver's own Write method the rewrite would dispatch back
+			// to the enclosing method itself — stay silent, no valid
+			// rewrite exists there.
+			if writeFixSelfDispatches(pass, outer, recv, "Write") {
 				return true
 			}
 			// fmt.Fprintf needs an io.Writer. Unlike PS2113 (whose match

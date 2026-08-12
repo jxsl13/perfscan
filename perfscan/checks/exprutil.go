@@ -81,6 +81,66 @@ func astCalleeName(call *ast.CallExpr) string {
 	return ""
 }
 
+// enclosingMethodRecv returns the receiver identifier name and method name
+// of the *ast.FuncDecl whose body lexically encloses target, when that
+// FuncDecl is a method with a NAMED receiver. ok is false otherwise (free
+// function, unnamed or blank receiver, or no enclosing declaration). Go
+// never nests FuncDecls and closures are *ast.FuncLit, so at most one
+// FuncDecl encloses target — a closure inside a method still resolves to
+// that method (it closes over the receiver).
+func enclosingMethodRecv(pass *analysis.Pass, target ast.Node) (recvName, methodName string, ok bool) {
+	for _, f := range pass.Files {
+		if target.Pos() < f.Pos() || target.End() > f.End() {
+			continue
+		}
+		for _, d := range f.Decls {
+			fn, isFn := d.(*ast.FuncDecl)
+			if !isFn || fn.Body == nil ||
+				fn.Body.Pos() > target.Pos() || target.End() > fn.Body.End() {
+				continue
+			}
+			if fn.Recv == nil || len(fn.Recv.List) == 0 || len(fn.Recv.List[0].Names) == 0 {
+				return "", "", false
+			}
+			name := fn.Recv.List[0].Names[0].Name
+			if name == "_" {
+				return "", "", false
+			}
+			return name, fn.Name.Name, true
+		}
+		return "", "", false
+	}
+	return "", "", false
+}
+
+// writeFixSelfDispatches reports whether rewriting a write whose writer
+// expression is writer would dispatch back into the method that lexically
+// encloses node — i.e. the "fix" would turn a correct delegation (like
+// WriteString(s) { return d.Write([]byte(s)) }) into unbounded recursion.
+// dispatch is the set of method names the rewritten call lands on (e.g.
+// "WriteString", or "Write" for the fmt.Fprintf family). It triggers only
+// when writer is a bare identifier naming the enclosing method's receiver
+// and that method's name is in dispatch; a selector like d.buf or any other
+// expression is a different object and is safe. When this reports true the
+// finding must be suppressed entirely: the original code is the correct
+// delegation and no valid rewrite exists.
+func writeFixSelfDispatches(pass *analysis.Pass, node ast.Node, writer ast.Expr, dispatch ...string) bool {
+	id, isIdent := writer.(*ast.Ident)
+	if !isIdent {
+		return false
+	}
+	recvName, methodName, ok := enclosingMethodRecv(pass, node)
+	if !ok || id.Name != recvName {
+		return false
+	}
+	for _, m := range dispatch {
+		if methodName == m {
+			return true
+		}
+	}
+	return false
+}
+
 // isPointerMethod reports whether fn is a method with a pointer receiver.
 func isPointerMethod(fn *ast.FuncDecl) bool {
 	if fn.Recv == nil || len(fn.Recv.List) == 0 {

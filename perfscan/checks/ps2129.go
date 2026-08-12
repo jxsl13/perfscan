@@ -59,6 +59,14 @@ io.WriteString's argument without a conversion, and a []byte,
 fmt.Stringer or error operand is formatted through String()/Error() —
 none match.
 
+Two positions are excluded entirely: a matched call lexically inside w's
+own WriteString or Write method. io.WriteString(w, s) dispatches to
+w.WriteString when w implements io.StringWriter and to w.Write
+otherwise, so inside either method the rewrite could dispatch back to
+the enclosing method itself — unbounded recursion that still compiles.
+The check reports nothing there; writing to a different object (a
+field, another variable) inside those methods is still reported.
+
 The writer and operand expressions are kept byte-verbatim in place —
 evaluated once, in the original order; only the wrapper around them is
 rewritten to io.WriteString(w, s). The fix edits imports as needed: the
@@ -102,6 +110,14 @@ func runPS2129(pass *analysis.Pass) (any, error) {
 			}
 			name, verb, w, s, ok := ps2129Match(pass, call)
 			if !ok {
+				return true
+			}
+			// io.WriteString(w, s) dispatches to w.WriteString when w
+			// implements io.StringWriter and to w.Write otherwise: inside
+			// the writer's own WriteString or Write method the rewrite
+			// would dispatch back to the enclosing method itself — stay
+			// silent, no valid rewrite exists there.
+			if writeFixSelfDispatches(pass, call, w, "WriteString", "Write") {
 				return true
 			}
 			fix := ps2129Fix(pass, f, call, w, s)

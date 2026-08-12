@@ -102,3 +102,35 @@ func (*oddSig) WriteString(s string) error  { return nil }
 func wrongSignature(w *oddSig, s string) {
 	w.Write([]byte(s))
 }
+
+// The classic WriteString-delegates-to-Write implementation (the real
+// xxhash bug): rewriting w.Write([]byte(s)) to w.WriteString(s) here
+// would make WriteString call ITSELF — unbounded recursion that still
+// compiles. The delegation is the correct code; nothing is reported.
+type selfW struct{ b []byte }
+
+func (w *selfW) Write(p []byte) (int, error) {
+	w.b = append(w.b, p...)
+	return len(p), nil
+}
+
+func (w *selfW) WriteString(s string) (int, error) {
+	return w.Write([]byte(s))
+}
+
+// Writing to a DIFFERENT object inside WriteString is still reported: a
+// field of the receiver is not the receiver.
+type wrapW struct{ buf *bytes.Buffer }
+
+func (w *wrapW) Write(p []byte) (int, error) { return w.buf.Write(p) }
+
+func (w *wrapW) WriteString(s string) (int, error) {
+	return w.buf.Write([]byte(s)) // want `w\.Write\(\[\]byte\(s\)\) allocates and copies the string; the receiver implements io\.StringWriter, so w\.WriteString\(s\) writes it directly`
+}
+
+// A method OTHER than WriteString writing to the receiver is still
+// reported: the rewrite dispatches to WriteString, not to the enclosing
+// method.
+func (w *selfW) dump(s string) {
+	w.Write([]byte(s)) // want `w\.Write\(\[\]byte\(s\)\) allocates and copies the string; the receiver implements io\.StringWriter, so w\.WriteString\(s\) writes it directly`
+}
