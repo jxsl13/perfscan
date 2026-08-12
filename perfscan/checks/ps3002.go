@@ -28,16 +28,23 @@ The generic slices.SortFunc (Go 1.21+) sorts the concrete slice type with a
 direct call, and a sort.Sort on a concrete sort.Interface implementation
 avoids the reflect-based swaps too.
 
-The automatic fix (L2) handles the one shape where the signature change from
-index-based func(i, j int) bool to element-based func(a, b T) int is purely
-mechanical: the sorted value is a plain identifier xs, and the comparator
-body is exactly "return xs[i]<CHAIN> < xs[j]<CHAIN>" with the same (possibly
-empty) selector chain on both sides and an ordered basic element/field type.
-That closure captures xs only to index it, so xs[i]→a, xs[j]→b is faithful
-and the call becomes slices.SortFunc(xs, func(a, b T) int { return
-cmp.Compare(aExpr, bExpr) }). The fix is only offered when the file already
-imports "slices" and "cmp" (un-renamed and not shadowed at the call site);
-every other comparator stays advisory.`,
+The automatic fix (L2) handles the shape where the sorted value is a plain
+identifier xs and the comparator body is exactly "return xs[i]<CHAIN> <
+xs[j]<CHAIN>" with the same (possibly empty) selector chain on both sides and
+an ordered basic element/field type. Two forms:
+
+  - Whole element (empty chain, "xs[i] < xs[j]") → slices.Sort(xs), which
+    drops the comparator entirely. Needs only "slices" in scope.
+  - A field ("xs[i].f < xs[j].f") → slices.SortFunc(xs, func(a, b T) int {
+    return cmp.Compare(a.f, b.f) }). Needs "slices" and "cmp" in scope and a
+    locally spellable element type T.
+
+FLOAT is excluded from the fix (advisory only): cmp.Compare and slices.Sort
+order NaN as the smallest value while the '<' comparator treats NaN as
+incomparable, so the rewrite is not bit-identical for a slice that may hold a
+NaN — the same exclusion PS3104/PS3105 apply. A SliceStable over an ordered
+basic type collapses to the unstable sort because equal elements are
+indistinguishable. Every other comparator stays advisory.`,
 		Before: `sort.Slice(xs, func(i, j int) bool { return xs[i].Key < xs[j].Key })`,
 		After:  `slices.SortFunc(xs, func(a, b Item) int { return cmp.Compare(a.Key, b.Key) })`,
 	},
@@ -195,7 +202,7 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 		}
 	}
 	// The compared type must be an ordered basic type — the domain of
-	// cmp.Compare.
+	// cmp.Compare and slices.Sort.
 	cmpType := pass.TypesInfo.TypeOf(bin.X)
 	if cmpType == nil {
 		return nil
@@ -204,13 +211,40 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 	if !ok || basic.Info()&types.IsOrdered == 0 {
 		return nil
 	}
-	// slices and cmp must resolve to their std packages at the call site:
-	// imported in this file, un-renamed, and not shadowed by a local name.
-	if !stdPkgInScope(pass, call.Pos(), "slices") || !stdPkgInScope(pass, call.Pos(), "cmp") {
+	// Floats are ordered but NOT safe: cmp.Compare and slices.Sort order NaN as
+	// the smallest value, whereas the '<' comparator treats NaN as incomparable,
+	// so the two disagree on any slice that can contain a NaN. Advisory only —
+	// the same float exclusion PS3104/PS3105 apply for exactly this reason.
+	if basic.Info()&types.IsFloat != 0 {
 		return nil
 	}
-	// The element type must be spellable in this package without a new
-	// import.
+	// slices must resolve to the std package at the call site (imported here,
+	// un-renamed, not shadowed) — required by BOTH rewrites below.
+	if !stdPkgInScope(pass, call.Pos(), "slices") {
+		return nil
+	}
+
+	// Whole-element ascending compare — the body is exactly `xs[i] < xs[j]`
+	// (empty selector chain) — becomes slices.Sort(xs), dropping the comparator
+	// entirely. For an ordered non-float element '<' is the total order
+	// slices.Sort already uses, and equal elements are indistinguishable so a
+	// SliceStable collapses to the same result. No cmp import, no element
+	// spelling needed.
+	if len(fieldsA) == 0 {
+		return &analysis.SuggestedFix{
+			Message: fmt.Sprintf("replace sort.%s with slices.Sort", name),
+			TextEdits: []analysis.TextEdit{
+				{Pos: call.Pos(), End: call.End(), NewText: fmt.Appendf(nil, "slices.Sort(%s)", xs.Name)},
+			},
+		}
+	}
+
+	// Field compare — `xs[i].f < xs[j].f` — becomes slices.SortFunc with
+	// cmp.Compare, so cmp must also be importable and the element type spellable
+	// without a new import.
+	if !stdPkgInScope(pass, call.Pos(), "cmp") {
+		return nil
+	}
 	elem := types.Unalias(sliceType.Elem())
 	if !locallySpellable(elem, pass.Pkg) {
 		return nil
@@ -221,10 +255,7 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 	if name == "SliceStable" {
 		fn = "SortStableFunc"
 	}
-	suffix := ""
-	if len(fieldsA) > 0 {
-		suffix = "." + strings.Join(fieldsA, ".")
-	}
+	suffix := "." + strings.Join(fieldsA, ".")
 	newText := fmt.Sprintf("slices.%s(%s, func(a, b %s) int { return cmp.Compare(a%s, b%s) })",
 		fn, xs.Name, elemStr, suffix, suffix)
 	return &analysis.SuggestedFix{
