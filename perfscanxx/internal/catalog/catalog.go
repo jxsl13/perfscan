@@ -255,6 +255,16 @@ var entries = []Entry{
 			`hasArgument(0, declRefExpr(to(varDecl(hasLocalStorage()))))).bind("mv")))))))`,
 		Message: "std::move of a local in a return statement pessimizes NRVO — the compiler can elide the copy/move entirely if you return the local directly (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2103", TidyName: "custom-catch-by-value",
+		Level: LevelIdiomatic, Category: "copies",
+		Title:   "exception caught by value copies (and can slice) it; catch by const reference",
+		HasFix:  false,
+		Custom:  true,
+		Bind:    "cv",
+		Query:   `match cxxCatchStmt(has(varDecl(hasType(hasCanonicalType(recordType()))).bind("cv")))`,
+		Message: "exception caught by value copies the exception object (and can slice a derived type to its base); catch by const reference (query-based, no auto-fix)",
+	},
 }
 
 // All returns the full catalog in stable ID order.
