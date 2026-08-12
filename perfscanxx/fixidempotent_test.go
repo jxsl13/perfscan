@@ -97,6 +97,55 @@ func TestExcludeKeepsFixOffIncludedHeader(t *testing.T) {
 	}
 }
 
+// TestFixSequentialExcludeKeepsHeaderUntouched pins that -fix-sequential (the
+// one-clang-tidy-pass-per-check path used to avoid cross-check fix-it collisions)
+// honors -exclude for an included header exactly as plain -fix does. It is a
+// SEPARATE code path from -fix (applySequentialFixes derives its per-check
+// Options from the base, so the ExcludeHeaderFilter must ride along); this test
+// guards against that inheritance silently breaking. Skipped when clang-tidy absent.
+func TestFixSequentialExcludeKeepsHeaderUntouched(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	dir := t.TempDir()
+	proj := filepath.Join(dir, "proj")
+	deps := filepath.Join(dir, "deps")
+	for _, d := range []string{proj, deps} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const header = "#pragma once\nstruct Dep {\n  ~Dep() {}\n};\n" // PX3013 fixable
+	hpath := filepath.Join(deps, "dep.h")
+	if err := os.WriteFile(hpath, []byte(header), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cpp := filepath.Join(proj, "a.cpp")
+	if err := os.WriteFile(cpp, []byte("#include \"dep.h\"\nDep* make() { return new Dep(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + proj + `","file":"` + cpp + `","command":"clang++ -std=c++17 -I` + deps + ` -c a.cpp"}]`
+	if err := os.WriteFile(filepath.Join(proj, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Control: WITHOUT -exclude, -fix-sequential fixes the header (proving the
+	// setup triggers a header fix-it, so the exclude assertion is meaningful).
+	runCLI("-tidy", bin, "-fix", "-fix-sequential", "-checks", "PX3013", "-p", proj, proj)
+	if got, _ := os.ReadFile(hpath); !strings.Contains(string(got), "= default") {
+		t.Skipf("setup did not produce a header fix-it (clang-tidy header scope differs); got:\n%s", got)
+	}
+	// Reset and run WITH -exclude deps/ — the header must be left untouched.
+	if err := os.WriteFile(hpath, []byte(header), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runCLI("-tidy", bin, "-fix", "-fix-sequential", "-checks", "PX3013", "-exclude", "deps/", "-p", proj, proj)
+	if got, _ := os.ReadFile(hpath); string(got) != header {
+		t.Errorf("-fix-sequential -exclude deps/ did not keep the fix off the excluded header:\n%s", got)
+	}
+}
+
 // TestDiffExcludeKeepsHeaderOutOfPreview pins that -diff honors -exclude for an
 // included header exactly as -fix does (both flow the same --exclude-header-filter):
 // the preview must not show a change to an excluded header, or -diff would promise
