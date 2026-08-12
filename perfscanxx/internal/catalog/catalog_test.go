@@ -110,3 +110,109 @@ func TestUniqueIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestUniqueTidyNames(t *testing.T) {
+	seen := map[string]string{}
+	for _, e := range All() {
+		if prev, dup := seen[e.TidyName]; dup {
+			t.Errorf("TidyName %q shared by %s and %s", e.TidyName, prev, e.ID)
+		}
+		seen[e.TidyName] = e.ID
+	}
+}
+
+// TestCustomCheckInvariants pins the contract every query-based custom check
+// must satisfy. It is the guard that would have caught PX2103 shipping without
+// the isExpansionInMainFile() header gate (it fired on library-header catch
+// clauses the user cannot fix), and any future Bind/.bind desync or malformed
+// matcher.
+func TestCustomCheckInvariants(t *testing.T) {
+	custom := 0
+	for _, e := range All() {
+		if !e.Custom {
+			// Custom-only fields must be empty on built-in entries, so a
+			// stray Query/Bind can never silently ride along.
+			if e.Query != "" || e.Bind != "" || e.Message != "" {
+				t.Errorf("%s: built-in entry must leave Query/Bind/Message empty, got Query=%q Bind=%q Message=%q", e.ID, e.Query, e.Bind, e.Message)
+			}
+			continue
+		}
+		custom++
+
+		// A custom check carries no clang-tidy fix-it: a matcher only reports.
+		if e.HasFix {
+			t.Errorf("%s: custom checks are advisory — HasFix must be false", e.ID)
+		}
+		// The declarative fields must all be present.
+		if e.Bind == "" {
+			t.Errorf("%s: custom check has empty Bind", e.ID)
+		}
+		if e.Message == "" {
+			t.Errorf("%s: custom check has empty Message", e.ID)
+		}
+
+		q := strings.TrimSpace(e.Query)
+		if !strings.HasPrefix(q, "match ") {
+			t.Errorf("%s: Query must be a clang-query 'match ...' command, got %q", e.ID, q)
+		}
+		if !balancedParens(q) {
+			t.Errorf("%s: Query has unbalanced parentheses:\n%s", e.ID, q)
+		}
+		// Every custom matcher must stay off standard/library headers: without
+		// this guard the check fires on code the user cannot change (noise).
+		if !strings.Contains(q, "isExpansionInMainFile()") {
+			t.Errorf("%s: Query must contain isExpansionInMainFile() to avoid firing in library headers", e.ID)
+		}
+		// The diagnostic anchors on Bind, so the matcher must bind that exact
+		// name — a mismatch means clang-tidy reports nothing.
+		wantBind := `.bind("` + e.Bind + `")`
+		if !strings.Contains(q, wantBind) {
+			t.Errorf("%s: Query must bind its anchor node %s, but no %s found in:\n%s", e.ID, e.Bind, wantBind, q)
+		}
+
+		// The generated clang-tidy config must round-trip the query + bind.
+		cfg := ClangTidyConfig([]Entry{e})
+		name := strings.TrimPrefix(e.TidyName, "custom-")
+		for _, want := range []string{"Name: " + name, "Query: |", "BindName: " + e.Bind} {
+			if !strings.Contains(cfg, want) {
+				t.Errorf("%s: generated config missing %q:\n%s", e.ID, want, cfg)
+			}
+		}
+	}
+	if custom == 0 {
+		t.Fatal("expected at least one custom check in the catalog")
+	}
+}
+
+// balancedParens reports whether every '(' has a matching ')', ignoring the
+// contents of double-quoted string literals (a matcher argument like "(" must
+// not throw the count off).
+func balancedParens(s string) bool {
+	depth := 0
+	inStr := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			if c == '\\' {
+				i++ // skip the escaped char
+				continue
+			}
+			if c == '"' {
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth < 0 {
+				return false
+			}
+		}
+	}
+	return depth == 0
+}

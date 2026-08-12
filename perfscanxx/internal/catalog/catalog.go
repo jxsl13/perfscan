@@ -252,8 +252,8 @@ var entries = []Entry{
 		Custom: true,
 		Bind:   "grow",
 		// Any loop kind — forStmt alone missed range-for (the most common C++
-		// loop) and while/do loops.
-		Query: `match cxxMemberCallExpr(` +
+		// loop) and while/do loops. isExpansionInMainFile keeps it off headers.
+		Query: `match cxxMemberCallExpr(isExpansionInMainFile(), ` +
 			`callee(cxxMethodDecl(hasAnyName("push_back", "emplace_back"))), ` +
 			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("grow")`,
 		Message: "vector grown via push_back/emplace_back inside a loop; reserve() before the loop to avoid repeated reallocation (perfscanxx PS2101 analog, query-based)",
@@ -265,7 +265,8 @@ var entries = []Entry{
 		HasFix: false,
 		Custom: true,
 		Bind:   "mv",
-		Query: `match returnStmt(hasReturnValue(ignoringParenImpCasts(` +
+		// isExpansionInMainFile keeps it off headers (inline/template returns).
+		Query: `match returnStmt(isExpansionInMainFile(), hasReturnValue(ignoringParenImpCasts(` +
 			`cxxConstructExpr(hasArgument(0, ignoringParenImpCasts(` +
 			`callExpr(callee(functionDecl(hasName("::std::move"))), ` +
 			`hasArgument(0, declRefExpr(to(varDecl(hasLocalStorage()))))).bind("mv")))))))`,
@@ -274,11 +275,14 @@ var entries = []Entry{
 	{
 		ID: "PX2103", TidyName: "custom-catch-by-value",
 		Level: LevelIdiomatic, Category: "copies",
-		Title:   "exception caught by value copies (and can slice) it; catch by const reference",
-		HasFix:  false,
-		Custom:  true,
-		Bind:    "cv",
-		Query:   `match cxxCatchStmt(has(varDecl(hasType(hasCanonicalType(recordType()))).bind("cv")))`,
+		Title:  "exception caught by value copies (and can slice) it; catch by const reference",
+		HasFix: false,
+		Custom: true,
+		Bind:   "cv",
+		// isExpansionInMainFile keeps it off library/system headers (e.g. an
+		// inline function's catch clause in a third-party header the user can't
+		// change) — consistent with every other custom check.
+		Query:   `match cxxCatchStmt(isExpansionInMainFile(), has(varDecl(hasType(hasCanonicalType(recordType()))).bind("cv")))`,
 		Message: "exception caught by value copies the exception object (and can slice a derived type to its base); catch by const reference (query-based, no auto-fix)",
 	},
 	{
