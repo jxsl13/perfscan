@@ -1,13 +1,20 @@
 package ps3002
 
 // The only sort reference in this FILE is the fixable call itself: the
-// rewrite would orphan the import (the fix runner never prunes imports),
-// so the finding stays advisory here.
+// check STILL fixes it and only ADDS the imports the rewrite needs — it
+// never drops or swaps the sort import; the fix pipeline (the runner's
+// pruneOrphanedImports; analysistest's FormatSourceRemoveImports plays
+// that role here) removes the orphaned sort import after applying the
+// edits, which is exactly what the golden shows. This pins the removal
+// of the old withhold-when-orphaning gate.
 
-import "sort"
+import (
+	"cmp"
+	"slices"
+)
 
 type orphanItem struct{ key int }
 
 func sortOrphan(xs []orphanItem) {
-	sort.Slice(xs, func(i, j int) bool { return xs[i].key < xs[j].key }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+	slices.SortFunc(xs, func(a, b orphanItem) int { return cmp.Compare(a.key, b.key) }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
 }

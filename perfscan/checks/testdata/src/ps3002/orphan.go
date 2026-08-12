@@ -1,10 +1,16 @@
 package ps3002
 
 // The only sort reference in this FILE is the fixable call itself: the
-// rewrite would orphan the import (the fix runner never prunes imports),
-// so the finding stays advisory here.
+// check STILL fixes it and only ADDS the imports the rewrite needs — it
+// never drops or swaps the sort import; the fix pipeline (the runner's
+// pruneOrphanedImports; analysistest's FormatSourceRemoveImports plays
+// that role here) removes the orphaned sort import after applying the
+// edits, which is exactly what the golden shows. This pins the removal
+// of the old withhold-when-orphaning gate.
 
-import "sort"
+import (
+	"sort"
+)
 
 type orphanItem struct{ key int }
 

@@ -1,0 +1,21 @@
+//go:build go1.20
+
+package ps3002
+
+import (
+	"slices"
+	"sort"
+)
+
+// VERSION GUARD, pinned semantics (same as PS3104's oldversion fixture):
+// per-file version pinning exists only from go1.21 on, so go/types CLAMPS
+// a //go:build go1.20 line to go1.21 (pass.TypesInfo.FileVersions reports
+// "go1.21" here) — the very version that has slices.Sort and cmp.Compare.
+// A file below go1.21 is therefore unrepresentable inside a modern module
+// and this file IS flagged and fixed; the gate blocks only via
+// pass.Pkg.GoVersion() when a whole MODULE still declares go < 1.21. The
+// sort.Sort call keeps a surviving sort reference for the golden.
+func oldVersion(xs []int, keep sort.Interface) {
+	sort.Sort(keep)
+	slices.Sort(xs) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}

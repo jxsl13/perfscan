@@ -1,0 +1,16 @@
+package ps3002
+
+// Only "sort" is imported: the whole-element rewrite needs just the
+// slices package and the fix ADDS that import (no cmp — slices.Sort
+// drops the comparator entirely). The sort.Sort call keeps a surviving
+// sort reference, so the golden compiles without the runner's orphan
+// pruning (analysistest applies only the check's own edits).
+
+import (
+	"sort"
+)
+
+func sortWholeNoImports(xs []int, keep sort.Interface) {
+	sort.Sort(keep)
+	sort.Slice(xs, func(i, j int) bool { return xs[i] < xs[j] }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
