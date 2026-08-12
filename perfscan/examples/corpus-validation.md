@@ -143,17 +143,6 @@ for _, f := range strings.Split(v,",") → for f := range strings.SplitSeq(v,","
 So the auto-fix suite is behavior-preserving even on the standard library — the most
 heterogeneous real Go there is. (`corpus/go` restored with `git checkout .` after.)
 
-A later, broader pass (2026-08-12) exercising the newest checks — especially **PS2126**
-(`fmt.Errorf(const) → errors.New`, which edits imports) — rewrote **19 files** across
-`archive/`, `encoding/`, `mime/multipart`, `net/`, `regexp/syntax`, and `text/template`:
-**26 `errors.New` rewrites** (e.g. `text/template/funcs.go`, `net/url/url.go`) plus 4
-`make(map, n)` (PS2104) and 3 `strconv` (PS2107). Every changed package **`go build`s
-and `go vet`s exit 0** with the stdlib's own toolchain — so PS2126's `fmt`-drop /
-`errors`-add import surgery is correct on the standard library too, not just etcd.
-(`go build std` as a whole can't be the gate here: `corpus/go`'s `time/tzdata` is missing
-its `go:generate`-d `zipdata.go` and fails at baseline, independent of any fix — so the
-changed packages are built/vetted directly.)
-
 ## Generated-file skipping validated at scale (Kubernetes protobuf)
 
 perfscan skips generated files (`// Code generated ... DO NOT EDIT.`) by default —
@@ -178,19 +167,6 @@ user cannot act on (regenerated on every `make`). Default-skipping turns a 3444-
 flood into a clean report; `-include-generated` is there when you do want them. (By
 contrast `pkg/apis/...` `zz_generated.deepcopy.go` carries **0** perf findings — plain
 deepcopy code — so skipping is a no-op there; the win is concentrated in protobuf.)
-
-## PS2126 import surgery holds up at scale (etcd)
-
-PS2126 (`fmt.Errorf(const) → errors.New`) is the only check that rewrites imports
-across a package boundary — add `errors`, drop `fmt` only when the file's last `fmt`
-use goes away. That machinery is the risky part, so it was stress-tested on real code:
-`perfscan -fix -checks PS2126` on `go.etcd.io/etcd/server` rewrote **18 files** (31
-findings), and the module both **`go build`s and `go vet`s exit 0**. The import edits
-came out right in each case — e.g. `server/storage/schema/schema.go` gained
-`"errors"` and turned `fmt.Errorf("missing term information")` into
-`errors.New("missing term information")`, while files that still call `fmt.Sprintf`/
-`fmt.Println` kept their `fmt` import (only `errors` added). So the add/keep/drop
-accounting (modeled on PS3104) is correct on production Go, not just the fixtures.
 
 ## `-diff` produces valid patches on real code
 
