@@ -78,6 +78,9 @@ func TestPS3101(t *testing.T) {
 
 func TestPS4101(t *testing.T) {
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS4101.Analyzer, "ps4101")
+	// A package-level shadow of the builtin copy must suppress the fix; kept in
+	// its own package because the shadow is package-wide.
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS4101.Analyzer, "ps4101_copyshadow")
 }
 
 func TestPS2004(t *testing.T) {
