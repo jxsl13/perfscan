@@ -75,6 +75,35 @@ from the catalog and documented as a permanent exclusion in `internal/catalog`.
 DDNet (383 cc files) is also in the reproducible set; it additionally needs its
 codegen targets built for `generated/*.h` — see `examples/ddnet-recipe.md`.
 
+### fmt — library fixes cleanly; a signature-change limitation on amalgamated deps
+
+`perfscanxx -fix -level 3` on **fmt** (217 findings) applied **184 fixes**, and the
+**fmt library target rebuilds clean** (`cmake --build build --target fmt` → exit 0) —
+the header-only library and `src/` fix safely.
+
+The full-tree test build, however, surfaced a real limitation of **signature-changing**
+fixes. PX3007 (`modernize-pass-by-value`) rewrote a constructor in fmt's **bundled
+gtest amalgamation** (`test/gtest/gmock-gtest-all.cc`):
+
+```cpp
+SingleFailureChecker(..., const std::string& substr);   // →  ..., std::string substr);
+```
+
+That class is **declared twice** (the amalgamation's embedded copy and the public
+`gtest.h` the test TUs compile against). clang-tidy rewrote the copy it saw, not the
+duplicate, so the caller still references the `const std::string&` mangling while the
+definition now exports the by-value one → **linker error** (`symbol(s) not found`).
+
+This is NOT a syntax bug like PX3017, and NOT a reason to drop PX3007 (a core,
+correct perf check that fixes first-party code cleanly — proven on leveldb/DDNet).
+It is the inherent hazard of any signature-changing fix: it is only safe when EVERY
+declaration of the symbol is updated together, which fails on hand-amalgamated
+third-party code that duplicates declarations. **Mitigation:** scope `-fix` (via the
+compile DB / input paths) to your own sources, not vendored amalgamations — you would
+not want perfscanxx rewriting bundled `gtest`/`googletest` anyway. The signature-safe
+majority of the catalog (reserve, emplace, make_shared/unique, avoid-endl, = default,
+member-initializer, …) is unaffected.
+
 ## `-diff` dry-run validated on real C++
 
 `perfscanxx -diff -level 3 ./...` on leveldb printed a **960-line unified diff across
