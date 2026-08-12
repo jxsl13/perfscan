@@ -245,6 +245,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		ExtraArgs:           extraArgs,
 		ExcludeHeaderFilter: excludeHeaderRegex(excludes),
 	}
+	// Query-based custom checks need --experimental-custom-checks, which only
+	// exists on clang-tidy/LLVM >= 20. On an older clang-tidy that flag is an
+	// unknown argument and the whole run fails, so degrade gracefully: drop the
+	// custom checks (the built-in catalog still runs) and say why once.
+	if catalog.AnyCustom(selected) {
+		if major, ok := tidy.MajorVersion(context.Background(), opts.Binary); ok && major < tidy.MinExperimentalMajor {
+			selected = catalog.WithoutCustom(selected)
+			fmt.Fprintf(stderr, "perfscanxx: clang-tidy (LLVM %d) predates --experimental-custom-checks (need >= %d); skipping the query-based custom checks — the built-in checks still run. Upgrade LLVM to enable them.\n", major, tidy.MinExperimentalMajor)
+		}
+	}
 	// Query-based custom checks need their CustomChecks definitions in a
 	// config file plus --experimental-custom-checks (zero compiled C++).
 	if catalog.AnyCustom(selected) {
