@@ -257,24 +257,9 @@ func BenchmarkPS3001_After(b *testing.B) {
 	}
 }
 
-// PS3002 — sort.Slice vs slices.SortFunc.
-func BenchmarkPS3002_Before(b *testing.B) {
-	scratch := make([]int, n)
-	for range b.N {
-		copy(scratch, ints)
-		sort.Slice(scratch, func(i, j int) bool { return scratch[i] < scratch[j] })
-		sinkI = scratch[0]
-	}
-}
-
-func BenchmarkPS3002_After(b *testing.B) {
-	scratch := make([]int, n)
-	for range b.N {
-		copy(scratch, ints)
-		slices.SortFunc(scratch, func(a, c int) int { return a - c })
-		sinkI = scratch[0]
-	}
-}
+// PS3002 is benchmarked accurately (both fix forms: slices.Sort for a
+// whole-element compare and slices.SortFunc with cmp.Compare for a field
+// compare) in ps3002_test.go.
 
 // PS3003 — dense int-keyed map vs slice.
 func BenchmarkPS3003_Before(b *testing.B) {
