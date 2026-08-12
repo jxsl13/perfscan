@@ -149,13 +149,17 @@ func sprintfConcatFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr,
 	// order; empty segments (leading, trailing, or between adjacent verbs)
 	// contribute nothing.
 	tokens := make([]string, 0, 2*len(segs)-1)
+	// One throwaway FileSet for every render: the printed args carry no
+	// positions relative to it, so a single empty set gives identical
+	// output without allocating a fresh FileSet per verb.
+	fset := token.NewFileSet()
 	for i, seg := range segs {
 		if seg != "" {
 			tokens = append(tokens, strconv.Quote(seg))
 		}
 		if i < len(segs)-1 {
 			var b strings.Builder
-			if err := printer.Fprint(&b, token.NewFileSet(), call.Args[i+1]); err != nil {
+			if err := printer.Fprint(&b, fset, call.Args[i+1]); err != nil {
 				return nil
 			}
 			tokens = append(tokens, b.String())

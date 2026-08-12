@@ -136,6 +136,10 @@ func ps2102Fixes(pass *analysis.Pass, f *ast.File) map[*ast.AssignStmt]*analysis
 	fixes := map[*ast.AssignStmt]*analysis.SuggestedFix{}
 	importAdded := false
 	usedNames := map[string]bool{}
+	// One throwaway FileSet for every render: the printed nodes carry no
+	// positions relative to it, so a single empty set gives identical
+	// output without allocating a fresh FileSet per write.
+	fset := token.NewFileSet()
 	astutil.WithStack(f, func(n ast.Node, stack []ast.Node) bool {
 		block, ok := n.(*ast.BlockStmt)
 		if !ok {
@@ -170,7 +174,7 @@ func ps2102Fixes(pass *analysis.Pass, f *ast.File) map[*ast.AssignStmt]*analysis
 			renderOK := true
 			for _, w := range g.writes {
 				var b strings.Builder
-				if err := printer.Fprint(&b, token.NewFileSet(), w.Rhs[0]); err != nil {
+				if err := printer.Fprint(&b, fset, w.Rhs[0]); err != nil {
 					renderOK = false
 					break
 				}

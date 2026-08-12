@@ -267,11 +267,15 @@ func ps2106Fix(pass *analysis.Pass, f *ast.File, run []*ast.AssignStmt, name str
 	extra.Grow(16 * len(run)) // rough lower bound: ", " + a short arg per combined statement
 	edits := make([]analysis.TextEdit, 0, len(run))
 	edits = append(edits, analysis.TextEdit{Pos: firstCall.Rparen, End: firstCall.Rparen})
+	// One throwaway FileSet for every render: the printed args carry no
+	// positions relative to it, so a single empty set gives identical
+	// output without allocating a fresh FileSet per argument.
+	fset := token.NewFileSet()
 	for k := 1; k < len(run); k++ {
 		stmt := run[k]
 		for _, v := range stmt.Rhs[0].(*ast.CallExpr).Args[1:] {
 			extra.WriteString(", ")
-			if err := printer.Fprint(&extra, token.NewFileSet(), v); err != nil {
+			if err := printer.Fprint(&extra, fset, v); err != nil {
 				return nil
 			}
 		}

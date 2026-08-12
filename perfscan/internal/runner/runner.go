@@ -98,6 +98,7 @@ func Run(checks []*lint.Check, opts Options) int {
 		fmt.Fprintln(opts.Stderr, "perfscan: -diff and -fix are mutually exclusive")
 		return 2
 	}
+	cacheWd()
 
 	cfg, cfgPath := loadConfig(opts)
 	config.Set(cfg.Compile())
@@ -235,12 +236,31 @@ func Run(checks []*lint.Check, opts Options) int {
 	return 0
 }
 
+// cachedWd holds the working directory for relPath, which runs once per
+// finding when formatting output — caching avoids a Getwd syscall per
+// finding. Run refreshes it up front (the process may chdir between runs,
+// e.g. in tests, but never during one); relPath falls back to fetching it
+// lazily when called outside Run.
+var (
+	cachedWd    string
+	cachedWdErr error
+	wdCached    bool
+)
+
+// cacheWd captures the current working directory for relPath.
+func cacheWd() {
+	cachedWd, cachedWdErr = os.Getwd()
+	wdCached = true
+}
+
 func relPath(p string) string {
-	wd, err := os.Getwd()
-	if err != nil {
+	if !wdCached {
+		cacheWd()
+	}
+	if cachedWdErr != nil {
 		return p
 	}
-	if r, err := filepath.Rel(wd, p); err == nil && !strings.HasPrefix(r, "..") {
+	if r, err := filepath.Rel(cachedWd, p); err == nil && !strings.HasPrefix(r, "..") {
 		return r
 	}
 	return p
