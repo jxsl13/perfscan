@@ -143,6 +143,31 @@ for _, f := range strings.Split(v,",") → for f := range strings.SplitSeq(v,","
 So the auto-fix suite is behavior-preserving even on the standard library — the most
 heterogeneous real Go there is. (`corpus/go` restored with `git checkout .` after.)
 
+## Generated-file skipping validated at scale (Kubernetes protobuf)
+
+perfscan skips generated files (`// Code generated ... DO NOT EDIT.`) by default —
+you don't hand-optimize machine-emitted code. Kubernetes is the acid test: it is
+saturated with generated Go (`zz_generated.deepcopy.go`, protobuf `generated.pb.go`).
+
+On `staging/src/k8s.io/api/...` (the protobuf-heavy API types), **every** finding is
+in generated code:
+
+```
+perfscan -level 3 ./staging/src/k8s.io/api/...
+  → 0 findings, exit 0
+  → "perfscan: 3444 finding(s) in generated files skipped (use -include-generated to report them)"
+
+perfscan -level 3 -include-generated ./staging/src/k8s.io/api/...
+  → 3444 findings — 3444/3444 in .pb.go / zz_generated files
+```
+
+The suppressed 3444 are exactly the protobuf `Marshal`/`Size`/`String` shapes —
+PS2124 (×1209), PS2003 (×950), PS2102 (×616), PS3103 (×348), PS3104 (×180) — noise a
+user cannot act on (regenerated on every `make`). Default-skipping turns a 3444-finding
+flood into a clean report; `-include-generated` is there when you do want them. (By
+contrast `pkg/apis/...` `zz_generated.deepcopy.go` carries **0** perf findings — plain
+deepcopy code — so skipping is a no-op there; the win is concentrated in protobuf.)
+
 ## `-diff` produces valid patches on real code
 
 `perfscan -diff -level 3 ./...` on the etcd `pkg/` module printed a **179-line
