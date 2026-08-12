@@ -76,6 +76,12 @@ func Load(path string) ([]string, error) {
 	if len(entries) == 0 {
 		return nil, errors.New(filepath.Base(path) + ": empty compilation database")
 	}
+	// The spec requires each entry's directory to be ABSOLUTE. When it is not
+	// (a relative or empty directory, which real generators occasionally emit),
+	// resolve the translation unit against the database's OWN location rather
+	// than the process CWD, so `perfscanxx -p build` gives the same result no
+	// matter which directory it is invoked from.
+	base := filepath.Dir(path)
 	seen := map[string]bool{}
 	var out []string
 	for _, e := range entries {
@@ -84,7 +90,11 @@ func Load(path string) ([]string, error) {
 			continue
 		}
 		if !filepath.IsAbs(f) {
-			f = filepath.Join(e.Directory, f)
+			if filepath.IsAbs(e.Directory) {
+				f = filepath.Join(e.Directory, f)
+			} else {
+				f = filepath.Join(base, e.Directory, f)
+			}
 		}
 		f = filepath.Clean(f)
 		if !seen[f] {
@@ -92,6 +102,20 @@ func Load(path string) ([]string, error) {
 			out = append(out, f)
 		}
 	}
+	// Entries existed but none named a source file: a malformed database. Say so
+	// clearly instead of returning an empty list that later reads as "no TUs
+	// matched" and sends the user hunting in the wrong place.
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s: %d entr%s but none names a source file (each needs a non-empty \"file\")",
+			filepath.Base(path), len(entries), plural(len(entries)))
+	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
 }
