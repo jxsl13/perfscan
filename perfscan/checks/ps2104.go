@@ -11,10 +11,12 @@ import (
 )
 
 // PS2104 reports a map declared with no size hint earlier in the block
-// of a bounded loop that inserts into it. Same counted bound semantics as
+// of a bounded loop that inserts into it — but only when at least one
+// insert per iteration is unconditional. Same counted bound semantics as
 // PS2101: k unconditional inserts per iteration make k*bound the hint
 // (exact for distinct keys), conditional inserts are excluded (lower
-// bound), a conditional-only fill keeps 1*bound (upper bound).
+// bound). A conditional-only fill is NOT flagged: a size hint of the
+// loop bound would over-reserve buckets when few iterations insert.
 var PS2104 = register(&lint.Check{
 	ID:       "PS2104",
 	Category: "alloc",
@@ -30,11 +32,12 @@ over a slice or map, or a counted loop) and nothing between the
 declaration and the loop touches the map, make(map[K]V, k*bound) reserves
 the buckets once.
 
-Bound semantics — inserts are COUNTED per iteration: k unconditional
-inserts make k*bound the hint (exact for distinct keys); conditional
-inserts are excluded, leaving a lower bound; a conditional-only fill keeps
-1*bound, the upper bound. A size hint may legally over-reserve, so every
-class is safe.
+Bound semantics — inserts are COUNTED per iteration, and only maps that
+receive at least one UNCONDITIONAL insert per iteration are flagged: k
+unconditional inserts make k*bound the hint (exact for distinct keys);
+conditional inserts alongside them are excluded, leaving a lower bound. A
+conditional-only fill is NOT flagged — a size hint of the loop bound
+would over-reserve buckets when few iterations actually insert.
 
 The automatic fix rewrites the declaration when the bound is a plain
 identifier (or len of one) not reassigned in the loop body. A size hint is
@@ -93,7 +96,11 @@ func reportMapPrealloc(pass *analysis.Pass, block *ast.BlockStmt, j int, bound s
 			continue
 		}
 		uncond, cond := insertCounts(body, name)
-		if uncond == 0 && cond == 0 {
+		// Only an unconditional insert per iteration justifies a size
+		// hint. A conditional-only fill (uncond == 0, cond > 0) must not
+		// be pre-sized to the loop bound: that is the potential maximum,
+		// and it over-reserves buckets when few iterations insert.
+		if uncond == 0 {
 			continue
 		}
 		// The fix rewrites the declaration; the bound's subject must be
