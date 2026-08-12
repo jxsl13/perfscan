@@ -153,6 +153,25 @@ Verified two ways:
   (0 files) while still applying **10** fixes under `db/`, and `cmake --build …
   --target leveldb` exits **0** — excluded tree preserved, the rest fixed, tree builds.
 
+### spdlog — a clean positive datapoint (whole suite is fix-safe here)
+
+Not every real codebase hits the fmt pathologies. `perfscanxx -fix -level 3` on
+**spdlog** applied fixes to **24 first-party files** (104 findings → 40 residual
+advisory), and the whole tree — tests included — **rebuilds clean** (`cmake --build
+build` → exit 0). Crucially this exercises the same signature-changing checks that
+broke fmt (PX3007 `pass-by-value` ×17, PX1002 `unnecessary-value-param` ×15) plus
+PX3015 ×7, all behavior-preserving here — spdlog has no duplicated declarations and
+no delegating-ctor-with-body-assignment, so the checks are safe. This is the common
+case; fmt is the exception.
+
+spdlog also exercises the vendored guard on a real **CMake FetchContent** tree: it
+bundles **Catch2** under `build/_deps/catch2-src/`, and `-fix` correctly warned that
+it had rewritten **22** files there (the `_deps` segment). Those built fine (Catch2
+is not a hand-amalgamated single-header), but `-fix -exclude _deps/` cleanly skips
+them — **0** `_deps/` files modified, warning silent — while preserving all 24
+first-party fixes. So the `_deps` heuristic and `-exclude` work as intended on real
+FetchContent output.
+
 ## `-diff` dry-run validated on real C++
 
 `perfscanxx -diff -level 3 ./...` on leveldb printed a **960-line unified diff across
