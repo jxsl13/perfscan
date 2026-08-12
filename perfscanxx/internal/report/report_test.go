@@ -2,6 +2,7 @@ package report
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"runtime"
 	"strings"
@@ -107,7 +108,12 @@ func TestJSONAndSARIF(t *testing.T) {
 	}
 	origRead := ReadFile
 	defer func() { ReadFile = origRead }()
-	ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	// Return real content so the sample offsets (10, 40) resolve to 1-based
+	// line numbers — exercising the real SARIF location path (offset 10 -> line 1,
+	// offset 40 -> line 3).
+	ReadFile = func(string) ([]byte, error) {
+		return []byte("aaaaaaaaaa\nbbbbbbbbbbbbbbbbbbbb\ncccccccccccccccccccc\n"), nil
+	}
 
 	findings := FromExport(sampleExport(), catalog.LevelAggressive)
 
@@ -123,10 +129,74 @@ func TestJSONAndSARIF(t *testing.T) {
 	if err := SARIF(&sarifBuf, findings); err != nil {
 		t.Fatalf("SARIF: %v", err)
 	}
-	s := sarifBuf.String()
-	for _, want := range []string{`"version": "2.1.0"`, `"ruleId": "PX1001"`, `"uri": "/src/demo.cpp"`} {
-		if !strings.Contains(s, want) {
-			t.Errorf("SARIF output lacks %s", want)
+
+	// Validate the SARIF STRUCTURALLY (not just by substring): GitHub Code
+	// Scanning silently rejects malformed SARIF, so assert the required 2.1.0
+	// shape — version, one run with a named tool driver, and every result
+	// carrying a ruleId that resolves to a declared rule plus a physical
+	// location with a uri and 1-based startLine.
+	var log struct {
+		Version string `json:"version"`
+		Runs    []struct {
+			Tool struct {
+				Driver struct {
+					Name  string `json:"name"`
+					Rules []struct {
+						ID string `json:"id"`
+					} `json:"rules"`
+				} `json:"driver"`
+			} `json:"tool"`
+			Results []struct {
+				RuleID    string `json:"ruleId"`
+				Locations []struct {
+					PhysicalLocation struct {
+						ArtifactLocation struct {
+							URI string `json:"uri"`
+						} `json:"artifactLocation"`
+						Region struct {
+							StartLine int `json:"startLine"`
+						} `json:"region"`
+					} `json:"physicalLocation"`
+				} `json:"locations"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(sarifBuf.Bytes(), &log); err != nil {
+		t.Fatalf("SARIF is not valid JSON: %v\n%s", err, sarifBuf.String())
+	}
+	if log.Version != "2.1.0" {
+		t.Errorf("SARIF version = %q, want 2.1.0", log.Version)
+	}
+	if len(log.Runs) != 1 {
+		t.Fatalf("SARIF runs = %d, want 1", len(log.Runs))
+	}
+	run := log.Runs[0]
+	if run.Tool.Driver.Name == "" {
+		t.Error("SARIF tool.driver.name is empty")
+	}
+	ruleIDs := map[string]bool{}
+	for _, r := range run.Tool.Driver.Rules {
+		ruleIDs[r.ID] = true
+	}
+	if len(run.Results) == 0 {
+		t.Fatal("SARIF has no results")
+	}
+	for i, res := range run.Results {
+		if res.RuleID == "" {
+			t.Errorf("result[%d] has empty ruleId", i)
+		} else if !ruleIDs[res.RuleID] {
+			t.Errorf("result[%d] ruleId %q is not declared in tool.driver.rules", i, res.RuleID)
+		}
+		if len(res.Locations) == 0 {
+			t.Errorf("result[%d] (%s) has no locations", i, res.RuleID)
+			continue
+		}
+		loc := res.Locations[0].PhysicalLocation
+		if loc.ArtifactLocation.URI == "" {
+			t.Errorf("result[%d] (%s) location has no uri", i, res.RuleID)
+		}
+		if loc.Region.StartLine < 1 {
+			t.Errorf("result[%d] (%s) startLine = %d, want >= 1", i, res.RuleID, loc.Region.StartLine)
 		}
 	}
 }
