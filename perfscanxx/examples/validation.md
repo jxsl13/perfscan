@@ -199,11 +199,33 @@ unsafe on dense C++** where their edit ranges abut or overlap.
 Fix-safety picture so far — **-fix-clean:** leveldb, spdlog (and perfscan's Go
 corpora). **-fix-breakers:** fmt (PX3007 on amalgamated gtest; PX3015 on a delegating
 ctor) and abseil (PX3004×PX3015 ordering; overlapping edits in template headers). The
-breakers are all dense, heavily-attributed template code. **Recommended workflow:
-preview with `-diff` before `-fix`** (it renders exactly what would be written, so a
-broken combination is visible before it touches disk), and narrow with `-checks` /
-`-exclude`. A future perfscanxx improvement could apply fixes per-check-family or
-iterate to a fixpoint instead of one combined pass.
+breakers are all dense, heavily-attributed template code.
+
+**`-fix-sequential` fixes the interaction class.** `perfscanxx -fix -fix-sequential`
+applies each fixable built-in check in its OWN clang-tidy `--fix` pass (one invocation
+per check) instead of one combined `clang-apply-replacements` run. Because each pass
+re-parses the already-partially-fixed source, a later check's fix-it accounts for an
+earlier one, so two edits can no longer land at the same offset in the wrong order. On
+the exact `cleanup.h` shape, combined `-fix` writes the un-compilable
+
+```cpp
+S(S&& other) : engaged_(true)  noexcept { … }   // error: expected '{' or ','
+```
+
+while `-fix -fix-sequential` writes the valid
+
+```cpp
+S(S&& other)  noexcept : engaged_(true) { … }   // compiles
+```
+
+(verified end-to-end through perfscanxx). It is slower — one clang-tidy invocation per
+check — so single-pass stays the default; reach for `-fix-sequential` on dense C++ where
+the combined pass collides. It does NOT rescue the single-check breakers (fmt's
+amalgamated-gtest PX3007 or the delegating-ctor PX3015 fail with only that one check
+active) — those still need `-exclude` / `-checks`. **Recommended workflow: preview with
+`-diff` first; on a break, retry with `-fix-sequential`, then narrow with `-checks` /
+`-exclude`.** Validated at scale with no regression: `-fix -fix-sequential` on leveldb
+(25 isolated passes) applies 15 fixes and the tree still **rebuilds clean**.
 
 ## `-diff` dry-run validated on real C++
 
