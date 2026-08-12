@@ -35,6 +35,14 @@ struct (256-byte `core/v1.Volume`, 408-byte `Container`, 616-byte
 136 bytes — all above the check's 128-byte (two-cache-line) gate. Zero small
 structs were flagged, i.e. the check is precise, not noisy, on real production Go.
 
+Fix-quality audit of the busiest AUTO-FIX check: **PS2101** (append without
+prealloc) fired 69× on scheduler alone, and `-diff` shows every rewrite pre-sizes to
+the exact loop bound — `make([]string, 0)` → `make([]string, 0, len(nodes))`,
+`… 0, len(pods)`, `… 0, len(podVolumes.StaticBindings)`, etc. The cap is always a
+`len(...)` of the ranged collection — provably `>= 0`, so no `make` panic is
+introduced and the result slice is byte-identical (capacity is only a hint) — a real
+gc win (no repeated growth reallocations), correctly extracted on production Go.
+
 **etcd** (`go.etcd.io/etcd`, 1102 Go files; a multi-module repo). Root module
 `./...`: **22 findings, 0 loader errors**.
 
