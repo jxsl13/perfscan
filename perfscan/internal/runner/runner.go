@@ -60,6 +60,11 @@ type Options struct {
 	// (those with the conventional "// Code generated ... DO NOT EDIT."
 	// marker). By default they are skipped.
 	IncludeGenerated bool
+	// Exclude drops findings whose slash-normalized file path contains any
+	// of these substrings (e.g. "vendor/", "testdata/", ".pb.go"). Because
+	// -fix works from the findings list, excluding a finding also excludes
+	// its fix.
+	Exclude []string
 
 	Stdout io.Writer
 	Stderr io.Writer
@@ -155,6 +160,13 @@ func Run(checks []*lint.Check, opts Options) int {
 	findings = filterGenerated(findings, opts.IncludeGenerated)
 	if dropped := before - len(findings); !opts.IncludeGenerated && dropped > 0 {
 		fmt.Fprintf(opts.Stderr, "perfscan: %d finding(s) in generated files skipped (use -include-generated to report them)\n", dropped)
+	}
+	if len(opts.Exclude) > 0 {
+		before := len(findings)
+		findings = filterExcluded(findings, opts.Exclude)
+		if dropped := before - len(findings); dropped > 0 {
+			fmt.Fprintf(opts.Stderr, "perfscan: %d finding(s) excluded by -exclude\n", dropped)
+		}
 	}
 	slices.SortFunc(findings, func(a, b Finding) int {
 		if c := strings.Compare(a.Pos.Filename, b.Pos.Filename); c != 0 {
@@ -468,6 +480,40 @@ func filterGenerated(findings []Finding, include bool) []Finding {
 	// copy it every iteration (perfscan's own PS3103 — dogfooded).
 	for i := range findings {
 		if isGenerated(findings[i].Pos.Filename) {
+			continue
+		}
+		out = append(out, findings[i])
+	}
+	return out
+}
+
+// pathExcluded reports whether p's slash-normalized path contains any of the
+// exclude substrings. An empty exclude list never matches.
+func pathExcluded(p string, excludes []string) bool {
+	if len(excludes) == 0 {
+		return false
+	}
+	slashed := filepath.ToSlash(p)
+	for _, e := range excludes {
+		if strings.Contains(slashed, e) {
+			return true
+		}
+	}
+	return false
+}
+
+// filterExcluded drops findings whose file path matches any -exclude
+// substring (see pathExcluded). Because -fix works from the findings list,
+// this filter covers report, JSON, SARIF, -diff, baseline, and -fix alike.
+func filterExcluded(findings []Finding, excludes []string) []Finding {
+	if len(excludes) == 0 {
+		return findings
+	}
+	out := make([]Finding, 0, len(findings))
+	// Iterate by index: a Finding is large enough that ranging by value would
+	// copy it every iteration (perfscan's own PS3103 — dogfooded).
+	for i := range findings {
+		if pathExcluded(findings[i].Pos.Filename, excludes) {
 			continue
 		}
 		out = append(out, findings[i])
