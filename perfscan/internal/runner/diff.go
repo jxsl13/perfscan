@@ -13,7 +13,7 @@ import (
 // returns 1 when at least one file would change (0 otherwise, 2 never —
 // hard errors were already reported by patchedFiles on Stderr).
 func diffFixes(findings []Finding, opts Options) int {
-	files, applied, failed := patchedFiles(findings, opts)
+	files, applied, overlapping, failed := patchedFiles(findings, opts)
 	paths := make([]string, 0, len(files))
 	for path, pf := range files {
 		if !bytes.Equal(pf.orig, pf.fixed) {
@@ -27,6 +27,9 @@ func diffFixes(findings []Finding, opts Options) int {
 	}
 	if failed > 0 {
 		fmt.Fprintf(opts.Stderr, "perfscan: %d fix(es) could not be rendered\n", failed)
+	}
+	if overlapping > 0 {
+		fmt.Fprintf(opts.Stderr, "perfscan: %d overlapping fix(es) not shown (already covered by another)\n", overlapping)
 	}
 	if len(paths) > 0 {
 		fmt.Fprintf(opts.Stderr, "perfscan: %d file(s) would change (%d fix(es)); run with -fix to apply\n", len(paths), applied)
