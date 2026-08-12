@@ -93,6 +93,23 @@ func silentNoSpread(x int) []int {
 	return append([]int{}, x)
 }
 
+// make with a CONSTANT-ZERO length is non-nil but EMPTY: append([]int(nil), s...)
+// yields nil where slices.Clone(s) stays non-nil, so this stays advisory even
+// though the length is a constant. Pins the "POSITIVE constant length" boundary
+// of the guard (a loosening to just "constant length" would reintroduce the
+// nil-ness divergence).
+func advisoryConstZeroMake() []int {
+	s := make([]int, 0)
+	return append([]int(nil), s...) // want `append\(\[\]int\(nil\), s\.\.\.\) is a hand-rolled clone; slices\.Clone\(s\) says it directly`
+}
+
+// An EMPTY composite literal is non-nil but empty: same []T(nil) divergence,
+// advisory. Pins the "literal WITH ELEMENTS" boundary.
+func advisoryEmptyLiteral() []int {
+	s := []int{}
+	return append([]int(nil), s...) // want `append\(\[\]int\(nil\), s\.\.\.\) is a hand-rolled clone; slices\.Clone\(s\) says it directly`
+}
+
 func keepFmt() {
 	fmt.Println("keep the import group non-empty")
 }
