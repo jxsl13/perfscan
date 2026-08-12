@@ -34,3 +34,42 @@ func hoisted(lines []string) int {
 	}
 	return n
 }
+
+func variant(pats, lines []string) int {
+	n := 0
+	for _, p := range pats {
+		re := regexp.MustCompile(p) // loop-variant pattern: p changes each iteration, cannot hoist
+		for _, s := range lines {
+			if re.MatchString(s) {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func variantIndex(pats, lines []string) int {
+	n := 0
+	for i := range pats {
+		re := regexp.MustCompile(pats[i]) // loop-variant pattern: depends on loop index i
+		for _, s := range lines {
+			if re.MatchString(s) {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func build() string { return "x" }
+
+func invariantVar(lines []string) int {
+	pat := build()
+	n := 0
+	for _, s := range lines {
+		if regexp.MustCompile(pat).MatchString(s) { // want `regexp\.MustCompile inside a loop recompiles an invariant pattern every iteration; hoist it out of the loop`
+			n++
+		}
+	}
+	return n
+}

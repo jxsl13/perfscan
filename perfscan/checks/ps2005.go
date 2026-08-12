@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"go/types"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -66,7 +67,14 @@ func runPS2005(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			if _, inLoop := astutil.InLoop(stack); !inLoop {
+			loop, inLoop := astutil.InLoop(stack)
+			if !inLoop {
+				return true
+			}
+			// The pattern must be loop-invariant: a pattern that depends on
+			// a variable declared inside the loop (e.g. a range variable)
+			// genuinely changes per iteration and cannot be hoisted.
+			if len(call.Args) >= 1 && !ps2005LoopInvariant(pass.TypesInfo, loop, call.Args[0]) {
 				return true
 			}
 			diag := analysis.Diagnostic{
@@ -84,6 +92,42 @@ func runPS2005(pass *analysis.Pass) (any, error) {
 		})
 	}
 	return nil, nil
+}
+
+// ps2005LoopInvariant reports whether arg is invariant with respect to the
+// enclosing loop: it references no variable whose declaring object lies
+// within [loop.Pos(), loop.End()). Identifiers with no resolved object
+// default to invariant (report — the current behavior) rather than
+// suppressing.
+func ps2005LoopInvariant(info *types.Info, loop ast.Node, arg ast.Expr) bool {
+	invariant := true
+	ast.Inspect(arg, func(n ast.Node) bool {
+		if !invariant {
+			return false
+		}
+		id, ok := n.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		obj := info.Uses[id]
+		if obj == nil {
+			obj = info.Defs[id]
+		}
+		if obj == nil {
+			return true
+		}
+		if _, isVar := obj.(*types.Var); !isVar {
+			// Funcs, consts, type names, package names, builtins cannot
+			// vary per iteration.
+			return true
+		}
+		if loop.Pos() <= obj.Pos() && obj.Pos() < loop.End() {
+			invariant = false
+			return false
+		}
+		return true
+	})
+	return invariant
 }
 
 // hoistRegexpFix builds the two-edit hoist: insert a binding before the
