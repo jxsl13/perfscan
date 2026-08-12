@@ -35,12 +35,12 @@ identifier xs and the comparator body is a run of ordered comparisons
 and an ordered basic element/field type. Three forms:
 
   - Whole element (empty chain, "return xs[i] < xs[j]") → slices.Sort(xs),
-    which drops the comparator entirely. Needs only "slices" in scope.
+    which drops the comparator entirely. Needs only the "slices" package.
     Ascending only — slices.Sort has no comparator to reverse.
   - A single field ("return xs[i].f < xs[j].f") → slices.SortFunc(xs,
     func(a, b T) int { return cmp.Compare(a.f, b.f) }); a descending
     "return xs[i].f > xs[j].f" swaps the operands to cmp.Compare(b.f, a.f).
-    Needs "slices" and "cmp" in scope and a locally spellable element type T.
+    Needs "slices" and "cmp" and a locally spellable element type T.
   - A multi-field tie-break chain of "if xs[i].f != xs[j].f { return
     xs[i].f < xs[j].f }" guards (each guard testing the very field it then
     orders) closed by a final "return xs[i].g < xs[j].g" → the equivalent
@@ -51,6 +51,17 @@ and an ordered basic element/field type. Three forms:
     differing field exactly where the bool chain returns its '<' or '>'
     (cmp.Compare(b.f, a.f) < 0 iff a.f > b.f), so the permutation is
     identical. Same "slices"+"cmp" requirements as the single field.
+
+The fix edits imports as needed: a missing "slices" (and, for the field
+forms, "cmp") import is ADDED at its sorted position, and an existing
+import is reused under whatever alias the file gave it. The check itself
+never touches the sort import — when the rewrites remove the file's last
+sort reference, the fix pipeline prunes the orphaned import after
+applying the edits. A dot- or blank-imported slices/cmp, a local name
+shadowing the package at the call site, or a cgo file (whose import
+block must not be edited) keeps the report advisory. The check only
+fires when the effective language version is at least go1.21, where
+slices.Sort/SortFunc and cmp.Compare exist — the same gate as PS3104.
 
 FLOAT is excluded from the fix (advisory only): cmp.Compare and slices.Sort
 order NaN as the smallest value while the '<' comparator treats NaN as
@@ -91,17 +102,23 @@ var sortSliceFuncs = map[string]bool{
 
 func runPS3002(pass *analysis.Pass) (any, error) {
 	for _, f := range pass.Files {
-		// Two passes per file: collect first, so the fixes can be
-		// suppressed when applying ALL of them would rewrite the file's
-		// last sort.* reference and orphan the import (the runner never
-		// prunes imports; same guard as PS3077's math handling).
+		if !ps3104SlicesSortAvailable(pass, f) {
+			// slices.Sort/SortFunc and cmp.Compare exist only from go1.21
+			// on; below that the advice is moot, so stay silent entirely
+			// (same gate as PS3104/PS2119).
+			continue
+		}
+		// Two passes per file: collect first, then decide the import edits
+		// once for the whole file — every fixable site needs "slices" and
+		// the field-compare sites need "cmp" as well (same per-file site
+		// collection as PS3104).
 		type site struct {
 			call *ast.CallExpr
 			name string
 			fix  *analysis.SuggestedFix
 		}
 		var sites []site
-		fixable := 0
+		fixable, cmpFixable := 0, 0
 		ast.Inspect(f, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -111,17 +128,49 @@ func runPS3002(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			fix := sortFuncFix(pass, call, name)
+			fix, needsCmp := sortFuncFix(pass, f, call, name)
 			if fix != nil {
 				fixable++
+				if needsCmp {
+					cmpFixable++
+				}
 			}
 			sites = append(sites, site{call, name, fix})
 			return true
 		})
-		// Each fixable call holds exactly one sort reference (its
-		// selector); if those are ALL of the file's sort references, the
-		// fixes would orphan the import — advisory only then.
-		emitFixes := fixable > 0 && pkgRefCount(pass, f, "sort") > fixable
+		if len(sites) == 0 {
+			continue
+		}
+		// The fix ADDS the imports its rewrites need and leaves the sort
+		// import alone: when the rewrites remove the file's last sort
+		// reference, the fix pipeline prunes the orphaned import after
+		// applying the edits (pure INSERTS never collide with the call
+		// rewrites; a drop/swap of the sort spec could). The file-level
+		// scan uses the import paths — an aliased slices/cmp import is
+		// still an import, and sortFuncFix already resolved the alias.
+		// A cgo file never gets here with a fix: sortFuncFix returns nil
+		// for it, so no import edit is ever built for one.
+		needSlicesFile := fixable > 0 && !ps3002FileImports(f, "slices")
+		needCmpFile := cmpFixable > 0 && !ps3002FileImports(f, "cmp")
+		var importEdits []analysis.TextEdit
+		if needSlicesFile {
+			importEdits = append(importEdits, ps2110ImportEdit(f, "slices"))
+		}
+		if needCmpFile {
+			importEdits = append(importEdits, ps2110ImportEdit(f, "cmp"))
+		}
+		if len(importEdits) > 0 {
+			// All fixes of a run are applied together, so only the first
+			// fixable site carries the import edits (same convention as
+			// PS3104/PS2110).
+			for i := range sites {
+				if sites[i].fix != nil {
+					sites[i].fix.TextEdits = append(sites[i].fix.TextEdits, importEdits...)
+					break
+				}
+			}
+		}
+		emitFixes := fixable > 0
 		for _, st := range sites {
 			diag := analysis.Diagnostic{
 				Pos:     st.call.Pos(),
@@ -135,6 +184,17 @@ func runPS3002(pass *analysis.Pass) (any, error) {
 		}
 	}
 	return nil, nil
+}
+
+// ps3002FileImports reports whether f imports the given path (under any
+// name, aliases included).
+func ps3002FileImports(f *ast.File, path string) bool {
+	for _, imp := range f.Imports {
+		if imp.Path != nil && imp.Path.Value == `"`+path+`"` {
+			return true
+		}
+	}
+	return false
 }
 
 // sortFuncFix builds the slices.SortFunc rewrite for the provably safe
@@ -157,69 +217,82 @@ func runPS3002(pass *analysis.Pass) (any, error) {
 // cmp.Compare(a.f, b.f) and a descending field cmp.Compare(b.f, a.f) with the
 // operands swapped. Every comparison's operands must be identical selector
 // chains rooted at xs[i] (left) and xs[j] (right) over an ordered non-float
-// basic type, and the packages slices and cmp must be importable by name at
-// the call site (already imported, un-renamed, not shadowed). Same-field
-// guards only: both sorts share the same pdqsort, and under these guards the
-// bool chain and the cmp.Compare chain induce the identical total order —
+// basic type, and the packages slices and cmp must be usable by name at the
+// call site: an existing import is reused (alias included), a missing one is
+// ADDED by the per-file import edits runPS3002 builds — only a dot/blank
+// import or a shadowing local keeps the site advisory, as does a cgo file,
+// whose import block must never be edited. Same-field guards only: both
+// sorts share the same pdqsort, and under these guards the bool chain and
+// the cmp.Compare chain induce the identical total order —
 // cmp.Compare(b.f, a.f) < 0 ⟺ a.f > b.f — so the resulting permutation is
 // bit-identical (including ties). The whole-element form stays ascending
 // only: slices.Sort has no comparator to swap operands in. All other shapes
 // get the advisory report only.
-func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis.SuggestedFix {
+//
+// needsCmp reports whether the returned fix rewrites a field compare and so
+// relies on the cmp package (the whole-element slices.Sort form does not) —
+// the caller uses it to decide the file's cmp import edit.
+func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name string) (fix *analysis.SuggestedFix, needsCmp bool) {
+	// A cgo file's import block must not be edited, and whether an import
+	// edit is needed is a per-file decision made after all sites are
+	// collected — so no cgo site ever offers a fix.
+	if ps2110ImportsC(f) {
+		return nil, false
+	}
 	// The rewrite targets the standard library sort package only: a
 	// same-named third-party package could give Slice other semantics.
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
-		return nil
+		return nil, false
 	}
 	pkgID, ok := sel.X.(*ast.Ident)
 	if !ok {
-		return nil
+		return nil, false
 	}
 	if pn, ok := pass.TypesInfo.Uses[pkgID].(*types.PkgName); !ok || pn.Imported().Path() != "sort" {
-		return nil
+		return nil, false
 	}
 	if len(call.Args) != 2 {
-		return nil
+		return nil, false
 	}
 	xs, ok := call.Args[0].(*ast.Ident)
 	if !ok {
-		return nil
+		return nil, false
 	}
 	xsObj := pass.TypesInfo.ObjectOf(xs)
 	if xsObj == nil {
-		return nil
+		return nil, false
 	}
 	sliceType, ok := underlyingSlice(pass.TypesInfo.TypeOf(xs))
 	if !ok {
-		return nil
+		return nil, false
 	}
 	fl, ok := call.Args[1].(*ast.FuncLit)
 	if !ok {
-		return nil
+		return nil, false
 	}
 	// Exactly two int parameters and a single (bool) result.
 	var params []string
 	for _, field := range fl.Type.Params.List {
 		if !types.Identical(pass.TypesInfo.TypeOf(field.Type), types.Typ[types.Int]) {
-			return nil
+			return nil, false
 		}
 		for _, pn := range field.Names {
 			params = append(params, pn.Name)
 		}
 	}
 	if len(params) != 2 || params[0] == "_" || params[1] == "_" {
-		return nil
+		return nil, false
 	}
 	if fl.Type.Results == nil || fl.Type.Results.NumFields() != 1 {
-		return nil
+		return nil, false
 	}
 	// Body: zero or more `if xs[i].f != xs[j].f { return xs[i].f < xs[j].f }`
 	// (or `> xs[j].f`) tie-break guards followed by exactly one final
 	// `return A < B` / `return A > B`. Direction is INDEPENDENT per field.
 	body := fl.Body.List
 	if len(body) == 0 {
-		return nil
+		return nil, false
 	}
 	type fieldCmp struct {
 		suffix     string
@@ -229,15 +302,15 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 	for _, stmt := range body[:len(body)-1] {
 		ifs, ok := stmt.(*ast.IfStmt)
 		if !ok || ifs.Init != nil || ifs.Else != nil || len(ifs.Body.List) != 1 {
-			return nil
+			return nil, false
 		}
 		condSuffix, ok := neqField(pass, ifs.Cond, xsObj, params[0], params[1])
 		if !ok {
-			return nil
+			return nil, false
 		}
 		ret, ok := ifs.Body.List[0].(*ast.ReturnStmt)
 		if !ok || len(ret.Results) != 1 {
-			return nil
+			return nil, false
 		}
 		cmpSuffix, cmpDesc, ok := orderingCompare(pass, ret.Results[0], xsObj, params[0], params[1])
 		// The guard must test the very field it then orders (an empty
@@ -245,59 +318,65 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 		// otherwise the bool chain and the cmp chain diverge on ties. The
 		// return's direction does not affect the guard: `!=` is symmetric.
 		if !ok || cmpSuffix == "" || cmpSuffix != condSuffix {
-			return nil
+			return nil, false
 		}
 		fields = append(fields, fieldCmp{cmpSuffix, cmpDesc})
 	}
 	final, ok := body[len(body)-1].(*ast.ReturnStmt)
 	if !ok || len(final.Results) != 1 {
-		return nil
+		return nil, false
 	}
 	finalSuffix, finalDesc, ok := orderingCompare(pass, final.Results[0], xsObj, params[0], params[1])
 	if !ok {
-		return nil
+		return nil, false
 	}
 	// A whole-element compare is only valid as the sole statement AND
 	// ascending (→ slices.Sort, which has no comparator to swap operands
 	// in); as the tail of a tie-break chain it compares the whole element,
 	// which cmp.Compare cannot express.
 	if finalSuffix == "" && (len(fields) > 0 || finalDesc) {
-		return nil
+		return nil, false
 	}
 	fields = append(fields, fieldCmp{finalSuffix, finalDesc})
-	// slices must resolve to the std package at the call site (imported here,
-	// un-renamed, not shadowed) — required by BOTH rewrites below.
-	if !stdPkgInScope(pass, call.Pos(), "slices") {
-		return nil
+	// slices must be usable by name at the call site — required by BOTH
+	// rewrites below. An existing import is reused under its local name
+	// (alias included); a missing one is fine, runPS3002 adds the import
+	// edit per file. Only a dot/blank import or a shadowing local keeps
+	// the site advisory.
+	slicesName, _, usable := ps3104SlicesName(pass, f, call.Pos())
+	if !usable {
+		return nil, false
 	}
 
 	// Whole-element ascending compare — the body is exactly `xs[i] < xs[j]`
 	// (empty selector chain) — becomes slices.Sort(xs), dropping the comparator
 	// entirely. For an ordered non-float element '<' is the total order
 	// slices.Sort already uses, and equal elements are indistinguishable so a
-	// SliceStable collapses to the same result. No cmp import, no element
+	// SliceStable collapses to the same result. No cmp package, no element
 	// spelling needed.
 	if fields[0].suffix == "" {
 		return &analysis.SuggestedFix{
-			Message: fmt.Sprintf("replace sort.%s with slices.Sort", name),
+			Message: fmt.Sprintf("replace sort.%s with %s.Sort", name, slicesName),
 			TextEdits: []analysis.TextEdit{
-				{Pos: call.Pos(), End: call.End(), NewText: fmt.Appendf(nil, "slices.Sort(%s)", xs.Name)},
+				{Pos: call.Pos(), End: call.End(), NewText: fmt.Appendf(nil, "%s.Sort(%s)", slicesName, xs.Name)},
 			},
-		}
+		}, false
 	}
 
 	// Field compare(s) — `xs[i].f < xs[j].f` or `xs[i].f > xs[j].f`, possibly
 	// behind `!=` tie-break guards — become slices.SortFunc with one
 	// cmp.Compare per field (operands SWAPPED for a descending field:
 	// cmp.Compare(b.f, a.f) < 0 ⟺ b.f < a.f ⟺ a.f > b.f, the bool
-	// comparator's exact result), so cmp must also be importable and the
-	// element type spellable without a new import.
-	if !stdPkgInScope(pass, call.Pos(), "cmp") {
-		return nil
+	// comparator's exact result), so cmp must also be usable by name (same
+	// resolution as slices: reuse or add) and the element type spellable
+	// without a new import.
+	cmpName, _, usable := ps3002CmpName(pass, f, call.Pos())
+	if !usable {
+		return nil, false
 	}
 	elem := types.Unalias(sliceType.Elem())
 	if !locallySpellable(elem, pass.Pkg) {
-		return nil
+		return nil, false
 	}
 	elemStr := types.TypeString(elem, types.RelativeTo(pass.Pkg))
 
@@ -310,22 +389,50 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 	// cmp.Compare(b.f, a.f).
 	compare := func(f fieldCmp) string {
 		if f.descending {
-			return fmt.Sprintf("cmp.Compare(b%s, a%s)", f.suffix, f.suffix)
+			return fmt.Sprintf("%s.Compare(b%s, a%s)", cmpName, f.suffix, f.suffix)
 		}
-		return fmt.Sprintf("cmp.Compare(a%s, b%s)", f.suffix, f.suffix)
+		return fmt.Sprintf("%s.Compare(a%s, b%s)", cmpName, f.suffix, f.suffix)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "slices.%s(%s, func(a, b %s) int { ", fn, xs.Name, elemStr)
+	fmt.Fprintf(&b, "%s.%s(%s, func(a, b %s) int { ", slicesName, fn, xs.Name, elemStr)
 	for _, f := range fields[:len(fields)-1] {
 		fmt.Fprintf(&b, "if a%s != b%s { return %s }; ", f.suffix, f.suffix, compare(f))
 	}
 	fmt.Fprintf(&b, "return %s })", compare(fields[len(fields)-1]))
 	return &analysis.SuggestedFix{
-		Message: fmt.Sprintf("replace sort.%s with slices.%s", name, fn),
+		Message: fmt.Sprintf("replace sort.%s with %s.%s", name, slicesName, fn),
 		TextEdits: []analysis.TextEdit{
 			{Pos: call.Pos(), End: call.End(), NewText: []byte(b.String())},
 		},
+	}, true
+}
+
+// ps3002CmpName resolves how the fix must spell the cmp package at pos: the
+// file's existing import name (alias included) when cmp is already imported,
+// or the bare name "cmp" with needImport set when the file must add the
+// import. usable is false when the name cannot be used — a dot or blank cmp
+// import, or another object owning the name at pos (the mirror of
+// ps3104SlicesName for the "cmp" path).
+func ps3002CmpName(pass *analysis.Pass, f *ast.File, pos token.Pos) (name string, needImport, usable bool) {
+	for _, imp := range f.Imports {
+		if imp.Path.Value != `"cmp"` {
+			continue
+		}
+		local := "cmp"
+		if imp.Name != nil {
+			local = imp.Name.Name
+		}
+		if local == "_" || local == "." {
+			// Blank import gives no usable name; a dot import puts Compare
+			// in scope unqualified but rewriting to a bare Compare(x, y) is
+			// too fragile — advisory in both cases.
+			return "", false, false
+		}
+		nf, ok := ps2110PkgUsable(pass, pos, local, "cmp")
+		return local, false, ok && !nf
 	}
+	needImport, usable = ps2110PkgUsable(pass, pos, "cmp", "cmp")
+	return "cmp", needImport, usable && needImport
 }
 
 // orderingCompare validates a single ordering comparison `xs[i]<CHAIN> <
