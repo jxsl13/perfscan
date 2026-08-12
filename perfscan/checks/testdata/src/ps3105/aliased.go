@@ -1,0 +1,13 @@
+package ps3105
+
+import (
+	sl "slices"
+	"sort"
+)
+
+// slices is imported under an ALIAS: the fix spells the call with the
+// alias and deletes the now-orphaned sort spec.
+func aliasedSlices(xs []int) {
+	sort.Sort(sort.IntSlice(xs)) // want `sort\.Sort\(sort\.IntSlice\(\.\.\.\)\) sorts through the sort\.Interface adapter \(an interface dispatch per comparison and swap\); slices\.Sort sorts the concrete \[\]int directly with the identical ascending order`
+	sl.Reverse(xs)
+}
