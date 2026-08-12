@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 
 	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/fixes"
@@ -154,9 +155,11 @@ func lineCol(path string, offset int) (line, col int) {
 //	file.cpp:12:9: message (PX1001 L1, fix available)
 func Text(w io.Writer, findings []Finding) {
 	for _, f := range findings {
-		pos := fmt.Sprintf("%s:#%d", f.File, f.Offset)
+		// Concatenation + strconv instead of fmt.Sprintf: this runs once per
+		// finding and avoids the format-string parse and its allocations.
+		pos := f.File + ":#" + strconv.Itoa(f.Offset)
 		if f.Line > 0 {
-			pos = fmt.Sprintf("%s:%d:%d", f.File, f.Line, f.Col)
+			pos = f.File + ":" + strconv.Itoa(f.Line) + ":" + strconv.Itoa(f.Col)
 		}
 		meta := f.ID
 		if f.Level != "" {
