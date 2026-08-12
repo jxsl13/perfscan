@@ -98,6 +98,21 @@ WHOLE grown auto-fix suite is behavior-preserving on a real, non-trivial Go modu
 Reproduce: point perfscan at any checked-out module, e.g.
 `(cd corpus/etcd/pkg && perfscan -fix ./... && go build ./...)`.
 
+Repeated on the larger, structurally different **`server/`** module
+(`go.etcd.io/etcd/server/v3` — raft, MVCC storage, gRPC; report-mode-only until
+now) at `-level 3` (2026-08-12, clang-tidy-independent, pure Go):
+
+```
+findings before -fix: 99   →   after -fix: 74   (24 fixes across 15 files, 0 failed)
+go build ./...  → exit 0        # the rewritten module compiles cleanly
+go vet ./...    → exit 0        # no vet issues introduced (matches the clean baseline)
+```
+
+Top findings on `server/`: PS2101 reserve-before-loop (25), PS3003 (16), PS3103
+range-value-copy (14), PS3104 sort→slices (8), PS2107 single-value Sprintf (7). A
+second, independent module confirms the auto-fix suite is behavior-preserving on
+real production Go beyond the `pkg/` sample.
+
 ## `-diff` produces valid patches on real code
 
 `perfscan -diff -level 3 ./...` on the etcd `pkg/` module printed a **179-line
