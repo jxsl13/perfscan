@@ -2,8 +2,10 @@ package ps2101
 
 import "sync"
 
+// A conditional-only fill is NOT flagged: pre-sizing to the loop bound
+// would over-allocate when few iterations append.
 func filtered(src []string) []string {
-	out := []string{} // want `out is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(src\)\) — an upper bound: all appends are conditional`
+	out := []string{}
 	for _, s := range src {
 		if s != "" {
 			out = append(out, s)
@@ -70,9 +72,10 @@ func mixed(src []int) []int {
 	return out
 }
 
-// A spread append has an unknown per-call count: upper-bound form.
+// A spread append has an unknown per-call count: with zero unconditional
+// single-value appends, the slice is not reported.
 func spread(src [][]int) []int {
-	out := []int{} // want `out is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(src\)\) — an upper bound: all appends are conditional`
+	out := []int{}
 	for _, vs := range src {
 		out = append(out, vs...)
 	}
@@ -120,11 +123,10 @@ func twoTargets(src map[string]int) ([]string, []int) {
 	return keys, vals
 }
 
-// The bound's subject is defined AFTER the declaration: the advisory
-// stays, but no fix may reference b at the declaration site (found by
-// auto-fixing a real-world codebase).
+// Conditional-only fill (and the bound's subject is defined AFTER the
+// declaration): not reported.
 func indentString(s string) []byte {
-	var res []byte // want `res is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(b\)\) — an upper bound: all appends are conditional \(declared nil: pre-size only if no caller distinguishes nil from empty\)`
+	var res []byte
 	b := []byte(s)
 	for _, c := range b {
 		if c != 0 {
@@ -137,9 +139,10 @@ func indentString(s string) []byte {
 // Regression (Kubernetes scheduler TestMergePlugins): a nil-declared
 // slice with only CONDITIONAL appends can end the loop with zero appends;
 // pre-sizing would turn that nil result into an empty non-nil slice,
-// observable via cmp.Diff/JSON/== nil. Advisory only, never fixed.
+// observable via cmp.Diff/JSON/== nil. Conditional-only fill: not
+// reported at all.
 func nilPreserved(src []string, keep func(string) bool) []string {
-	var out []string // want `out is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(src\)\) — an upper bound: all appends are conditional \(declared nil: pre-size only if no caller distinguishes nil from empty\)`
+	var out []string
 	for _, s := range src {
 		if keep(s) {
 			out = append(out, s)
