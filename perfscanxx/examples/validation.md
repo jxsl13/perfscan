@@ -419,3 +419,31 @@ top-level `const` on a by-value return. This is the busier counterpart to the
 fmt datapoint above — a mid-size, container/string-heavy C++ library where both
 the curated clang-tidy checks and the custom queries produce actionable,
 mechanically-fixable results without noise or crashes.
+
+## abseil — large container library, confirms PX3020's documented FP profile (159 TUs)
+
+`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DABSL_BUILD_TESTING=OFF` over
+`abseil/abseil-cpp` yields a 159-TU compile database. `perfscanxx -level 2 -p
+build ./...` reports **157 findings** in ~6s, exit 1 (findings present), **no
+crashes and no orchestration errors** — the largest corpus run to date. 130/159
+TUs partially parse (abseil leans on build-time-generated config headers;
+`-cmake-build` regenerates them) and are still partially analyzed, which is the
+documented graceful-degradation path.
+
+The distribution is instructive: **PX3020 (rvalue-reference param never
+`std::move`'d) dominates at 80** — precisely the false-positive profile the
+catalog entry calls out. abseil's container / allocator-extended move
+constructors consume their rvalue-ref parameters member-wise
+(`std::move(other.member_)`) or via `std::make_move_iterator`, which clang-tidy's
+`cppcoreguidelines-rvalue-reference-param-not-moved` does not recognize as a
+move, so it flags a parameter that IS moved-from. This is exactly why PX3020
+ships **advisory-only** (`HasFix:false`) — there is no safe mechanical rewrite,
+and on container-library code it is noisy by nature. The remaining findings are
+high-signal and consistent with the smaller runs: PX3013 (`= default`) ×36,
+PX3004 (noexcept move) ×17, PX1002 (unnecessary value param) ×9, PX3015 (member
+initializer) ×8, PX3006 ×7.
+
+So a 159-TU container library both (a) stress-tests the orchestrator (no crash,
+clean parse-error accounting, 6s wall time) and (b) confirms the catalog's
+honesty about PX3020: the one check documented as FP-prone on this exact style of
+code is the one that lights up, and it is correctly withheld from any auto-fix.
