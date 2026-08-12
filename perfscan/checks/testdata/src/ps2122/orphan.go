@@ -1,7 +1,8 @@
 package ps2122
 
 // The only fmt reference in this FILE is the fixable Sprintf itself: the
-// concatenation rewrite would orphan the import, so advisory only.
+// concatenation rewrite orphans the import, and the fix pipeline prunes
+// the now-unused fmt import afterwards, so the fix applies (non-cgo file).
 
 import (
 	"fmt"

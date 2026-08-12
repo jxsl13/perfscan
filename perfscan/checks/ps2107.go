@@ -44,9 +44,12 @@ bit-identical: the argument's type must be the unnamed predeclared kind
 (int/uint/... , bool, []byte, string) — a named type could implement
 fmt.Formatter and change what fmt prints, so named types keep the plain
 advisory report. The fix adds the strconv or encoding/hex import when the
-file lacks it and is suppressed when the rewrite would orphan the file's
-fmt import, when the needed package name is shadowed at the call site, or
-in cgo files (whose import block must not be edited).`,
+file lacks it and is suppressed when the needed package name is shadowed
+at the call site or when a cgo file would need the import added (a cgo
+file's import block must not be edited). The fix also applies when the
+rewrite removes the file's last fmt reference — the fix pipeline prunes
+the now-unused fmt import — except in cgo files, where the orphan could
+not be pruned, so the report stays advisory there.`,
 		Before: `id := fmt.Sprintf("%d", userID)`,
 		After:  `id := strconv.Itoa(userID)`,
 		MeasuredWin: `strconv.Itoa runs several times faster than
@@ -62,9 +65,11 @@ allocations (measured ~4x faster, 1 alloc instead of 2 for a 4-digit int).`,
 
 func runPS2107(pass *analysis.Pass) (any, error) {
 	for _, f := range pass.Files {
-		// Collect first: fixes are suppressed when applying all of them
-		// would rewrite the file's last fmt reference and orphan the
-		// import (the runner never prunes imports).
+		// Collect first: applying all fixes may rewrite the file's last
+		// fmt reference and orphan the import. The fix pipeline prunes
+		// such an orphan afterwards — except in a cgo file (import "C"),
+		// whose import block is never edited, so there the fixes are
+		// withheld and the reports stay advisory.
 		type site struct {
 			call *ast.CallExpr
 			msg  string
@@ -122,7 +127,7 @@ func runPS2107(pass *analysis.Pass) (any, error) {
 			sites = append(sites, site{call, c.msg, fix})
 			return true
 		})
-		emitFixes := fixable > 0 && pkgRefCount(pass, f, "fmt") > fixable
+		emitFixes := fixable > 0 && (pkgRefCount(pass, f, "fmt") > fixable || !ps2110ImportsC(f))
 		for _, st := range sites {
 			diag := analysis.Diagnostic{
 				Pos:     st.call.Pos(),

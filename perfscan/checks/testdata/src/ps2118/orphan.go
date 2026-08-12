@@ -1,7 +1,8 @@
 package ps2118
 
 // The only io reference in this FILE is the fixable WriteString itself:
-// the w.Write(b) rewrite would orphan the import, so advisory only.
+// the w.Write(b) rewrite orphans the import, and the fix pipeline prunes
+// the now-unused io import afterwards, so the fix applies (non-cgo file).
 
 import (
 	"bytes"

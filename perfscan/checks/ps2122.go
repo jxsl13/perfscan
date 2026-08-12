@@ -54,11 +54,12 @@ primaries or + chains, so the operands never need parentheses; the
 WHOLE replacement is parenthesized when the surrounding context binds
 tighter than + (an index, a slice, a binary operand), exactly as
 PS2121 decides it. Each rewrite removes the file's fmt.Sprintf
-selector, so — like PS2107/PS2118 — the fixes are withheld (advisory
-report only) when applying all of them would rewrite the file's last
-fmt reference and orphan the import. A comment inside the rewritten
-scaffolding is never silently dropped: it suppresses the fix and keeps
-the report.`,
+selector; the fix applies even when that removes the file's last fmt
+reference — the fix pipeline prunes the now-unused fmt import — EXCEPT
+in cgo files (import "C"), whose import block is never edited: there
+the fixes are withheld and the report stays advisory. A comment inside
+the rewritten scaffolding is never silently dropped: it suppresses the
+fix and keeps the report.`,
 		Before: `s := fmt.Sprintf("%s%s%s", host, ":", port)`,
 		After:  `s := host + ":" + port`,
 		MeasuredWin: `BenchmarkPS2122 (a host + ":" + port join of three
@@ -77,9 +78,11 @@ pp buffer round-trip disappear, leaving only the result string).`,
 
 func runPS2122(pass *analysis.Pass) (any, error) {
 	for _, f := range pass.Files {
-		// Collect first: fixes are suppressed when applying all of them
-		// would rewrite the file's last fmt reference and orphan the
-		// import (the runner never prunes imports; same guard as
+		// Collect first: applying all fixes may rewrite the file's last
+		// fmt reference and orphan the import. The fix pipeline prunes
+		// such an orphan afterwards — except in a cgo file (import "C"),
+		// whose import block is never edited, so there the fixes are
+		// withheld and the reports stay advisory (same guard as
 		// PS2107/PS2118).
 		type site struct {
 			call *ast.CallExpr
@@ -144,8 +147,9 @@ func runPS2122(pass *analysis.Pass) (any, error) {
 		})
 		// Each fixable call holds exactly one fmt reference (its selector's
 		// package identifier); if those are ALL of the file's fmt
-		// references, the fixes would orphan the import — advisory only.
-		emitFixes := fixable > 0 && pkgRefCount(pass, f, "fmt") > fixable
+		// references, the fixes orphan the import — fine in a non-cgo file
+		// (the fix pipeline prunes it), advisory only in a cgo file.
+		emitFixes := fixable > 0 && (pkgRefCount(pass, f, "fmt") > fixable || !ps2110ImportsC(f))
 		for _, st := range sites {
 			diag := analysis.Diagnostic{
 				Pos:     st.call.Pos(),

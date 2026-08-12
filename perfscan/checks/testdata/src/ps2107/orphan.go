@@ -1,8 +1,9 @@
 package ps2107
 
 // The only fmt reference in this FILE is the fixable Sprintf itself: the
-// rewrite would orphan the import (the runner never prunes imports), so
-// advisory only.
+// rewrite orphans the import, and the fix pipeline prunes the now-unused
+// fmt import afterwards, so the fix applies (non-cgo file) and adds the
+// strconv import it needs.
 
 import "fmt"
 

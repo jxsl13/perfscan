@@ -60,9 +60,11 @@ var simpleVerbFormat = regexp.MustCompile(`^(?:[^%]|%[sdv])*$`)
 
 func runPS2103(pass *analysis.Pass) (any, error) {
 	for _, f := range pass.Files {
-		// Collect first: fixes are suppressed when applying all of them
-		// would rewrite the file's last fmt reference and orphan the
-		// import (the runner never prunes imports).
+		// Collect first: applying all fixes may rewrite the file's last
+		// fmt reference and orphan the import. The fix pipeline prunes
+		// such an orphan afterwards — except in a cgo file (import "C"),
+		// whose import block is never edited, so there the fixes are
+		// withheld and the reports stay advisory.
 		type site struct {
 			call *ast.CallExpr
 			fix  *analysis.SuggestedFix
@@ -95,7 +97,7 @@ func runPS2103(pass *analysis.Pass) (any, error) {
 			sites = append(sites, site{call, fix})
 			return true
 		})
-		emitFixes := fixable > 0 && pkgRefCount(pass, f, "fmt") > fixable
+		emitFixes := fixable > 0 && (pkgRefCount(pass, f, "fmt") > fixable || !ps2110ImportsC(f))
 		for _, st := range sites {
 			diag := analysis.Diagnostic{
 				Pos:     st.call.Pos(),

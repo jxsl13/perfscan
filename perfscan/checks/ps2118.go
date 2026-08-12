@@ -54,11 +54,12 @@ variable) inside Write is still reported.
 
 The automatic fix replaces the whole call with w.Write(b), rendering both
 argument expressions as written (a non-selectable w such as &buf is
-parenthesized). Each rewrite removes the file's io.WriteString selector,
-so — like PS3002/PS2103 — the fixes are withheld (advisory report only)
-when applying all of them would rewrite the file's last io reference and
-orphan the import. A comment inside the call is never silently dropped:
-it suppresses the fix and keeps the report.`,
+parenthesized). Each rewrite removes the file's io.WriteString selector;
+the fix applies even when that removes the file's last io reference —
+the fix pipeline prunes the now-unused io import — EXCEPT in cgo files
+(import "C"), whose import block is never edited: there the fixes are
+withheld and the report stays advisory. A comment inside the call is
+never silently dropped: it suppresses the fix and keeps the report.`,
 		Before: `io.WriteString(w, string(b))`,
 		After:  `w.Write(b)`,
 		MeasuredWin: `BenchmarkPS2118 (64 slices of ~83 bytes written to a
@@ -76,9 +77,11 @@ directly.`,
 
 func runPS2118(pass *analysis.Pass) (any, error) {
 	for _, f := range pass.Files {
-		// Collect first: fixes are suppressed when applying ALL of them
-		// would rewrite the file's last io reference and orphan the import
-		// (the runner never prunes imports; same guard as PS3002/PS2103).
+		// Collect first: applying ALL fixes may rewrite the file's last io
+		// reference and orphan the import. The fix pipeline prunes such an
+		// orphan afterwards — except in a cgo file (import "C"), whose
+		// import block is never edited, so there the fixes are withheld
+		// and the reports stay advisory (same guard as PS2103/PS2107).
 		type site struct {
 			call *ast.CallExpr
 			fix  *analysis.SuggestedFix
@@ -125,8 +128,9 @@ func runPS2118(pass *analysis.Pass) (any, error) {
 		})
 		// Each fixable call holds exactly one io reference (its selector's
 		// package identifier); if those are ALL of the file's io references,
-		// the fixes would orphan the import — advisory only then.
-		emitFixes := fixable > 0 && pkgRefCount(pass, f, "io") > fixable
+		// the fixes orphan the import — fine in a non-cgo file (the fix
+		// pipeline prunes it), advisory only in a cgo file.
+		emitFixes := fixable > 0 && (pkgRefCount(pass, f, "io") > fixable || !ps2110ImportsC(f))
 		for _, st := range sites {
 			diag := analysis.Diagnostic{
 				Pos:     st.call.Pos(),
