@@ -56,3 +56,11 @@ by construction. Verified at scale: the leveldb checkout was **byte-clean before
 after** the run (every file restored perfectly), and the emitted patch is **`patch
 -p1 --dry-run`-clean** (a valid, appliable unified diff). So `-diff` is a reliable,
 non-destructive CI gate / review preview of exactly what `-fix` would write.
+
+## `-fix` is idempotent
+
+Running `perfscanxx -fix -level 3 ./...` on a leveldb copy applied the catalog's
+fixes; a SECOND pass then reports **nothing left to change** (`-diff` exits 0,
+"no fixes to apply", empty patch), and the rewritten tree still compiles (`[100%]
+Built target leveldb`). So `-fix` reaches a fixpoint — repeated CI runs converge and
+never oscillate or re-churn already-fixed code.
