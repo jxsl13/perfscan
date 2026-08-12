@@ -1,0 +1,13 @@
+package ps2126
+
+import (
+	"errors"
+	"fmt"
+)
+
+// The file keeps ANOTHER fmt reference (Sprintf), so the fmt import
+// stays; the fix only inserts the errors import at its sorted position.
+func keepFmt(name string) (string, error) {
+	err := errors.New("not found") // want `fmt\.Errorf on a constant verb-free message runs the whole fmt printer just to copy the string; errors\.New returns the identical \*errors\.errorString without the printer allocation or format scan`
+	return fmt.Sprintf("user %q", name), err
+}
