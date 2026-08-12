@@ -48,8 +48,10 @@ func FindProject(start string) (string, bool) {
 	return best, best != ""
 }
 
-// Available reports whether a cmake binary is on PATH.
-func Available() bool {
+// Available reports whether a cmake binary is on PATH. It is a package variable
+// (like Runner) so tests can exercise Configure/Build — including their error
+// and not-available paths — hermetically, without a real cmake on PATH.
+var Available = func() bool {
 	_, err := exec.LookPath("cmake")
 	return err == nil
 }
