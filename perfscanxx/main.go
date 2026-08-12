@@ -315,6 +315,23 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// Plain -fix applied clang-tidy's fix-its in place during the report run
+	// above (opts.Fix was set). Summarize what carried fix-its so the run is not
+	// silent — mirrors -diff's "N file(s) would change" and -fix-sequential's own
+	// summary. When a TU did not fully parse, clang-tidy skips applying its
+	// fix-its, so the caveat is stated inline rather than over-claiming.
+	if *fix && !*fixSeq {
+		n, files := fixTargets(findings)
+		switch {
+		case n == 0:
+			fmt.Fprintln(stderr, "perfscanxx: -fix: no reported finding carries a fix-it")
+		case len(parseErrs) > 0:
+			fmt.Fprintf(stderr, "perfscanxx: -fix: %d finding(s) across %d file(s) carried fix-its; some may not have applied where a translation unit did not fully parse (see below)\n", n, files)
+		default:
+			fmt.Fprintf(stderr, "perfscanxx: -fix: applied fix-its for %d finding(s) across %d file(s)\n", n, files)
+		}
+	}
+
 	// -diff (dry run): render the unified diff that -fix would produce, IDENTICAL
 	// to -fix by construction. The clang-tidy run above was WITHOUT --fix (opts.Fix
 	// is false since -diff and -fix are mutually exclusive); its --export-fixes YAML
@@ -571,6 +588,19 @@ func diagnoseNoMatch(inputs []string, buildDir string) string {
 	}
 	return fmt.Sprintf("the compilation database %s has %d on-disk translation unit(s) rooted near %s, none under %v — point the path/pattern (or -p) at that subtree.",
 		dbPath, onDisk, sampleRoot, inputs)
+}
+
+// fixTargets counts the reported findings that carry at least one clang-tidy
+// fix-it and the distinct files they touch — the basis for the -fix summary.
+func fixTargets(findings []report.Finding) (n, files int) {
+	seen := map[string]bool{}
+	for _, f := range findings {
+		if f.Fixes > 0 {
+			n++
+			seen[f.File] = true
+		}
+	}
+	return n, len(seen)
 }
 
 // countMissingHeaderErrors counts clang compile errors caused by a header that
