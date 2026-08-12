@@ -106,3 +106,11 @@ unified diff across 8 files (13 fixes)**, left the source **byte-unchanged**
 (`git apply --check -p1 --directory=pkg`), confirming the diff renderer produces
 genuinely valid, appliable unified diffs on real multi-file production Go — so
 `-diff` is a reliable CI gate / review preview of exactly what `-fix` would write.
+
+## `-fix` is idempotent
+
+Running `perfscan -fix -level 3 ./...` on an etcd `pkg/` copy applied **13 fixes**;
+a SECOND pass (`-diff`) then reports **nothing left to change** (exit 0, empty
+patch), and the rewritten module still `go build`s and `go vet`s exit 0. So `-fix`
+converges to a fixpoint — repeated CI runs never oscillate or re-churn already-fixed
+code.
