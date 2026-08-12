@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"strings"
 
 	"golang.org/x/tools/go/analysis"
 
@@ -11,9 +12,10 @@ import (
 	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
-// PS2128 reports the classic quadratic string-building loop — a fresh empty
-// local string that the immediately following loop grows by concatenation
-// and that is only read afterwards — and rewrites it to strings.Builder.
+// PS2128 reports the classic quadratic string-building loop — a fresh local
+// string (empty or seeded with a string expression) that the immediately
+// following loop grows by concatenation and that is only read afterwards —
+// and rewrites it to strings.Builder.
 var PS2128 = register(&lint.Check{
 	ID:       "PS2128",
 	Category: "alloc",
@@ -34,9 +36,10 @@ The check fires only on the exact shape whose rewrite is provably
 bit-identical, because changing the accumulator's type from string to
 strings.Builder must account for every use:
 
-  - the accumulator is declared fresh and empty (acc := "" or var acc
-    string, the predeclared string) immediately before a for/range loop in
-    the same block, with no statement in between;
+  - the accumulator is declared fresh (acc := "" or var acc string, the
+    predeclared string) — or seeded with a string-typed expression E
+    (acc := E, var acc = E, var acc string = E) — immediately before a
+    for/range loop in the same block, with no statement in between;
   - inside the loop it is ONLY appended to, via acc += expr or
     acc = acc + expr, where expr is string-typed and does not mention acc —
     appends may sit inside nested ifs, switches, blocks or loops, but not
@@ -48,7 +51,11 @@ strings.Builder must account for every use:
 The fix keeps the variable name: the declaration becomes var acc
 strings.Builder, each append becomes acc.WriteString(expr) with expr's
 source text untouched in place, and each later read of acc becomes
-acc.String(). The strings import is added when missing; if the name
+acc.String(). A non-empty seed is preserved via a leading
+acc.WriteString(E) emitted right after the declaration: E's source text
+stays untouched in place, so it is still evaluated exactly once, at the
+declaration point, before the loop, and the final string is byte-for-byte
+E + the appends. The strings import is added when missing; if the name
 strings is shadowed at any rewrite site (or the file is a cgo file that
 would need the import), the finding is reported without a fix rather than
 producing one that does not compile.
@@ -132,7 +139,7 @@ func ps2128InnermostFuncBody(stack []ast.Node) *ast.BlockStmt {
 // ps2128Candidate checks one adjacent statement pair (declaration, loop)
 // and reports when the full accumulator gate holds.
 func ps2128Candidate(pass *analysis.Pass, f *ast.File, fnBody *ast.BlockStmt, declStmt, loopStmt ast.Stmt, importAdded *bool) {
-	accID, obj := ps2128EmptyStringDecl(pass, declStmt)
+	accID, obj, seed := ps2128StringDecl(pass, declStmt)
 	if obj == nil || !astutil.IsLoop(loopStmt) {
 		return
 	}
@@ -145,54 +152,109 @@ func ps2128Candidate(pass *analysis.Pass, f *ast.File, fnBody *ast.BlockStmt, de
 		End:     loopStmt.End(),
 		Message: accID.Name + " is grown by string concatenation on every loop iteration, re-copying the accumulated prefix each time (quadratic); build it in a strings.Builder and read it once with String()",
 	}
-	if fix := ps2128Fix(pass, f, declStmt, appends, reads, accID.Name, importAdded); fix != nil {
+	if fix := ps2128Fix(pass, f, declStmt, seed, appends, reads, accID.Name, importAdded); fix != nil {
 		diag.SuggestedFixes = []analysis.SuggestedFix{*fix}
 	}
 	pass.Report(diag)
 }
 
-// ps2128EmptyStringDecl matches stmt as a fresh empty string declaration of
-// a single local: acc := "" (exactly that literal) or var acc string (the
-// predeclared string, no initializer). It returns the declared identifier
-// and its object, or nil.
-func ps2128EmptyStringDecl(pass *analysis.Pass, stmt ast.Stmt) (*ast.Ident, *types.Var) {
+// ps2128StringDecl matches stmt as a fresh string declaration of a single
+// local: acc := E, var acc string, var acc = E or var acc string = E. It
+// returns the declared identifier, its object and the SEED expression —
+// nil when the initializer is the empty literal "" or absent, so the empty
+// forms keep their seedless rewrite. A non-nil seed must be string-typed
+// and must not reference the accumulator itself.
+func ps2128StringDecl(pass *analysis.Pass, stmt ast.Stmt) (*ast.Ident, *types.Var, ast.Expr) {
 	var id *ast.Ident
+	var seed ast.Expr
 	switch d := stmt.(type) {
 	case *ast.AssignStmt:
 		if d.Tok != token.DEFINE || len(d.Lhs) != 1 || len(d.Rhs) != 1 {
-			return nil, nil
+			return nil, nil, nil
 		}
 		lhs, ok := d.Lhs[0].(*ast.Ident)
 		if !ok {
-			return nil, nil
-		}
-		lit, ok := d.Rhs[0].(*ast.BasicLit)
-		if !ok || lit.Kind != token.STRING || lit.Value != `""` {
-			return nil, nil
+			return nil, nil, nil
 		}
 		id = lhs
+		seed = d.Rhs[0]
 	case *ast.DeclStmt:
 		gd, ok := d.Decl.(*ast.GenDecl)
 		if !ok || gd.Tok != token.VAR || len(gd.Specs) != 1 {
-			return nil, nil
+			return nil, nil, nil
 		}
 		vs, ok := gd.Specs[0].(*ast.ValueSpec)
-		if !ok || len(vs.Names) != 1 || len(vs.Values) != 0 {
-			return nil, nil
+		if !ok || len(vs.Names) != 1 || len(vs.Values) > 1 {
+			return nil, nil, nil
 		}
-		tid, ok := vs.Type.(*ast.Ident)
-		if !ok || pass.TypesInfo.Uses[tid] != types.Universe.Lookup("string") {
-			return nil, nil
+		if vs.Type != nil {
+			// var acc string / var acc string = E: the declared type must
+			// be the predeclared string.
+			tid, ok := vs.Type.(*ast.Ident)
+			if !ok || pass.TypesInfo.Uses[tid] != types.Universe.Lookup("string") {
+				return nil, nil, nil
+			}
+		} else if len(vs.Values) == 0 {
+			// var acc with neither type nor value does not compile.
+			return nil, nil, nil
 		}
 		id = vs.Names[0]
+		if len(vs.Values) == 1 {
+			// var acc = E: the inferred type is validated below via Defs.
+			seed = vs.Values[0]
+		}
 	default:
-		return nil, nil
+		return nil, nil, nil
+	}
+	// The empty literal (possibly parenthesized) is the existing seedless
+	// path, not a seed.
+	if lit, ok := ps2128Unparen(seed).(*ast.BasicLit); ok && lit.Kind == token.STRING && lit.Value == `""` {
+		seed = nil
 	}
 	obj, ok := pass.TypesInfo.Defs[id].(*types.Var)
 	if !ok || !types.Identical(obj.Type(), types.Typ[types.String]) {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return id, obj
+	if seed != nil {
+		// The rewrite inserts `var <id> strings.Builder` ahead of the seed's
+		// WriteString, so any identifier in the seed spelled like the
+		// accumulator would rebind from its outer target to the Builder —
+		// `acc := acc + "-"` is legal Go, its RHS resolving in the OUTER
+		// scope. Reject on NAME, not just object identity.
+		if ps2128NameOccurs(seed, id.Name) {
+			return nil, nil, nil
+		}
+		// The seed must be string-typed (same walk as the append operands).
+		if !ps2128Operand(pass, obj, seed) {
+			return nil, nil, nil
+		}
+	}
+	return id, obj, seed
+}
+
+// ps2128Unparen strips enclosing parentheses. Returns e unchanged (including
+// nil) when it is not parenthesized.
+func ps2128Unparen(e ast.Expr) ast.Expr {
+	for {
+		p, ok := e.(*ast.ParenExpr)
+		if !ok {
+			return e
+		}
+		e = p.X
+	}
+}
+
+// ps2128NameOccurs reports whether e contains any identifier spelled name —
+// used to reject a seed that the inserted accumulator declaration would shadow.
+func ps2128NameOccurs(e ast.Expr, name string) bool {
+	found := false
+	ast.Inspect(e, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && id.Name == name {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // ps2128Append is one qualifying in-loop append statement: acc += e or
@@ -384,8 +446,10 @@ func ps2128PlainRead(id *ast.Ident, stack []ast.Node) bool {
 // ps2128Fix builds the strings.Builder rewrite, or nil when the strings
 // name is not usable at every edit site, the file is a cgo file that would
 // need the import, or a comment overlaps replaced punctuation — then the
-// finding stays report-only.
-func ps2128Fix(pass *analysis.Pass, f *ast.File, declStmt ast.Stmt, appends []ps2128Append, reads []*ast.Ident, name string, importAdded *bool) *analysis.SuggestedFix {
+// finding stays report-only. A non-nil seed turns the declaration edit
+// into two lines: the builder declaration followed by
+// name.WriteString(seed), with the seed's source text untouched in place.
+func ps2128Fix(pass *analysis.Pass, f *ast.File, declStmt ast.Stmt, seed ast.Expr, appends []ps2128Append, reads []*ast.Ident, name string, importAdded *bool) *analysis.SuggestedFix {
 	positions := make([]token.Pos, 0, 1+len(appends)+len(reads))
 	positions = append(positions, declStmt.Pos())
 	for i := range appends {
@@ -405,8 +469,10 @@ func ps2128Fix(pass *analysis.Pass, f *ast.File, declStmt ast.Stmt, appends []ps
 	if needImport && ps2110ImportsC(f) {
 		return nil
 	}
-	// The declaration is replaced whole and each append keeps only the
-	// operand's text; a comment inside the replaced ranges would be lost.
+	// The declaration is replaced whole (a seed keeps only its own text)
+	// and each append keeps only the operand's text; a comment inside any
+	// of these ranges — including inside the seed — would be lost or
+	// misplaced by the rewrite.
 	if ps2110CommentsIn(f, declStmt.Pos(), declStmt.End()) {
 		return nil
 	}
@@ -416,12 +482,30 @@ func ps2128Fix(pass *analysis.Pass, f *ast.File, declStmt ast.Stmt, appends []ps
 			return nil
 		}
 	}
-	edits := make([]analysis.TextEdit, 0, 1+2*len(appends)+len(reads)+1)
-	edits = append(edits, analysis.TextEdit{
-		Pos:     declStmt.Pos(),
-		End:     declStmt.End(),
-		NewText: []byte("var " + name + " strings.Builder"),
-	})
+	edits := make([]analysis.TextEdit, 0, 2+2*len(appends)+len(reads)+1)
+	if seed != nil {
+		// Two lines: the builder declaration, then the seed written once at
+		// the declaration point — evaluated exactly as before, before the
+		// loop. Only the punctuation around the seed is replaced: its
+		// source text stays untouched in place. Assume gofmt indentation
+		// (tabs): the declaration starts at column Column, i.e. Column-1
+		// tabs of indentation.
+		indent := strings.Repeat("\t", pass.Fset.Position(declStmt.Pos()).Column-1)
+		edits = append(edits,
+			analysis.TextEdit{
+				Pos:     declStmt.Pos(),
+				End:     seed.Pos(),
+				NewText: []byte("var " + name + " strings.Builder\n" + indent + name + ".WriteString("),
+			},
+			analysis.TextEdit{Pos: seed.End(), End: declStmt.End(), NewText: []byte(")")},
+		)
+	} else {
+		edits = append(edits, analysis.TextEdit{
+			Pos:     declStmt.Pos(),
+			End:     declStmt.End(),
+			NewText: []byte("var " + name + " strings.Builder"),
+		})
+	}
 	for i := range appends {
 		ap := appends[i]
 		// Replace only the punctuation around the operand: its source

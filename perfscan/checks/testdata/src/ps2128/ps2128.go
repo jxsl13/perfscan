@@ -1,7 +1,12 @@
 package ps2128
 
+import (
+	"fmt"
+)
+
 // acc := "" form, plain counted for loop: fixed, and this first fix
-// carries the added strings import for the file.
+// carries the added strings import for the file. EMPTY init: no seed
+// WriteString is emitted.
 func joinDefine(items []string) string {
 	acc := "" // want `acc is grown by string concatenation on every loop iteration`
 	for i := 0; i < len(items); i++ {
@@ -103,10 +108,10 @@ func statementBetween(items []string) string {
 	return acc
 }
 
-// NEGATIVE: the accumulator starts non-empty — var acc strings.Builder
-// would drop the seed; silent.
+// SEEDED: the accumulator starts non-empty — the seed is preserved via a
+// leading WriteString, still evaluated at the declaration point: fixed.
 func seeded(items []string) string {
-	acc := "prefix:"
+	acc := "prefix:" // want `acc is grown by string concatenation on every loop iteration`
 	for _, it := range items {
 		acc += it
 	}
@@ -148,4 +153,68 @@ func neverRead(items []string) {
 	for _, it := range items {
 		acc += it
 	}
+}
+
+// SEEDED: var acc = E form (type inferred string): fixed, seed preserved.
+func seededVar(items []string) string {
+	var acc = "x" // want `acc is grown by string concatenation on every loop iteration`
+	for _, it := range items {
+		acc += it
+	}
+	return acc
+}
+
+// SEEDED: var acc string = fmt.Sprintf(...) — the seed is a call; it is
+// still evaluated exactly once, at the declaration point, before the loop.
+func seededSprintf(items []string, n int) string {
+	var acc string = fmt.Sprintf("%d:", n) // want `acc is grown by string concatenation on every loop iteration`
+	for _, it := range items {
+		acc += it
+	}
+	return acc
+}
+
+// SEEDED with an if-guarded append inside the loop: fixed.
+func seededGuarded(items []string) string {
+	acc := "start:" // want `acc is grown by string concatenation on every loop iteration`
+	for _, it := range items {
+		if it != "" {
+			acc += it
+		}
+	}
+	return acc
+}
+
+// NEGATIVE (report-only): the seed's source range contains a comment the
+// two-line rewrite cannot place; reported, no fix.
+func seededComment(items []string) string {
+	acc := "a" + /* seed */ "b" // want `acc is grown by string concatenation on every loop iteration`
+	for _, it := range items {
+		acc += it
+	}
+	return acc
+}
+
+// Seed references an OUTER binding of the same name: the inserted
+// `var acc strings.Builder` would shadow it and rebind the seed's acc to the
+// Builder (a type error). Must not fire (regression: adversarial c05).
+func seededShadow(acc string, ws []string) string {
+	if len(ws) > 0 {
+		acc := acc + "-"
+		for _, w := range ws {
+			acc += w
+		}
+		return acc
+	}
+	return acc
+}
+
+// A parenthesized empty initializer is still the seedless empty path — no
+// WriteString("") is emitted (regression: adversarial c11/c21).
+func parenEmpty(ws []string) string {
+	acc := ("") // want `acc is grown by string concatenation on every loop iteration`
+	for _, w := range ws {
+		acc += w
+	}
+	return acc
 }
