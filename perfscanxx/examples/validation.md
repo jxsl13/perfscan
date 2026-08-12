@@ -164,6 +164,25 @@ PX3015 ×7, all behavior-preserving here — spdlog has no duplicated declaratio
 no delegating-ctor-with-body-assignment, so the checks are safe. This is the common
 case; fmt is the exception.
 
+**Behavioral equivalence — spdlog's own test suite passes after `-fix` (2026-08-12).**
+`rebuilds clean` proves the fixes are type-safe; the stronger proof is that runtime
+behavior is unchanged. spdlog ships a Catch2 unit-test binary (`spdlog-utests`, one
+CTest target) exercising the sinks, formatters, async queue, and file rotation.
+Before `-fix`: `ctest` → **100% passed**. Applying the full catalog to the 24
+first-party files (`perfscanxx -fix -level 3 -exclude _deps/` — PX1002 value-param→
+const-ref ×15, PX3015 member-init ×7, PX3013 `= default` ×5, PX3007 pass-by-value
+×4, PX2101 reserve ×4, …), then rebuilding and re-running:
+
+```
+cmake --build build --target spdlog-utests  → exit 0   # rewritten sources compile+link
+ctest                                        → 100% tests passed (6.6s)
+```
+
+So the `-fix` suite is not merely recompilable but **behavior-preserving under the
+project's own tests** on real C++ — the strongest evidence class, and the C++ analog
+of the Go etcd/apimachinery test-suite results (`../../perfscan/examples/corpus-validation.md`).
+(Applied in place, then restored with `git checkout .`.)
+
 spdlog also exercises the vendored guard on a real **CMake FetchContent** tree: it
 bundles **Catch2** under `build/_deps/catch2-src/`, and `-fix` correctly warned that
 it had rewritten **22** files there (the `_deps` segment). Those built fine (Catch2
