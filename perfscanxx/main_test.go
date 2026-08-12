@@ -578,3 +578,58 @@ func TestSummarizeParseErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestVendoredSegment(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/proj/src/main.cpp", false},
+		{"/proj/vendor/lib/x.cpp", true},
+		{"/proj/third_party/re2/re2.cc", true},
+		{"/proj/build/_deps/fmt-src/src/format.cc", true},
+		{"/proj/test/gtest/gmock-gtest-all.cc", true},
+		{"/proj/external/googletest/src/gtest.cc", true},
+		{"relative/thirdparty/a.cpp", true},
+		{"/proj/myvendorlib/x.cpp", false}, // substring, not a full segment -> not vendored
+	}
+	for _, c := range cases {
+		if _, ok := vendoredSegment(c.path); ok != c.want {
+			t.Errorf("vendoredSegment(%q) = %v, want %v", c.path, ok, c.want)
+		}
+	}
+}
+
+// TestWarnVendoredFixes covers the -fix vendored-path warning: only findings
+// that actually carried a fix-it (Fixes>0) under a vendored path are reported,
+// each file once; first-party and advisory-only findings never warn.
+func TestWarnVendoredFixes(t *testing.T) {
+	findings := []report.Finding{
+		{File: "/p/src/a.cpp", Fixes: 1},                     // first-party fix -> no warn
+		{File: "/p/third_party/dep/b.cpp", Fixes: 2},         // vendored + fixable -> warn
+		{File: "/p/third_party/dep/b.cpp", Fixes: 1},         // same file again -> dedup
+		{File: "/p/vendor/c.cpp", Fixes: 0},                  // vendored but advisory -> no warn
+		{File: "/p/test/gtest/gmock-gtest-all.cc", Fixes: 3}, // bundled gtest -> warn
+	}
+	var buf bytes.Buffer
+	warnVendoredFixes(&buf, findings)
+	out := buf.String()
+	if !strings.Contains(out, "2 file(s) under vendored") {
+		t.Errorf("expected a warning for 2 distinct vendored files, got:\n%s", out)
+	}
+	if !strings.Contains(out, "b.cpp") || !strings.Contains(out, "gmock-gtest-all.cc") {
+		t.Errorf("warning should name the two vendored files, got:\n%s", out)
+	}
+	if strings.Contains(out, "a.cpp") {
+		t.Errorf("first-party file must not be warned, got:\n%s", out)
+	}
+	if strings.Contains(out, "c.cpp") {
+		t.Errorf("advisory-only vendored file (Fixes==0) must not be warned, got:\n%s", out)
+	}
+	// No vendored fixes -> silent.
+	var buf2 bytes.Buffer
+	warnVendoredFixes(&buf2, []report.Finding{{File: "/p/src/a.cpp", Fixes: 1}})
+	if buf2.Len() != 0 {
+		t.Errorf("no vendored fixes should be silent, got %q", buf2.String())
+	}
+}

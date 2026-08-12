@@ -314,6 +314,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		report.Text(stdout, findings)
 	}
 
+	// After -fix, flag any bundled/third-party files we just rewrote: fixing
+	// vendored code is usually unwanted and can break amalgamated libraries.
+	if *fix {
+		warnVendoredFixes(stderr, findings)
+	}
+
 	// Summarize TUs that failed to parse instead of dumping clang-tidy's
 	// per-file progress/errors (which can be hundreds of lines).
 	if len(parseErrs) > 0 {
@@ -455,6 +461,61 @@ func countMissingHeaderErrors(findings []report.Finding) int {
 		}
 	}
 	return n
+}
+
+// vendoredDirs are path segments that conventionally hold third-party / bundled
+// code the user did not write. Rewriting such code with -fix is usually unwanted,
+// and for signature-changing fix-its on hand-amalgamated libraries (e.g. a
+// bundled googletest, which duplicates declarations) it can silently break the
+// build — see the fmt case in examples/validation.md.
+var vendoredDirs = map[string]bool{
+	"vendor": true, "third_party": true, "thirdparty": true, "third-party": true,
+	"external": true, "extern": true, "_deps": true,
+	"googletest": true, "googlemock": true, "gtest": true, "gmock": true,
+}
+
+// vendoredSegment returns the first vendored path segment in p, if any.
+func vendoredSegment(p string) (string, bool) {
+	for _, seg := range strings.Split(filepath.ToSlash(p), "/") {
+		if vendoredDirs[strings.ToLower(seg)] {
+			return seg, true
+		}
+	}
+	return "", false
+}
+
+// warnVendoredFixes warns when -fix rewrote files under vendored/third-party
+// paths. clang-tidy applies fix-its to every file in the compile database,
+// bundled dependencies included; only findings that actually carried a fix-it
+// (Fixes>0) are counted, since advisory findings never modify a file.
+func warnVendoredFixes(stderr io.Writer, findings []report.Finding) {
+	seen := map[string]bool{}
+	var files []string
+	for _, f := range findings {
+		if f.Fixes == 0 {
+			continue
+		}
+		if _, ok := vendoredSegment(f.File); ok && !seen[f.File] {
+			seen[f.File] = true
+			files = append(files, relPathCwd(f.File))
+		}
+	}
+	if len(files) == 0 {
+		return
+	}
+	sort.Strings(files)
+	fmt.Fprintf(stderr, "perfscanxx: warning: -fix modified %d file(s) under vendored/third-party "+
+		"paths; rewriting bundled dependencies is usually unwanted and can break amalgamated code "+
+		"(see examples/validation.md). Narrow the compile database or input paths to exclude them:\n",
+		len(files))
+	const maxList = 10
+	for i, f := range files {
+		if i == maxList {
+			fmt.Fprintf(stderr, "  … and %d more\n", len(files)-maxList)
+			break
+		}
+		fmt.Fprintln(stderr, "  modified vendored file:", f)
+	}
 }
 
 // underDir reports whether file is dir itself or lives beneath it.
