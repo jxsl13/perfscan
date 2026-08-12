@@ -20,6 +20,7 @@
 //	perfscanxx -p build ./src/game/...   only the src/game subtree
 //	perfscanxx -checks PX1* -p build ./... only copy checks
 //	perfscanxx -level 1 -fix -p build ./... apply only L1 (idiomatic) fixes
+//	perfscanxx -diff -p build ./...      preview -fix as a unified diff (no writes; exit 1 if any change)
 //	perfscanxx -json -p build ./...      machine-readable output
 //	perfscanxx -p build src/a.cpp        a single translation unit
 //	perfscanxx -list                     print the check table
@@ -31,6 +32,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -46,6 +48,7 @@ import (
 	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/cmake"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/compdb"
+	diffpkg "github.com/jxsl13/perfscan/perfscanxx/internal/diff"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/fixes"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/report"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/tidy"
@@ -71,6 +74,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	var (
 		fix        = fs.Bool("fix", false, "apply the fix-its of every reported check; -level gates both reporting and fixing (e.g. -level 1 -fix applies only idiomatic fixes)")
+		diff       = fs.Bool("diff", false, "print a unified diff of what -fix would change, without modifying files; exit 1 if anything would change (mutually exclusive with -fix)")
 		list       = fs.Bool("list", false, "list all checks and exit")
 		fixable    = fs.Bool("fixable", false, "with -list: show only checks that carry an auto-fix (-fix applies them)")
 		explain    = fs.String("explain", "", "print the documentation of a check (e.g. PX1001) and exit")
@@ -114,6 +118,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	if *maxLevel < 1 || *maxLevel > 3 {
 		fmt.Fprintln(stderr, "perfscanxx: -level must be 1, 2 or 3")
+		return 2
+	}
+	if *diff && *fix {
+		fmt.Fprintln(stderr, "perfscanxx: -diff and -fix are mutually exclusive")
 		return 2
 	}
 	// Optional CMake bootstrap: when no compilation database exists yet and the
@@ -222,6 +230,52 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// -diff (dry run): render the unified diff that -fix would produce, IDENTICAL
+	// to -fix by construction. The clang-tidy run above was WITHOUT --fix (opts.Fix
+	// is false since -diff and -fix are mutually exclusive); its --export-fixes YAML
+	// tells us which files -fix would touch. diffpkg.Build snapshots those files,
+	// runs the REAL clang-tidy --fix over the same inputs (so adjacent edits are
+	// coalesced/cleaned exactly as -fix does), diffs original -> modified, then
+	// restores the snapshots so nothing is left changed on disk. stdout is a clean
+	// patch; a one-line summary and the parse-error notice go to stderr. Exit 1 iff
+	// anything would change.
+	//
+	// Note: -diff mirrors -fix, and -fix does not consult the baseline (clang-tidy
+	// applies every selected fix-it), so -diff does not suppress baselined fixes —
+	// doing so would make the preview diverge from what -fix actually writes.
+	if *diff {
+		fixOpts := opts
+		fixOpts.Fix = true
+		runFix := func() error {
+			_, ferr := tidy.Run(context.Background(), fixOpts)
+			return ferr
+		}
+		diffs, snapshots, derr := diffpkg.Build(ef, catalog.Level(*maxLevel), runFix, diffpkg.OSFS{})
+		if derr != nil {
+			fmt.Fprintln(stderr, "perfscanxx:", derr)
+			return 2
+		}
+		// Defense in depth: assert restore left every touched file byte-identical
+		// to its snapshot before we report success.
+		if verr := verifyRestored(diffpkg.OSFS{}, snapshots); verr != nil {
+			fmt.Fprintln(stderr, "perfscanxx:", verr)
+			return 2
+		}
+		for _, fd := range diffs {
+			fmt.Fprint(stdout, fd.Patch)
+		}
+		if len(diffs) > 0 {
+			fmt.Fprintf(stderr, "perfscanxx: %d file(s) would change; run with -fix to apply\n", len(diffs))
+		} else {
+			fmt.Fprintln(stderr, "perfscanxx: no fixes to apply")
+		}
+		summarizeParseErrors(stderr, parseErrs, *verbose, *cmakeBuild)
+		if len(diffs) > 0 {
+			return 1
+		}
+		return 0
+	}
+
 	// Baseline ratchet: seed the file on first run, else suppress accepted
 	// findings so only regressions are reported (and counted for the exit code).
 	if *baseline != "" {
@@ -263,26 +317,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// Summarize TUs that failed to parse instead of dumping clang-tidy's
 	// per-file progress/errors (which can be hundreds of lines).
 	if len(parseErrs) > 0 {
-		files := map[string]bool{}
-		for _, f := range parseErrs {
-			files[f.File] = true
-		}
-		fmt.Fprintf(stderr, "perfscanxx: %d translation unit(s) did not fully parse and were partially analyzed\n", len(files))
-		if *verbose {
-			names := make([]string, 0, len(files))
-			for f := range files {
-				names = append(names, relPathCwd(f))
-			}
-			sort.Strings(names)
-			for _, n := range names {
-				fmt.Fprintln(stderr, "  did not fully parse:", n)
-			}
-		} else {
-			fmt.Fprintln(stderr, "perfscanxx: re-run with -v to list them.")
-		}
-		if missing := countMissingHeaderErrors(parseErrs); missing > 0 && !*cmakeBuild {
-			fmt.Fprintln(stderr, "perfscanxx: some reference headers generated at build time — re-run with -cmake-build to generate them.")
-		}
+		summarizeParseErrors(stderr, parseErrs, *verbose, *cmakeBuild)
 	} else if res.ExitCode != 0 {
 		// Non-zero exit with no parsed diagnostics = a real invocation error.
 		fmt.Fprint(stderr, res.Stderr)
@@ -293,6 +328,53 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// verifyRestored asserts that every snapshotted file's current on-disk bytes
+// equal the snapshot taken before -diff ran clang-tidy --fix — i.e. the restore
+// left nothing modified. It is a cheap safety net over diffpkg.Build's deferred
+// restore; a mismatch means we would have left the user's tree dirty, which must
+// never happen for a dry-run preview.
+func verifyRestored(fsys diffpkg.FS, snapshots map[string][]byte) error {
+	for abs, orig := range snapshots {
+		cur, err := fsys.ReadFile(abs)
+		if err != nil {
+			return fmt.Errorf("verifying restore of %s: %w", abs, err)
+		}
+		if !bytes.Equal(cur, orig) {
+			return fmt.Errorf("restore failed: %s was left modified by -diff", abs)
+		}
+	}
+	return nil
+}
+
+// summarizeParseErrors reports the count (and, with -v, the names) of
+// translation units that did not fully parse, instead of dumping clang-tidy's
+// per-file progress/errors. Shared by the report and -diff paths.
+func summarizeParseErrors(stderr io.Writer, parseErrs []report.Finding, verbose, cmakeBuild bool) {
+	if len(parseErrs) == 0 {
+		return
+	}
+	files := map[string]bool{}
+	for _, f := range parseErrs {
+		files[f.File] = true
+	}
+	fmt.Fprintf(stderr, "perfscanxx: %d translation unit(s) did not fully parse and were partially analyzed\n", len(files))
+	if verbose {
+		names := make([]string, 0, len(files))
+		for f := range files {
+			names = append(names, relPathCwd(f))
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			fmt.Fprintln(stderr, "  did not fully parse:", n)
+		}
+	} else {
+		fmt.Fprintln(stderr, "perfscanxx: re-run with -v to list them.")
+	}
+	if missing := countMissingHeaderErrors(parseErrs); missing > 0 && !cmakeBuild {
+		fmt.Fprintln(stderr, "perfscanxx: some reference headers generated at build time — re-run with -cmake-build to generate them.")
+	}
 }
 
 // expandInputs turns the positional args into the concrete translation units
@@ -429,6 +511,7 @@ Examples:
 	perfscanxx -checks PX1* -p build ./... only copy checks
 	perfscanxx -level 1 -fix -p build ./... report + apply only L1 fixes
 	perfscanxx -fix -p build ./...       default -level 3: apply every fix
+	perfscanxx -diff -p build ./...      preview what -fix would change as a unified diff (no writes; exit 1 if any change)
 	perfscanxx -p build src/main.cpp     a single translation unit
 	perfscanxx -p build -baseline .perfscanxx-baseline.yaml ./...   ratchet: seed, then fail only on NEW findings
 	perfscanxx -cmake ./...              auto-configure a CMake project (generate compile_commands.json)
