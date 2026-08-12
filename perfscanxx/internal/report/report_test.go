@@ -165,12 +165,16 @@ func TestJSONAndSARIF(t *testing.T) {
 				Driver struct {
 					Name  string `json:"name"`
 					Rules []struct {
-						ID string `json:"id"`
+						ID               string `json:"id"`
+						ShortDescription struct {
+							Text string `json:"text"`
+						} `json:"shortDescription"`
 					} `json:"rules"`
 				} `json:"driver"`
 			} `json:"tool"`
 			Results []struct {
 				RuleID    string `json:"ruleId"`
+				RuleIndex int    `json:"ruleIndex"`
 				Locations []struct {
 					PhysicalLocation struct {
 						ArtifactLocation struct {
@@ -200,6 +204,13 @@ func TestJSONAndSARIF(t *testing.T) {
 	ruleIDs := map[string]bool{}
 	for _, r := range run.Tool.Driver.Rules {
 		ruleIDs[r.ID] = true
+		// Curated PX rules carry the catalog's one-line summary so GitHub
+		// Code Scanning shows what the rule means. PX1001 is catalogued.
+		if r.ID == "PX1001" {
+			if e, ok := catalog.ByID("PX1001"); ok && r.ShortDescription.Text != e.Title {
+				t.Errorf("rule PX1001 shortDescription = %q, want catalog Title %q", r.ShortDescription.Text, e.Title)
+			}
+		}
 	}
 	if len(run.Results) == 0 {
 		t.Fatal("SARIF has no results")
@@ -209,6 +220,13 @@ func TestJSONAndSARIF(t *testing.T) {
 			t.Errorf("result[%d] has empty ruleId", i)
 		} else if !ruleIDs[res.RuleID] {
 			t.Errorf("result[%d] ruleId %q is not declared in tool.driver.rules", i, res.RuleID)
+		}
+		// ruleIndex must point at the declared rule with the same id
+		// (GitHub uses it to resolve the rule without a name lookup).
+		if res.RuleIndex < 0 || res.RuleIndex >= len(run.Tool.Driver.Rules) {
+			t.Errorf("result[%d] (%s) ruleIndex %d out of range [0,%d)", i, res.RuleID, res.RuleIndex, len(run.Tool.Driver.Rules))
+		} else if got := run.Tool.Driver.Rules[res.RuleIndex].ID; got != res.RuleID {
+			t.Errorf("result[%d] ruleIndex %d points at rule %q, want %q", i, res.RuleIndex, got, res.RuleID)
 		}
 		if len(res.Locations) == 0 {
 			t.Errorf("result[%d] (%s) has no locations", i, res.RuleID)

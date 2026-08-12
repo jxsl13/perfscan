@@ -185,9 +185,13 @@ func JSON(w io.Writer, findings []Finding) error {
 // SARIF renders findings as a minimal SARIF 2.1.0 log
 // (GitHub Code Scanning compatible).
 func SARIF(w io.Writer, findings []Finding) error {
+	type sarifText struct {
+		Text string `json:"text"`
+	}
 	type sarifRule struct {
-		ID   string `json:"id"`
-		Name string `json:"name,omitempty"`
+		ID               string     `json:"id"`
+		Name             string     `json:"name,omitempty"`
+		ShortDescription *sarifText `json:"shortDescription,omitempty"`
 	}
 	type sarifMessage struct {
 		Text string `json:"text"`
@@ -208,6 +212,7 @@ func SARIF(w io.Writer, findings []Finding) error {
 	}
 	type sarifResult struct {
 		RuleID    string          `json:"ruleId"`
+		RuleIndex int             `json:"ruleIndex"`
 		Message   sarifMessage    `json:"message"`
 		Locations []sarifLocation `json:"locations"`
 	}
@@ -229,21 +234,30 @@ func SARIF(w io.Writer, findings []Finding) error {
 		Runs    []sarifRun `json:"runs"`
 	}
 
-	seen := map[string]bool{}
+	ruleIndex := map[string]int{}
 	rules := []sarifRule{}
 	results := make([]sarifResult, 0, len(findings))
 	for _, f := range findings {
-		if !seen[f.ID] {
-			seen[f.ID] = true
-			rules = append(rules, sarifRule{ID: f.ID, Name: f.TidyName})
+		if _, ok := ruleIndex[f.ID]; !ok {
+			ruleIndex[f.ID] = len(rules)
+			r := sarifRule{ID: f.ID, Name: f.TidyName}
+			// Enrich with the catalog's one-line summary so GitHub Code
+			// Scanning shows what each PX rule means, not just its id.
+			// Pass-through diagnostics (clang-diagnostic-*) aren't in the
+			// catalog and simply carry no shortDescription.
+			if e, ok := catalog.ByID(f.ID); ok && e.Title != "" {
+				r.ShortDescription = &sarifText{Text: e.Title}
+			}
+			rules = append(rules, r)
 		}
 		var region *sarifRegion
 		if f.Line > 0 {
 			region = &sarifRegion{StartLine: f.Line, StartColumn: f.Col}
 		}
 		results = append(results, sarifResult{
-			RuleID:  f.ID,
-			Message: sarifMessage{Text: f.Message},
+			RuleID:    f.ID,
+			RuleIndex: ruleIndex[f.ID],
+			Message:   sarifMessage{Text: f.Message},
 			Locations: []sarifLocation{{
 				PhysicalLocation: sarifPhysicalLocation{
 					ArtifactLocation: sarifArtifactLocation{URI: f.File},
