@@ -184,3 +184,15 @@ a SECOND pass (`-diff`) then reports **nothing left to change** (exit 0, empty
 patch), and the rewritten module still `go build`s and `go vet`s exit 0. So `-fix`
 converges to a fixpoint — repeated CI runs never oscillate or re-churn already-fixed
 code.
+
+## Prealloc checks never over-size a conditional fill (regression, verified on etcd)
+
+PS2101 (slice append) and PS2104 (map insert) pre-size only when at least one add
+per iteration is UNCONDITIONAL — a conditional-only fill (`for … { if … { out =
+append(out, x) } }`) is left alone, since pre-sizing to the loop bound would be the
+theoretical max, not what the loop actually stores. Confirmed on real code:
+`perfscan -level 3 -checks PS2101,PS2104` on `go.etcd.io/etcd/server` reports **16
+findings, every one "exact: one unconditional value per iteration"** — zero
+conditional-only findings leak (the old "0 unconditional / all conditional" upper-bound
+form no longer appears anywhere). So the guard fires exactly on the sites where a
+size hint is warranted.
