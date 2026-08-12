@@ -174,7 +174,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(files) == 0 {
-		fmt.Fprintf(stderr, "perfscanxx: no C++ translation units matched %v\n", inputs)
+		if hint := diagnoseNoMatch(inputs, *buildDir); hint != "" {
+			fmt.Fprintln(stderr, "perfscanxx: no C++ translation units matched —", hint)
+		} else {
+			fmt.Fprintf(stderr, "perfscanxx: no C++ translation units matched %v\n", inputs)
+		}
 		return 2
 	}
 
@@ -521,6 +525,43 @@ func expandInputs(args []string, buildDir string) (files []string, effBuildDir s
 	}
 	sort.Strings(files)
 	return files, effBuildDir, nil
+}
+
+// diagnoseNoMatch explains WHY a run resolved to zero translation units, so the
+// common stale/mismatched build-directory cases don't surface as a bare "no
+// units matched". It re-reads the located database (cheap: only on the error
+// path) and returns "" when there is nothing more specific to say than the
+// generic message. Two cases it names:
+//
+//   - the database lists TUs but NONE exist on disk — the build dir is stale or
+//     from a different checkout (its file paths point at a tree that moved),
+//   - the database's TUs DO exist on disk but none fall under the requested
+//     path/pattern — the pattern (or -p) points at the wrong subtree.
+func diagnoseNoMatch(inputs []string, buildDir string) string {
+	dbPath, err := compdb.Find(buildDir, ".")
+	if err != nil {
+		return "" // no database context — nothing more specific to add
+	}
+	tus, err := compdb.Load(dbPath)
+	if err != nil || len(tus) == 0 {
+		return ""
+	}
+	onDisk := 0
+	sampleRoot := ""
+	for _, tu := range tus {
+		if fi, e := os.Stat(tu); e == nil && !fi.IsDir() {
+			onDisk++
+			if sampleRoot == "" {
+				sampleRoot = filepath.Dir(tu)
+			}
+		}
+	}
+	if onDisk == 0 {
+		return fmt.Sprintf("the compilation database %s lists %d translation unit(s) but none exist on disk — the build directory looks stale or from a different checkout (its paths point at a tree that moved). Reconfigure with -cmake, or point -p at a fresh build.",
+			dbPath, len(tus))
+	}
+	return fmt.Sprintf("the compilation database %s has %d on-disk translation unit(s) rooted near %s, none under %v — point the path/pattern (or -p) at that subtree.",
+		dbPath, onDisk, sampleRoot, inputs)
 }
 
 // countMissingHeaderErrors counts clang compile errors caused by a header that
