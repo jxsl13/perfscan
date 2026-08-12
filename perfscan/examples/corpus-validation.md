@@ -28,6 +28,13 @@ SplitSeq (1) — confirming they aren't just synthetic-fixture checks.
 **`go build` and `go vet` both exit 0** — the auto-fix suite is behavior-preserving
 on the largest corpus too. (Applied in place, then restored with `git checkout .`.)
 
+Precision audit of the busiest advisory check: **PS3103** (range copies a large
+element) fired 250× — every flagged element is a genuinely large Kubernetes API
+struct (256-byte `core/v1.Volume`, 408-byte `Container`, 616-byte
+`PersistentVolume`, 784-byte `Node`, …), and the **smallest** flagged element is
+136 bytes — all above the check's 128-byte (two-cache-line) gate. Zero small
+structs were flagged, i.e. the check is precise, not noisy, on real production Go.
+
 **etcd** (`go.etcd.io/etcd`, 1102 Go files; a multi-module repo). Root module
 `./...`: **22 findings, 0 loader errors**.
 
