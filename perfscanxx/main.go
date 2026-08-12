@@ -144,6 +144,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 					fmt.Fprintf(stderr, "perfscanxx: no %s found — configuring CMake project at %s\n", compdb.Name, src)
 					if e := cmake.Configure(context.Background(), src, build); e != nil {
 						fmt.Fprintln(stderr, "perfscanxx:", e)
+						// A bare auto-configure enables the project's default
+						// targets; many need options to switch off tests/examples/
+						// benchmarks that pull extra dependencies (e.g. leveldb's
+						// benchmarks want sqlite3). perfscanxx can't guess each
+						// project's option names, so point the user at the manual
+						// path with -p instead of leaving them with a raw CMake error.
+						fmt.Fprintln(stderr, "perfscanxx: the CMake configure step failed — the project likely needs options to disable tests/examples/benchmarks that pull extra dependencies. Configure it yourself and pass -p <build-dir>, e.g.:")
+						fmt.Fprintf(stderr, "    cmake -S %s -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=OFF   # plus any <PROJECT>_BUILD_TESTS/_BENCHMARKS=OFF\n", src)
+						fmt.Fprintln(stderr, "    perfscanxx -p build ./...")
 						return 2
 					}
 				}
