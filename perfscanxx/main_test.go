@@ -795,3 +795,15 @@ func TestApplySequentialFixes(t *testing.T) {
 		t.Errorf("want a summary of 2 applied checks, got %q", buf.String())
 	}
 }
+
+func TestExcludeHeaderRegex(t *testing.T) {
+	if got := excludeHeaderRegex(nil); got != "" {
+		t.Errorf("empty excludes = %q, want \"\"", got)
+	}
+	// Substrings are regex-escaped (the '.' and '+' are literal) and OR-joined.
+	got := excludeHeaderRegex([]string{"deps/", "third_party/", "a.b+c/"})
+	want := `deps/|third_party/|a\.b\+c/`
+	if got != want {
+		t.Errorf("excludeHeaderRegex = %q, want %q", got, want)
+	}
+}

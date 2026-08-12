@@ -47,3 +47,52 @@ func TestFixIsIdempotent(t *testing.T) {
 		t.Errorf("second -fix changed the file — not idempotent:\n--- after pass 1 ---\n%s\n--- after pass 2 ---\n%s", after1, after2)
 	}
 }
+
+// TestExcludeKeepsFixOffIncludedHeader is the regression for -exclude leaking a
+// fix into an EXCLUDED header that a non-excluded TU includes. Before the
+// --exclude-header-filter wiring, `-fix -exclude deps/` still rewrote deps/dep.h
+// (clang-tidy --fix touches any file with a fix-it). Uses PX3013 in a header so
+// no sysroot is needed. Skipped when clang-tidy is unavailable.
+func TestExcludeKeepsFixOffIncludedHeader(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	dir := t.TempDir()
+	proj := filepath.Join(dir, "proj")
+	deps := filepath.Join(dir, "deps")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(deps, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const header = "#pragma once\nstruct Dep {\n  ~Dep() {}\n};\n" // PX3013 fixable
+	hpath := filepath.Join(deps, "dep.h")
+	if err := os.WriteFile(hpath, []byte(header), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cpp := filepath.Join(proj, "a.cpp")
+	if err := os.WriteFile(cpp, []byte("#include \"dep.h\"\nDep* make() { return new Dep(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + proj + `","file":"` + cpp + `","command":"clang++ -std=c++17 -I` + deps + ` -c a.cpp"}]`
+	if err := os.WriteFile(filepath.Join(proj, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Control: WITHOUT -exclude, clang-tidy fixes the header (proving the setup
+	// actually triggers a header fix-it, so the exclude assertion is meaningful).
+	runCLI("-tidy", bin, "-fix", "-checks", "PX3013", "-p", proj, proj)
+	if got, _ := os.ReadFile(hpath); !strings.Contains(string(got), "= default") {
+		t.Skipf("setup did not produce a header fix-it (clang-tidy header scope differs); got:\n%s", got)
+	}
+	// Reset and run WITH -exclude deps/ — the header must be left untouched.
+	if err := os.WriteFile(hpath, []byte(header), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runCLI("-tidy", bin, "-fix", "-checks", "PX3013", "-exclude", "deps/", "-p", proj, proj)
+	if got, _ := os.ReadFile(hpath); string(got) != header {
+		t.Errorf("-exclude deps/ did not keep -fix off the excluded header:\n%s", got)
+	}
+}

@@ -44,6 +44,16 @@ type Options struct {
 	Experimental bool
 	// Fix makes clang-tidy apply its fix-its in place.
 	Fix bool
+	// ExcludeHeaderFilter, when non-empty, is a regex passed as
+	// --exclude-header-filter so clang-tidy does not DIAGNOSE (and therefore
+	// does not --fix) any header whose path matches it — the mechanism that
+	// makes -exclude actually cover fix-its landing in an excluded header that a
+	// non-excluded TU includes. clang-tidy requires --header-filter alongside it,
+	// so HeaderFilter is sent too (default ".*", preserving header reporting).
+	ExcludeHeaderFilter string
+	// HeaderFilter is the --header-filter regex; only emitted when
+	// ExcludeHeaderFilter is set (clang-tidy pairs the two). Empty means ".*".
+	HeaderFilter string
 	// ExportFixes is the --export-fixes destination. Empty means: use a
 	// temp file managed by Run.
 	ExportFixes string
@@ -79,6 +89,15 @@ func Argv(o Options) []string {
 	}
 	if o.Fix {
 		args = append(args, "--fix")
+	}
+	if o.ExcludeHeaderFilter != "" {
+		hf := o.HeaderFilter
+		if hf == "" {
+			hf = ".*"
+		}
+		// clang-tidy requires --header-filter with --exclude-header-filter; the
+		// exclude then suppresses matching headers' diagnostics AND fix-its.
+		args = append(args, "--header-filter="+hf, "--exclude-header-filter="+o.ExcludeHeaderFilter)
 	}
 	if len(o.ExtraArgs) > 0 {
 		args = append(args, o.ExtraArgs...)

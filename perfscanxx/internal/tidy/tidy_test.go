@@ -172,3 +172,17 @@ func indexOf(ss []string, want string) int {
 	}
 	return -1
 }
+
+// TestArgvExcludeHeaderFilter pins that an ExcludeHeaderFilter emits BOTH
+// --header-filter (clang-tidy requires it alongside) and --exclude-header-filter,
+// and that it is omitted entirely when unset.
+func TestArgvExcludeHeaderFilter(t *testing.T) {
+	with := strings.Join(Argv(Options{Checks: []string{"c"}, Files: []string{"a.cpp"}, ExcludeHeaderFilter: "deps/|vendor/"}), " ")
+	if !strings.Contains(with, "--header-filter=.*") || !strings.Contains(with, "--exclude-header-filter=deps/|vendor/") {
+		t.Errorf("argv missing header-filter pair: %s", with)
+	}
+	without := strings.Join(Argv(Options{Checks: []string{"c"}, Files: []string{"a.cpp"}}), " ")
+	if strings.Contains(without, "header-filter") {
+		t.Errorf("no ExcludeHeaderFilter set, but argv carries a header-filter: %s", without)
+	}
+}
