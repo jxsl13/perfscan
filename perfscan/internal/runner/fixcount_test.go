@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"go/token"
 	"io"
 	"os"
@@ -63,5 +64,54 @@ func TestFixCountExcludesSkippedFiles(t *testing.T) {
 	// applied (they share the file's fate).
 	if _, applied, failed := patchedFiles([]Finding{mkFinding(50, 60), mkFinding(70, 80)}, opts); applied != 0 || failed != 2 {
 		t.Errorf("two out-of-range fixes: applied=%d failed=%d, want applied=0 failed=2", applied, failed)
+	}
+}
+
+// Regression: two checks can emit overlapping fixes for the same span (e.g.
+// PS2103 and PS2122 both rewrite one fmt.Sprintf, via different edits).
+// patchedFiles applies a maximal NON-overlapping set — dropping a whole
+// conflicting fix — instead of skipping the entire file and losing every fix
+// in it.
+func TestFixConflictResolution(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "p.go")
+	content := []byte("package p\nvar x = 100000\n") // 25 bytes; "100000" at [18,24)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	tf := fset.AddFile(path, -1, len(content))
+
+	mk := func(startOff, endOff int, text string) Finding {
+		return Finding{
+			Check: &lint.Check{ID: "PS9999", AutoFix: true},
+			fset:  fset,
+			Fixes: []analysis.SuggestedFix{{
+				TextEdits: []analysis.TextEdit{{
+					Pos:     tf.Pos(startOff),
+					End:     tf.Pos(endOff),
+					NewText: []byte(text),
+				}},
+			}},
+		}
+	}
+	opts := Options{Stderr: io.Discard}
+
+	// A replaces [18,24] ("100000" -> "1"); B replaces [20,22] (inside A) —
+	// they overlap. A starts first, so A wins and B is dropped: 1 applied,
+	// 1 failed, and the file IS written with A's rewrite (not skipped whole).
+	files, applied, failed := patchedFiles([]Finding{mk(18, 24, "1"), mk(20, 22, "9")}, opts)
+	if applied != 1 || failed != 1 {
+		t.Fatalf("conflicting fixes: applied=%d failed=%d, want applied=1 failed=1", applied, failed)
+	}
+	pf, ok := files[path]
+	if !ok || !bytes.Contains(pf.fixed, []byte("var x = 1\n")) {
+		t.Fatalf("winning fix not applied; fixed=%q", pf.fixed)
+	}
+
+	// Non-overlapping fixes both apply: C replaces "x" [14,15], D replaces
+	// "100000" [18,24] — disjoint, so 2 applied, 0 failed.
+	if _, applied, failed := patchedFiles([]Finding{mk(14, 15, "y"), mk(18, 24, "1")}, opts); applied != 2 || failed != 0 {
+		t.Errorf("disjoint fixes: applied=%d failed=%d, want applied=2 failed=0", applied, failed)
 	}
 }
