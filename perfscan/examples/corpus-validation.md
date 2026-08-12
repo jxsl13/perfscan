@@ -143,6 +143,17 @@ for _, f := range strings.Split(v,",") → for f := range strings.SplitSeq(v,","
 So the auto-fix suite is behavior-preserving even on the standard library — the most
 heterogeneous real Go there is. (`corpus/go` restored with `git checkout .` after.)
 
+A later, broader pass (2026-08-12) exercising the newest checks — especially **PS2126**
+(`fmt.Errorf(const) → errors.New`, which edits imports) — rewrote **19 files** across
+`archive/`, `encoding/`, `mime/multipart`, `net/`, `regexp/syntax`, and `text/template`:
+**26 `errors.New` rewrites** (e.g. `text/template/funcs.go`, `net/url/url.go`) plus 4
+`make(map, n)` (PS2104) and 3 `strconv` (PS2107). Every changed package **`go build`s
+and `go vet`s exit 0** with the stdlib's own toolchain — so PS2126's `fmt`-drop /
+`errors`-add import surgery is correct on the standard library too, not just etcd.
+(`go build std` as a whole can't be the gate here: `corpus/go`'s `time/tzdata` is missing
+its `go:generate`-d `zipdata.go` and fails at baseline, independent of any fix — so the
+changed packages are built/vetted directly.)
+
 ## Generated-file skipping validated at scale (Kubernetes protobuf)
 
 perfscan skips generated files (`// Code generated ... DO NOT EDIT.`) by default —
