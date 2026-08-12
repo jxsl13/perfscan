@@ -228,6 +228,14 @@ var entries = []Entry{
 		Title:  "find(prefix)==0 / rfind(suffix)==size-n scans on mismatch; starts_with/ends_with short-circuits (C++20)",
 		HasFix: true,
 	},
+	{
+		// Advisory (clang-tidy emits no fix-it): the corrected std::move can't be
+		// inserted mechanically without knowing the parameter is dead afterwards.
+		ID: "PX3020", TidyName: "cppcoreguidelines-rvalue-reference-param-not-moved",
+		Level: LevelStructured, Category: "moves",
+		Title:  "an rvalue-reference parameter never std::move'd is a missed move — it copies where it could have moved",
+		HasFix: false,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
