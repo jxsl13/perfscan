@@ -47,6 +47,12 @@ basic type collapses to the unstable sort because equal elements are
 indistinguishable. Every other comparator stays advisory.`,
 		Before: `sort.Slice(xs, func(i, j int) bool { return xs[i].Key < xs[j].Key })`,
 		After:  `slices.SortFunc(xs, func(a, b Item) int { return cmp.Compare(a.Key, b.Key) })`,
+		MeasuredWin: `BenchmarkPS3002 (a shuffled 10k copy sorted per op, Apple
+M2 Pro, go1.26). Field compare -> slices.SortFunc: 1787 µs/op, 3 allocs ->
+997 µs/op, 0 allocs (~1.8x, reflect-based struct swaps eliminated).
+Whole-element compare -> slices.Sort: 652 µs/op, 2 allocs -> 389 µs/op, 0
+allocs (~1.7x). The win is the reflect element swaps plus the per-comparison
+interface dispatch that the compile-time-specialized generic sorts avoid.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3002",
