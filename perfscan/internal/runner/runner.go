@@ -565,14 +565,20 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		}
 		fix := f.Fixes[0]
 		ok := true
-		edits := make([]edit, 0, len(fix.TextEdits))
+		// Group each edit under the REAL token.File it belongs to, keyed by
+		// that file's name with RAW offsets. Keying by the finding's
+		// Pos.Filename would honor //line directives (and cgo preambles),
+		// which remap the reported path to an unrelated file — sending these
+		// raw offsets into the wrong file and silently corrupting it.
+		//perfscan:ignore PS2104 a fix's edits nearly always share one file; len(TextEdits) would over-reserve
+		byFile := map[string][]edit{}
 		for _, te := range fix.TextEdits {
 			file := f.fset.File(te.Pos)
 			if file == nil {
 				ok = false
 				break
 			}
-			edits = append(edits, edit{
+			byFile[file.Name()] = append(byFile[file.Name()], edit{
 				start: file.Offset(te.Pos),
 				end:   file.Offset(te.End),
 				text:  te.NewText,
@@ -582,7 +588,9 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 			failed++
 			continue
 		}
-		perFile[f.Pos.Filename] = append(perFile[f.Pos.Filename], edits...)
+		for name, es := range byFile {
+			perFile[name] = append(perFile[name], es...)
+		}
 		applied++
 	}
 
@@ -605,6 +613,21 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		}
 		if overlap {
 			fmt.Fprintf(opts.Stderr, "perfscan: fix %s: overlapping edits, skipping file\n", path)
+			failed++
+			continue
+		}
+		// Guard against edit offsets that do not address this on-disk file —
+		// e.g. a cgo-processed translation unit whose parsed bytes differ
+		// from the source. Applying such offsets would panic or corrupt.
+		outOfRange := false
+		for i := range edits {
+			if edits[i].start < 0 || edits[i].start > edits[i].end || edits[i].end > len(src) {
+				outOfRange = true
+				break
+			}
+		}
+		if outOfRange {
+			fmt.Fprintf(opts.Stderr, "perfscan: fix %s: edit offsets out of range (generated or cgo source?), skipping file\n", path)
 			failed++
 			continue
 		}
