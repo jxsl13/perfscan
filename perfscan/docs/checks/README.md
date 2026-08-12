@@ -51,6 +51,7 @@ checks' fixes.
 | [PS2121](PS2121.md) | alloc | L1 | yes | len(strings.Split(s, sep)) allocates every piece just to count them; strings.Count(s, sep)+1 is allocation-free |
 | [PS2122](PS2122.md) | alloc | L1 | yes | fmt.Sprintf("%s%s", a, b) over plain strings is a reflection-priced +; concatenate directly |
 | [PS2123](PS2123.md) | alloc | L1 | yes | fmt.Sprint over plain strings is a reflection-priced +; concatenate directly |
+| [PS2124](PS2124.md) | alloc | L1 | yes | strings.Join over an inline []string literal is a slice-priced +; concatenate with the separator interleaved |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
