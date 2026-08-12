@@ -13,7 +13,7 @@ name: perfscan-gcl
 destination: .
 plugins:
   - module: github.com/jxsl13/perfscan/perfscan/plugin
-    version: v0.31.0                               # a published perfscan release
+    version: v0.34.0                               # a published perfscan release
 ```
 
 Then `golangci-lint custom` builds `./perfscan-gcl`.
