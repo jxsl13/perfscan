@@ -199,7 +199,14 @@ unsafe on dense C++** where their edit ranges abut or overlap.
 Fix-safety picture so far — **-fix-clean:** leveldb, spdlog (and perfscan's Go
 corpora). **-fix-breakers:** fmt (PX3007 on amalgamated gtest; PX3015 on a delegating
 ctor) and abseil (PX3004×PX3015 ordering; overlapping edits in template headers). The
-breakers are all dense, heavily-attributed template code.
+breakers are all dense, heavily-attributed template code. **DDNet: analyze-only
+until its codegen is built** — report mode works (e.g. `src/game/client/...` yields
+196 findings, dominated by PX3015 constructor-init ×149 and PX2101 reserve ×41), but
+`-fix` writes **0 files**: 23 of those TUs don't fully parse (they need DDNet's
+generated `generated/*.h`, see `examples/ddnet-recipe.md`), and clang-tidy correctly
+**declines to apply any fix-it to a translation unit it could not fully compile** — so
+`-fix` never rewrites code parsed from a broken AST. A useful safety property; a full
+DDNet `-fix` run first needs the codegen targets built.
 
 **`-fix-sequential` fixes the interaction class.** `perfscanxx -fix -fix-sequential`
 applies each fixable built-in check in its OWN clang-tidy `--fix` pass (one invocation
