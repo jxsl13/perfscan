@@ -30,7 +30,24 @@ import (
 
 var version = "dev" // set by the release workflow via -ldflags
 
+// stringList is a repeatable, comma-splitting flag.Value: each occurrence
+// appends its comma-separated, whitespace-trimmed parts.
+type stringList []string
+
+func (s *stringList) String() string { return strings.Join(*s, ",") }
+
+func (s *stringList) Set(v string) error {
+	for part := range strings.SplitSeq(v, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			*s = append(*s, p)
+		}
+	}
+	return nil
+}
+
 func main() {
+	var exclude stringList
+	flag.Var(&exclude, "exclude", "exclude findings whose slash-path contains any of these substrings (repeatable, comma-separated); also skips their -fix, e.g. -exclude vendor/,testdata/,.pb.go")
 	var (
 		fix        = flag.Bool("fix", false, "apply the auto-fixes of every reported check; -level gates both reporting and fixing (e.g. -level 1 -fix applies only idiomatic fixes)")
 		diff       = flag.Bool("diff", false, "print a unified diff of what -fix would change, without modifying files; exit 1 if anything would change")
@@ -79,6 +96,7 @@ func main() {
 		Baseline:         *baseline,
 		WriteBaseline:    *writeBase,
 		IncludeGenerated: *includeGen,
+		Exclude:          exclude,
 	})
 	os.Exit(code)
 }
