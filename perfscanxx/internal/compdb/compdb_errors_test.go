@@ -50,19 +50,48 @@ func TestLoadErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("only empty-file entries yield no TUs, no error", func(t *testing.T) {
-		// A non-empty array whose entries carry no "file" is not an "empty
-		// database" error (entries exist); it simply resolves to zero TUs.
+	t.Run("entries but no usable file is a clear error", func(t *testing.T) {
+		// A non-empty array whose entries carry no "file" resolves to zero TUs.
+		// Rather than return an empty list (which later reads as "no TUs matched"
+		// and misdirects the user), Load reports the malformed database directly.
 		p := filepath.Join(dir, Name)
-		if err := os.WriteFile(p, []byte(`[{"directory":"/x","file":""}]`), 0o644); err != nil {
+		if err := os.WriteFile(p, []byte(`[{"directory":"/x","file":""},{"directory":"/y"}]`), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		tus, err := Load(p)
-		if err != nil {
-			t.Fatalf("Load: unexpected error %v", err)
+		_, err := Load(p)
+		if err == nil {
+			t.Fatal("Load of entries-without-files: want error, got nil")
 		}
-		if len(tus) != 0 {
-			t.Errorf("Load = %v, want no translation units", tus)
+		if !strings.Contains(err.Error(), "none names a source file") {
+			t.Errorf("no-usable-file error = %q, want it to mention 'none names a source file'", err)
 		}
 	})
+}
+
+// TestLoadRelativeDirectoryResolvesToDatabase pins that a spec-violating
+// relative (or empty) entry directory resolves the translation unit against the
+// database's OWN location, not the process working directory — so results do not
+// depend on where perfscanxx happens to be invoked from.
+func TestLoadRelativeDirectoryResolvesToDatabase(t *testing.T) {
+	dbDir := t.TempDir()
+	p := filepath.Join(dbDir, Name)
+	// directory "." (relative) + file "sub/a.cpp": the TU is dbDir/sub/a.cpp.
+	if err := os.WriteFile(p, []byte(`[{"directory":".","file":"sub/a.cpp"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Run from an unrelated working directory to prove CWD is not consulted.
+	wd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(wd) }()
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+
+	tus, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := filepath.Join(dbDir, "sub", "a.cpp")
+	if len(tus) != 1 || tus[0] != want {
+		t.Errorf("Load = %v, want [%s] (resolved against the database dir, not CWD)", tus, want)
+	}
 }
