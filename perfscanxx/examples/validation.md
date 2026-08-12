@@ -6,20 +6,27 @@ All corpora are configured with the brew clang++ toolchain (so headers match
 clang-tidy), each producing a `build/compile_commands.json`. Reproduce the whole
 set with `examples/fetch-corpus.sh` (corpora live under `corpus/`, gitignored).
 
-## Findings — 27-check catalog, `-level 3` (2026-08-12)
+## Findings — catalog at `-level 3` (2026-08-12)
 
-| Codebase | cpp/cc files | PX findings | Top checks |
-|----------|-------------:|------------:|-----------|
+| Codebase | TUs / files | PX findings | Top checks |
+|----------|------------:|------------:|-----------|
 | leveldb  |  78 | 108 | PX3017:73 PX2101:13 PX3013:6 PX3007:6 PX3015:5 PX2003:4 |
 | fmt      |  48 | 274 | PX3013:63 PX3017:59 PX3007:27 PX3015:23 PX2101:20 PX3008:16 PX1002:15 PX3018:9 PX3009:8 PX3004:8 |
 | abseil   | 492 |  96 | PX3013:20 PX3017:18 PX3004:18 PX2101:10 PX3015:9 PX3006:7 PX3018:2 PX3008:2 |
-| **total**|     | **478** | 16 distinct PX checks exercised |
+| **DDNet**| 420 TUs | **669** | PX3015:495 PX3017:74 PX2101:89 PX3001:9 PX3007:1 PX1002:1 |
+| **total**|     | **1147** | across the four complex codebases |
 
-Every check added since the previous pass fires on real code — notably **PX3017**
-(use-default-member-init) is pervasive (73 in leveldb, 59 in fmt), and **PX3015**
-(prefer-member-initializer, 23 in fmt) and **PX3018** (redundant-string-init) also
-land. Only two checks stay advisory by design: PX2101 (query-based, diagnose-only)
-and PX2002 (clang-tidy emits no fix-it).
+**DDNet** — a full C++ game/engine (420 translation units; it needs its codegen
+targets built for `generated/*.h`, all present here) — is the most complex corpus and
+now runs cleanly: only 29/420 TUs partially parsed, the rest fully analyzed. Its
+findings are dominated by the constructor-initialization checks **PX3015**
+(prefer-member-initializer, 495) and **PX3017** (use-default-member-init, 74) — strong
+validation of those checks on a large real codebase — plus 89 PX2101
+reserve-before-loop opportunities.
+
+Four checks stay advisory by design: PX2002 (clang-tidy emits no fix-it) and the three
+query-based custom checks PX2101 (reserve-before-loop), PX2102 (pessimizing-move) and
+PX2103 (catch-by-value), which `--experimental-custom-checks` can only diagnose.
 
 ## End-to-end `-fix` integrity on real code (full 27-check catalog)
 
