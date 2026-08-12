@@ -124,6 +124,34 @@ range-value-copy (14), PS3104 sort→slices (8), PS2107 single-value Sprintf (7)
 second, independent module confirms the auto-fix suite is behavior-preserving on
 real production Go beyond the `pkg/` sample.
 
+### Behavioral equivalence — the target repo's OWN test suites pass after `-fix` (2026-08-12)
+
+`go build`/`go vet` prove the rewritten code is *type-safe*; the stronger proof is
+that its *runtime behavior* is unchanged. Re-running the full current catalog against
+the etcd `server/` module (`perfscan -fix -level 3 ./...`) applied **21 fixes across
+15 files** — including a **PS2128 loop-concat→`strings.Builder`** rewrite in a real
+MVCC hot path, `storage/mvcc/key_index.go`:
+
+```go
+var s string                          var s strings.Builder
+for _, g := range ki.generations {  → for _, g := range ki.generations {
+    s += g.String()                       s.WriteString(g.String())
+}                                     }
+return s                              return s.String()
+```
+
+etcd's own test suites for the touched packages then **pass unchanged**:
+
+```
+go test ./storage/mvcc/  → ok   (17.0s)   # the package carrying the PS2128 rewrite
+go test ./auth/          → ok   ( 1.5s)
+```
+
+So the auto-fix suite is not merely recompilable but **behavior-preserving under the
+project's own tests** on production Go — the strongest real-world evidence class, and
+a genuine perf win extracted from a hot path (quadratic `+=` → amortized builder).
+(Applied in place, then restored with `git checkout .`.)
+
 ### The Go standard library itself — the most diverse corpus (2026-08-12)
 
 The strongest `-fix` integrity test is the **Go standard library** (`corpus/go`,
