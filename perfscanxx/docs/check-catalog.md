@@ -58,7 +58,8 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   perfscan's advisory checks: `--experimental-custom-checks` is **diagnose-only**, so
   they carry **no auto-fix**. Current ones: **PX2101** reserve-before-loop,
   **PX2102** pessimizing-move (`return std::move(local)`), **PX2103** catch-by-value,
-  **PX2104** regex-in-loop (`std::regex` constructed each iteration).
+  **PX2104** regex-in-loop (`std::regex` constructed each iteration),
+  **PX2105** dynamic-cast-in-loop (an RTTI type-check every iteration).
 
   > This replaces the earlier design's compiled out-of-tree clang-tidy plugin: per
   > the minimal-C++ directive, custom checks are declarative clang-query matcher
@@ -68,7 +69,7 @@ Two built-in checks stay advisory because clang-tidy emits no fix-it for them:
 `PX2002` (inefficient-string-concatenation) and `PX3020`
 (rvalue-reference-param-not-moved — a missed move, where inserting the corrected
 `std::move` needs to know the parameter is dead afterwards). So the advisory set is
-exactly `{PX2002, PX3020, PX2101, PX2102, PX2103, PX2104}`; everything else is
+exactly `{PX2002, PX3020, PX2101, PX2102, PX2103, PX2104, PX2105}`; everything else is
 auto-fixable.
 
 ## Provenance
