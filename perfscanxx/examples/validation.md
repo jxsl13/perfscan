@@ -172,6 +172,30 @@ them — **0** `_deps/` files modified, warning silent — while preserving all 
 first-party fixes. So the `_deps` heuristic and `-exclude` work as intended on real
 FetchContent output.
 
+### leveldb — clean whole-suite `-fix`, and the header-guard confirmed on real headers (2026-08-12)
+
+**leveldb** (`google/leveldb`, a small header-heavy KV store) is a second clean
+positive and doubles as real-code validation of the v0.27.0 main-file guard on the
+query-based custom checks. Report mode over the compdb (`-p build ./...`) surfaced
+**42 findings across 6 checks** (PX2101 ×20, PX3013 ×6, PX3007 ×6, PX3015 ×5,
+PX2003 ×4, PX1002 ×1), **0 crashes**.
+
+Header-guard datapoint: every one of the **20 PX2101/PX2102/PX2103** custom-check
+findings lands in a `.cc` translation unit — **zero in leveldb's many `.h` headers**.
+leveldb includes those headers into every `.cc`, so a `push_back`-in-loop inside an
+included header would expand off the main file; the `isExpansionInMainFile()` guard
+(added v0.27.0) correctly suppresses exactly those, firing only on code the user owns
+in the TU being compiled. The synthetic fixture that pinned the guard is thus
+confirmed on a real header-heavy repo.
+
+`-fix` integrity: `perfscanxx -fix -level 3 -checks PX3013,PX3007,PX3015,PX2003,PX1002`
+rewrote **16 files** (`= default` trivial dtors, `pass-by-value`+`std::move`,
+member-initializer moves, `emplace`, value-param → const-ref) — spanning both `.cc`
+and `.h` files (clang-tidy's built-in checks legitimately edit headers, unlike the
+main-file-gated custom queries) — and leveldb **rebuilds and links clean**
+(`cmake --build build --target leveldb` → `[100%] Built target leveldb`). A third
+independent real C++ tree confirming the whole `-fix` pipeline is compile-safe.
+
 ### abseil — a THIRD hazard: fix-it *interactions* in one -fix pass
 
 `perfscanxx -fix -level 3` on **abseil** (78 findings, 41 files) does **not** rebuild
