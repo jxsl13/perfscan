@@ -222,6 +222,12 @@ var entries = []Entry{
 		Title:  `std::string s = "" constructs from a C string; the default constructor is empty and cheaper`,
 		HasFix: true,
 	},
+	{
+		ID: "PX3019", TidyName: "modernize-use-starts-ends-with",
+		Level: LevelIdiomatic, Category: "strings",
+		Title:  "find(prefix)==0 / rfind(suffix)==size-n scans on mismatch; starts_with/ends_with short-circuits (C++20)",
+		HasFix: true,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
