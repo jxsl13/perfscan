@@ -1,7 +1,7 @@
 # perfscanxx validation on real complex C++ codebases
 
 perfscanxx (Go orchestrator over clang-tidy, zero of our own C++) run against
-complex real-world C++ as test data, with the **full 28-check catalog** (`-level 3`).
+complex real-world C++ as test data, with the **full 29-check catalog** (`-level 3`).
 All corpora are configured with the brew clang++ toolchain (so headers match
 clang-tidy), each producing a `build/compile_commands.json`. Reproduce the whole
 set with `examples/fetch-corpus.sh` (corpora live under `corpus/`, gitignored).
@@ -33,7 +33,7 @@ Four checks stay advisory by design: PX2002 (clang-tidy emits no fix-it) and the
 query-based custom checks PX2101 (reserve-before-loop), PX2102 (pessimizing-move) and
 PX2103 (catch-by-value), which `--experimental-custom-checks` can only diagnose.
 
-## End-to-end `-fix` integrity on real code (full 28-check catalog)
+## End-to-end `-fix` integrity on real code (full 29-check catalog)
 
 `perfscanxx -fix -level 3` applied with the FULL catalog to leveldb, then the tree
 **recompiled**:
