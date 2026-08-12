@@ -414,6 +414,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	default:
 		report.Text(stdout, findings)
+		// Human text mode: close with a count so a run isn't ambiguous about
+		// whether it finished or simply found nothing. JSON/SARIF are
+		// machine-consumed and get no stderr summary; -fix prints its own
+		// applied-fix summary above, so skip the duplicate there.
+		if !*fix {
+			summarizeFindings(stderr, findings)
+		}
 	}
 
 	// After -fix, flag any bundled/third-party files we just rewrote: fixing
@@ -588,6 +595,22 @@ func diagnoseNoMatch(inputs []string, buildDir string) string {
 	}
 	return fmt.Sprintf("the compilation database %s has %d on-disk translation unit(s) rooted near %s, none under %v — point the path/pattern (or -p) at that subtree.",
 		dbPath, onDisk, sampleRoot, inputs)
+}
+
+// summarizeFindings writes a one-line count of the reported findings (and the
+// distinct files they span) to w, or a clear "no findings" when clean — so a
+// plain text run always ends with an unambiguous result line, matching the
+// summaries -fix/-diff/-baseline already print.
+func summarizeFindings(w io.Writer, findings []report.Finding) {
+	if len(findings) == 0 {
+		fmt.Fprintln(w, "perfscanxx: no findings")
+		return
+	}
+	files := map[string]bool{}
+	for _, f := range findings {
+		files[f.File] = true
+	}
+	fmt.Fprintf(w, "perfscanxx: %d finding(s) across %d file(s)\n", len(findings), len(files))
 }
 
 // fixTargets counts the reported findings that carry at least one clang-tidy

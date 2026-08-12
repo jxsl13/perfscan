@@ -1,10 +1,32 @@
 package main
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/jxsl13/perfscan/perfscanxx/internal/report"
 )
+
+// TestSummarizeFindings pins the plain-text report summary: a count of findings
+// and distinct files when non-empty, a clear "no findings" when clean.
+func TestSummarizeFindings(t *testing.T) {
+	var buf bytes.Buffer
+	summarizeFindings(&buf, []report.Finding{
+		{ID: "PX3013", File: "a.h"},
+		{ID: "PX3004", File: "a.h"}, // same file -> still 1 file
+		{ID: "PX3015", File: "b.cpp"},
+	})
+	if got := buf.String(); !strings.Contains(got, "3 finding(s) across 2 file(s)") {
+		t.Errorf("summary = %q, want '3 finding(s) across 2 file(s)'", got)
+	}
+
+	buf.Reset()
+	summarizeFindings(&buf, nil)
+	if got := strings.TrimSpace(buf.String()); got != "perfscanxx: no findings" {
+		t.Errorf("empty summary = %q, want 'perfscanxx: no findings'", got)
+	}
+}
 
 // TestFixTargets pins the -fix summary counting: only findings that carry a
 // fix-it count, and files are de-duplicated (a header fixed via several
