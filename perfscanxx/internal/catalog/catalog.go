@@ -216,6 +216,18 @@ var entries = []Entry{
 		Title:  "std::bind carries type-erasure overhead and inhibits inlining; an equivalent lambda is cheaper and inlinable",
 		HasFix: true,
 	},
+	{
+		ID: "PX3017", TidyName: "modernize-use-default-member-init",
+		Level: LevelStructured, Category: "init",
+		Title:  "member initialized to a constant in every constructor body; a default member initializer states it once at the declaration",
+		HasFix: true,
+	},
+	{
+		ID: "PX3018", TidyName: "readability-redundant-string-init",
+		Level: LevelIdiomatic, Category: "strings",
+		Title:  `std::string s = "" constructs from a C string; the default constructor is empty and cheaper`,
+		HasFix: true,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
