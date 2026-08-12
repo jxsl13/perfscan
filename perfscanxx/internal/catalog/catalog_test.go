@@ -234,3 +234,40 @@ func TestEntryMetadata(t *testing.T) {
 		}
 	}
 }
+
+// TestAggressiveOnlyPerfChecks pins PX3021/PX3022: they are genuine clang-tidy
+// perf diagnostics with no fix-it, and must be gated to L3 so they never spam
+// at the default level. Regression guard for the no-spam / level-gating policy.
+func TestAggressiveOnlyPerfChecks(t *testing.T) {
+	for _, id := range []string{"PX3021", "PX3022"} {
+		e, ok := ByID(id)
+		if !ok {
+			t.Fatalf("%s missing from catalog", id)
+		}
+		if e.Level != LevelAggressive {
+			t.Errorf("%s: Level = %v, want LevelAggressive (L3 — niche, must not surface by default)", id, e.Level)
+		}
+		if e.HasFix {
+			t.Errorf("%s: HasFix = true, but clang-tidy emits no fix-it for it (advisory-only)", id)
+		}
+	}
+	// Absent below L3, present at L3.
+	l2 := ids(Select("all", LevelStructured))
+	l3 := ids(Select("all", LevelAggressive))
+	for _, id := range []string{"PX3021", "PX3022"} {
+		for _, got := range l2 {
+			if got == id {
+				t.Errorf("%s leaked into an L2 selection; it is L3-only", id)
+			}
+		}
+		found := false
+		for _, got := range l3 {
+			if got == id {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s not present in an L3 selection", id)
+		}
+	}
+}
