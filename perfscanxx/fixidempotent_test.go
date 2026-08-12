@@ -96,3 +96,43 @@ func TestExcludeKeepsFixOffIncludedHeader(t *testing.T) {
 		t.Errorf("-exclude deps/ did not keep -fix off the excluded header:\n%s", got)
 	}
 }
+
+// TestDiffExcludeKeepsHeaderOutOfPreview pins that -diff honors -exclude for an
+// included header exactly as -fix does (both flow the same --exclude-header-filter):
+// the preview must not show a change to an excluded header, or -diff would promise
+// a change -fix would (correctly) refuse to make. Skipped when clang-tidy absent.
+func TestDiffExcludeKeepsHeaderOutOfPreview(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	dir := t.TempDir()
+	proj := filepath.Join(dir, "proj")
+	deps := filepath.Join(dir, "deps")
+	for _, d := range []string{proj, deps} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(deps, "dep.h"), []byte("#pragma once\nstruct Dep {\n  ~Dep() {}\n};\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "a.cpp"), []byte("#include \"dep.h\"\nDep* make() { return new Dep(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + proj + `","file":"` + filepath.Join(proj, "a.cpp") + `","command":"clang++ -std=c++17 -I` + deps + ` -c a.cpp"}]`
+	if err := os.WriteFile(filepath.Join(proj, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Control: without -exclude, the header change appears in the preview.
+	out, _, _ := runCLI("-tidy", bin, "-diff", "-checks", "PX3013", "-p", proj, proj)
+	if !strings.Contains(out, "dep.h") {
+		t.Skipf("setup did not preview a header change (clang-tidy header scope differs):\n%s", out)
+	}
+	// With -exclude deps/, the excluded header must NOT appear.
+	outEx, _, _ := runCLI("-tidy", bin, "-diff", "-checks", "PX3013", "-exclude", "deps/", "-p", proj, proj)
+	if strings.Contains(outEx, "dep.h") {
+		t.Errorf("-diff -exclude deps/ still previewed the excluded header:\n%s", outEx)
+	}
+}
