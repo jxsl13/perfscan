@@ -559,6 +559,13 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 	}
 	//perfscan:ignore PS2104 findings cluster in few files; len(findings) would over-reserve
 	perFile := map[string][]edit{}
+	// pending counts the fixes grouped onto each file; the applied/failed tally
+	// is deferred to the write loop below, so a file that is skipped there
+	// (unreadable / overlapping / offsets out of range) marks its fixes FAILED
+	// rather than applied. Counting applied per finding up front overstated it
+	// whenever the target file was later skipped.
+	//perfscan:ignore PS2104 a fix's edits cluster in few files; len would over-reserve
+	pending := map[string]int{}
 	for _, f := range findings {
 		if !f.Check.AutoFix || len(f.Fixes) == 0 {
 			continue
@@ -591,7 +598,14 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		for name, es := range byFile {
 			perFile[name] = append(perFile[name], es...)
 		}
-		applied++
+		// Attribute the fix to one target file so it is counted exactly once,
+		// when that file's fate is known below. A fix's edits share a single
+		// file in practice; the break makes multi-file fixes (none today) still
+		// count once rather than per file.
+		for name := range byFile {
+			pending[name]++
+			break
+		}
 	}
 
 	files = make(map[string]patchedFile, len(perFile))
@@ -599,7 +613,7 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		src, err := os.ReadFile(path)
 		if err != nil {
 			fmt.Fprintf(opts.Stderr, "perfscan: fix %s: %v\n", path, err)
-			failed++
+			failed += pending[path]
 			continue
 		}
 		orig := slices.Clone(src)
@@ -613,7 +627,7 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		}
 		if overlap {
 			fmt.Fprintf(opts.Stderr, "perfscan: fix %s: overlapping edits, skipping file\n", path)
-			failed++
+			failed += pending[path]
 			continue
 		}
 		// Guard against edit offsets that do not address this on-disk file —
@@ -628,7 +642,7 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		}
 		if outOfRange {
 			fmt.Fprintf(opts.Stderr, "perfscan: fix %s: edit offsets out of range (generated or cgo source?), skipping file\n", path)
-			failed++
+			failed += pending[path]
 			continue
 		}
 		for _, e := range edits {
@@ -638,6 +652,7 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 			src = formatted
 		}
 		files[path] = patchedFile{orig: orig, fixed: src}
+		applied += pending[path]
 	}
 	return files, applied, failed
 }
