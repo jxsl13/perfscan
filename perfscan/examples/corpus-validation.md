@@ -23,6 +23,11 @@ PS3104 sort→slices (21), PS2110 slices.Clone (22), PS2120 WriteString(Sprintf)
 PS2123 fmt.Sprint-concat (4), PS2124 Join-literal-concat (2), PS2119 range-Split→
 SplitSeq (1) — confirming they aren't just synthetic-fixture checks.
 
+`-fix` integrity on Kubernetes: `perfscan -fix -level 3 ./pkg/scheduler/...` applied
+**49 fixes across 23 files** (198 → 149 findings), and the rewritten subtree
+**`go build` and `go vet` both exit 0** — the auto-fix suite is behavior-preserving
+on the largest corpus too. (Applied in place, then restored with `git checkout .`.)
+
 **etcd** (`go.etcd.io/etcd`, 1102 Go files; a multi-module repo). Root module
 `./...`: **22 findings, 0 loader errors**.
 
