@@ -316,6 +316,23 @@ var entries = []Entry{
 			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("dc")`,
 		Message: "dynamic_cast inside a loop pays an RTTI type-check on every iteration; hoist the cast out, replace it with virtual dispatch, or use a cheaper type discriminator (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2106", TidyName: "custom-stringstream-in-loop",
+		Level: LevelStructured, Category: "allocation",
+		Title:  "std::stringstream constructed inside a loop reallocates its buffer every iteration",
+		HasFix: false,
+		Custom: true,
+		Bind:   "ss",
+		// A std::(o|i)stringstream declared inside any loop kind: each
+		// construction heap-allocates a fresh buffer and imbues the locale, all
+		// re-done every iteration. isExpansionInMainFile keeps it off library
+		// headers. No safe mechanical fix — the remedy (hoist the stream out and
+		// reset it with .str("") each iteration) is a design change.
+		Query: `match varDecl(isExpansionInMainFile(), ` +
+			`hasType(hasCanonicalType(recordType(hasDeclaration(cxxRecordDecl(matchesName("::std::basic_(o|i)?stringstream")))))), ` +
+			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("ss")`,
+		Message: "std::stringstream constructed inside a loop heap-allocates a new buffer (and re-imbues the locale) every iteration; hoist the stream out of the loop and reset it with .str(\"\") each pass (query-based, no auto-fix)",
+	},
 }
 
 // Deliberately NOT in the catalog (do not re-add on a future audit):
