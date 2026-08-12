@@ -114,3 +114,24 @@ func kept(w io.Writer, v int) string {
 	w.Write([]byte(s))
 	return s
 }
+
+// Inside the receiver's own Write method the rewrite fmt.Fprintf(g, ...)
+// would write through g.Write — the enclosing method itself: unbounded
+// recursion that still compiles. Nothing is reported.
+type selfG struct{ b []byte }
+
+func (g *selfG) Write(p []byte) (int, error) {
+	return g.Write([]byte(fmt.Sprintf("x=%d", len(p))))
+}
+
+// The same call in any OTHER method of the receiver is still reported:
+// the rewrite dispatches to Write, not to the enclosing method.
+func (g *selfG) dump(v int) {
+	g.Write([]byte(fmt.Sprintf("%d", v))) // want `Write\(\[\]byte\(fmt\.Sprintf\(\.\.\.\)\)\) builds a throwaway string and \[\]byte; fmt\.Fprintf\(w, \.\.\.\) writes the formatted bytes directly to w`
+}
+
+// A DIFFERENT writer inside Write is still reported: w is not the
+// receiver.
+func (g *selfG) mirror(w io.Writer, p []byte) (int, error) {
+	return w.Write([]byte(fmt.Sprintf("%x", p))) // want `Write\(\[\]byte\(fmt\.Sprintf\(\.\.\.\)\)\) builds a throwaway string and \[\]byte; fmt\.Fprintf\(w, \.\.\.\) writes the formatted bytes directly to w`
+}

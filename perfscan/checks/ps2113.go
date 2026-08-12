@@ -37,6 +37,13 @@ format, then the arguments. The io.Writer contract forbids retaining the
 passed slice, so handing the writer fmt's reused buffer instead of a
 fresh copy is not observable for conforming writers.
 
+One position is excluded entirely: w.Write([]byte(fmt.Sprintf(...)))
+lexically inside w's own Write method. fmt.Fprintf writes through
+w.Write, so the rewrite would dispatch back to the enclosing method
+itself — unbounded recursion that still compiles. The check reports
+nothing there; writing to a different object (a field, another variable)
+inside Write is still reported.
+
 The automatic fix requires the argument to be exactly a predeclared
 []byte conversion of a call type-pinned to the standard library's
 fmt.Sprintf/Sprint/Sprintln, and the callee to be a method with
@@ -102,6 +109,13 @@ func runPS2113(pass *analysis.Pass) (any, error) {
 			}
 			recv, inner, qual, sname, ok := ps2113Match(pass, outer)
 			if !ok {
+				return true
+			}
+			// fmt.Fprintf(w, ...) writes through w.Write: inside the
+			// receiver's own Write method the rewrite would dispatch back
+			// to the enclosing method itself — stay silent, no valid
+			// rewrite exists there.
+			if writeFixSelfDispatches(pass, outer, recv, "Write") {
 				return true
 			}
 			fname := ps2113Fprint[sname]

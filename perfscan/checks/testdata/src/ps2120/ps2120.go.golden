@@ -143,3 +143,29 @@ func kept(sb *strings.Builder, v int) string {
 	sb.WriteString(s)
 	return s
 }
+
+// Inside the receiver's own Write method the rewrite fmt.Fprintf(h, ...)
+// would write through h.Write — the enclosing method itself: unbounded
+// recursion that still compiles. Nothing is reported.
+type selfH struct{ b []byte }
+
+func (h *selfH) WriteString(s string) (int, error) {
+	h.b = append(h.b, s...)
+	return len(s), nil
+}
+
+func (h *selfH) Write(p []byte) (int, error) {
+	return h.WriteString(fmt.Sprintf("n=%d", len(p)))
+}
+
+// The same call in any OTHER method of the receiver is still reported:
+// the rewrite dispatches to Write, not to the enclosing method.
+func (h *selfH) dump(v int) {
+	fmt.Fprintf(h, "%d", v) // want `WriteString\(fmt\.Sprintf\(\.\.\.\)\) builds a throwaway string; fmt\.Fprintf\(w, \.\.\.\) writes the formatted bytes directly to w`
+}
+
+// A DIFFERENT writer inside Write is still reported: sb is not the
+// receiver.
+func (h *selfH) mirror(sb *strings.Builder, p []byte) (int, error) {
+	return fmt.Fprintf(sb, "%x", p) // want `WriteString\(fmt\.Sprintf\(\.\.\.\)\) builds a throwaway string; fmt\.Fprintf\(w, \.\.\.\) writes the formatted bytes directly to w`
+}

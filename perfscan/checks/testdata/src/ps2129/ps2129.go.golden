@@ -108,3 +108,37 @@ func shadowedFmt(w io.Writer, s string) {
 	var fmt fakeFmt
 	fmt.Fprintf(w, "%s", s)
 }
+
+// A WriteString that delegates through fmt: the rewrite
+// io.WriteString(f, s) would dispatch to f.WriteString — the enclosing
+// method itself: unbounded recursion that still compiles. Nothing is
+// reported.
+type selfF struct{ b []byte }
+
+func (f *selfF) Write(p []byte) (int, error) {
+	f.b = append(f.b, p...)
+	return len(p), nil
+}
+
+func (f *selfF) WriteString(s string) (int, error) {
+	return fmt.Fprint(f, s)
+}
+
+// A writer WITHOUT WriteString: io.WriteString(g, s) would fall back to
+// g.Write — inside Write that is the enclosing method itself: recursion.
+// Nothing is reported.
+type selfF2 struct{ b []byte }
+
+func (g *selfF2) Write(p []byte) (int, error) {
+	return fmt.Fprint(g, string(p))
+}
+
+// The same call in any OTHER method of the receiver, or on a different
+// writer, is still reported.
+func (f *selfF) dump(s string) {
+	io.WriteString(f, s) // want `fmt\.Fprint\(w, s\) on a single plain string pays fmt's interface boxing and reflection just to copy the bytes; io\.WriteString\(w, s\) writes them directly with the same \(n, err\)`
+}
+
+func (f *selfF) mirror(w io.Writer, s string) (int, error) {
+	return io.WriteString(w, s) // want `fmt\.Fprintf\(w, "%s", s\) on a plain string pays fmt's format parse, interface boxing and reflection just to copy the bytes; io\.WriteString\(w, s\) writes them directly with the same \(n, err\)`
+}
