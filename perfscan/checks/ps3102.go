@@ -92,7 +92,7 @@ func runPS3102(pass *analysis.Pass) (any, error) {
 				// delete(m, k) cannot remove a NaN key (NaN != NaN), but
 				// clear does — the rewrite would clear MORE than the loop.
 				diag.Message = msg + " — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical"
-			case !clearOK, !ps3102ClearUsable(pass, rs.Pos()), ps3102CommentsOverlap(f, rs):
+			case !clearOK, !builtinInScope(pass, rs.Pos(), "clear"), ps3102CommentsOverlap(f, rs):
 				// Pre-1.21 file, shadowed clear, or a comment inside the
 				// replaced span: report without a fix.
 			default:
@@ -222,19 +222,6 @@ func ps3102ClearAvailable(pass *analysis.Pass, f *ast.File) bool {
 		return true
 	}
 	return version.Compare(lang, "go1.21") >= 0
-}
-
-// ps3102ClearUsable reports whether the identifier clear still resolves to
-// the predeclared builtin at pos — a user declaration named clear in any
-// enclosing scope would capture the rewritten call.
-func ps3102ClearUsable(pass *analysis.Pass, pos token.Pos) bool {
-	scope := pass.Pkg.Scope().Innermost(pos)
-	if scope == nil {
-		return false
-	}
-	_, obj := scope.LookupParent("clear", pos)
-	_, isBuiltin := obj.(*types.Builtin)
-	return isBuiltin
 }
 
 // ps3102CommentsOverlap reports whether a comment overlaps the replaced
