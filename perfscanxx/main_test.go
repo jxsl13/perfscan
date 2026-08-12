@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
+	"github.com/jxsl13/perfscan/perfscanxx/internal/report"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/tidy"
 )
 
@@ -487,4 +488,93 @@ func TestBaselineRatchetSeedSuppressRegress(t *testing.T) {
 	if strings.Contains(out, "loop variable is copied") {
 		t.Errorf("regression run must still suppress the baselined finding, got:\n%s", out)
 	}
+}
+
+// TestCountMissingHeaderErrors pins the substring/name filter that drives the
+// "-cmake-build" hint: only clang-diagnostic-error findings whose message says
+// "file not found" count as a missing generated header.
+func TestCountMissingHeaderErrors(t *testing.T) {
+	findings := []report.Finding{
+		{TidyName: "clang-diagnostic-error", Message: "'gen/proto.h' file not found"},
+		{TidyName: "clang-diagnostic-error", Message: "'other.h' file not found"},
+		{TidyName: "clang-diagnostic-error", Message: "expected ';' after declaration"}, // error, but not a missing header
+		{TidyName: "performance-for-range-copy", Message: "file not found"},             // right words, wrong check
+		{TidyName: "clang-diagnostic-warning", Message: "'x.h' file not found"},         // warning, not error
+	}
+	if got := countMissingHeaderErrors(findings); got != 2 {
+		t.Errorf("countMissingHeaderErrors = %d, want 2", got)
+	}
+	if got := countMissingHeaderErrors(nil); got != 0 {
+		t.Errorf("countMissingHeaderErrors(nil) = %d, want 0", got)
+	}
+}
+
+// TestSummarizeParseErrors covers the parse-error degradation summary: the empty
+// no-op, unique-file counting (dedup), the terse vs -v listing, and the
+// missing-header -> -cmake-build hint (suppressed when -cmake-build was used).
+func TestSummarizeParseErrors(t *testing.T) {
+	// Two findings in fileA, one in fileB -> 2 unique TUs.
+	base := []report.Finding{
+		{File: "/proj/a.cpp", TidyName: "clang-diagnostic-error", Message: "'gen.h' file not found"},
+		{File: "/proj/a.cpp", TidyName: "performance-for-range-copy", Message: "copy"},
+		{File: "/proj/b.cpp", TidyName: "clang-diagnostic-error", Message: "'gen2.h' file not found"},
+	}
+
+	t.Run("empty is a no-op", func(t *testing.T) {
+		var buf bytes.Buffer
+		summarizeParseErrors(&buf, nil, false, false)
+		if buf.Len() != 0 {
+			t.Errorf("empty input should print nothing, got %q", buf.String())
+		}
+	})
+
+	t.Run("terse counts unique TUs and points at -v", func(t *testing.T) {
+		var buf bytes.Buffer
+		summarizeParseErrors(&buf, base, false, false)
+		out := buf.String()
+		if !strings.Contains(out, "2 translation unit(s) did not fully parse") {
+			t.Errorf("want unique-TU count of 2, got:\n%s", out)
+		}
+		if !strings.Contains(out, "re-run with -v") {
+			t.Errorf("terse mode should point at -v, got:\n%s", out)
+		}
+		if strings.Contains(out, "did not fully parse: ") {
+			t.Errorf("terse mode must not list individual files, got:\n%s", out)
+		}
+	})
+
+	t.Run("verbose lists each unique file", func(t *testing.T) {
+		var buf bytes.Buffer
+		summarizeParseErrors(&buf, base, true, false)
+		out := buf.String()
+		if !strings.Contains(out, "a.cpp") || !strings.Contains(out, "b.cpp") {
+			t.Errorf("verbose mode should list both files, got:\n%s", out)
+		}
+		if strings.Contains(out, "re-run with -v") {
+			t.Errorf("verbose mode should not also suggest -v, got:\n%s", out)
+		}
+	})
+
+	t.Run("missing-header hint appears unless -cmake-build", func(t *testing.T) {
+		var withBuf, withoutBuf bytes.Buffer
+		summarizeParseErrors(&withoutBuf, base, false, false) // cmakeBuild=false -> hint
+		summarizeParseErrors(&withBuf, base, false, true)     // cmakeBuild=true -> suppressed
+		if !strings.Contains(withoutBuf.String(), "-cmake-build") {
+			t.Errorf("missing headers without -cmake-build should hint it, got:\n%s", withoutBuf.String())
+		}
+		if strings.Contains(withBuf.String(), "re-run with -cmake-build") {
+			t.Errorf("hint must be suppressed when -cmake-build already used, got:\n%s", withBuf.String())
+		}
+	})
+
+	t.Run("no missing headers -> no hint", func(t *testing.T) {
+		var buf bytes.Buffer
+		noHeaders := []report.Finding{
+			{File: "/proj/a.cpp", TidyName: "clang-diagnostic-error", Message: "expected ';'"},
+		}
+		summarizeParseErrors(&buf, noHeaders, false, false)
+		if strings.Contains(buf.String(), "-cmake-build") {
+			t.Errorf("no missing-header errors should not hint -cmake-build, got:\n%s", buf.String())
+		}
+	})
 }
