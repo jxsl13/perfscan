@@ -40,6 +40,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -178,8 +179,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// -exclude drops matching translation units from the input list BEFORE
-	// clang-tidy runs, so excluded files are neither analyzed nor (under -fix)
-	// rewritten — the reliable way to keep -fix off vendored/third-party trees.
+	// clang-tidy runs. That alone does NOT stop a fix-it landing in an excluded
+	// HEADER that a non-excluded TU includes, so the excludes also become a
+	// clang-tidy --exclude-header-filter below (opts.ExcludeHeaderFilter), which
+	// suppresses those headers' diagnostics AND fix-its — keeping -fix off
+	// vendored/third-party trees for real.
 	excludes := splitExcludes(excludeArg)
 	if len(excludes) > 0 {
 		kept := files[:0:0]
@@ -223,9 +227,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// In -fix-sequential mode this first run only reports; the fixes are
 		// applied afterwards, one check per pass, to avoid cross-check fix-it
 		// collisions.
-		Fix:       *fix && !*fixSeq,
-		Files:     files,
-		ExtraArgs: extraArgs,
+		Fix:                 *fix && !*fixSeq,
+		Files:               files,
+		ExtraArgs:           extraArgs,
+		ExcludeHeaderFilter: excludeHeaderRegex(excludes),
 	}
 	// Query-based custom checks need their CustomChecks definitions in a
 	// config file plus --experimental-custom-checks (zero compiled C++).
@@ -553,6 +558,23 @@ func splitExcludes(raw []string) []string {
 		}
 	}
 	return out
+}
+
+// excludeHeaderRegex turns the -exclude substring list into one regex for
+// clang-tidy's --exclude-header-filter: each substring is regex-escaped and
+// OR-joined, and clang-tidy partial-matches, so it matches any header path
+// CONTAINING one of the substrings — the same semantics as pathExcluded. Empty
+// excludes yield "" (the filter is then omitted). This is what makes -exclude
+// actually keep -fix off an excluded header included by a non-excluded TU.
+func excludeHeaderRegex(excludes []string) string {
+	if len(excludes) == 0 {
+		return ""
+	}
+	parts := make([]string, len(excludes))
+	for i, e := range excludes {
+		parts[i] = regexp.QuoteMeta(e)
+	}
+	return strings.Join(parts, "|")
 }
 
 // pathExcluded reports whether p's slash-normalized path contains any of the
