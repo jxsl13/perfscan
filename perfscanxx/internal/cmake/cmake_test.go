@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -26,22 +27,31 @@ func TestFindProject(t *testing.T) {
 func TestConfigureBuildArgs(t *testing.T) {
 	var gotDir string
 	var gotArgv []string
-	orig := Runner
-	defer func() { Runner = orig }()
+	origRunner, origAvail := Runner, Available
+	defer func() { Runner, Available = origRunner, origAvail }()
 	Runner = func(_ context.Context, dir string, argv []string) ([]byte, error) {
 		gotDir, gotArgv = dir, argv
 		return nil, nil
 	}
-	// Available() checks PATH for cmake; skip if absent so the test is hermetic.
-	if !Available() {
-		t.Skip("cmake not on PATH")
+	// Stub Available (not skip): the arg-construction contract must be pinned
+	// even on machines/CI without a real cmake — that is why Available is a var.
+	Available = func() bool { return true }
+
+	// Configure runs in the SOURCE dir and requests the compile database.
+	if err := Configure(context.Background(), "/src", "/src/build"); err != nil {
+		t.Fatal(err)
 	}
-	_ = Configure(context.Background(), "/src", "/src/build")
-	if gotDir != "/src" || gotArgv[0] != "cmake" || gotArgv[1] != "-S" {
-		t.Errorf("configure argv=%v dir=%q", gotArgv, gotDir)
+	wantCfg := []string{"cmake", "-S", "/src", "-B", "/src/build", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"}
+	if gotDir != "/src" || !slices.Equal(gotArgv, wantCfg) {
+		t.Errorf("configure argv=%v dir=%q\n want argv=%v dir=/src", gotArgv, gotDir, wantCfg)
 	}
-	_ = Build(context.Background(), "/src/build", "gen")
-	if gotArgv[1] != "--build" || gotArgv[len(gotArgv)-1] != "gen" {
-		t.Errorf("build argv=%v", gotArgv)
+
+	// Build (no targets) runs in the BUILD dir. (Multi-target argv and the
+	// not-available / failure branches are covered by TestConfigureBuildErrorPaths.)
+	if err := Build(context.Background(), "/src/build"); err != nil {
+		t.Fatal(err)
+	}
+	if gotDir != "/src/build" || !slices.Equal(gotArgv, []string{"cmake", "--build", "/src/build"}) {
+		t.Errorf("build (no target) argv=%v dir=%q", gotArgv, gotDir)
 	}
 }
