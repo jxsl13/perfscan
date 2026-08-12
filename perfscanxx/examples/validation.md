@@ -104,6 +104,18 @@ not want perfscanxx rewriting bundled `gtest`/`googletest` anyway. The signature
 majority of the catalog (reserve, emplace, make_shared/unique, avoid-endl, = default,
 member-initializer, …) is unaffected.
 
+To make this failure mode visible instead of silent, `-fix` now **warns** when it
+rewrites files under vendored/third-party path segments (`vendor`, `third_party`,
+`_deps`, `external`, `gtest`/`gmock`/`googletest`/`googlemock`, …). On this exact fmt
+run it prints:
+
+```
+perfscanxx: warning: -fix modified 3 file(s) under vendored/third-party paths; …
+  modified vendored file: corpus/fmt/test/gtest/gmock-gtest-all.cc
+  modified vendored file: corpus/fmt/test/gtest/gmock/gmock.h
+  modified vendored file: corpus/fmt/test/gtest/gtest/gtest.h
+```
+
 ## `-diff` dry-run validated on real C++
 
 `perfscanxx -diff -level 3 ./...` on leveldb printed a **960-line unified diff across
