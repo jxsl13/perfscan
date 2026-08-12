@@ -91,3 +91,19 @@ func mixed(src []string) map[string]int {
 	}
 	return m
 }
+
+// Regression: a LABELED loop is wrapped in an *ast.LabeledStmt in the
+// block's statement list; it must be discovered like an unlabeled one.
+// The insert is unconditional — flagged and size-hinted. (The label must
+// be used to compile.)
+func labeledMap(src []string) map[string]int {
+	m := make(map[string]int, len(src)) // want `m is filled in the following bounded loop but declared without a size hint; pre-size it with make\(map\[\.\.\.\]\.\.\., len\(src\)\) — exact: one unconditional value per iteration \(a hint may over-reserve for repeated keys\)`
+L:
+	for i, s := range src {
+		m[s] = i
+		if s == "" {
+			continue L
+		}
+	}
+	return m
+}

@@ -30,7 +30,8 @@ and rehashes its way up as the loop inserts — each growth re-buckets every
 key inserted so far. When the fill loop's iteration count is known (a range
 over a slice or map, or a counted loop) and nothing between the
 declaration and the loop touches the map, make(map[K]V, k*bound) reserves
-the buckets once.
+the buckets once. Labeled loops (L: for ...) are covered like unlabeled
+ones.
 
 Bound semantics — inserts are COUNTED per iteration, and only maps that
 receive at least one UNCONDITIONAL insert per iteration are flagged: k
@@ -67,14 +68,19 @@ func runPS2104(pass *analysis.Pass) (any, error) {
 				return true
 			}
 			for j, stmt := range block.List {
-				body := loopBodyOf(stmt)
+				// A labeled loop (L: for ...) arrives wrapped in an
+				// *ast.LabeledStmt; unwrap so it is analyzed like an
+				// unlabeled one. The label stays one element in
+				// block.List, so the j indexing is unaffected.
+				loop := unwrapLabeled(stmt)
+				body := loopBodyOf(loop)
 				if body == nil {
 					continue
 				}
-				bound := loopCapacityExpr(pass, stmt)
+				bound := loopCapacityExpr(pass, loop)
 				// A range loop is always bounded by its source; a for
 				// loop only counts when a bound was derived.
-				if _, isRange := stmt.(*ast.RangeStmt); !isRange && bound == "" {
+				if _, isRange := loop.(*ast.RangeStmt); !isRange && bound == "" {
 					continue
 				}
 				reportMapPrealloc(pass, block, j, bound)
