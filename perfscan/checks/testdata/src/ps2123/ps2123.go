@@ -1,0 +1,142 @@
+package ps2123
+
+import (
+	"fmt"
+	"strings"
+)
+
+func sink(string) {}
+
+// Assignment context: no parentheses needed.
+func twoArgs(a, b string) string {
+	s := fmt.Sprint(a, b) // want `fmt\.Sprint over only plain strings inserts no separators and boxes every operand through fmt's reflection machinery; direct \+ concatenation builds the identical string`
+	return s
+}
+
+// Three string operands: still no separators inserted.
+func threeArgs(a, b, c string) string {
+	return fmt.Sprint(a, b, c) // want `fmt\.Sprint over only plain strings inserts no separators and boxes every operand through fmt's reflection machinery; direct \+ concatenation builds the identical string`
+}
+
+// A single string operand: fmt.Sprint is the identity.
+func single(a string) string {
+	return fmt.Sprint(a) // want `fmt\.Sprint over only plain strings inserts no separators and boxes every operand through fmt's reflection machinery; direct \+ concatenation builds the identical string`
+}
+
+// A single PRIMARY operand needs no parentheses even under an index.
+func singleIndexed(a string) byte {
+	return fmt.Sprint(a)[0] // want `fmt\.Sprint over only plain strings inserts no separators and boxes every operand through fmt's reflection machinery; direct \+ concatenation builds the identical string`
+}
+
+// A single + chain operand under an index DOES need them.
+func singleConcatIndexed(a, b string) byte {
+	return fmt.Sprint(a + b)[0] // want `fmt\.Sprint over only plain strings inserts no separators and boxes every operand through fmt's reflection machinery; direct \+ concatenation builds the identical string`
+}
+
+// An argument that is itself a call stays verbatim.
+func callArg(x, y string) string {
+	return fmt.Sprint(strings.ToUpper(x), y) // want `fmt\.Sprint over only plain strings inserts no separators and boxes every operand through fmt's reflection machinery; direct \+ concatenation builds the identical string`
+}
+
+// An argument that is itself a + concatenation needs no parentheses:
+// string + is associative and the only string-producing binary operator.
+func concatArg(a, b, c string) string {
+	return fmt.Sprint(a+b, c) // want `fmt\.Sprint over only plain strings inserts no separators and boxes every operand through fmt's reflection machinery; direct \+ concatenation builds the identical string`
+}
+
+// An untyped constant string argument defaults to plain string.
+func literalArg(b string) string {
+	return fmt.Sprint("pre-", b) // want `fmt\.Sprint over only plain strings inserts no separators and boxes every operand through fmt's reflection machinery; direct \+ concatenation builds the identical string`
+}
+
+// Call-argument context is self-delimiting: no parentheses needed.
+func asArg(a, b string) {
+	sink(fmt.Sprint(a, b)) // want `fmt\.Sprint over only plain strings inserts no separators and boxes every operand through fmt's reflection machinery; direct \+ concatenation builds the identical string`
+}
+
+// PRECEDENCE: indexing binds tighter than + — the whole replacement must
+// be parenthesized or the index would apply to the last operand only.
+func indexed(a, b string) byte {
+	return fmt.Sprint(a, b)[0] // want `fmt\.Sprint over only plain strings inserts no separators and boxes every operand through fmt's reflection machinery; direct \+ concatenation builds the identical string`
+}
+
+// Operand of a further +: parenthesized as well — redundant but harmless.
+func merged(a, b, c string) string {
+	return fmt.Sprint(a, b) + c // want `fmt\.Sprint over only plain strings inserts no separators and boxes every operand through fmt's reflection machinery; direct \+ concatenation builds the identical string`
+}
+
+// Reported but NOT fixed: a comment inside the rewritten scaffolding
+// would be destroyed by the edits.
+func commented(a, b string) string {
+	return fmt.Sprint( // keep me // want `fmt\.Sprint over only plain strings inserts no separators and boxes every operand through fmt's reflection machinery; direct \+ concatenation builds the identical string`
+		a, b)
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// A non-string operand re-engages Sprint's spacing rule and is not
+// formatted by identity: reject the whole call.
+func intArg(a string, n int) string {
+	return fmt.Sprint(a, n)
+}
+
+// Mixed with an untyped int constant: the constant is not string-typed.
+func mixedConst(a string) string {
+	return fmt.Sprint(a, 1)
+}
+
+func boolArg(a string, ok bool) string {
+	return fmt.Sprint(a, ok)
+}
+
+func byteSliceArg(a string, b []byte) string {
+	return fmt.Sprint(a, b)
+}
+
+// A NAMED string type may implement fmt.Stringer/fmt.Formatter, which
+// Sprint's %v formatting would honor and + would not.
+type name string
+
+func (n name) String() string { return "Mx. " + string(n) }
+
+func namedStringArg(a string, n name) string {
+	return fmt.Sprint(a, n)
+}
+
+func errorArg(a string, err error) string {
+	return fmt.Sprint(a, err)
+}
+
+func stringerArg(a string, s fmt.Stringer) string {
+	return fmt.Sprint(a, s)
+}
+
+// fmt.Sprintf belongs to PS2122/PS2107, not here.
+func sprintf(a, b string) string {
+	return fmt.Sprintf("%s%s", a, b)
+}
+
+// fmt.Sprintln ALWAYS inserts spaces and appends a newline.
+func sprintln(a, b string) string {
+	return fmt.Sprintln(a, b)
+}
+
+// Zero operands: fmt.Sprint() is the empty string, but out of scope.
+func empty() string {
+	return fmt.Sprint()
+}
+
+// A shadowed fmt is not the fmt package.
+type fakeFmt struct{}
+
+func (fakeFmt) Sprint(args ...any) string { return "" }
+
+func shadowedFmt(a, b string) string {
+	fmt := fakeFmt{}
+	return fmt.Sprint(a, b)
+}
+
+// A spread call passes an unknown number of arguments.
+func spread(args ...any) string {
+	return fmt.Sprint(args...)
+}
