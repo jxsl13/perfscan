@@ -386,3 +386,17 @@ So the ratchet both **suppresses the recorded backlog** (line-independent, per t
 `baseline` package's file/id/message keying) AND **surfaces genuinely new findings** on
 real corpus code — the two properties a CI ratchet needs to burn down a backlog without
 letting regressions slip in.
+
+## fmt (fmtlib) — clean report + fix roundtrip on a header-only library
+
+`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` over `fmtlib/fmt` yields a 3-TU
+compile database. `perfscanxx -level 2 -p build ./...` reports **8 findings**, all
+in fmt's own headers and all legitimate: PX3013 (`= default` for a trivial
+constructor) ×3, PX3004 (noexcept move constructor/assignment) ×3, PX3015
+(prefer member initializer) ×2 — exit 0, no orchestration errors, no spurious
+custom-check noise (the PX21xx `isExpansionInMainFile()` guard keeps them off the
+included headers). `perfscanxx -fix -level 2` then applies clang-tidy's fix-its
+cleanly across three headers (10 edits), e.g. `constexpr monostate() {}` →
+`constexpr monostate() = default;`. A concise, high-signal result on a widely-used
+header-only library — the curated catalog fires only where a real, mechanical
+improvement exists.
