@@ -152,6 +152,22 @@ project's own tests** on production Go — the strongest real-world evidence cla
 a genuine perf win extracted from a hot path (quadratic `+=` → amortized builder).
 (Applied in place, then restored with `git checkout .`.)
 
+Confirmed again on **`k8s.io/client-go`** — a fresh, large, concurrency-heavy staging
+module (workqueues, rate limiters, the shared-informer cache). `perfscan -fix -level 3
+./...` applied **37 fixes, 1 skipped (overlaps an applied fix)** — the last being a
+benign PS2103/PS2122 overlap now reported distinctly from a failure — and the module
+`go build`s exit 0. Its own suites pass unchanged, including the heavy informer/cache
+tests:
+
+```
+go test ./util/workqueue/  → ok      go test ./tools/cache/          → ok (48s)
+go test ./util/flowcontrol/→ ok      go test ./tools/cache/synctrack/→ ok
+```
+
+Five independent production codebases now confirm behavior-preservation under their
+OWN tests (etcd, apimachinery, component-base, client-go, and the C++ spdlog). The
+overlap-drop reporting added in v0.34.0 is likewise confirmed on real code here.
+
 ### The Go standard library itself — the most diverse corpus (2026-08-12)
 
 The strongest `-fix` integrity test is the **Go standard library** (`corpus/go`,
