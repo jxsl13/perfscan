@@ -7,6 +7,22 @@ surface genuine findings, and — critically — that `-fix` produces code that
 
 ## Findings — full catalog, report mode (2026-08-12)
 
+**Kubernetes** (`k8s.io/kubernetes`, ~17k Go files, vendored) — the largest corpus,
+a robustness stress test. Three big subtrees loaded offline with **zero loader
+errors** and **961 findings across 23 distinct checks**:
+
+| Subtree | findings | loader errors |
+|---------|---------:|--------------:|
+| pkg/scheduler/…  | 198 | 0 |
+| pkg/kubelet/…    | 517 | 0 |
+| pkg/controller/… | 246 | 0 |
+
+Top: PS2101 reserve-before-loop (301), PS3103 range-value-copy (250), PS2104 (140),
+PS2103 sprintf-in-loop (104). The recently-added checks all fire on production Go —
+PS3104 sort→slices (21), PS2110 slices.Clone (22), PS2120 WriteString(Sprintf) (6),
+PS2123 fmt.Sprint-concat (4), PS2124 Join-literal-concat (2), PS2119 range-Split→
+SplitSeq (1) — confirming they aren't just synthetic-fixture checks.
+
 **etcd** (`go.etcd.io/etcd`, 1102 Go files; a multi-module repo). Root module
 `./...`: **22 findings, 0 loader errors**.
 
