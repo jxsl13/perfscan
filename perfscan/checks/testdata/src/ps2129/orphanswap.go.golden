@@ -1,0 +1,14 @@
+package ps2129
+
+import (
+	"io"
+	"os"
+)
+
+// The two fmt references in this FILE are the fixable calls themselves:
+// applying both fixes orphans the fmt import, so its spec is swapped for
+// "io" in place.
+func orphanSwap(s string) {
+	io.WriteString(os.Stdout, s) // want `fmt\.Fprintf\(w, "%s", s\) on a plain string pays fmt's format parse, interface boxing and reflection just to copy the bytes; io\.WriteString\(w, s\) writes them directly with the same \(n, err\)`
+	io.WriteString(os.Stderr, s) // want `fmt\.Fprint\(w, s\) on a single plain string pays fmt's interface boxing and reflection just to copy the bytes; io\.WriteString\(w, s\) writes them directly with the same \(n, err\)`
+}

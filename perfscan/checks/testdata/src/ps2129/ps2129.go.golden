@@ -1,0 +1,110 @@
+package ps2129
+
+import (
+	"fmt"
+	"io"
+)
+
+// fmt stays imported: this reference keeps the import alive after every
+// fix in this file is applied.
+func keepFmtAlive(w io.Writer) {
+	fmt.Fprintln(w, "kept")
+}
+
+func basic(w io.Writer, s string) {
+	io.WriteString(w, s) // want `fmt\.Fprintf\(w, "%s", s\) on a plain string pays fmt's format parse, interface boxing and reflection just to copy the bytes; io\.WriteString\(w, s\) writes them directly with the same \(n, err\)`
+}
+
+func verbV(w io.Writer, s string) {
+	io.WriteString(w, s) // want `fmt\.Fprintf\(w, "%v", s\) on a plain string pays fmt's format parse, interface boxing and reflection just to copy the bytes; io\.WriteString\(w, s\) writes them directly with the same \(n, err\)`
+}
+
+func plainFprint(w io.Writer, s string) {
+	io.WriteString(w, s) // want `fmt\.Fprint\(w, s\) on a single plain string pays fmt's interface boxing and reflection just to copy the bytes; io\.WriteString\(w, s\) writes them directly with the same \(n, err\)`
+}
+
+// Both return (n int, err error): the results carry over verbatim.
+func results(w io.Writer, s string) (int, error) {
+	return io.WriteString(w, s) // want `fmt\.Fprintf\(w, "%s", s\) on a plain string pays fmt's format parse, interface boxing and reflection just to copy the bytes; io\.WriteString\(w, s\) writes them directly with the same \(n, err\)`
+}
+
+// An untyped string constant defaults to string and is written verbatim.
+func literal(w io.Writer) {
+	io.WriteString(w, "hello") // want `fmt\.Fprint\(w, s\) on a single plain string pays fmt's interface boxing and reflection just to copy the bytes; io\.WriteString\(w, s\) writes them directly with the same \(n, err\)`
+}
+
+// --- advisory only: reported, but never rewritten ---
+
+// A local named io shadows the package at the call site: the emitted
+// io.WriteString qualifier would not resolve — no fix.
+func shadowedIo(w io.Writer, s string) {
+	io := 1
+	_ = io
+	fmt.Fprintf(w, "%s", s) // want `fmt\.Fprintf\(w, "%s", s\) on a plain string pays fmt's format parse, interface boxing and reflection just to copy the bytes; io\.WriteString\(w, s\) writes them directly with the same \(n, err\)`
+}
+
+// A comment inside the rewritten punctuation would be swallowed — no fix.
+func commented(w io.Writer, s string) {
+	fmt.Fprintf(w /* keep me */, "%s", s) // want `fmt\.Fprintf\(w, "%s", s\) on a plain string pays fmt's format parse, interface boxing and reflection just to copy the bytes; io\.WriteString\(w, s\) writes them directly with the same \(n, err\)`
+}
+
+// --- guards: none of the following may be reported ---
+
+type myStr string
+
+type stamp struct{}
+
+func (stamp) String() string { return "stamp" }
+
+// The whole format must be EXACTLY the one verb: a trailing newline (or
+// anything else) formats differently.
+func trailingNewline(w io.Writer, s string) {
+	fmt.Fprintf(w, "%s\n", s)
+}
+
+// Any other verb formats, it does not copy: "%q" quotes, "%d" needs a
+// number, "%+v"/"%#v" alter the rendering.
+func otherVerbs(w io.Writer, s string, v int) {
+	fmt.Fprintf(w, "%q", s)
+	fmt.Fprintf(w, "%d", v)
+	fmt.Fprintf(w, "%+v", s)
+}
+
+// The operand must be STATICALLY the predeclared string: %s on a []byte
+// or a Stringer goes through fmt's own formatting, %v on an error calls
+// Error(), and a defined string type would not compile as
+// io.WriteString's argument without a conversion.
+func notString(w io.Writer, b []byte, st stamp, m myStr, err error) {
+	fmt.Fprintf(w, "%s", b)
+	fmt.Fprintf(w, "%s", st)
+	fmt.Fprintf(w, "%v", err)
+	fmt.Fprintf(w, "%s", m)
+}
+
+// Only the single-operand forms match: a second operand needs the format
+// (or gains fmt.Fprint's separating space).
+func twoOperands(w io.Writer, a, b string) {
+	fmt.Fprintf(w, "%s%s", a, b)
+	fmt.Fprint(w, a, b)
+}
+
+// No variadic spread.
+func spread(w io.Writer, args []any) {
+	fmt.Fprintf(w, "%s", args...)
+}
+
+// A non-literal format never matches, even when it holds the right verb.
+func nonLiteral(w io.Writer, s string) {
+	format := "%s"
+	fmt.Fprintf(w, format, s)
+}
+
+// A local object named fmt shadows the package: not stdlib fmt.Fprintf.
+type fakeFmt struct{}
+
+func (fakeFmt) Fprintf(w io.Writer, format, s string) (int, error) { return 0, nil }
+
+func shadowedFmt(w io.Writer, s string) {
+	var fmt fakeFmt
+	fmt.Fprintf(w, "%s", s)
+}
