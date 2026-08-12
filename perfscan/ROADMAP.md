@@ -4,6 +4,13 @@ perfscan generalizes an internal performance-scanner engine into a
 standalone, staticcheck-style utility. This file tracks the porting state
 of the original reference registry and the planned engine work. PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+> **Current state (2026-08-12):** the engine is complete and the catalog has grown
+> to **~75 checks** (well past the original reference registry). The authoritative,
+> always-current check list is the tool itself — `perfscan -list` and the generated
+> `docs/checks/` — not the hand-maintained lists below. The safe, bit-identical
+> mechanical-fix seam for stdlib patterns is essentially mined out; recent work is
+> real-world validation (etcd, Kubernetes) and hardening.
+
 ## Engine
 
 - [x] Check model with stable IDs, categories, docs, fix levels (L1–L3)
@@ -14,7 +21,9 @@ of the original reference registry and the planned engine work. PRs welcome — 
 - [x] Gated auto-fix (`-fix[=N]`) with gofmt post-formatting
 - [x] SARIF 2.1.0 output (`-sarif`; L3 advisories map to "note")
 - [x] Baseline/ratchet support (`-baseline` / `-write-baseline`, line-independent identity)
-- [x] golangci-lint module plugin (`plugin/`, maxLevel + vocabulary settings)
+- [x] `-diff` dry-run: preview `-fix` as a `git apply`-clean unified diff without
+      touching files (exit 1 on pending changes); `-fix` proven idempotent (a fixpoint)
+- [x] golangci-lint module plugin (`plugin/`, maxLevel + vocabulary settings; e2e-validated)
 - [x] Docs generated from the registry (`make docs`, CI drift gate)
 - [x] Project vocabulary config (perfscan.yaml, auto-discovery, starved-check
       warnings) — keeps the engine generic while supporting any domain codebase
@@ -75,8 +84,22 @@ checks; the figures cited in their docs are its measured results.
 - [x] PS3101 invariant-conversion-in-loop (L1)
 - [x] PS4101 loop-copy → copy() (L1, auto-fix)
 - [x] PS2103 sprintf-concat-in-loop (L1)
+- [x] Grown generic auto-fix family (all L1, bit-identical, mostly stdlib-idiom):
+      **PS2105–PS2125** (range-`[]rune`, append-clone/concat, `slices.Clone`/`Concat`,
+      `w.WriteString`/`io.WriteString`/`Fprintf` write rewrites, `len(Split)`→`Count+1`,
+      `fmt.Sprintf`/`Sprint`/`strings.Join`→`+` concat, `len([]rune/[]byte)`→
+      `RuneCountInString`/`len`), **PS3102** map-clear→`clear`, **PS3104/PS3105**
+      `sort.Ints`/`sort.Sort`/`sort.Stable(IntSlice)`→`slices.Sort`, **PS5101–PS5104**
+      (`bytes.Equal`, `WriteByte`, `EqualFold` advisory, `Count`→`Contains`).
+      See `perfscan -list` / `docs/checks/` for the authoritative, current set.
 
 ### Next up (generic, high value)
+
+The safe, bit-identical mechanical-fix seam for common stdlib patterns is
+essentially exhausted (staticcheck / perfsprint / go-critic / gopls-modernize all
+mined). Remaining ideas are either gc-parity (the compiler already optimizes the
+shape) or behaviour-subtle / non-local — those stay advisory. Focus has shifted to
+real-world `-fix` validation and check-precision/robustness hardening.
 
 
 ### Not ported (documented holes — IDs stay reserved)
