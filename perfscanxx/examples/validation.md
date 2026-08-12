@@ -246,3 +246,13 @@ fixes; a SECOND pass then reports **nothing left to change** (`-diff` exits 0,
 "no fixes to apply", empty patch), and the rewritten tree still compiles (`[100%]
 Built target leveldb`). So `-fix` reaches a fixpoint — repeated CI runs converge and
 never oscillate or re-churn already-fixed code.
+
+## PX2101 reserve-before-loop covers every loop kind (measured on fmt)
+
+The `custom-reserve-before-loop` query matched only `forStmt()` until it was broadened
+to `anyOf(forStmt, cxxForRangeStmt, whileStmt, doStmt)`. Measured on **fmt**: the old
+`forStmt`-only query flagged **20** `push_back`/`emplace_back`-in-loop sites; the
+broadened query flags **25** — the extra **5** are growth inside **range-for** loops
+(C++'s most common loop, e.g. `for (auto& x : xs) v.push_back(f(x))`) that the old
+query silently missed. The custom check `PX2104` (regex-in-loop) already used the
+all-loop-kinds matcher.
