@@ -42,6 +42,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	baselinepkg "github.com/jxsl13/perfscan/perfscanxx/internal/baseline"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/cmake"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/compdb"
@@ -77,6 +78,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		maxLevel   = fs.Int("level", 3, "report only checks whose fix level is <= N (1=idiomatic, 2=structured, 3=aggressive)")
 		jsonOut    = fs.Bool("json", false, "emit findings as JSON")
 		sarifOut   = fs.Bool("sarif", false, "emit findings as SARIF 2.1.0 (GitHub Code Scanning)")
+		baseline   = fs.String("baseline", "", "ratchet file: if it does not exist, write the current findings as the accepted baseline; if it exists, report only NEW findings (line-independent) so CI fails on regressions while the backlog is burned down")
 		buildDir   = fs.String("p", "", "build directory containing compile_commands.json (default: found by walking up from the cwd)")
 		tidyBin    = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
 		showVer    = fs.Bool("version", false, "print version and exit")
@@ -217,6 +219,29 @@ func run(args []string, stdout, stderr io.Writer) int {
 		} else {
 			findings = append(findings, f)
 		}
+	}
+
+	// Baseline ratchet: seed the file on first run, else suppress accepted
+	// findings so only regressions are reported (and counted for the exit code).
+	if *baseline != "" {
+		if !baselinepkg.Exists(*baseline) {
+			n, err := baselinepkg.Write(*baseline, findings)
+			if err != nil {
+				fmt.Fprintln(stderr, "perfscanxx:", err)
+				return 2
+			}
+			fmt.Fprintf(stderr, "perfscanxx: wrote %d finding(s) to baseline %s\n", n, *baseline)
+			return 0
+		}
+		kept, suppressed, err := baselinepkg.Filter(*baseline, findings)
+		if err != nil {
+			fmt.Fprintln(stderr, "perfscanxx:", err)
+			return 2
+		}
+		if suppressed > 0 {
+			fmt.Fprintf(stderr, "perfscanxx: %d baselined finding(s) suppressed (%s)\n", suppressed, *baseline)
+		}
+		findings = kept
 	}
 
 	switch {
@@ -392,6 +417,7 @@ Examples:
 	perfscanxx -level 1 -fix -p build ./... report + apply only L1 fixes
 	perfscanxx -fix -p build ./...       default -level 3: apply every fix
 	perfscanxx -p build src/main.cpp     a single translation unit
+	perfscanxx -p build -baseline .perfscanxx-baseline.yaml ./...   ratchet: seed, then fail only on NEW findings
 	perfscanxx -cmake ./...              auto-configure a CMake project (generate compile_commands.json)
 	perfscanxx -cmake-build ./...        also build it to generate build-time headers
 	perfscanxx -list                     the check table (with an auto-fix coverage summary)
