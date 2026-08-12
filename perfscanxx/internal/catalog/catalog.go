@@ -415,6 +415,31 @@ func Select(selector string, maxLevel Level) []Entry {
 	return out
 }
 
+// UnmatchedPatterns returns the non-negation include patterns in selector that
+// match NO catalog entry at any level — genuine typos (e.g. "PX9999"), as
+// distinct from a real check merely gated out by -level (which Select drops but
+// match() still recognizes). Negations and the empty selector yield nothing.
+func UnmatchedPatterns(selector string) []string {
+	var unmatched []string
+	for pat := range strings.SplitSeq(selector, ",") {
+		pat = strings.TrimSpace(pat)
+		if pat == "" || strings.HasPrefix(pat, "-") {
+			continue
+		}
+		matched := false
+		for _, e := range entries {
+			if match(e, pat) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			unmatched = append(unmatched, pat)
+		}
+	}
+	return unmatched
+}
+
 func matchAny(e Entry, pats []string) bool {
 	for _, p := range pats {
 		if match(e, p) {

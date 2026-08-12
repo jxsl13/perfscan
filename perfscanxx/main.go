@@ -195,6 +195,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// Flag individual selector patterns that match no known check — a typo in
+	// one pattern of several (e.g. -checks PX1001,PX9999) is otherwise dropped
+	// silently, since the empty-selection error below only fires when NOTHING
+	// matches.
+	for _, p := range catalog.UnmatchedPatterns(*sel) {
+		fmt.Fprintf(stderr, "perfscanxx: WARNING: -checks pattern %q matches no known check (typo? see perfscanxx -list)\n", p)
+	}
 	selected := catalog.Select(*sel, catalog.Level(*maxLevel))
 	if len(selected) == 0 {
 		fmt.Fprintf(stderr, "perfscanxx: selector %q matches no checks at -level %d (see perfscanxx -list)\n", *sel, *maxLevel)
