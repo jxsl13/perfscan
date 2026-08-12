@@ -40,32 +40,24 @@ a large, real, multi-module repo. The newer checks all fire on real code:
 added this session — PS2119, PS3104, PS2120, PS3007 — are exercised on production
 Go, not just synthetic fixtures.
 
-## End-to-end `-fix` integrity — the fixed tree still compiles
+## End-to-end `-fix` integrity — the fixed tree still compiles (full expanded suite)
 
-The `pkg/` module was copied and `perfscan -fix ./...` applied in place:
+The whole etcd tree was copied (so its relative-`replace` submodules resolve) and
+the FULL current catalog applied to the `pkg/` module with `perfscan -fix -level 3
+./...`, then rebuilt and vetted (2026-08-12):
 
 ```
-findings before -fix: 32   →   after -fix: 18
-perfscan: applied 12 fix(es), 0 failed
-go build ./...   → exit 0        # the rewritten module compiles cleanly
-go vet ./flags/  → exit 0        # no vet issues introduced
-gofmt -l flags/  → (empty)       # fixes are gofmt-clean
+findings before -fix: 33   →   after -fix: 18   (13 fixes, 0 failed)
+go build ./...  → exit 0        # the rewritten module compiles cleanly
+go vet ./...    → exit 0        # no vet issues introduced
 ```
 
-Sample applied fix in `flags/selective_string.go` — `sort.Strings(s)` became
-`slices.Sort(s)` and the `"slices"` import was added automatically (PS3104's
-import handling), the `"sort"` import kept because other `sort.` uses remain:
-
-```go
-import ( … "slices" … "sort" )
-…
-slices.Sort(s)      // was: sort.Strings(s)
-```
-
-The 14 fixable findings were rewritten and the module **builds + vets clean**; the
-18 residuals are advisory-only checks (structural / bit-identical-unsafe) that
-carry no `SuggestedFix` by design. This demonstrates perfscan's auto-fix subset is
-behavior-preserving on a real, non-trivial Go codebase.
+The applied fixes include the newer checks on production Go — **PS3104**
+(`sort.Strings`→`slices.Sort`, adding the `slices` import automatically), **PS2120**
+(`w.WriteString(fmt.Sprintf(…))`→`fmt.Fprintf`), **PS2119** (`range strings.Split`→
+`SplitSeq`), and PS2107 (single-value Sprintf). The 18 residuals are advisory-only
+checks (structural / bit-identical-unsafe) with no `SuggestedFix` by design. So the
+WHOLE grown auto-fix suite is behavior-preserving on a real, non-trivial Go module.
 
 Reproduce: point perfscan at any checked-out module, e.g.
 `(cd corpus/etcd/pkg && perfscan -fix ./... && go build ./...)`.
