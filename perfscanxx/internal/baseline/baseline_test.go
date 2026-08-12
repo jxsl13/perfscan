@@ -1,6 +1,7 @@
 package baseline
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -87,4 +88,44 @@ func TestExists(t *testing.T) {
 	if !Exists(present) {
 		t.Error("Exists reported a written file as missing")
 	}
+}
+
+// TestFilterErrorAndEdgePaths pins Filter's non-happy paths: a missing baseline
+// and a MALFORMED one must return an error (never panic, and never silently
+// suppress a regression by treating a broken baseline as "everything allowed"),
+// while a well-formed but EMPTY baseline suppresses nothing.
+func TestFilterErrorAndEdgePaths(t *testing.T) {
+	dir := t.TempDir()
+	findings := []report.Finding{f("a.cpp", "PX1001", "copy")}
+
+	t.Run("missing baseline is an error", func(t *testing.T) {
+		if _, _, err := Filter(filepath.Join(dir, "nope.yaml"), findings); err == nil {
+			t.Error("Filter of a missing baseline: want error, got nil")
+		}
+	})
+
+	t.Run("malformed baseline is an error, not silent suppression", func(t *testing.T) {
+		p := filepath.Join(dir, "bad.yaml")
+		if err := os.WriteFile(p, []byte("entries: [this is: not, valid: yaml"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		kept, suppressed, err := Filter(p, findings)
+		if err == nil {
+			t.Fatalf("Filter of malformed YAML: want error; got kept=%d suppressed=%d", len(kept), suppressed)
+		}
+	})
+
+	t.Run("empty baseline suppresses nothing", func(t *testing.T) {
+		p := filepath.Join(dir, "empty.yaml")
+		if _, err := Write(p, nil); err != nil {
+			t.Fatal(err)
+		}
+		kept, suppressed, err := Filter(p, findings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(kept) != 1 || suppressed != 0 {
+			t.Fatalf("empty baseline: kept=%d suppressed=%d; want 1, 0 (nothing baselined)", len(kept), suppressed)
+		}
+	})
 }
