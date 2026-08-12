@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
@@ -121,8 +120,32 @@ func TestJSONAndSARIF(t *testing.T) {
 	if err := JSON(&jsonBuf, findings); err != nil {
 		t.Fatalf("JSON: %v", err)
 	}
-	if !strings.Contains(jsonBuf.String(), `"id": "PX1001"`) {
-		t.Errorf("JSON output lacks PX1001: %s", jsonBuf.String())
+	// Validate the -json output STRUCTURALLY (tooling/editors consume it): parse
+	// the array and assert each finding's fields — id, level, category, message,
+	// file, a 1-based line, and the fix count.
+	var jf []struct {
+		ID       string `json:"id"`
+		Check    string `json:"check"`
+		Level    string `json:"level"`
+		Category string `json:"category"`
+		Message  string `json:"message"`
+		File     string `json:"file"`
+		Line     int    `json:"line"`
+		Fixes    int    `json:"fixes"`
+	}
+	if err := json.Unmarshal(jsonBuf.Bytes(), &jf); err != nil {
+		t.Fatalf("-json is not valid JSON: %v\n%s", err, jsonBuf.String())
+	}
+	if len(jf) != 2 {
+		t.Fatalf("-json has %d findings, want 2", len(jf))
+	}
+	if jf[0].ID != "PX1001" || jf[0].Level != "L1" || jf[0].Category == "" ||
+		jf[0].Check != "performance-for-range-copy" || jf[0].File != "/src/demo.cpp" ||
+		jf[0].Line < 1 || jf[0].Message == "" || jf[0].Fixes != 1 {
+		t.Errorf("-json finding[0] = %+v, want PX1001/L1/1-fix with a resolved location", jf[0])
+	}
+	if jf[1].ID != "PX2001" || jf[1].Level != "L2" || jf[1].Fixes != 0 {
+		t.Errorf("-json finding[1] = %+v, want PX2001/L2/0-fix", jf[1])
 	}
 
 	var sarifBuf bytes.Buffer
