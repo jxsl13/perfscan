@@ -44,7 +44,8 @@ block as a loop whose iteration count is known — a range over a slice or
 map, or a counted for loop — and nothing between the declaration and the
 loop touches it, that count bounds the appends, so make([]T, 0, k*bound)
 removes every growth copy. Standalone declarations count too: a loop
-filling several targets yields one finding per target.
+filling several targets yields one finding per target. Labeled loops
+(L: for ...) are covered like unlabeled ones.
 
 Bound semantics — the check COUNTS the values appended per iteration and
 only flags slices that receive at least one UNCONDITIONAL append per
@@ -93,14 +94,19 @@ func runPS2101(pass *analysis.Pass) (any, error) {
 				return true
 			}
 			for j, stmt := range block.List {
-				body := loopBodyOf(stmt)
+				// A labeled loop (L: for ...) arrives wrapped in an
+				// *ast.LabeledStmt; unwrap so it is analyzed like an
+				// unlabeled one. The label stays one element in
+				// block.List, so the j indexing is unaffected.
+				loop := unwrapLabeled(stmt)
+				body := loopBodyOf(loop)
 				if body == nil {
 					continue
 				}
-				bound := loopCapacityExpr(pass, stmt)
+				bound := loopCapacityExpr(pass, loop)
 				// A range loop is always bounded by its source; a for
 				// loop only counts when a bound was derived.
-				if _, isRange := stmt.(*ast.RangeStmt); !isRange && bound == "" {
+				if _, isRange := loop.(*ast.RangeStmt); !isRange && bound == "" {
 					continue
 				}
 				// Every unsized declaration EARLIER in this block feeds
@@ -133,8 +139,8 @@ func runPS2101(pass *analysis.Pass) (any, error) {
 					// between the declaration and the loop would read
 					// lock-protected state unsynchronized — advisory only.
 					emitFix := bound != "" && !isNil &&
-						!definesIdent(block.List[i+1:j], boundSubject(stmt)) &&
-						!(boundReadsField(stmt) && acquiresLockBetween(block.List[i+1:j]))
+						!definesIdent(block.List[i+1:j], boundSubject(loop)) &&
+						!(boundReadsField(loop) && acquiresLockBetween(block.List[i+1:j]))
 					reportPrealloc(pass, block.List[i], name, typ, isNil, bound, emitFix, uncond, cond, unknown)
 				}
 			}
@@ -147,6 +153,7 @@ func runPS2101(pass *analysis.Pass) (any, error) {
 // boundSubject returns the root identifier of a loop's bound source: the
 // range subject's root, or the counted-loop bound's root.
 func boundSubject(s ast.Stmt) string {
+	s = unwrapLabeled(s)
 	switch l := s.(type) {
 	case *ast.RangeStmt:
 		return rootIdentName(l.X)
@@ -169,6 +176,7 @@ func boundSubject(s ast.Stmt) string {
 // the range subject, or the counted-loop bound (unwrapping a single len(...)
 // argument). It returns nil when no such expression applies.
 func boundSourceExpr(s ast.Stmt) ast.Expr {
+	s = unwrapLabeled(s)
 	switch l := s.(type) {
 	case *ast.RangeStmt:
 		return l.X
@@ -277,7 +285,20 @@ func stmtsMention(stmts []ast.Stmt, name string) bool {
 	return false
 }
 
+// unwrapLabeled peels label wrappers so a labeled loop (L: for ...) is
+// discovered like an unlabeled one. Labels can nest (rare), so it loops.
+func unwrapLabeled(s ast.Stmt) ast.Stmt {
+	for {
+		l, ok := s.(*ast.LabeledStmt)
+		if !ok {
+			return s
+		}
+		s = l.Stmt
+	}
+}
+
 func loopBodyOf(s ast.Stmt) *ast.BlockStmt {
+	s = unwrapLabeled(s)
 	switch l := s.(type) {
 	case *ast.RangeStmt:
 		return l.Body
@@ -295,6 +316,7 @@ func loopBodyOf(s ast.Stmt) *ast.BlockStmt {
 //   - `for i := 0; i < n; i++` with n a plain identifier → "n"
 //   - `for i := 0; i < len(src); i++` with src a plain identifier → "len(src)"
 func loopCapacityExpr(pass *analysis.Pass, s ast.Stmt) string {
+	s = unwrapLabeled(s)
 	switch l := s.(type) {
 	case *ast.RangeStmt:
 		src := simpleExprText(l.X)

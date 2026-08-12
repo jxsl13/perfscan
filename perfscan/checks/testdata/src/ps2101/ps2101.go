@@ -241,3 +241,34 @@ func switchBreakNotOurs(src []int, sink func(int)) []int {
 	}
 	return out
 }
+
+// Regression: a LABELED loop is wrapped in an *ast.LabeledStmt in the
+// block's statement list; it must be discovered like an unlabeled one.
+// The append runs BEFORE the continue-L guard, so it is unconditional —
+// flagged and fixed. (The label must be used to compile.)
+func labeledUnconditional(src []int) []int {
+	out := []int{} // want `out is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(src\)\) — exact: one unconditional value per iteration`
+L:
+	for _, x := range src {
+		out = append(out, x)
+		if x == 0 {
+			continue L
+		}
+	}
+	return out
+}
+
+// Regression: the labeled-loop discovery must compose with the early-exit
+// guard — a `continue L` EARLIER in the body can skip the append, so the
+// append is conditional. A conditional-only fill: not reported.
+func labeledContinueGuard(src []int, skip int) []int {
+	out := []int{}
+L:
+	for _, x := range src {
+		if x == skip {
+			continue L
+		}
+		out = append(out, x)
+	}
+	return out
+}
