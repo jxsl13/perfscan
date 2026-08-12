@@ -70,3 +70,20 @@ func sortInts(xs []int) {
 func alreadyModern(xs []int) {
 	slices.SortFunc(xs, func(a, b int) int { return cmp.Compare(a, b) })
 }
+
+// Whole-element []int compare becomes slices.Sort — no cmp import needed.
+func sortIntsWhole(xs []int) {
+	sort.Slice(xs, func(i, j int) bool { return xs[i] < xs[j] }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
+
+// SliceStable whole-element collapses to slices.Sort (stable == unstable for a
+// basic ordered element, whose equal values are indistinguishable).
+func sortIntsStableWhole(xs []int) {
+	sort.SliceStable(xs, func(i, j int) bool { return xs[i] < xs[j] }) // want `sort\.SliceStable swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
+
+// FLOAT stays advisory: cmp.Compare/slices.Sort order NaN as smallest, but the
+// '<' comparator treats NaN as incomparable, so the rewrite is not bit-identical.
+func sortFloats(fs []float64) {
+	sort.Slice(fs, func(i, j int) bool { return fs[i] < fs[j] }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
