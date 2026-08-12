@@ -88,6 +88,17 @@ go build ./...  → exit 0        # the rewritten module compiles cleanly
 go vet ./...    → exit 0        # no vet issues introduced
 ```
 
+Repeated on **`k8s.io/apimachinery`** (a self-contained Kubernetes staging module —
+JSON/CBOR/protobuf runtime, reflection-heavy `deep_equal`, `sets`, `labels`) at
+`-level 3` (2026-08-12): 142 first-party findings (120 in generated files skipped),
+`-fix` rewrote **29 files** — `make([]T, 0, n)`/`make(map, n)` preallocation (×25),
+`slices.Sort`/`Clone` (×8), `range Split`→`SplitSeq` (×4), a `strconv` — and the
+module **`go build`s exit 0**. `go vet` surfaces only **four pre-existing**
+`repeats json tag` warnings in apimachinery's own `_test.go` structs (identical on the
+unmodified tree, unrelated to any fix); no vet issue is introduced by `-fix`. Another
+independent, real, reflection-heavy module confirming the auto-fix suite is
+behavior-preserving.
+
 The applied fixes include the newer checks on production Go — **PS3104**
 (`sort.Strings`→`slices.Sort`, adding the `slices` import automatically), **PS2120**
 (`w.WriteString(fmt.Sprintf(…))`→`fmt.Fprintf`), **PS2119** (`range strings.Split`→
