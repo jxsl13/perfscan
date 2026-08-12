@@ -90,8 +90,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		cmakeCfg   = fs.Bool("cmake", false, "if no compile_commands.json is found, auto-configure a detected CMake project to generate one (runs cmake configure; only use on trusted code)")
 		cmakeBuild = fs.Bool("cmake-build", false, "implies -cmake and also runs 'cmake --build' to generate build-time headers so TUs parse (executes the project build; incremental)")
 		extra      stringSlice
+		excludeArg stringSlice
 	)
 	fs.Var(&extra, "extra-arg", "extra argument passed to the compiler via clang-tidy (repeatable), e.g. -extra-arg=-isysroot -extra-arg=$(xcrun --show-sdk-path)")
+	fs.Var(&excludeArg, "exclude", "exclude files whose slash-path contains any of these substrings from analysis, reporting, -fix and -diff (repeatable and comma-separated), e.g. -exclude vendor/,third_party/,_deps/")
 	fs.Usage = func() { printUsage(stderr, fs) }
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -170,6 +172,24 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// -exclude drops matching translation units from the input list BEFORE
+	// clang-tidy runs, so excluded files are neither analyzed nor (under -fix)
+	// rewritten — the reliable way to keep -fix off vendored/third-party trees.
+	excludes := splitExcludes(excludeArg)
+	if len(excludes) > 0 {
+		kept := files[:0:0]
+		for _, f := range files {
+			if !pathExcluded(f, excludes) {
+				kept = append(kept, f)
+			}
+		}
+		files = kept
+		if len(files) == 0 {
+			fmt.Fprintf(stderr, "perfscanxx: all matched translation units were removed by -exclude %v\n", excludes)
+			return 2
+		}
+	}
+
 	selected := catalog.Select(*sel, catalog.Level(*maxLevel))
 	if len(selected) == 0 {
 		fmt.Fprintf(stderr, "perfscanxx: selector %q matches no checks at -level %d (see perfscanxx -list)\n", *sel, *maxLevel)
@@ -214,6 +234,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "perfscanxx:", err)
 		return 2
+	}
+
+	// Also drop diagnostics anchored in an excluded file (e.g. a header pulled
+	// in by a non-excluded TU): filtering ef here flows through to report/JSON/
+	// SARIF, -diff and the baseline, which all derive from it.
+	if len(excludes) > 0 && ef != nil {
+		kept := ef.Diagnostics[:0]
+		for i := range ef.Diagnostics {
+			if !pathExcluded(ef.Diagnostics[i].DiagnosticMessage.FilePath, excludes) {
+				kept = append(kept, ef.Diagnostics[i])
+			}
+		}
+		ef.Diagnostics = kept
 	}
 
 	// Separate real performance findings from clang parse errors
@@ -474,6 +507,35 @@ var vendoredDirs = map[string]bool{
 	"googletest": true, "googlemock": true, "gtest": true, "gmock": true,
 }
 
+// splitExcludes expands the repeated/comma-separated -exclude values into a flat
+// list of non-empty substring patterns.
+func splitExcludes(raw []string) []string {
+	var out []string
+	for _, r := range raw {
+		for _, part := range strings.Split(r, ",") {
+			if p := strings.TrimSpace(part); p != "" {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// pathExcluded reports whether p's slash-normalized path contains any of the
+// exclude substrings.
+func pathExcluded(p string, excludes []string) bool {
+	if len(excludes) == 0 {
+		return false
+	}
+	sp := filepath.ToSlash(p)
+	for _, e := range excludes {
+		if strings.Contains(sp, e) {
+			return true
+		}
+	}
+	return false
+}
+
 // vendoredSegment returns the first vendored path segment in p, if any.
 func vendoredSegment(p string) (string, bool) {
 	for _, seg := range strings.Split(filepath.ToSlash(p), "/") {
@@ -573,6 +635,7 @@ Examples:
 	perfscanxx -level 1 -fix -p build ./... report + apply only L1 fixes
 	perfscanxx -fix -p build ./...       default -level 3: apply every fix
 	perfscanxx -diff -p build ./...      preview what -fix would change as a unified diff (no writes; exit 1 if any change)
+	perfscanxx -fix -exclude vendor/,third_party/ -p build ./...   fix, but skip vendored/third-party trees
 	perfscanxx -p build src/main.cpp     a single translation unit
 	perfscanxx -p build -baseline .perfscanxx-baseline.yaml ./...   ratchet: seed, then fail only on NEW findings
 	perfscanxx -cmake ./...              auto-configure a CMake project (generate compile_commands.json)

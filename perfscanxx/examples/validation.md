@@ -104,7 +104,7 @@ not want perfscanxx rewriting bundled `gtest`/`googletest` anyway. The signature
 majority of the catalog (reserve, emplace, make_shared/unique, avoid-endl, = default,
 member-initializer, …) is unaffected.
 
-To make this failure mode visible instead of silent, `-fix` now **warns** when it
+To make this failure mode visible instead of silent, `-fix` **warns** when it
 rewrites files under vendored/third-party path segments (`vendor`, `third_party`,
 `_deps`, `external`, `gtest`/`gmock`/`googletest`/`googlemock`, …). On this exact fmt
 run it prints:
@@ -115,6 +115,43 @@ perfscanxx: warning: -fix modified 3 file(s) under vendored/third-party paths; �
   modified vendored file: corpus/fmt/test/gtest/gmock/gmock.h
   modified vendored file: corpus/fmt/test/gtest/gtest/gtest.h
 ```
+
+### A second fmt finding: PX3015 breaks delegating constructors
+
+Excluding the bundled gtest (`-exclude test/gtest/`, below) removes the link error,
+but a full fmt `-fix` still does not build — a SEPARATE, first-party bug. **PX3015**
+(`cppcoreguidelines-prefer-member-initializer`) rewrote a **delegating** constructor
+in fmt's own `include/fmt/os.h`:
+
+```cpp
+ostream_params(T... p, int new_oflag) : ostream_params(p...) { oflag = new_oflag; }
+//  →  : ostream_params(p...), oflag(new_oflag) { }     // error: an initializer for a
+//                                                      // delegating constructor must appear alone
+```
+
+clang-tidy's fix-it does not notice the constructor delegates (`: ostream_params(p...)`),
+and a delegating constructor may not carry any other member initializer — so the
+rewrite is illegal C++. PX3015 is otherwise correct and high-value (it fixed DDNet
+495× and leveldb cleanly), so this is a clang-tidy fix-it limitation on the
+delegating-constructor shape, not a reason to drop the check. Mitigation is the same
+as above: preview with `-diff`, and `-exclude` the offending file/tree. (Tracked for a
+follow-up guard.)
+
+## Excluding files from analysis and `-fix` (`-exclude`)
+
+`-exclude <substr>` (repeatable and comma-separated) drops every translation unit
+whose slash-path contains a listed substring **before** clang-tidy runs, so excluded
+files are neither analyzed nor rewritten, and matching findings are filtered from
+report/JSON/SARIF/`-diff`. It is the direct, general control for the hazards above —
+keep `-fix` off vendored trees or any file whose fix-it you don't want.
+
+Verified two ways:
+
+- **fmt**: `-fix -exclude test/gtest/` modifies **0** files under `test/gtest/` (the
+  vendored-warning is silent), so the bundled googletest is left untouched.
+- **leveldb** (positive build proof): `-fix -exclude util/` leaves `util/` untouched
+  (0 files) while still applying **10** fixes under `db/`, and `cmake --build …
+  --target leveldb` exits **0** — excluded tree preserved, the rest fixed, tree builds.
 
 ## `-diff` dry-run validated on real C++
 

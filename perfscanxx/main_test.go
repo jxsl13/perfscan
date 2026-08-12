@@ -633,3 +633,41 @@ func TestWarnVendoredFixes(t *testing.T) {
 		t.Errorf("no vendored fixes should be silent, got %q", buf2.String())
 	}
 }
+
+func TestSplitExcludes(t *testing.T) {
+	got := splitExcludes([]string{"vendor/,third_party/", " _deps/ ", "", "gtest/"})
+	want := []string{"vendor/", "third_party/", "_deps/", "gtest/"}
+	if len(got) != len(want) {
+		t.Fatalf("splitExcludes = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("splitExcludes[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if splitExcludes(nil) != nil {
+		t.Error("splitExcludes(nil) should be nil")
+	}
+}
+
+func TestPathExcluded(t *testing.T) {
+	ex := []string{"vendor/", "third_party/", "test/gtest/"}
+	cases := []struct {
+		p    string
+		want bool
+	}{
+		{"/proj/src/main.cpp", false},
+		{"/proj/vendor/lib/x.cpp", true},
+		{"/proj/third_party/re2/re2.cc", true},
+		{"/proj/test/gtest/gmock-gtest-all.cc", true},
+		{"/proj/mytest/gtestish.cpp", false},
+	}
+	for _, c := range cases {
+		if got := pathExcluded(c.p, ex); got != c.want {
+			t.Errorf("pathExcluded(%q) = %v, want %v", c.p, got, c.want)
+		}
+	}
+	if pathExcluded("/anything", nil) {
+		t.Error("no excludes must never match")
+	}
+}
