@@ -250,3 +250,41 @@ func TestSyntaxErrorPackageIsSafe(t *testing.T) {
 		t.Errorf("ok.go was modified even though the package does not type-check:\n%s", gv)
 	}
 }
+
+// TestEmptyPackageIsSafe pins the other edge of the malformed-input family: a
+// module with no Go files at all (a valid but empty result, not an error) must
+// exit cleanly and never crash — under both report and -fix. A future change
+// that assumed at least one package/file would regress here.
+func TestEmptyPackageIsSafe(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module e\n\ngo 1.23\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(wd) }()
+
+	for _, fix := range []bool{false, true} {
+		var out, errBuf bytes.Buffer
+		// Must not panic (the test fails automatically if it does).
+		code := Run(checks.All(), Options{
+			Patterns: []string{"./..."},
+			MaxLevel: lint.LevelAggressive,
+			Fix:      fix,
+			Stdout:   &out,
+			Stderr:   &errBuf,
+		})
+		// No files, no findings -> clean exit 0.
+		if code != 0 {
+			t.Errorf("empty package (fix=%v): exit %d, want 0; stderr:\n%s", fix, code, errBuf.String())
+		}
+		if strings.Contains(out.String(), "PS") {
+			t.Errorf("empty package (fix=%v): unexpected finding on stdout:\n%s", fix, out.String())
+		}
+	}
+}
