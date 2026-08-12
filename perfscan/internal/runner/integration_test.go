@@ -203,3 +203,50 @@ func TestFixIsIdempotent(t *testing.T) {
 		t.Errorf("second -fix should apply 0 fixes; stderr:\n%s", stderr2)
 	}
 }
+
+// TestSyntaxErrorPackageIsSafe pins that a package which does not parse never
+// crashes the runner and never modifies a file — even under -fix. go/analysis
+// cannot analyze an incomplete package, so the correct behavior is to surface
+// the load error and leave every file untouched; a linter that panicked or
+// spliced a fix into a broken tree would be dangerous.
+func TestSyntaxErrorPackageIsSafe(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const broken = "package s\n\nfunc f( {\n\tx := []string{}\n\t_ = x\n}\n"
+	// A valid sibling with a genuine PS2101 site: it must NOT be fixed, because
+	// the package as a whole does not type-check.
+	const valid = "package s\n\nfunc g(xs []string) []string {\n\tout := []string{}\n\tfor _, x := range xs {\n\t\tout = append(out, x)\n\t}\n\treturn out\n}\n"
+	write("go.mod", "module s\n\ngo 1.23\n")
+	write("broken.go", broken)
+	write("ok.go", valid)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(wd) }()
+
+	var out, errBuf bytes.Buffer
+	// The call must not panic (the test fails automatically if it does).
+	Run(checks.All(), Options{
+		Patterns: []string{"./..."},
+		MaxLevel: lint.LevelAggressive,
+		Fix:      true,
+		Stdout:   &out,
+		Stderr:   &errBuf,
+	})
+
+	if gb, _ := os.ReadFile(filepath.Join(dir, "broken.go")); string(gb) != broken {
+		t.Errorf("broken.go was modified:\n%s", gb)
+	}
+	if gv, _ := os.ReadFile(filepath.Join(dir, "ok.go")); string(gv) != valid {
+		t.Errorf("ok.go was modified even though the package does not type-check:\n%s", gv)
+	}
+}
