@@ -130,3 +130,32 @@ func TestSetForTesting(t *testing.T) {
 		t.Error("restore() did not revert the vocabulary")
 	}
 }
+
+func TestUnknownKeys(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "perfscan.yaml")
+
+	// elementAccesors (missing an 's') and bogus are unknown; the two correctly
+	// spelled keys are not. Result is sorted.
+	os.WriteFile(p, []byte("elementAccessors: [A]\nelementAccesors: [B]\nbogus: 1\nallocatorFuncs: [Z]\n"), 0o644)
+	got := UnknownKeys(p)
+	if len(got) != 2 || got[0] != "bogus" || got[1] != "elementAccesors" {
+		t.Errorf("UnknownKeys = %v, want [bogus elementAccesors]", got)
+	}
+
+	// All-known config -> no unknowns.
+	os.WriteFile(p, []byte("elementAccessors: [A]\nfanOutHelpers: [F]\n"), 0o644)
+	if got := UnknownKeys(p); len(got) != 0 {
+		t.Errorf("UnknownKeys(all known) = %v, want none", got)
+	}
+
+	// Missing file and a non-mapping YAML document are best-effort nil.
+	if got := UnknownKeys(filepath.Join(dir, "nope.yaml")); got != nil {
+		t.Errorf("UnknownKeys(missing) = %v, want nil", got)
+	}
+	seq := filepath.Join(dir, "seq.yaml")
+	os.WriteFile(seq, []byte("- a\n- b\n"), 0o644)
+	if got := UnknownKeys(seq); got != nil {
+		t.Errorf("UnknownKeys(non-mapping) = %v, want nil", got)
+	}
+}
