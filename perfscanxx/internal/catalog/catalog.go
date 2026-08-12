@@ -242,6 +242,31 @@ var entries = []Entry{
 		Title:  "an rvalue-reference parameter never std::move'd is a missed move — it copies where it could have moved",
 		HasFix: false,
 	},
+	{
+		// Advisory (clang-tidy emits no fix-it): an integer<->pointer cast
+		// (reinterpret_cast<T*>(intval) or the reverse) opaques the value to the
+		// optimizer — it defeats alias analysis and blocks optimizations across
+		// the cast. There is no mechanical rewrite (the fix is to redesign so the
+		// pointer is never round-tripped through an integer), so it stays advisory.
+		// Gated to L3: it is a niche systems/embedded pattern, near-silent on
+		// ordinary application code, so it must never surface at the default level.
+		ID: "PX3021", TidyName: "performance-no-int-to-ptr",
+		Level: LevelAggressive, Category: "codegen",
+		Title:  "an integer<->pointer cast pessimizes optimization — it defeats the optimizer's alias analysis",
+		HasFix: false,
+	},
+	{
+		// Advisory (clang-tidy emits no fix-it, only a suggested base type): an
+		// enum whose fixed underlying type is wider than its value set needs wastes
+		// storage in every object and array that holds it. The suggested narrower
+		// type is context-dependent (ABI, arithmetic, forward-declares elsewhere),
+		// so it is not a safe mechanical rewrite and stays advisory. Gated to L3 to
+		// avoid noise on deliberately-wide enums.
+		ID: "PX3022", TidyName: "performance-enum-size",
+		Level: LevelAggressive, Category: "layout",
+		Title:  "an enum's underlying type is wider than its value set needs; a narrower base type shrinks every instance",
+		HasFix: false,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{

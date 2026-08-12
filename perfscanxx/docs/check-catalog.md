@@ -73,12 +73,20 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   > the minimal-C++ directive, custom checks are declarative clang-query matcher
   > strings, not a C++ module.
 
-Two built-in checks stay advisory because clang-tidy emits no fix-it for them:
-`PX2002` (inefficient-string-concatenation) and `PX3020`
+Four built-in checks stay advisory because clang-tidy emits no fix-it for them:
+`PX2002` (inefficient-string-concatenation), `PX3020`
 (rvalue-reference-param-not-moved — a missed move, where inserting the corrected
-`std::move` needs to know the parameter is dead afterwards). So the advisory set is
-exactly `{PX2002, PX3020, PX2101, PX2102, PX2103, PX2104, PX2105, PX2106}`; everything else is
-auto-fixable.
+`std::move` needs to know the parameter is dead afterwards), and two L3-only
+diagnostics with no mechanical rewrite: `PX3021` (no-int-to-ptr — an integer↔pointer
+cast that defeats the optimizer's alias analysis) and `PX3022` (enum-size — an enum
+whose fixed underlying type is wider than its value set needs). So the advisory set is
+exactly `{PX2002, PX3020, PX3021, PX3022, PX2101, PX2102, PX2103, PX2104, PX2105, PX2106}`;
+everything else is auto-fixable.
+
+`PX3021` and `PX3022` are gated to **L3 (aggressive)** — they target niche
+systems/embedded patterns (integer↔pointer round-tripping, deliberately-wide
+enums) and must never surface at the default level, so they are the first
+aggressive-tier entries in the catalog.
 
 ## Provenance
 
