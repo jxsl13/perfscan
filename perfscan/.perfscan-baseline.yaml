@@ -4,10 +4,26 @@ entries:
       id: PS3101
       message: '[]byte(repl) copies its operand on every iteration but repl is loop-invariant; hoist the conversion above the loop'
       count: 1
+    - file: config/config.go
+      id: PS3106
+      message: parameter c of type Config is 264 bytes; passing it by value copies 264 bytes on every call — take a *Config for large values (advisory)
+      count: 1
+    - file: config/config.go
+      id: PS3106
+      message: receiver c of type Config is 264 bytes; passing it by value copies 264 bytes on every call — take a *Config for large values (advisory)
+      count: 1
     - file: internal/runner/baseline.go
       id: PS3103
       message: ranging by value copies a 136-byte Finding element on every iteration; iterate by index and take a pointer to the element where aliasing is safe
       count: 2
+    - file: internal/runner/baseline.go
+      id: PS3106
+      message: parameter f of type Finding is 136 bytes; passing it by value copies 136 bytes on every call — take a *Finding for large values (advisory)
+      count: 1
+    - file: internal/runner/diff.go
+      id: PS3106
+      message: parameter opts of type Options is 160 bytes; passing it by value copies 160 bytes on every call — take a *Options for large values (advisory)
+      count: 1
     - file: internal/runner/runner.go
       id: PS2110
       message: append([]byte{}, e.text...) is a hand-rolled clone; bytes.Clone(e.text) says it directly
@@ -19,6 +35,14 @@ entries:
     - file: internal/runner/runner.go
       id: PS3103
       message: ranging by value copies a 136-byte Finding element on every iteration; iterate by index and take a pointer to the element where aliasing is safe
+      count: 5
+    - file: internal/runner/runner.go
+      id: PS3106
+      message: parameter cfg of type github.com/jxsl13/perfscan/perfscan/config.Config is 264 bytes; passing it by value copies 264 bytes on every call — take a *github.com/jxsl13/perfscan/perfscan/config.Config for large values (advisory)
+      count: 1
+    - file: internal/runner/runner.go
+      id: PS3106
+      message: parameter opts of type Options is 160 bytes; passing it by value copies 160 bytes on every call — take a *Options for large values (advisory)
       count: 5
     - file: internal/runner/sarif.go
       id: PS3103
