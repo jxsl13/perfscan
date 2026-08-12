@@ -1,111 +1,94 @@
-# Example perfscan vocabulary for a tensor/numerical library.
-# These project-specific names drive the DOMAIN checks (opt-in); the
-# stdlib/language checks need no config. Supply your own names via
-# -config file.yaml or a perfscan.yaml in the module root.
+# perfscan domain-check vocabulary — a GENERIC template.
+#
+# perfscan's language/stdlib checks need no config and run on any Go module.
+# The DOMAIN checks (opt-in) key on YOUR project's own vocabulary — the names of
+# your element accessors, allocators, fast-path helpers, fan-out entry points and
+# so on. List those names here so the domain checks can recognise them; leave any
+# field empty (or omit it) to keep the checks that depend on it silent.
+#
+# Every value below is a PLACEHOLDER — replace it with the real identifiers from
+# your codebase. Nothing here is built in; perfscan ships no vocabulary of its
+# own. Supply this file with `-config perfscan.yaml`, or drop a perfscan.yaml /
+# .perfscan.yaml in your module root (auto-discovered). YAML is the format; JSON
+# also parses.
+#
+# The n-dimensional-data fields (shapeMethods, indexDecomposeFuncs, dtypeMethods)
+# are only meaningful for tensor/array libraries — omit them otherwise.
+
+# Per-element getter/setter methods whose per-call dispatch inside a hot loop the
+# PS1xxx checks report. (matrix lib: At/Set — tensor lib: AtF64/SetF64)
 elementAccessors:
-  - AtF64
-  - SetF64
+  - At
+  - Set
+
+# Typed fast-path helpers whose presence marks a loop as already optimized, so a
+# fallback per-element loop beside them is expected. Keep this list COMPLETE — a
+# helper missing here makes the per-element checks flag the very fast path.
 fastPathHelpers:
-  - flatF64
-  - flatF32
-  - flatContig
-  - F64
-  - F32
-  - f64Data
-  - outF64
-  - flatRowMajor
-  - copyRowsFrom
+  - flatSlice
+  - rawData
+
+# Methods whose result is used as a loop bound, marking the loop as per-element.
+# (e.g. Len, Size, Count)
 elementCountMethods:
-  - Numel
+  - Len
+
+# Methods returning a dimension/shape slice; a loop bounded by x.Shape()[i] walks
+# elements just as an element count does. (n-dimensional data only)
 shapeMethods:
   - Shape
+
+# Functions converting a flat index into a multi-index; their use marks a
+# per-element loop. (n-dimensional data only)
 indexDecomposeFuncs:
   - Unravel
+
+# Allocation entry points that PS2001 reports when called inside a per-element
+# loop. (e.g. New, Alloc, Zeros)
 allocatorFuncs:
   - New
-  - NewOn
-  - FromFloat64
-  - FromFloat32
-  - Zeros
-  - Ones
-  - Full
-  - Scalar
-  - scalarTensor
-  - Cast
+  - Alloc
+
+# Helpers fed a per-element closure (one indirect call per element) that PS1002
+# reports. (e.g. ForEach, Map, VisitEach)
 perElementVisitors:
-  - readGen
-  - fillGen
-  - visitGen
-  - forEach
-  - eachElem
+  - ForEach
+
+# Bulk copy routines whose presence silences the genuine-decode path for PS4001.
+# (e.g. a raw block copy)
 bulkCopyHelpers:
-  - rawCopyLE
-  - rawStoreLE
+  - bulkCopy
+
+# SIMD / vectorized kernels that exist beside a scalar math.X call; PS4002 reports
+# the scalar call when a vectorized sibling is available. (e.g. vExp, vTanh)
 vectorizedSiblingFuncs:
-  - vexpF32
-  - vexpFullF32
-  - vexpRowF32
-  - vexpQuadsNeonF32
-  - vexpFullQuadsNeonF32
-  - vsiluF32
-  - vsiluF64
-  - vsiluGradF32
-  - vsiluQuadsNeonF32
-  - vsiluGradQuadsNeonF32
-  - vgeluF32
-  - vgeluGradF32
-  - vgeluQuadsNeonF32
-  - vgeluGradQuadsNeonF32
-  - vtanhF32
-  - vtanhQuadsNeonF32
-  - vlogF32
-  - vlogQuadsNeonF32
-  - vsigmoidF32
-  - vsigmoidQuadsNeonF32
-  - vsoftplusF64
-  - vsoftcapF64
-  - vMaxF32
-  - varSumF32
-  - expF64x4
-  - softplusF64x4
-  - horizF64x4
-  - max8
-pureComputeFuncs:
-  - forward
-layoutOpConstants:
-  - OpSlice
-  - OpReshape
-  - OpTranspose
-  - OpConcat
-pointerTypeNames:
-  - Shape
-  - Strides
-  - Tensor
-  - Storage
-  - Attrs
-  - Device
-  - Context
-variadicDispatchWrappers:
-  - bitExec
-  - exec
-  - hcExec
-  - rdropExec
-  - visExecN
-topKSelectorFuncs:
-  - topKIndices
-inputViewFuncs:
-  - f64Data
-  - f32Data
-outputViewFuncs:
-  - outF64
-  - outF32
-referenceBackendPkg:
-  - r
-  - e
-  - f
-optimizedBackendPkgs:
-  - cpu
-kernelRegisterFuncs:
-  - add
+  - vExp
+
+# The project's parallel fan-out entry points; the PS3xxx serial-nest checks
+# report a hot serial nest in a package that declares one. (e.g. parallel.For)
+fanOutHelpers:
+  - parallel.For
+
+# Element-type discriminator methods whose switch PS1009 inspects for a case left
+# on the per-element accessor while a sibling case takes typed storage.
+# (n-dimensional data only; e.g. Dtype, Kind)
 dtypeMethods:
   - Dtype
+
+# ---------------------------------------------------------------------------
+# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 11
+# fields, filled with that project's real vocabulary. Copy the SHAPE, not the
+# names:
+#
+#   elementAccessors:       [AtF64, SetF64]
+#   fastPathHelpers:        [flatF64, flatF32, flatContig, F64, F32]
+#   elementCountMethods:    [Numel]
+#   shapeMethods:           [Shape]
+#   indexDecomposeFuncs:    [Unravel]
+#   allocatorFuncs:         [New, NewOn, Zeros, Ones, Full, Cast]
+#   perElementVisitors:     [forEach, eachElem, visitGen]
+#   bulkCopyHelpers:        [rawCopyLE, rawStoreLE]
+#   vectorizedSiblingFuncs: [vexpF32, vtanhF32, vsiluF32, vgeluF32]
+#   fanOutHelpers:          [parallel.For]
+#   dtypeMethods:           [Dtype]
+# ---------------------------------------------------------------------------

@@ -7,6 +7,11 @@
 // vocabulary — its element accessors, allocators, fast-path helpers and
 // vectorized kernels — which lives in a YAML config, not in the engine.
 //
+// The vocabulary is entirely project-supplied; perfscan ships none of its own
+// and is not tied to any particular library. docs/perfscan.example.yaml is a
+// generic, field-by-field template (with a tensor library shown as one concrete
+// instance) to copy and fill with your codebase's names.
+//
 // With no config those checks stay silent, and the runner names each starved
 // check in a loud stderr warning: a silent zero from a starved check reads as
 // "no instances", which is the one failure mode that costs whole
@@ -31,29 +36,31 @@ import (
 // Config is the project vocabulary for domain checks. All fields are
 // optional; an empty field silences the checks that depend on it.
 type Config struct {
-	// ElementAccessors are per-element get/set methods (e.g. AtF64, SetF64)
-	// whose per-call dispatch inside hot loops PS1xxx checks report.
+	// ElementAccessors are per-element get/set methods (e.g. At/Set — a tensor
+	// library might name them AtF64/SetF64) whose per-call dispatch inside hot
+	// loops PS1xxx checks report.
 	ElementAccessors []string `json:"elementAccessors,omitempty" yaml:"elementAccessors"`
 
-	// FastPathHelpers are typed fast-path helpers (e.g. flatF64) whose
-	// presence silences a fallback loop. Keep this list COMPLETE: a
+	// FastPathHelpers are typed fast-path helpers (e.g. a flat-slice accessor)
+	// whose presence silences a fallback loop. Keep this list COMPLETE: a
 	// comma-ok helper missing from the list makes the per-element checks
 	// report the very fallback the fast path exists to guard.
 	FastPathHelpers []string `json:"fastPathHelpers,omitempty" yaml:"fastPathHelpers"`
 
 	// ElementCountMethods are methods whose result used as a loop bound
-	// marks the loop as per-element (e.g. Numel).
+	// marks the loop as per-element (e.g. Len, Size, Count).
 	ElementCountMethods []string `json:"elementCountMethods,omitempty" yaml:"elementCountMethods"`
 
 	// ShapeMethods return dimension slices; a loop bounded by
-	// t.Shape()[i] walks elements exactly as an element count does.
+	// x.Shape()[i] walks elements exactly as an element count does
+	// (n-dimensional-data libraries only).
 	ShapeMethods []string `json:"shapeMethods,omitempty" yaml:"shapeMethods"`
 
-	// IndexDecomposeFuncs convert flat indices to multi-indices
-	// (e.g. Unravel); their use marks a per-element loop.
+	// IndexDecomposeFuncs convert a flat index to a multi-index; their use
+	// marks a per-element loop (n-dimensional-data libraries only).
 	IndexDecomposeFuncs []string `json:"indexDecomposeFuncs,omitempty" yaml:"indexDecomposeFuncs"`
 
-	// AllocatorFuncs are allocation entry points (e.g. New, Zeros, Cast)
+	// AllocatorFuncs are allocation entry points (e.g. New, Alloc)
 	// that PS2001 reports when called inside a per-element loop.
 	AllocatorFuncs []string `json:"allocatorFuncs,omitempty" yaml:"allocatorFuncs"`
 
@@ -75,9 +82,10 @@ type Config struct {
 	// packages that declare one but leave a hot nest serial.
 	FanOutHelpers []string `json:"fanOutHelpers,omitempty" yaml:"fanOutHelpers"`
 
-	// DtypeMethods are element-type discriminator methods (e.g. Dtype)
+	// DtypeMethods are element-type discriminator methods (e.g. Dtype, Kind)
 	// whose switch statements PS1009 inspects for named cases left on the
-	// per-element accessor while a sibling case takes typed storage.
+	// per-element accessor while a sibling case takes typed storage
+	// (n-dimensional-data libraries only).
 	DtypeMethods []string `json:"dtypeMethods,omitempty" yaml:"dtypeMethods"`
 }
 

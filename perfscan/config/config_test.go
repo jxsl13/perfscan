@@ -159,3 +159,30 @@ func TestUnknownKeys(t *testing.T) {
 		t.Errorf("UnknownKeys(non-mapping) = %v, want nil", got)
 	}
 }
+
+// TestExampleConfigIsValidAndGeneric pins the shipped template: it must parse,
+// contain NO unknown keys (so it never drifts back to stale/renamed fields), and
+// populate every documented field so it stays a complete, working reference.
+func TestExampleConfigIsValidAndGeneric(t *testing.T) {
+	const path = "../docs/perfscan.example.yaml"
+	if unk := UnknownKeys(path); len(unk) != 0 {
+		t.Errorf("example config has unknown keys %v — every key must map to a Config field", unk)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(example): %v", err)
+	}
+	fields := map[string]int{
+		"ElementAccessors": len(c.ElementAccessors), "FastPathHelpers": len(c.FastPathHelpers),
+		"ElementCountMethods": len(c.ElementCountMethods), "ShapeMethods": len(c.ShapeMethods),
+		"IndexDecomposeFuncs": len(c.IndexDecomposeFuncs), "AllocatorFuncs": len(c.AllocatorFuncs),
+		"PerElementVisitors": len(c.PerElementVisitors), "BulkCopyHelpers": len(c.BulkCopyHelpers),
+		"VectorizedSiblingFuncs": len(c.VectorizedSiblingFuncs), "FanOutHelpers": len(c.FanOutHelpers),
+		"DtypeMethods": len(c.DtypeMethods),
+	}
+	for name, n := range fields {
+		if n == 0 {
+			t.Errorf("example config leaves %s empty; the template should exercise every field", name)
+		}
+	}
+}
