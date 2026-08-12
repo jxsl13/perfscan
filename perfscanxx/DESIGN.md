@@ -344,7 +344,8 @@ tidy-names, are mapped to PX IDs like any built-in check, and flow through the
 Consequence: `--experimental-custom-checks` is **diagnose-only** — custom checks
 emit NO fix-its, so they are always **advisory** (no `-fix`/`-diff` applies to them).
 This is the C++ analog of perfscan's advisory checks. Current ones: **PX2101**
-reserve-before-loop, **PX2102** pessimizing-move, **PX2103** catch-by-value.
+reserve-before-loop, **PX2102** pessimizing-move, **PX2103** catch-by-value, **PX2104**
+regex-in-loop.
 
 The only C++ perfscanxx touches is the prebuilt `clang-tidy` binary — there is **no
 compiled plugin, no `--load`, no LLVM link**, and therefore none of the plugin-ABI
