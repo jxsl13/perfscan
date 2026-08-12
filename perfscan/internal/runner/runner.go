@@ -557,15 +557,13 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		start, end int
 		text       []byte
 	}
+	// A fileFix is one finding's edits within a single file, resolved
+	// atomically — all its edits apply or none do.
+	type fileFix struct {
+		edits []edit
+	}
 	//perfscan:ignore PS2104 findings cluster in few files; len(findings) would over-reserve
-	perFile := map[string][]edit{}
-	// pending counts the fixes grouped onto each file; the applied/failed tally
-	// is deferred to the write loop below, so a file that is skipped there
-	// (unreadable / overlapping / offsets out of range) marks its fixes FAILED
-	// rather than applied. Counting applied per finding up front overstated it
-	// whenever the target file was later skipped.
-	//perfscan:ignore PS2104 a fix's edits cluster in few files; len would over-reserve
-	pending := map[string]int{}
+	perFile := map[string][]fileFix{}
 	for _, f := range findings {
 		if !f.Check.AutoFix || len(f.Fixes) == 0 {
 			continue
@@ -595,64 +593,91 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 			failed++
 			continue
 		}
+		// One fileFix per (finding, file): the finding's edits in that file are
+		// applied atomically — all or none — so overlap resolution can drop a
+		// whole conflicting fix without splicing half of it.
 		for name, es := range byFile {
-			perFile[name] = append(perFile[name], es...)
-		}
-		// Attribute the fix to one target file so it is counted exactly once,
-		// when that file's fate is known below. A fix's edits share a single
-		// file in practice; the break makes multi-file fixes (none today) still
-		// count once rather than per file.
-		for name := range byFile {
-			pending[name]++
-			break
+			perFile[name] = append(perFile[name], fileFix{edits: es})
 		}
 	}
 
+	// fixMinStart is a fix's earliest edit offset (its sort key); conflicts
+	// reports whether any edit in es overlaps any already-accepted edit
+	// (half-open ranges, so a boundary-touching insertion does not conflict).
+	fixMinStart := func(f fileFix) int {
+		m := f.edits[0].start
+		for _, e := range f.edits[1:] {
+			if e.start < m {
+				m = e.start
+			}
+		}
+		return m
+	}
+	conflicts := func(es, accepted []edit) bool {
+		for _, e := range es {
+			for _, a := range accepted {
+				if e.start < a.end && a.start < e.end {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
 	files = make(map[string]patchedFile, len(perFile))
-	for path, edits := range perFile {
+	for path, fixes := range perFile {
 		src, err := os.ReadFile(path)
 		if err != nil {
 			fmt.Fprintf(opts.Stderr, "perfscan: fix %s: %v\n", path, err)
-			failed += pending[path]
+			failed += len(fixes)
 			continue
 		}
 		orig := slices.Clone(src)
-		slices.SortFunc(edits, func(a, b edit) int { return b.start - a.start })
-		overlap := false
-		for i := 1; i < len(edits); i++ {
-			if edits[i].end > edits[i-1].start {
-				overlap = true
-				break
-			}
-		}
-		if overlap {
-			fmt.Fprintf(opts.Stderr, "perfscan: fix %s: overlapping edits, skipping file\n", path)
-			failed += pending[path]
-			continue
-		}
-		// Guard against edit offsets that do not address this on-disk file —
-		// e.g. a cgo-processed translation unit whose parsed bytes differ
+
+		// Reject the whole file when any edit's offsets do not address the
+		// on-disk bytes — e.g. a cgo-processed TU whose parsed bytes differ
 		// from the source. Applying such offsets would panic or corrupt.
 		outOfRange := false
-		for i := range edits {
-			if edits[i].start < 0 || edits[i].start > edits[i].end || edits[i].end > len(src) {
-				outOfRange = true
-				break
+		for i := range fixes {
+			for _, e := range fixes[i].edits {
+				if e.start < 0 || e.start > e.end || e.end > len(src) {
+					outOfRange = true
+				}
 			}
 		}
 		if outOfRange {
 			fmt.Fprintf(opts.Stderr, "perfscan: fix %s: edit offsets out of range (generated or cgo source?), skipping file\n", path)
-			failed += pending[path]
+			failed += len(fixes)
 			continue
 		}
-		for _, e := range edits {
+
+		// Resolve overlaps at the FIX level: two checks can target the same
+		// span (e.g. PS2103 and PS2122 both rewrite one fmt.Sprintf into a + b,
+		// via different but equivalent edits). Rather than skip the whole file,
+		// apply a maximal set of non-overlapping fixes; a fix whose edits
+		// collide with an already-accepted one is dropped whole (its finding
+		// counts failed) — the code is still correctly rewritten by the fix
+		// that won. Deterministic: fixes are ordered by their first edit, then
+		// by input order (stable).
+		slices.SortStableFunc(fixes, func(a, b fileFix) int { return fixMinStart(a) - fixMinStart(b) })
+		var accepted []edit
+		for i := range fixes {
+			if conflicts(fixes[i].edits, accepted) {
+				failed++
+				continue
+			}
+			accepted = append(accepted, fixes[i].edits...)
+			applied++
+		}
+		// Apply accepted edits back-to-front so earlier offsets stay valid.
+		slices.SortFunc(accepted, func(a, b edit) int { return b.start - a.start })
+		for _, e := range accepted {
 			src = append(src[:e.start], append(append([]byte{}, e.text...), src[e.end:]...)...)
 		}
 		if formatted, err := format.Source(src); err == nil {
 			src = formatted
 		}
 		files[path] = patchedFile{orig: orig, fixed: src}
-		applied += pending[path]
 	}
 	return files, applied, failed
 }
