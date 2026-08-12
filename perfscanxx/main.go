@@ -238,18 +238,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// -fix-sequential: apply every fixable built-in check in its own clang-tidy
-	// --fix pass, so fix-its from different checks are never combined in one
-	// clang-apply-replacements run (which can emit invalid code on dense C++
-	// where their edit ranges abut — see examples/validation.md). Query-based
-	// custom checks apply no fix-it and are skipped.
-	if *fix && *fixSeq {
-		if err := applySequentialFixes(context.Background(), stderr, opts, selected, *verbose); err != nil {
-			fmt.Fprintln(stderr, "perfscanxx:", err)
-			return 2
-		}
-	}
-
 	ef, err := fixes.Parse(res.ExportYAML)
 	if err != nil {
 		fmt.Fprintln(stderr, "perfscanxx:", err)
@@ -280,6 +268,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 			parseErrs = append(parseErrs, f)
 		} else {
 			findings = append(findings, f)
+		}
+	}
+
+	// -fix-sequential: apply each fixable built-in check that actually FIRED in
+	// its own clang-tidy --fix pass, so fix-its from different checks are never
+	// combined in one clang-apply-replacements run (which can emit invalid code
+	// on dense C++ where their edit ranges abut — see examples/validation.md).
+	// Limiting to the checks that fired (from the report run above) keeps this to
+	// a handful of passes instead of one per catalog entry; a check with no
+	// finding has nothing to apply. Query-based custom checks apply no fix-it and
+	// are skipped.
+	if *fix && *fixSeq {
+		fired := make(map[string]bool, len(findings))
+		for i := range findings {
+			fired[findings[i].ID] = true
+		}
+		if err := applySequentialFixes(context.Background(), stderr, opts, selected, fired, *verbose); err != nil {
+			fmt.Fprintln(stderr, "perfscanxx:", err)
+			return 2
 		}
 	}
 
@@ -556,19 +563,21 @@ func pathExcluded(p string, excludes []string) bool {
 	return false
 }
 
-// applySequentialFixes runs clang-tidy --fix once per fixable built-in check,
-// in catalog order, so fix-its from different checks are never combined in a
-// single clang-apply-replacements pass. Each pass re-parses the current (already
+// applySequentialFixes runs clang-tidy --fix once per fixable built-in check
+// that FIRED (fired[ID]), in catalog order, so fix-its from different checks are
+// never combined in a single clang-apply-replacements pass. Restricting to checks
+// that produced a finding keeps this to a handful of passes rather than one per
+// catalog entry. Each pass re-parses the current (already
 // partially fixed) source, so a later check's fix-it correctly accounts for an
 // earlier one — e.g. performance-noexcept-move-constructor then
 // cppcoreguidelines-prefer-member-initializer yields `noexcept : init {` rather
 // than the invalid `: init noexcept {` a combined pass produces. Slower (one
 // clang-tidy invocation per check) but collision-free. Query-based custom checks
 // (Custom) and advisory checks (no HasFix) apply no fix-it and are skipped.
-func applySequentialFixes(ctx context.Context, stderr io.Writer, base tidy.Options, selected []catalog.Entry, verbose bool) error {
+func applySequentialFixes(ctx context.Context, stderr io.Writer, base tidy.Options, selected []catalog.Entry, fired map[string]bool, verbose bool) error {
 	applied := 0
 	for _, e := range selected {
-		if !e.HasFix || e.Custom {
+		if !e.HasFix || e.Custom || !fired[e.ID] {
 			continue
 		}
 		o := base

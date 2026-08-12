@@ -767,13 +767,18 @@ func TestApplySequentialFixes(t *testing.T) {
 		{ID: "PX2002", TidyName: "performance-inefficient-string-concatenation", HasFix: false}, // advisory → skip
 		{ID: "PX2101", TidyName: "custom-reserve-before-loop", Custom: true},                    // query-based → skip
 		{ID: "PX3007", TidyName: "modernize-pass-by-value", HasFix: true},
+		{ID: "PX3013", TidyName: "modernize-use-equals-default", HasFix: true}, // fixable but did NOT fire -> skip
 	}
+	// Only PX1001 and PX3007 actually fired in the report run; PX3013 is fixable
+	// but produced no finding, so it gets no pass.
+	fired := map[string]bool{"PX1001": true, "PX3007": true, "PX2002": true, "PX2101": true}
 	base := tidy.Options{Binary: "clang-tidy", Files: []string{"x.cpp"}}
 	var buf bytes.Buffer
-	if err := applySequentialFixes(context.Background(), &buf, base, selected, false); err != nil {
+	if err := applySequentialFixes(context.Background(), &buf, base, selected, fired, false); err != nil {
 		t.Fatal(err)
 	}
-	// Argv builds `--checks=-*,<check>`; only the two fixable built-in checks run.
+	// Argv builds `--checks=-*,<check>`; only fixable built-in checks that FIRED run
+	// (advisory PX2002, custom PX2101, and non-firing PX3013 are skipped).
 	want := []string{"-*,performance-for-range-copy", "-*,modernize-pass-by-value"}
 	if len(checksSeen) != len(want) {
 		t.Fatalf("ran %d passes %v, want %d %v", len(checksSeen), checksSeen, len(want), want)

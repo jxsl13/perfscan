@@ -219,13 +219,15 @@ S(S&& other)  noexcept : engaged_(true) { … }   // compiles
 ```
 
 (verified end-to-end through perfscanxx). It is slower — one clang-tidy invocation per
-check — so single-pass stays the default; reach for `-fix-sequential` on dense C++ where
-the combined pass collides. It does NOT rescue the single-check breakers (fmt's
+check, but only for the checks that actually FIRED in the report run (a handful, not
+the whole catalog) — so single-pass stays the default; reach for `-fix-sequential` on
+dense C++ where the combined pass collides. It does NOT rescue the single-check breakers (fmt's
 amalgamated-gtest PX3007 or the delegating-ctor PX3015 fail with only that one check
 active) — those still need `-exclude` / `-checks`. **Recommended workflow: preview with
 `-diff` first; on a break, retry with `-fix-sequential`, then narrow with `-checks` /
-`-exclude`.** Validated at scale with no regression: `-fix -fix-sequential` on leveldb
-(25 isolated passes) applies 15 fixes and the tree still **rebuilds clean**.
+`-exclude`.** Validated at scale with no regression: `-fix -fix-sequential` on leveldb runs just
+**5 isolated passes** (only the checks that fired), ~44 s, applies 15 fixes, and the
+tree still **rebuilds clean**.
 
 ## `-diff` dry-run validated on real C++
 
