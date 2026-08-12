@@ -29,9 +29,10 @@ func dump(bs []byte) string {
 	return fmt.Sprintf("%x", bs) // want `fmt\.Sprintf of a single %x \[\]byte value boxes the argument and walks fmt's formatter state machine; hex\.EncodeToString converts it directly`
 }
 
-// %s over a plain string: the call is an identity — fixed to the value.
+// %s over a plain string is an IDENTITY, not a conversion: PS2107 leaves it to
+// PS2130 (which owns fmt.Sprintf("%s"/"%v", s) and fmt.Sprint). Silent here.
 func same(s string) string {
-	return fmt.Sprintf("%s", s) // want `fmt\.Sprintf of a single %s string value is an identity format through fmt's reflection path; use the string value directly`
+	return fmt.Sprintf("%s", s)
 }
 
 type port int
