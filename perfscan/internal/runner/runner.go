@@ -662,9 +662,28 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 
 	files = make(map[string]patchedFile, len(perFile))
 	for path, fixes := range perFile {
+		// Never write outside the working tree. On a cgo package the analyzer
+		// sees the cgo-PROCESSED translation unit, whose token.File.Name() is the
+		// go-build cache path; its offsets are in range for THAT file, so the
+		// out-of-range guard below misses. Writing there poisons a build artifact
+		// and, worse, reports a false "applied" while the user's real source is
+		// untouched. GOMODCACHE/GOROOT are likewise off-limits (read-only deps).
+		if outsideWorkTree(path) {
+			fmt.Fprintf(opts.Stderr, "perfscan: fix targets a generated/cached source outside the module (%s); cgo/generated packages cannot be auto-fixed — apply manually\n", path)
+			failed += len(fixes)
+			continue
+		}
 		src, err := os.ReadFile(path)
 		if err != nil {
 			fmt.Fprintf(opts.Stderr, "perfscan: fix %s: %v\n", path, err)
+			failed += len(fixes)
+			continue
+		}
+		// A "// Code generated ... DO NOT EDIT." file must never be rewritten,
+		// wherever it lives (cgo TUs carry this marker; so do stringer/protoc
+		// outputs a user may have in-tree). Same reasoning as the path guard.
+		if isGeneratedSource(src) {
+			fmt.Fprintf(opts.Stderr, "perfscan: fix %s: generated file (DO NOT EDIT); not applied\n", path)
 			failed += len(fixes)
 			continue
 		}
