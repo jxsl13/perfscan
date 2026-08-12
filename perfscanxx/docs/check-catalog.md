@@ -61,6 +61,13 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   **PX2104** regex-in-loop (`std::regex` constructed each iteration),
   **PX2105** dynamic-cast-in-loop (an RTTI type-check every iteration).
 
+  Every custom matcher is gated with `isExpansionInMainFile()` so it fires only on
+  the project's own translation unit, never on `catch`/`return`/loop constructs
+  inside included standard-library or third-party headers the user cannot change.
+  A catalog invariant test (`TestCustomCheckInvariants`) enforces this guard —
+  along with `.bind` ↔ `Bind` consistency, balanced matcher parens, and
+  advisory-only (`HasFix:false`) — on every current and future custom check.
+
   > This replaces the earlier design's compiled out-of-tree clang-tidy plugin: per
   > the minimal-C++ directive, custom checks are declarative clang-query matcher
   > strings, not a C++ module.
