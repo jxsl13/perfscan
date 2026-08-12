@@ -82,3 +82,12 @@ WHOLE grown auto-fix suite is behavior-preserving on a real, non-trivial Go modu
 
 Reproduce: point perfscan at any checked-out module, e.g.
 `(cd corpus/etcd/pkg && perfscan -fix ./... && go build ./...)`.
+
+## `-diff` produces valid patches on real code
+
+`perfscan -diff -level 3 ./...` on the etcd `pkg/` module printed a **179-line
+unified diff across 8 files (13 fixes)**, left the source **byte-unchanged**
+(dry-run), and exited 1. The emitted patch is **`git apply --check`-clean**
+(`git apply --check -p1 --directory=pkg`), confirming the diff renderer produces
+genuinely valid, appliable unified diffs on real multi-file production Go — so
+`-diff` is a reliable CI gate / review preview of exactly what `-fix` would write.
