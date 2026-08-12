@@ -10,7 +10,8 @@
 #
 # These are deliberately COMPLEX, TU-heavy codebases (not toy samples): a header
 # library (fmt), a logging lib (spdlog), an embedded KV store (leveldb), a large
-# foundational library (abseil, ~490 TUs), and a full game (DDNet, ~380 TUs).
+# foundational library (abseil, ~490 TUs), and a full game/engine (DDNet, ~420 TUs;
+# its codegen targets are built automatically so generated/*.h exist).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)/corpus"
@@ -24,9 +25,10 @@ projects=(
   "fmt     https://github.com/fmtlib/fmt.git         master"
   "spdlog  https://github.com/gabime/spdlog.git      v1.x  -DSPDLOG_BUILD_EXAMPLE=ON"
   "abseil  https://github.com/abseil/abseil-cpp.git  master -DABSL_BUILD_TESTING=OFF -DCMAKE_CXX_STANDARD=17"
-  # DDNet is heavier and needs codegen targets built for generated/*.h — see
-  # ddnet-recipe.md. Uncomment to include it:
-  # "ddnet  https://github.com/ddnet/ddnet.git        master -DCLIENT=OFF -DSERVER=OFF -DTOOLS=OFF"
+  # DDNet: a full C++ game/engine (~420 TUs). It generates headers at build time,
+  # so configure() also builds its (fast, pure-Python) codegen targets below, so
+  # generated/*.h exist for the game/ TUs — see ddnet-recipe.md.
+  "ddnet   https://github.com/ddnet/ddnet.git         master -DDOWNLOAD_GTEST=OFF -DPREFER_BUNDLED_LIBS=ON"
 )
 
 configure() {
@@ -45,6 +47,13 @@ configure() {
     "$@" >/dev/null
   local n; n=$(grep -c '"file"' "$dir/build/compile_commands.json" 2>/dev/null || echo 0)
   echo "   -> $dir/build/compile_commands.json ($n translation units)"
+  # DDNet generates headers at build time; the game/ TUs #include them, so build
+  # the codegen targets (fast, pure Python) so generated/*.h exist before scanning.
+  if [ "$name" = ddnet ]; then
+    echo "== building DDNet codegen targets (generated/*.h)"
+    cmake --build "$dir/build" \
+      --target generate_data_types generate_content_types generate_protocol >/dev/null
+  fi
 }
 
 for p in "${projects[@]}"; do
