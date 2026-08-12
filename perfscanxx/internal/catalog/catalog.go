@@ -265,6 +265,22 @@ var entries = []Entry{
 		Query:   `match cxxCatchStmt(has(varDecl(hasType(hasCanonicalType(recordType()))).bind("cv")))`,
 		Message: "exception caught by value copies the exception object (and can slice a derived type to its base); catch by const reference (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2104", TidyName: "custom-regex-in-loop",
+		Level: LevelStructured, Category: "allocation",
+		Title:  "std::regex constructed inside a loop recompiles the pattern every iteration; hoist it out",
+		HasFix: false,
+		Custom: true,
+		Bind:   "rx",
+		// A std::regex/std::wregex variable declared inside any loop kind. The
+		// canonical-type match sees through the std::regex typedef to
+		// basic_regex<>; isExpansionInMainFile keeps it off the <regex> header's
+		// own internal constructions. The C++ analog of perfscan's PS2005.
+		Query: `match varDecl(isExpansionInMainFile(), ` +
+			`hasType(hasCanonicalType(recordType(hasDeclaration(cxxRecordDecl(matchesName("basic_regex")))))), ` +
+			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("rx")`,
+		Message: "std::regex/std::wregex constructed inside a loop recompiles the pattern (an expensive parse + allocation) every iteration; declare it once outside the loop (query-based, no auto-fix)",
+	},
 }
 
 // Deliberately NOT in the catalog (do not re-add on a future audit):
