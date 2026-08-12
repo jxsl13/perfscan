@@ -177,6 +177,18 @@ unified diff across 8 files (13 fixes)**, left the source **byte-unchanged**
 genuinely valid, appliable unified diffs on real multi-file production Go — so
 `-diff` is a reliable CI gate / review preview of exactly what `-fix` would write.
 
+## PS3106 large-value-param is precise on real API-struct-heavy code (Kubernetes)
+
+PS3106 (advisory: a >128 B struct/array passed by value copies on every call) fires
+only on genuinely large values. On `k8s.io/kubernetes` `pkg/apis/...` + `pkg/scheduler/...`
+it reports **32 findings, every one a real large API struct** by value —
+`batch.JobSpec` (952 B), `core.PodSpec` (592 B), `core.PodStatus` (384 B),
+`core/v1.Volume` (256 B), `meta/v1.ObjectMeta` (232 B), … The **smallest** flagged
+type is **136 B**, just over the 128 B (two-cache-line) gate; nothing smaller leaks.
+Unlike the C++ sibling PX3020 (whose "missed move" has a move-via-iterator false
+positive), PS3106 has **no false-positive class** — Go has no move semantics, so
+"large struct passed by value" is unambiguous, and the size gate is exact.
+
 ## `-fix` is idempotent
 
 Running `perfscan -fix -level 3 ./...` on an etcd `pkg/` copy applied **13 fixes**;
