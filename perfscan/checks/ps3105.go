@@ -9,9 +9,9 @@ import (
 	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
-// PS3105 reports sort.Sort(sort.IntSlice(x)) / sort.Sort(sort.StringSlice(x))
-// — the wrapper-adapter spelling of an ascending sort — and rewrites them to
-// the generic slices.Sort(x). Sibling of PS3104, which handles the
+// PS3105 reports sort.Sort / sort.Stable over a sort.IntSlice / sort.StringSlice
+// adapter — the wrapper-adapter spelling of an ascending sort — and rewrites
+// them to the generic slices.Sort(x). Sibling of PS3104, which handles the
 // sort.Ints/sort.Strings helper spelling of the same operation.
 var PS3105 = register(&lint.Check{
 	ID:       "PS3105",
@@ -20,7 +20,7 @@ var PS3105 = register(&lint.Check{
 	Level:    lint.LevelIdiomatic,
 	AutoFix:  true,
 	Doc: lint.Documentation{
-		Title: "sort.Sort(sort.IntSlice/StringSlice(x)) is the adapter spelling of slices.Sort; call the generic sort directly",
+		Title: "sort.Sort/sort.Stable over a sort.IntSlice/StringSlice adapter is slices.Sort spelled the long way; call the generic sort directly",
 		Text: `sort.Sort(sort.IntSlice(x)) wraps the slice in the sort.IntSlice
 adapter and sorts it through the three-method sort.Interface — an
 interface dispatch on every comparison and swap — while the generic
@@ -36,37 +36,58 @@ matches the helper spelling sort.Ints(x)/sort.Strings(x); PS3105 matches
 the equivalent adapter spelling sort.Sort(sort.IntSlice(x)) /
 sort.Sort(sort.StringSlice(x)) that PS3104 does not.
 
+The stable spelling is matched too. sort.Stable(sort.IntSlice(x)) and
+sort.Stable(sort.StringSlice(x)) run a STABLE sort through the same
+adapter, and they rewrite to the very same slices.Sort(x) — which is
+UNSTABLE — because stability is UNOBSERVABLE for these element types. A
+stable sort differs from an unstable one only in the relative order it
+gives to elements that compare EQUAL; but for []int and []string, any
+two elements that compare equal are bitwise-identical values, so no
+observer can tell which equal element came first. slices.Sort(x)
+therefore produces byte-for-byte the same slice as sort.Stable over the
+adapter — bit-identical. (The slices package has no comparator-free
+SortStable, and none is needed here: there is no observable stability to
+preserve. If a future element type had distinguishable ties this
+equivalence would fail, which is exactly why sort.Float64Slice is
+excluded below for BOTH sort.Sort and sort.Stable.)
+
 The result is BIT-IDENTICAL. Both spellings sort ascending (< on int;
 lexicographic byte order on string), and for int and string any two
 elements that compare equal are bitwise-identical values — so the sorted
 output is the unique ascending arrangement of the input multiset, the
 same bytes no matter which algorithm produced it, stability included.
-sort.Sort returns nothing, so only a call statement is rewritten.
+sort.Sort and sort.Stable return nothing, so only a call statement is
+rewritten.
 
-sort.Float64Slice is deliberately EXCLUDED and never flagged, for the
-same reason PS3104 excludes sort.Float64s: Float64Slice.Less orders NaNs
-first, and float64 has DISTINGUISHABLE ties (-0.0 and +0.0 compare equal
-but differ in bits, as do NaNs with different payloads) — and both sorts
-are unstable, so two correct implementations may arrange those ties
-differently. The uniqueness argument above collapses and the rewrite is
-not guaranteed bit-identical, so perfscan does not offer it.
+sort.Float64Slice is deliberately EXCLUDED and never flagged — under
+either sort.Sort or sort.Stable — for the same reason PS3104 excludes
+sort.Float64s: Float64Slice.Less orders NaNs first, and float64 has
+DISTINGUISHABLE ties (-0.0 and +0.0 compare equal but differ in bits, as
+do NaNs with different payloads). For sort.Sort(sort.Float64Slice(x))
+both sorts are unstable, so two correct implementations may arrange
+those ties differently. For sort.Stable(sort.Float64Slice(x)) the source
+is stable but slices.Sort is not, so the distinguishable ties could be
+reordered. Either way the uniqueness argument above collapses and the
+rewrite is not guaranteed bit-identical, so perfscan does not offer it.
 
 Both selectors are resolved with type information: the callee must be
-the package function sort.Sort — never a shadowed sort, a same-named
-local, or a method — and its single argument must be a fresh CONVERSION
-to the named type sort.IntSlice or sort.StringSlice. A pre-built value
-of those types (a variable, a function result) is never matched: only
-the direct conversion form guarantees the operand is the underlying
-[]int/[]string, kept verbatim in place by the fix. An untyped operand
-(sort.Sort(sort.IntSlice(nil))) is skipped — slices.Sort cannot infer
-its type parameters from nil. Only a plain call statement is rewritten.
+the package function sort.Sort or sort.Stable — never a shadowed sort, a
+same-named local, or a method — and its single argument must be a fresh
+CONVERSION to the named type sort.IntSlice or sort.StringSlice. A
+pre-built value of those types (a variable, a function result) is never
+matched: only the direct conversion form guarantees the operand is the
+underlying []int/[]string, kept verbatim in place by the fix. An untyped
+operand (sort.Sort(sort.IntSlice(nil))) is skipped — slices.Sort cannot
+infer its type parameters from nil. Only a plain call statement is
+rewritten.
 
 The fix edits imports as needed: the slices import is added when missing
 (reusing an existing alias when the file imports slices under another
 name), and the sort import is dropped when the rewrites remove the
 file's LAST sort references — each rewritten call gives up TWO of them,
-sort.Sort and the sort.IntSlice/StringSlice conversion, and the import
-is dropped only when the file holds none besides those. When the
+the sort.Sort/sort.Stable callee and the sort.IntSlice/StringSlice
+conversion, and the import is dropped only when the file holds none
+besides those. When the
 rewrites replace the whole import, the sort spec is swapped for "slices"
 in place. A dot- or blank-imported slices, a comment inside the
 rewritten call punctuation, or a cgo file (whose import block must not
@@ -89,11 +110,13 @@ never became a wrapper over slices.Sort: it still drives Less and Swap
 through the interface on every comparison and swap on every toolchain,
 so the dispatch cost is real on go1.26, not just on go1.21. The rewrite
 buys the same ascending order, measurably faster, plus the directness of
-the modern API.`,
+the modern API. The sort.Stable spelling mirrors these numbers (it drives
+the SAME adapter through the same interface, only via a stable pdqsort
+variant) and rewrites to the same unstable slices.Sort.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS3105",
-		Doc:  "sort.Sort(sort.IntSlice/StringSlice(x)) adapter spelling instead of the generic slices.Sort",
+		Doc:  "sort.Sort/sort.Stable over a sort.IntSlice/StringSlice adapter instead of the generic slices.Sort",
 		Run:  runPS3105,
 	},
 })
@@ -128,9 +151,10 @@ func runPS3105(pass *analysis.Pass) (any, error) {
 		// conversion), and whether the sort import is orphaned depends on
 		// ALL of them together (same per-file site collection as PS3104).
 		type site struct {
-			call *ast.CallExpr
-			name string
-			fix  *analysis.SuggestedFix
+			call  *ast.CallExpr
+			outer string // the outer sort.* callee: "Sort" or "Stable"
+			name  string // the inner adapter type: "IntSlice" or "StringSlice"
+			fix   *analysis.SuggestedFix
 		}
 		var sites []site
 		fixable := 0
@@ -147,11 +171,15 @@ func runPS3105(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			// Type info pins the callee to the package function sort.Sort:
-			// a shadowed sort resolves sel.Sel to some other object, and a
-			// method carries a receiver.
+			// Type info pins the callee to the receiver-less package
+			// functions sort.Sort or sort.Stable: a shadowed sort resolves
+			// sel.Sel to some other object, and a method carries a
+			// receiver. Both spellings drive the sort.Interface adapter,
+			// and for the []int/[]string element types below the stable
+			// arrangement is unobservable (equal elements are bitwise
+			// identical), so both map to slices.Sort.
 			fn, ok := pass.TypesInfo.Uses[sel.Sel].(*types.Func)
-			if !ok || fn.Pkg() == nil || fn.Pkg().Path() != "sort" || fn.Name() != "Sort" {
+			if !ok || fn.Pkg() == nil || fn.Pkg().Path() != "sort" || (fn.Name() != "Sort" && fn.Name() != "Stable") {
 				return true
 			}
 			if sig, isSig := fn.Type().(*types.Signature); !isSig || sig.Recv() != nil {
@@ -202,7 +230,7 @@ func runPS3105(pass *analysis.Pass) (any, error) {
 			if fix != nil {
 				fixable++
 			}
-			sites = append(sites, site{call, tn.Name(), fix})
+			sites = append(sites, site{call, fn.Name(), tn.Name(), fix})
 			return true
 		})
 		if len(sites) == 0 {
@@ -249,7 +277,7 @@ func runPS3105(pass *analysis.Pass) (any, error) {
 			diag := analysis.Diagnostic{
 				Pos:     st.call.Pos(),
 				End:     st.call.End(),
-				Message: "sort.Sort(sort." + st.name + "(...)) sorts through the sort.Interface adapter (an interface dispatch per comparison and swap); slices.Sort sorts the concrete " + elem + " directly with the identical ascending order",
+				Message: "sort." + st.outer + "(sort." + st.name + "(...)) sorts through the sort.Interface adapter (an interface dispatch per comparison and swap); slices.Sort sorts the concrete " + elem + " directly with the identical ascending order",
 			}
 			if st.fix != nil {
 				diag.SuggestedFixes = []analysis.SuggestedFix{*st.fix}
@@ -272,8 +300,9 @@ func ps3105Fix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, x ast.Expr)
 		return nil
 	}
 	// The replaced spans are the call text around the operand — the outer
-	// sort.Sort( plus the inner sort.IntSlice( on the left, the )) on the
-	// right; a comment there would be silently destroyed — advisory then.
+	// sort.Sort(/sort.Stable( plus the inner sort.IntSlice( on the left,
+	// the )) on the right; a comment there would be silently destroyed —
+	// advisory then.
 	if ps2111CommentIn(f, call.Pos(), x.Pos()) || ps2111CommentIn(f, x.End(), call.End()) {
 		return nil
 	}

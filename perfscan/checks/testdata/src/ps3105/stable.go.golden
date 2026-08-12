@@ -1,0 +1,18 @@
+package ps3105
+
+import (
+	"fmt"
+	"slices"
+)
+
+// The STABLE adapter spelling maps to the SAME slices.Sort. For []int and
+// []string equal elements are bitwise identical, so stability is
+// unobservable: sort.Stable and the unstable slices.Sort produce the
+// byte-identical result. These are the file's ONLY sort references (two
+// per call: sort.Stable plus the conversion), so the fix swaps the
+// orphaned sort import for slices.
+func stableBoth(xs []int, ys []string) {
+	slices.Sort(xs) // want `sort\.Stable\(sort\.IntSlice\(\.\.\.\)\) sorts through the sort\.Interface adapter \(an interface dispatch per comparison and swap\); slices\.Sort sorts the concrete \[\]int directly with the identical ascending order`
+	slices.Sort(ys) // want `sort\.Stable\(sort\.StringSlice\(\.\.\.\)\) sorts through the sort\.Interface adapter \(an interface dispatch per comparison and swap\); slices\.Sort sorts the concrete \[\]string directly with the identical ascending order`
+	fmt.Println(xs, ys)
+}
