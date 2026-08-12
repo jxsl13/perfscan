@@ -256,3 +256,32 @@ broadened query flags **25** — the extra **5** are growth inside **range-for**
 (C++'s most common loop, e.g. `for (auto& x : xs) v.push_back(f(x))`) that the old
 query silently missed. The custom check `PX2104` (regex-in-loop) already used the
 all-loop-kinds matcher.
+
+## PX3020 missed-move: near-silent on app code, with a documented false-positive class
+
+`PX3020` (`cppcoreguidelines-rvalue-reference-param-not-moved`, advisory) fires on a
+`T&&` parameter that is never moved. Corpus signal-vs-noise:
+
+| corpus | first-party findings |
+|--------|---------------------:|
+| leveldb | 0 |
+| spdlog (excluding vendored Catch2) | 0 |
+| abseil | 69 |
+
+So on ordinary code it is essentially silent — it fires only on a genuine missed move
+(`void f(std::string&& s) { field_ = s; }` → should `std::move(s)`). abseil's 69 are
+inflated by a **known clang-tidy false positive**: the check only credits
+`std::move(param)` / `std::forward(param)`, so a parameter consumed another way is
+still flagged though it IS moved-from — e.g. abseil's allocator-extended container move
+constructors:
+
+```cpp
+FixedArray(FixedArray&& other, const allocator_type& a) noexcept(NoexceptMovable())
+    : FixedArray(std::make_move_iterator(other.begin()),   // moves other's elements,
+                 std::make_move_iterator(other.end()), a) {}  // but not via std::move(other)
+```
+
+`other` is fully consumed, yet PX3020 flags it. This pattern is concentrated in
+container/allocator implementations, not application code, so the practical noise is
+low — but the limitation is documented on the check (`internal/catalog`) so a reviewer
+knows a flagged move constructor may be a move-via-iterator false positive.
