@@ -13,8 +13,43 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
+
+// MinExperimentalMajor is the first LLVM/clang-tidy major version that supports
+// --experimental-custom-checks, and thus the query-based custom checks
+// (PX2101-PX2106). On an older clang-tidy that flag is an unknown argument and
+// clang-tidy exits with an error, so the caller degrades gracefully to the
+// built-in checks instead.
+const MinExperimentalMajor = 20
+
+var versionRe = regexp.MustCompile(`LLVM version (\d+)`)
+
+// MajorVersion returns the clang-tidy LLVM major version by parsing
+// `<binary> --version` (via the injectable Executor, so it is hermetically
+// testable). ok is false when the binary cannot be run or its output does not
+// contain a recognizable "LLVM version N.M.P" line — in which case the caller
+// should NOT assume the worst (perfscanxx requires a modern toolchain anyway).
+func MajorVersion(ctx context.Context, binary string) (major int, ok bool) {
+	if binary == "" {
+		binary = "clang-tidy"
+	}
+	var stdout, stderr bytes.Buffer
+	if _, err := Executor(ctx, []string{binary, "--version"}, &stdout, &stderr); err != nil {
+		return 0, false
+	}
+	m := versionRe.FindSubmatch(stdout.Bytes())
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
 
 // NotFoundHint is the actionable message printed when clang-tidy is absent.
 const NotFoundHint = "clang-tidy not found in PATH.\n" +

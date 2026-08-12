@@ -513,6 +513,20 @@ func AnyCustom(sel []Entry) bool {
 	return false
 }
 
+// WithoutCustom returns the entries of sel that are not query-based custom
+// checks, preserving order. Used to degrade gracefully when the clang-tidy on
+// PATH is too old for --experimental-custom-checks: the built-in checks still
+// run.
+func WithoutCustom(sel []Entry) []Entry {
+	out := make([]Entry, 0, len(sel))
+	for _, e := range sel {
+		if !e.Custom {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // ClangTidyConfig renders a .clang-tidy YAML enabling exactly sel: a Checks
 // line for all entries and a CustomChecks block defining the query-based ones.
 // Used when the selection contains custom checks — clang-tidy reads the custom
