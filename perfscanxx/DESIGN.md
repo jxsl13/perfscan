@@ -27,9 +27,10 @@ this document deliberately mirrors.
 3. **Real fixes.** `-fix` must produce compilable edits at source level,
    including through the preprocessor, because that is where C++ programmers
    live.
-4. **Extensible.** New perf checks (the PS-catalog analogues that clang-tidy
-   lacks) are written as clang-tidy plugin checks in C++ and loaded at
-   runtime — the Go side treats them identically to upstream checks.
+4. **Extensible, zero compiled C++.** New perf checks that clang-tidy lacks
+   (the PS-catalog analogues) are declarative clang-query matchers run via
+   `--experimental-custom-checks` (§6) — the Go side treats them identically to
+   upstream checks; nothing is compiled or linked against LLVM.
 
 ### Why clang-tidy and not LLVM IR
 
@@ -217,9 +218,8 @@ pair under `perfscanxx/benchmarks/` before it ships, per project policy):
 | PSX3003 | performance-noexcept-move-constructor | L2 | yes | API contract change (noexcept) |
 | PSX5001 | modernize-use-emplace | L2 | yes | curated import from outside `performance-*`; changes construction semantics (explicit ctors, aggregate rules) |
 
-L3 is reserved for the plugin checks (§6): the aggressive rewrites clang-tidy
-upstream would never accept (branchless clamps, loop interchange hints, SoA
-suggestions) plus passthrough of un-curated checks. As in perfscan, an L3
+L3 is reserved for the most aggressive rewrites — ABI/contract-affecting or deep
+restructurings — plus passthrough of un-curated checks. As in perfscan, an L3
 check without a provably-safe fix stays advisory.
 
 perfscan concepts and their fate:
@@ -274,9 +274,8 @@ check_options:
   performance-inefficient-vector-operation:
     VectorLikeClasses: '::std::vector;::absl::InlinedVector'
 
-# Plugin modules (§6): shared libraries passed to clang-tidy --load.
-plugins:
-  - path: build/lib/libperfscanxx-checks.dylib
+# Query-based custom checks (§6) are built into the catalog — no config needed;
+# they run via clang-tidy --experimental-custom-checks (zero compiled C++).
 
 baseline: perfscanxx-baseline.yaml   # optional; also -baseline flag
 
@@ -319,7 +318,7 @@ perfscanxx -version                          # own version + resolved clang-tidy
 
 Additions beyond perfscan, justified by the C++ substrate: `-p`
 (compile-db), `-j` (TU-parallel), `-doctor` (environment probe: clang-tidy
-found? version? compile db found? plugins loadable? — prints remediation
+found? version? compile db found? — prints remediation
 steps, exit 0/1). Findings print as `file:line:col: message (PSXid Ln)
 [tidy-name]` so standard problem-matchers work; `-json` emits one object
 per finding including the raw Replacements so editors can offer quick-fixes
@@ -328,32 +327,30 @@ without re-running.
 Exit codes: 0 clean, 1 findings (post-baseline), 2 usage/config error,
 3 environment error (no clang-tidy, no compile db).
 
-## 6. Custom checks: clang-tidy plugin modules
+## 6. Custom checks: query-based, ZERO compiled C++
 
-New perf checks that clang-tidy lacks (the PS-catalog analogues: hoist
-regex/format-object construction out of loops, string reserve, map→vector
-densification advisories, L3 branchless/loop-shape advisories) are written
-in **C++ as an out-of-tree clang-tidy plugin module** — this is officially
-supported: a shared library linked against LLVM (CMake `add_library(...
-MODULE)`), registering a `ClangTidyModule` under a namespace, loaded with
-`clang-tidy --load libperfscanxx-checks.{so,dylib}`. All plugin checks use
-the `perfscanxx-` tidy-name prefix (e.g. `perfscanxx-loop-regex-construct`)
-and flow through the *identical* pipeline: they emit diagnostics +
-FixItHints, appear in `--export-fixes` YAML, and the Go catalog maps
-`perfscanxx-*` names to PSX IDs/levels like any upstream check. Zero special
-cases in the orchestrator.
+New perf checks that clang-tidy lacks (the PS-catalog analogues — e.g.
+reserve-before-loop, pessimizing `return std::move(local)`, catch-by-value) are
+NOT written as compiled C++. Per the **minimal-C++ constraint**, they are
+declarative **clang-query matcher strings** run via clang-tidy's
+`--experimental-custom-checks` ([QueryBasedCustomChecks](https://clang.llvm.org/extra/clang-tidy/QueryBasedCustomChecks.html),
+LLVM ≥ 20). Each catalog entry marked `Custom` carries a `match …` matcher, a
+bound node name, and a diagnostic message; the orchestrator writes a temporary
+`.clang-tidy` (a `CustomChecks:` block) and passes
+`--experimental-custom-checks --config-file=…`. They surface as `custom-<name>`
+tidy-names, are mapped to PX IDs like any built-in check, and flow through the
+*identical* report pipeline. Zero special cases beyond emitting that config.
 
-Layout: `perfscanxx/plugin/` (CMake project, one `.cpp` per check, LLVM
-found via `brew --prefix llvm`), built separately from the Go binary and
-referenced via `plugins:` in config. The Go build never links LLVM.
+Consequence: `--experimental-custom-checks` is **diagnose-only** — custom checks
+emit NO fix-its, so they are always **advisory** (no `-fix`/`-diff` applies to them).
+This is the C++ analog of perfscan's advisory checks. Current ones: **PX2101**
+reserve-before-loop, **PX2102** pessimizing-move, **PX2103** catch-by-value.
 
-Hard constraint (verified, and it is the community's top complaint): **the
-plugin ABI is tied to the exact clang-tidy version.** A plugin built against
-LLVM 17 must be loaded by clang-tidy 17. Mitigation: `-doctor` compares
-`clang-tidy --version` against a version stamp we embed in the plugin's
-filename/manifest, and the orchestrator refuses to pass `--load` on
-mismatch (degrading to upstream-checks-only with a warning) rather than
-risking a crash.
+The only C++ perfscanxx touches is the prebuilt `clang-tidy` binary — there is **no
+compiled plugin, no `--load`, no LLVM link**, and therefore none of the plugin-ABI
+version-pinning a compiled module would need. (An earlier design used an out-of-tree
+compiled clang-tidy plugin module; it was removed in favor of this zero-C++ query
+mechanism — the Go build never links LLVM.)
 
 ## 7. Dependencies and graceful degradation
 
@@ -399,10 +396,9 @@ pass with no LLVM present. Enforced by structure:
    exists ≥ 17; the proposed `--export-fixes`→`--export-diagnostics`
    rename). The catalog therefore records `since`/`until` LLVM versions per
    check; unknown-to-this-version checks are skipped with a note, not an
-   error. Plugin ABI pinning is stricter (§6). Open: pin one blessed LLVM
-   major per perfscanxx minor release vs. a support matrix — start with a
-   matrix of {17,18,19,20} in CI (CI has clang-tidy even though dev
-   machines may not).
+   error. There is no plugin-ABI concern: custom checks are query strings, not a
+   compiled module (§6), so they are tolerant across LLVM versions — perfscanxx
+   just needs a clang-tidy new enough for `--experimental-custom-checks` (≥ 20).
 3. **Fix-it conflicts.** Overlapping replacements across checks or TUs
    (same header fixed via many TUs; two checks editing one expression).
    `clang-apply-replacements` dedups identical edits and *discards* files
@@ -451,8 +447,8 @@ pass with no LLVM present. Enforced by structure:
   incl. signature-break caveat and AllowedTypes,
   inefficient-vector-operation incl. reserve insertion):
   https://clang.llvm.org/extra/clang-tidy/checks/list.html
-- Out-of-tree plugin modules via `--load` (official) and ABI caveats:
-  https://clang.llvm.org/extra/clang-tidy/Contributing.html ,
-  https://github.com/coveooss/clang-tidy-plugin-examples
+- Query-based custom checks (`--experimental-custom-checks`, the zero-C++
+  mechanism §6 uses instead of a compiled plugin):
+  https://clang.llvm.org/extra/clang-tidy/QueryBasedCustomChecks.html
 - run-clang-tidy parallel model (per-TU export-fixes, merged):
   https://reviews.llvm.org/D31326
