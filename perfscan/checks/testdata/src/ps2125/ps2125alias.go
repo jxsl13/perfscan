@@ -1,0 +1,9 @@
+package ps2125
+
+import u8 "unicode/utf8"
+
+// unicode/utf8 is imported under an alias: the fix uses that alias.
+func aliased(s string) bool {
+	n := len([]rune(s)) // want `len\(\[\]rune\(s\)\) decodes and allocates the whole rune slice just to count it; utf8\.RuneCountInString\(s\) is the bit-identical count with zero allocation`
+	return n > 0 && u8.ValidString(s)
+}
