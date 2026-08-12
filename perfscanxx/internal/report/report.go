@@ -188,10 +188,14 @@ func SARIF(w io.Writer, findings []Finding) error {
 	type sarifText struct {
 		Text string `json:"text"`
 	}
+	type sarifConfig struct {
+		Level string `json:"level"`
+	}
 	type sarifRule struct {
-		ID               string     `json:"id"`
-		Name             string     `json:"name,omitempty"`
-		ShortDescription *sarifText `json:"shortDescription,omitempty"`
+		ID                   string       `json:"id"`
+		Name                 string       `json:"name,omitempty"`
+		ShortDescription     *sarifText   `json:"shortDescription,omitempty"`
+		DefaultConfiguration *sarifConfig `json:"defaultConfiguration,omitempty"`
 	}
 	type sarifMessage struct {
 		Text string `json:"text"`
@@ -213,8 +217,20 @@ func SARIF(w io.Writer, findings []Finding) error {
 	type sarifResult struct {
 		RuleID    string          `json:"ruleId"`
 		RuleIndex int             `json:"ruleIndex"`
+		Level     string          `json:"level,omitempty"`
 		Message   sarifMessage    `json:"message"`
 		Locations []sarifLocation `json:"locations"`
+	}
+
+	// sarifLevel maps a catalog level to a SARIF result level for GitHub Code
+	// Scanning triage. L3 is the aggressive/niche tier the catalog documents as
+	// "must never surface by default", so it is a lower-priority "note"; the
+	// actionable L1/L2 findings are "warning" (nothing here is an "error").
+	sarifLevel := func(level string) string {
+		if level == "L3" {
+			return "note"
+		}
+		return "warning"
 	}
 	type sarifDriver struct {
 		Name    string      `json:"name"`
@@ -240,7 +256,11 @@ func SARIF(w io.Writer, findings []Finding) error {
 	for _, f := range findings {
 		if _, ok := ruleIndex[f.ID]; !ok {
 			ruleIndex[f.ID] = len(rules)
-			r := sarifRule{ID: f.ID, Name: f.TidyName}
+			r := sarifRule{
+				ID:                   f.ID,
+				Name:                 f.TidyName,
+				DefaultConfiguration: &sarifConfig{Level: sarifLevel(f.Level)},
+			}
 			// Enrich with the catalog's one-line summary so GitHub Code
 			// Scanning shows what each PX rule means, not just its id.
 			// Pass-through diagnostics (clang-diagnostic-*) aren't in the
@@ -257,6 +277,7 @@ func SARIF(w io.Writer, findings []Finding) error {
 		results = append(results, sarifResult{
 			RuleID:    f.ID,
 			RuleIndex: ruleIndex[f.ID],
+			Level:     sarifLevel(f.Level),
 			Message:   sarifMessage{Text: f.Message},
 			Locations: []sarifLocation{{
 				PhysicalLocation: sarifPhysicalLocation{
