@@ -297,6 +297,21 @@ var entries = []Entry{
 			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("rx")`,
 		Message: "std::regex/std::wregex constructed inside a loop recompiles the pattern (an expensive parse + allocation) every iteration; declare it once outside the loop (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2105", TidyName: "custom-dynamic-cast-in-loop",
+		Level: LevelStructured, Category: "algorithms",
+		Title:  "dynamic_cast inside a loop pays an RTTI type-check every iteration",
+		HasFix: false,
+		Custom: true,
+		Bind:   "dc",
+		// dynamic_cast (a runtime RTTI lookup) evaluated inside any loop kind.
+		// isExpansionInMainFile keeps it off standard/library headers. No safe
+		// mechanical fix — the remedy (hoist the cast, use virtual dispatch, or a
+		// cheaper type discriminator) is a design change.
+		Query: `match cxxDynamicCastExpr(isExpansionInMainFile(), ` +
+			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("dc")`,
+		Message: "dynamic_cast inside a loop pays an RTTI type-check on every iteration; hoist the cast out, replace it with virtual dispatch, or use a cheaper type discriminator (query-based, no auto-fix)",
+	},
 }
 
 // Deliberately NOT in the catalog (do not re-add on a future audit):
