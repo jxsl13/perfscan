@@ -2,7 +2,9 @@ package runner
 
 import (
 	"bytes"
+	"go/build"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -285,6 +287,60 @@ func TestEmptyPackageIsSafe(t *testing.T) {
 		}
 		if strings.Contains(out.String(), "PS") {
 			t.Errorf("empty package (fix=%v): unexpected finding on stdout:\n%s", fix, out.String())
+		}
+	}
+}
+
+// TestCgoPackageFixDoesNotWriteCache pins the runner write-guard: on a cgo
+// package the analyzer sees the cgo-PROCESSED translation unit whose
+// token.File.Name() is a go-build CACHE path. A -fix must NOT write there
+// (poisoning a build artifact + reporting a false "applied") — it must leave the
+// user's source untouched and count the fix as not-applied. Regression for the
+// cgo cache-write bug. Skipped when cgo is unavailable.
+func TestCgoPackageFixDoesNotWriteCache(t *testing.T) {
+	if !build.Default.CgoEnabled {
+		t.Skip("cgo disabled")
+	}
+	if _, err := exec.LookPath("cc"); err != nil {
+		if _, err2 := exec.LookPath("clang"); err2 != nil {
+			t.Skip("no C compiler for cgo")
+		}
+	}
+	dir := t.TempDir()
+	const src = "package main\n\n// #include <stdlib.h>\nimport \"C\"\nimport \"sort\"\n\nfunc f(xs []int) { _ = C.malloc(0); sort.Ints(xs) }\nfunc main() { f(nil) }\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module m\n\ngo 1.23\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "m.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(wd) }()
+
+	var out, errBuf bytes.Buffer
+	Run(checks.All(), Options{
+		Patterns: []string{"./..."},
+		MaxLevel: lint.LevelAggressive,
+		Fix:      true,
+		Stdout:   &out,
+		Stderr:   &errBuf,
+	})
+
+	// The user's source is never touched.
+	if got, _ := os.ReadFile(filepath.Join(dir, "m.go")); string(got) != src {
+		t.Errorf("cgo m.go was modified by -fix:\n%s", got)
+	}
+	// If the check fired (cgo loaded), the guard must have declined the write:
+	// a warning about the generated/cached source and NO false "applied 1".
+	if strings.Contains(out.String(), "PS3104") {
+		if !strings.Contains(errBuf.String(), "generated/cached source outside the module") {
+			t.Errorf("expected the write-guard warning; stderr:\n%s", errBuf.String())
+		}
+		if strings.Contains(out.String(), "applied 1 fix") {
+			t.Errorf("reported a false apply on a cgo source; stdout:\n%s", out.String())
 		}
 	}
 }
