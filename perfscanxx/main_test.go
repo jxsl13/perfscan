@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -318,4 +320,80 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b[i:])
+}
+
+// TestExpandInputs covers the Go-style path-pattern expansion (./..., a subtree,
+// a concrete file) into the translation units of a compile database — including
+// the "skip TUs that don't exist on disk yet (generated sources)" rule, which is
+// what keeps `perfscanxx ./...` from erroring on un-generated codegen files.
+func TestExpandInputs(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir()) // resolve macOS /var -> /private/var
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(rel string) string {
+		p := filepath.Join(base, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("int main(){}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	a := write("src/a.cpp")
+	b := write("src/sub/b.cpp")
+	c := write("other/c.cpp")
+	gen := filepath.Join(base, "src", "gen.cpp") // listed in the DB but NOT on disk
+
+	type entry struct{ Directory, File string }
+	data, err := json.Marshal([]entry{{base, a}, {base, b}, {base, c}, {base, gen}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(base, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "build", "compile_commands.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	if err := os.Chdir(base); err != nil {
+		t.Fatal(err)
+	}
+
+	rel := func(paths []string) []string {
+		out := make([]string, 0, len(paths))
+		for _, p := range paths {
+			r, _ := filepath.Rel(base, p)
+			out = append(out, filepath.ToSlash(r))
+		}
+		sort.Strings(out)
+		return out
+	}
+
+	cases := []struct {
+		name     string
+		args     []string
+		buildDir string
+		want     []string
+	}{
+		{"whole project skips the non-existent generated TU", []string{"./..."}, "", []string{"other/c.cpp", "src/a.cpp", "src/sub/b.cpp"}},
+		{"subtree pattern", []string{"./src/..."}, "", []string{"src/a.cpp", "src/sub/b.cpp"}},
+		{"a directory arg", []string{"other"}, "", []string{"other/c.cpp"}},
+		{"a concrete file with -p", []string{"src/a.cpp"}, "build", []string{"src/a.cpp"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			files, _, err := expandInputs(tc.args, tc.buildDir)
+			if err != nil {
+				t.Fatalf("expandInputs(%v, %q): %v", tc.args, tc.buildDir, err)
+			}
+			if got := rel(files); !slices.Equal(got, tc.want) {
+				t.Errorf("expandInputs(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
 }
