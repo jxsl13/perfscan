@@ -146,7 +146,7 @@ func Discover(dir string) (Config, string) {
 	for {
 		// YAML is the config format; JSON names remain readable as a
 		// legacy fallback (YAML is a JSON superset).
-		for _, name := range []string{"perfscan.yaml", "perfscan.yml", ".perfscan.yaml", ".perfscan.yml", "perfscan.yaml", ".perfscan.yaml"} {
+		for _, name := range []string{"perfscan.yaml", "perfscan.yml", ".perfscan.yaml", ".perfscan.yml"} {
 			p := filepath.Join(dir, name)
 			if _, err := os.Stat(p); err == nil {
 				c, err := Load(p)
