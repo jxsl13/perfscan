@@ -33,10 +33,11 @@ direct conversion for each such shape:
                         -> strconv.FormatInt/FormatUint (other widths)
   fmt.Sprintf("%t", b)  -> strconv.FormatBool(b)
   fmt.Sprintf("%x", bs) -> hex.EncodeToString(bs)     (bs is []byte)
-  fmt.Sprintf("%s", s)  -> s                          (s is a string)
 
 Only formats that are EXACTLY one of these verbs and nothing else are
 reported, with a single non-variadic argument of the matching type.
+(fmt.Sprintf("%s", s) over a string is an IDENTITY, not a conversion; that
+belongs to PS2130 — reporting it here too would double-report the call.)
 
 The automatic fix rewrites the call when the rewrite is provably
 bit-identical: the argument's type must be the unnamed predeclared kind
@@ -232,27 +233,11 @@ func ps2107Classify(pass *analysis.Pass, verb string, arg ast.Expr) *ps2107Case 
 		c.replName = "hex.EncodeToString"
 		c.pkgName, c.pkgPath = "hex", "encoding/hex"
 		return c
-	case "%s":
-		if !underBasic || under.Info()&types.IsString == 0 {
-			return nil
-		}
-		c := &ps2107Case{msg: "fmt.Sprintf of a single %s string value is an identity format through fmt's reflection path; use the string value directly"}
-		if !tIsBasic {
-			return c
-		}
-		argText, ok := ps2107ExprText(arg)
-		if !ok {
-			return c
-		}
-		// The Sprintf call is a primary expression; a non-primary
-		// replacement (a+b, a conversion result is fine, but be safe) must
-		// keep its grouping in every syntactic context.
-		if !ps2107Primary(arg) {
-			argText = "(" + argText + ")"
-		}
-		c.repl = argText
-		c.replName = "the string value itself"
-		return c
+		// NOTE: %s over a string is an IDENTITY (fmt.Sprintf("%s", s) -> s), not
+		// a conversion like the cases above; it is owned by PS2130 (which also
+		// covers "%v" and fmt.Sprint and carries the composite-literal-in-header
+		// paren guard), so PS2107 deliberately does not handle it — that would
+		// double-report and double-fix the same call.
 	}
 	return nil
 }
@@ -264,17 +249,6 @@ func ps2107ExprText(arg ast.Expr) (string, bool) {
 		return "", false
 	}
 	return b.String(), true
-}
-
-// ps2107Primary reports whether e is a primary expression that binds at
-// least as tightly as the call it replaces, so no parentheses are needed.
-func ps2107Primary(e ast.Expr) bool {
-	switch e.(type) {
-	case *ast.Ident, *ast.SelectorExpr, *ast.BasicLit, *ast.CallExpr,
-		*ast.IndexExpr, *ast.SliceExpr, *ast.ParenExpr, *ast.CompositeLit:
-		return true
-	}
-	return false
 }
 
 // ps2107CommentsOverlap reports whether a comment overlaps the replaced
