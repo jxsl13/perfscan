@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/golangci/plugin-module-register v0.1.2
-	github.com/jxsl13/perfscan/perfscan v0.34.0
+	github.com/jxsl13/perfscan/perfscan v0.37.0
 	golang.org/x/tools v0.48.0
 )
 
