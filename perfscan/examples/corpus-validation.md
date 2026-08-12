@@ -293,3 +293,22 @@ correctly left un-fixed (no safe mechanical rewrite). A companion run of the ful
 catalog under `-fix` produced no corrupting edit — in particular PS4101 finds no
 `make([]T, len(src))` copy loop to touch here, and nothing in the pooled/byte-slice
 hot paths is rewritten unsafely.
+
+## `-fix` on zerolog (allocation-focused logger) — safe, and PS3002 stays honest
+
+`perfscan -level 3 ./...` over `github.com/rs/zerolog` (45 files, no-alloc byte
+paths) reports cleanly (exit 0, no load errors): PS3106 ×6, PS2106 ×6, PS3104 ×2,
+PS2114 ×2, plus one each of PS3101, PS3002, PS2103, PS2002. `-fix` applied the
+bit-identical rewrites — `sort.Strings(fields)` → `slices.Sort(fields)` (PS3104,
+×2) and consecutive `append(dst, x); append(dst, y)` → `append(dst, x, y)`
+(PS2106) — across three files, after which the module `go build`s and **both the
+zerolog and internal/cbor test packages pass**, confirming behavior is preserved.
+
+Notably the one **PS3002** site (`console.go:381`, a `sort.Slice`) was left
+advisory, not rewritten: the file did not already import `slices`, and PS3002
+never adds an import — so it correctly declines rather than emit an
+un-compilable `slices.Sort`. (A sibling `sort.Strings` in the same file did gain
+`slices.Sort` via PS3104, which DOES manage the import.) The v0.36.0 float
+exclusion had nothing to fire on here — no float-keyed sort in the corpus — but
+the report/fix pipeline is confirmed safe on a hand-optimized allocation-critical
+codebase.
