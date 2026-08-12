@@ -229,6 +229,12 @@ var entries = []Entry{
 		HasFix: true,
 	},
 	{
+		ID: "PX3023", TidyName: "modernize-shrink-to-fit",
+		Level: LevelIdiomatic, Category: "allocation",
+		Title:  "the vector<T>(v).swap(v) copy-and-swap idiom to shed excess capacity always allocates a full copy; v.shrink_to_fit() requests it directly and may skip the copy when already fit (C++11)",
+		HasFix: true,
+	},
+	{
 		// Advisory (clang-tidy emits no fix-it): the corrected std::move can't be
 		// inserted mechanically without knowing the parameter is dead afterwards.
 		// KNOWN false positives: clang-tidy only recognizes std::move(param) /
