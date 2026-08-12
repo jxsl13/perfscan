@@ -1,0 +1,14 @@
+package ps3105
+
+import (
+	"slices"
+	"sort"
+)
+
+// slices is ALREADY imported: the fix must not duplicate the import, and
+// the now-orphaned sort spec (both of its references belong to the one
+// rewritten call) is deleted from the group.
+func alreadySlices(xs []int) {
+	sort.Sort(sort.IntSlice(xs)) // want `sort\.Sort\(sort\.IntSlice\(\.\.\.\)\) sorts through the sort\.Interface adapter \(an interface dispatch per comparison and swap\); slices\.Sort sorts the concrete \[\]int directly with the identical ascending order`
+	slices.Reverse(xs)
+}

@@ -1,0 +1,10 @@
+package ps3105
+
+import "slices"
+
+// sort is imported under an ALIAS: type info still resolves st.Sort and
+// st.IntSlice to the sort package's objects; the orphaned aliased spec
+// (name included) is swapped for "slices".
+func aliasedSort(xs []int) {
+	slices.Sort(xs) // want `sort\.Sort\(sort\.IntSlice\(\.\.\.\)\) sorts through the sort\.Interface adapter \(an interface dispatch per comparison and swap\); slices\.Sort sorts the concrete \[\]int directly with the identical ascending order`
+}
