@@ -169,12 +169,16 @@ func TestJSONAndSARIF(t *testing.T) {
 						ShortDescription struct {
 							Text string `json:"text"`
 						} `json:"shortDescription"`
+						DefaultConfiguration struct {
+							Level string `json:"level"`
+						} `json:"defaultConfiguration"`
 					} `json:"rules"`
 				} `json:"driver"`
 			} `json:"tool"`
 			Results []struct {
 				RuleID    string `json:"ruleId"`
 				RuleIndex int    `json:"ruleIndex"`
+				Level     string `json:"level"`
 				Locations []struct {
 					PhysicalLocation struct {
 						ArtifactLocation struct {
@@ -238,6 +242,54 @@ func TestJSONAndSARIF(t *testing.T) {
 		}
 		if loc.Region.StartLine < 1 {
 			t.Errorf("result[%d] (%s) startLine = %d, want >= 1", i, res.RuleID, loc.Region.StartLine)
+		}
+	}
+}
+
+// TestSARIFLevelMapping pins the catalog-level -> SARIF triage-level mapping:
+// L1/L2 (actionable) -> "warning", L3 (aggressive/niche) -> "note", on both the
+// rule's defaultConfiguration and each result. GitHub Code Scanning reads these.
+func TestSARIFLevelMapping(t *testing.T) {
+	findings := []Finding{
+		{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 1},
+		{ID: "PX2001", TidyName: "x", Level: "L2", Message: "m", File: "b.cpp", Line: 1},
+		{ID: "PX3022", TidyName: "performance-enum-size", Level: "L3", Message: "m", File: "c.cpp", Line: 1},
+	}
+	var buf bytes.Buffer
+	if err := SARIF(&buf, findings); err != nil {
+		t.Fatal(err)
+	}
+	var log struct {
+		Runs []struct {
+			Tool struct {
+				Driver struct {
+					Rules []struct {
+						ID                   string `json:"id"`
+						DefaultConfiguration struct {
+							Level string `json:"level"`
+						} `json:"defaultConfiguration"`
+					} `json:"rules"`
+				} `json:"driver"`
+			} `json:"tool"`
+			Results []struct {
+				RuleID string `json:"ruleId"`
+				Level  string `json:"level"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &log); err != nil {
+		t.Fatalf("invalid SARIF: %v", err)
+	}
+	want := map[string]string{"PX1001": "warning", "PX2001": "warning", "PX3022": "note"}
+	run := log.Runs[0]
+	for _, r := range run.Tool.Driver.Rules {
+		if got := r.DefaultConfiguration.Level; got != want[r.ID] {
+			t.Errorf("rule %s defaultConfiguration.level = %q, want %q", r.ID, got, want[r.ID])
+		}
+	}
+	for _, res := range run.Results {
+		if got := res.Level; got != want[res.RuleID] {
+			t.Errorf("result %s level = %q, want %q", res.RuleID, got, want[res.RuleID])
 		}
 	}
 }
