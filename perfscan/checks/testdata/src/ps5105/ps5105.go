@@ -1,0 +1,119 @@
+package ps5105
+
+import (
+	"bytes"
+	"strings"
+	stdstrings "strings"
+)
+
+// --- positives: Index(...) == 0 is a prefix test ---
+
+func prefixLit(s string) bool {
+	return strings.Index(s, "x") == 0 // want `strings\.Index\(\.\.\.\) == 0 tests for a prefix only; strings\.HasPrefix\(s, sub\) is faster and stops at the first mismatched byte`
+}
+
+func prefixVars(s, sub string) bool {
+	return strings.Index(s, sub) == 0 // want `strings\.Index\(\.\.\.\) == 0 tests for a prefix only; strings\.HasPrefix\(s, sub\) is faster and stops at the first mismatched byte`
+}
+
+// Literal on the left: `0 == Index` is `Index == 0`.
+func reversed(s, sub string) bool {
+	return 0 == strings.Index(s, sub) // want `strings\.Index\(\.\.\.\) == 0 tests for a prefix only; strings\.HasPrefix\(s, sub\) is faster and stops at the first mismatched byte`
+}
+
+func prefixBytes(b, p []byte) bool {
+	return bytes.Index(b, p) == 0 // want `bytes\.Index\(\.\.\.\) == 0 tests for a prefix only; bytes\.HasPrefix\(s, sub\) is faster and stops at the first mismatched byte`
+}
+
+// An aliased import keeps its qualifier: only the selected name changes.
+func aliased(s, sub string) bool {
+	return stdstrings.Index(s, sub) == 0 // want `strings\.Index\(\.\.\.\) == 0 tests for a prefix only; strings\.HasPrefix\(s, sub\) is faster and stops at the first mismatched byte`
+}
+
+// Composed into a larger condition: the replacement is a bare call, so
+// no extra parentheses are needed.
+func composed(s, sub, t string) bool {
+	return len(t) > 0 && strings.Index(s, sub) == 0 // want `strings\.Index\(\.\.\.\) == 0 tests for a prefix only; strings\.HasPrefix\(s, sub\) is faster and stops at the first mismatched byte`
+}
+
+// Empty substring stays bit-identical either way: Index(s, "") is 0
+// always, and HasPrefix(s, "") is always true — no guard needed.
+func emptySub(s string) bool {
+	return strings.Index(s, "") == 0 // want `strings\.Index\(\.\.\.\) == 0 tests for a prefix only; strings\.HasPrefix\(s, sub\) is faster and stops at the first mismatched byte`
+}
+
+// A comment inside the deleted `== 0` scaffolding withholds the fix:
+// report only, no rewrite.
+func commented(s, sub string) bool {
+	return strings.Index(s, sub) == /* keep me */ 0 // want `strings\.Index\(\.\.\.\) == 0 tests for a prefix only; strings\.HasPrefix\(s, sub\) is faster and stops at the first mismatched byte`
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// Any position other than 0 genuinely needs the index.
+func atOne(s string) bool {
+	return strings.Index(s, "x") == 1
+}
+
+// Membership and position questions are a different rewrite — out of scope.
+func membership(s string) bool {
+	return strings.Index(s, "x") >= 0
+}
+
+func notPrefix(s string) bool {
+	return strings.Index(s, "x") != 0
+}
+
+func afterStart(s string) bool {
+	return strings.Index(s, "x") > 0
+}
+
+func beforeOne(s string) bool {
+	return strings.Index(s, "x") < 1
+}
+
+// The index bound to a variable and compared later is out of scope.
+func viaVariable(s, sub string) bool {
+	n := strings.Index(s, sub)
+	return n == 0
+}
+
+// A variable holding 0 is not the literal constant 0.
+func zeroVar(s, sub string) bool {
+	zero := 0
+	return strings.Index(s, sub) == zero
+}
+
+// A named constant is not the literal 0 either.
+const namedZero = 0
+
+func zeroConst(s, sub string) bool {
+	return strings.Index(s, sub) == namedZero
+}
+
+// A local method named Index on a value called strings must not match.
+type fakeStrings struct{}
+
+func (fakeStrings) Index(s, sub string) int { return -1 }
+
+func shadowed(s, sub string) bool {
+	var strings fakeStrings
+	return strings.Index(s, sub) == 0
+}
+
+// The HasSuffix analog is NOT behavior-preserving (LastIndex == -1 can
+// coincide with len(s)-len(sub) == -1 when sub is one byte longer than
+// s) and must never be rewritten.
+func lastIndex(s, sub string) bool {
+	return strings.LastIndex(s, sub) == len(s)-len(sub)
+}
+
+// The comparison is an untyped bool and may adopt a named bool type from
+// its context; HasPrefix returns plain bool, so the rewrite would not
+// compile here — skipped.
+type myBool bool
+
+func namedBoolContext(s, sub string) myBool {
+	var f myBool = strings.Index(s, sub) == 0
+	return f
+}

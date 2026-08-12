@@ -277,3 +277,7 @@ func TestPS2106(t *testing.T) {
 func TestPS2107(t *testing.T) {
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2107.Analyzer, "ps2107")
 }
+
+func TestPS5105(t *testing.T) {
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS5105.Analyzer, "ps5105")
+}
