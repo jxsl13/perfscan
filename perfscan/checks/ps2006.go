@@ -108,13 +108,16 @@ func runPS2006(pass *analysis.Pass) (any, error) {
 					if !concatLikeName(name) {
 						continue
 					}
-					if exprTextRendered(call.Args[0]) != exprTextRendered(target) {
+					// Render target once: it is compared here and reused in the
+					// message below (exprTextRendered runs the printer + allocates).
+					targetText := exprTextRendered(target)
+					if exprTextRendered(call.Args[0]) != targetText {
 						continue
 					}
 					pass.Report(analysis.Diagnostic{
 						Pos:     as.Pos(),
 						End:     as.End(),
-						Message: exprTextRendered(target) + " is reassigned to " + name + " of ITSELF plus a new row inside a loop of per-token step " + fn.Name.Name + " — a T-token run moves O(T²) bytes; replace with an amortized row buffer returning a zero-copy prefix view (AUDIT FOR ALIASING FIRST)",
+						Message: targetText + " is reassigned to " + name + " of ITSELF plus a new row inside a loop of per-token step " + fn.Name.Name + " — a T-token run moves O(T²) bytes; replace with an amortized row buffer returning a zero-copy prefix view (AUDIT FOR ALIASING FIRST)",
 					})
 				}
 				return true
