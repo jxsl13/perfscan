@@ -138,6 +138,39 @@ func TestExplainBuildsCorrectUpstreamURLPerFamily(t *testing.T) {
 	}
 }
 
+// TestExplainURLForEveryCheck guards the -explain doc URL for the WHOLE catalog:
+// every non-custom check must point at checks/<family>/<name>.html built from its
+// clang-tidy family prefix (not a hard-coded performance/ path), and every
+// query-based custom check must say it's perfscanxx-defined with no upstream URL.
+// This catches a new check family (or a new custom check) that -explain can't map.
+func TestExplainURLForEveryCheck(t *testing.T) {
+	for _, e := range catalog.All() {
+		out, _, code := runCLI("-explain", e.ID)
+		if code != 0 {
+			t.Errorf("-explain %s exit = %d", e.ID, code)
+			continue
+		}
+		if e.Custom {
+			if strings.Contains(out, "clang.llvm.org") {
+				t.Errorf("-explain %s (custom) must not print an upstream URL:\n%s", e.ID, out)
+			}
+			if !strings.Contains(out, "perfscanxx-defined") {
+				t.Errorf("-explain %s (custom) must note it is perfscanxx-defined:\n%s", e.ID, out)
+			}
+			continue
+		}
+		family, name, ok := strings.Cut(e.TidyName, "-")
+		if !ok {
+			t.Errorf("%s: TidyName %q has no family prefix", e.ID, e.TidyName)
+			continue
+		}
+		want := "/checks/" + family + "/" + name + ".html"
+		if !strings.Contains(out, want) {
+			t.Errorf("-explain %s: want URL containing %q, got:\n%s", e.ID, want, out)
+		}
+	}
+}
+
 func TestExplainUnknownCheckFails(t *testing.T) {
 	_, errOut, code := runCLI("-explain", "PX9999")
 	if code == 0 {
