@@ -53,6 +53,7 @@ checks' fixes.
 | [PS2123](PS2123.md) | alloc | L1 | yes | fmt.Sprint over plain strings is a reflection-priced +; concatenate directly |
 | [PS2124](PS2124.md) | alloc | L1 | yes | strings.Join over an inline []string literal is a slice-priced +; concatenate with the separator interleaved |
 | [PS2125](PS2125.md) | alloc | L1 | yes | len([]rune(s)) / len([]byte(s)) allocate a throwaway conversion just to take a length |
+| [PS2126](PS2126.md) | alloc | L1 | yes | fmt.Errorf on a constant verb-free message is errors.New plus a wasted formatter pass |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
