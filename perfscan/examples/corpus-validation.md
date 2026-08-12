@@ -364,3 +364,30 @@ not yet a safe mechanical rewrite — while the adjacent `sort.Strings`→`slice
 IS auto-fixed. Net: the recent safety work is confirmed behavior-preserving on a
 large production codebase, with the auto-fix boundary landing exactly where the
 bit-identical guarantee holds.
+
+## PS3002 import-machinery validated across four repos (widened auto-fix)
+
+After PS3002 gained multi-field, descending, and import-adding support, it no
+longer needs `slices`/`cmp` pre-imported and no longer withholds when it would
+orphan `sort` (the runner prunes the orphan). A `-fix -level 3` sweep over four
+repos — **klauspost/compress, zerolog, fasthttp, logrus** — applied the widened
+rewrite (compress ×5, fasthttp ×2, zerolog ×1) and every tree **still compiles
+with zero "imported and not used" errors**; the touched packages' own tests pass
+(compress `flate`/`zstd`/`s2`, all 7 zerolog packages, fasthttp).
+
+The clearest datapoint is compress `dict/builder.go`, a file that imported
+neither `slices` nor `cmp`:
+
+```go
+sort.Slice(sortedPrev, func(i, j int) bool {          slices.SortFunc(sortedPrev, func(a, b match) int {
+    return sortedPrev[i].n > sortedPrev[j].n      →       return cmp.Compare(b.n, a.n)
+})                                                    })
+// + "cmp" and "slices" imports added; orphaned "sort" pruned by the runner
+```
+
+This exercises three of the new behaviors at once — a **descending** comparator
+(`>` → swapped `cmp.Compare(b.n, a.n)`), **adding both** missing imports, and the
+runner **pruning** the now-unused `sort` — on real, hand-optimized codec code,
+and the package builds and its `flate`/`zstd`/`s2` neighbours' tests pass. The
+add-only import strategy (never combining a sort drop/swap with a cmp insert)
+holds across all four repos: no co-located-edit corruption, no leftover orphan.
