@@ -46,3 +46,13 @@ non-trivial C++ codebase.
 
 DDNet (383 cc files) is also in the reproducible set; it additionally needs its
 codegen targets built for `generated/*.h` — see `examples/ddnet-recipe.md`.
+
+## `-diff` dry-run validated on real C++
+
+`perfscanxx -diff -level 3 ./...` on leveldb printed a **960-line unified diff across
+33 files** and exited 1. `-diff` snapshots the affected files, runs clang-tidy's real
+`--fix`, renders the diff, and restores the originals — so the preview equals `-fix`
+by construction. Verified at scale: the leveldb checkout was **byte-clean before AND
+after** the run (every file restored perfectly), and the emitted patch is **`patch
+-p1 --dry-run`-clean** (a valid, appliable unified diff). So `-diff` is a reliable,
+non-destructive CI gate / review preview of exactly what `-fix` would write.
