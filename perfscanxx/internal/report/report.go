@@ -82,6 +82,16 @@ func FromExport(ef *fixes.ExportFile, maxLevel catalog.Level) []Finding {
 	return out
 }
 
+// ResolvePath is the exported form of resolvePath, used by the diff package to
+// map a Replacement's FilePath to an absolute path the same way findings are.
+func ResolvePath(filePath, buildDir, mainSrc string) string {
+	return resolvePath(filePath, buildDir, mainSrc)
+}
+
+// DisplayPath is the exported form of displayPath: render an absolute path
+// relative to the cwd for readable output.
+func DisplayPath(abs string) string { return displayPath(abs) }
+
 // resolvePath makes a diagnostic's (possibly BuildDirectory-relative)
 // FilePath absolute: an already-absolute path is returned as-is; otherwise
 // it is joined onto the BuildDirectory, falling back to the directory of the

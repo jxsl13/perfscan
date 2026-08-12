@@ -2,11 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
+	"github.com/jxsl13/perfscan/perfscanxx/internal/tidy"
 )
 
 // runCLI drives the real entry point and returns (stdout, stderr, exit).
@@ -141,6 +145,130 @@ func TestExplainUnknownCheckFails(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "unknown check") {
 		t.Errorf("-explain PX9999: want 'unknown check' on stderr, got %q", errOut)
+	}
+}
+
+// stubTidy replaces tidy.LookPath/Executor so run() can exercise the -diff
+// path without a real clang-tidy, modelling clang-tidy's two-phase behavior:
+//
+//   - The reporting invocation (no --fix) writes exportYAML to the
+//     --export-fixes destination in argv.
+//   - The -diff driver's second invocation (WITH --fix) rewrites each file named
+//     in fixWrites to its post-fix contents, in place — exactly as real
+//     clang-tidy --fix does (already coalesced/cleaned).
+//
+// sawFix (if non-nil) records whether any invocation carried --fix.
+func stubTidy(t *testing.T, exportYAML string, fixWrites map[string]string, sawFix *bool) func() {
+	t.Helper()
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+	tidy.Executor = func(_ context.Context, argv []string, stdout, stderr *bytes.Buffer) (int, error) {
+		fixMode := false
+		for _, a := range argv {
+			if a == "--fix" {
+				fixMode = true
+				if sawFix != nil {
+					*sawFix = true
+				}
+			}
+			if strings.HasPrefix(a, "--export-fixes=") {
+				dst := strings.TrimPrefix(a, "--export-fixes=")
+				if err := os.WriteFile(dst, []byte(exportYAML), 0o644); err != nil {
+					return -1, err
+				}
+			}
+		}
+		if fixMode {
+			for path, content := range fixWrites {
+				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+					return -1, err
+				}
+			}
+		}
+		return 0, nil
+	}
+	return func() { tidy.LookPath, tidy.Executor = origLook, origExec }
+}
+
+func TestDiffFixMutuallyExclusive(t *testing.T) {
+	_, errOut, code := runCLI("-diff", "-fix", "x.cpp")
+	if code != 2 {
+		t.Errorf("-diff -fix: exit = %d, want 2", code)
+	}
+	if !strings.Contains(errOut, "mutually exclusive") {
+		t.Errorf("-diff -fix: want 'mutually exclusive' on stderr, got %q", errOut)
+	}
+}
+
+func TestDiffDryRunPrintsPatchLeavesFileUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.cpp")
+	const orig = "for (auto x : items) {}\n"
+	if err := os.WriteFile(src, []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Synthetic --export-fixes: replace "auto x" (offset 5, len 6).
+	exportYAML := "" +
+		"MainSourceFile: '" + src + "'\n" +
+		"Diagnostics:\n" +
+		"  - DiagnosticName: performance-for-range-copy\n" +
+		"    DiagnosticMessage:\n" +
+		"      Message: 'loop variable is copied'\n" +
+		"      FilePath: '" + src + "'\n" +
+		"      FileOffset: 5\n" +
+		"      Replacements:\n" +
+		"        - FilePath: '" + src + "'\n" +
+		"          Offset: 5\n" +
+		"          Length: 6\n" +
+		"          ReplacementText: 'const auto& x'\n"
+
+	// What the --fix invocation writes in place (the real, cleaned result).
+	const fixed = "for (const auto& x : items) {}\n"
+	var sawFix bool
+	restore := stubTidy(t, exportYAML, map[string]string{src: fixed}, &sawFix)
+	defer restore()
+
+	out, errOut, code := runCLI("-diff", src)
+	if !sawFix {
+		t.Error("-diff must run clang-tidy --fix to build the preview")
+	}
+	if code != 1 {
+		t.Errorf("-diff with a pending fix: exit = %d, want 1\nstderr: %s", code, errOut)
+	}
+	if !strings.Contains(out, "-for (auto x : items) {}") || !strings.Contains(out, "+for (const auto& x : items) {}") {
+		t.Errorf("-diff stdout missing expected patch lines:\n%s", out)
+	}
+	if !strings.HasPrefix(out, "--- a/") {
+		t.Errorf("-diff stdout should start with a unified-diff header, got:\n%s", out)
+	}
+	if !strings.Contains(errOut, "would change") {
+		t.Errorf("-diff should print a summary to stderr, got %q", errOut)
+	}
+	// The file on disk must be byte-for-byte unchanged after -diff (restored).
+	after, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != orig {
+		t.Errorf("-diff left the source file modified: %q", after)
+	}
+}
+
+func TestDiffNoChangesExitsZero(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "clean.cpp")
+	if err := os.WriteFile(src, []byte("int main(){}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restore := stubTidy(t, "", nil, nil) // empty export => no diagnostics
+	defer restore()
+
+	out, _, code := runCLI("-diff", src)
+	if code != 0 {
+		t.Errorf("-diff with nothing to change: exit = %d, want 0", code)
+	}
+	if out != "" {
+		t.Errorf("-diff with nothing to change: stdout should be empty, got %q", out)
 	}
 }
 
