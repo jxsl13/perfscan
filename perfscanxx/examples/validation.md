@@ -400,3 +400,22 @@ cleanly across three headers (10 edits), e.g. `constexpr monostate() {}` →
 `constexpr monostate() = default;`. A concise, high-signal result on a widely-used
 header-only library — the curated catalog fires only where a real, mechanical
 improvement exists.
+
+## yaml-cpp — a busier real-world run (32 TUs, custom checks fire)
+
+`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` over `jbeder/yaml-cpp` yields a 32-TU
+compile database. `perfscanxx -level 2 -p build ./...` reports **67 findings**
+across eight checks, exit 0, no orchestration errors — a good spread over the
+catalog: PX3011 (const-qualified return type) ×22, PX2003 (use-emplace) ×16,
+PX1002 (unnecessary value param) ×15, PX3007 ×9, PX3018, PX2004, and — notably —
+the ZERO-compiled-C++ **custom queries** fire on real code: PX2101
+(reserve-before-loop) ×2 and PX2106 (stringstream-in-loop) ×1, both correctly
+gated to the project's own TUs by `isExpansionInMainFile()`.
+
+`perfscanxx -fix` applies clang-tidy's fix-its cleanly across 19 files (70
+insertions / 61 deletions), e.g. PX1002 `const std::string content` ->
+`const std::string& content` (pass by const reference) and PX3011 dropping a
+top-level `const` on a by-value return. This is the busier counterpart to the
+fmt datapoint above — a mid-size, container/string-heavy C++ library where both
+the curated clang-tidy checks and the custom queries produce actionable,
+mechanically-fixable results without noise or crashes.
