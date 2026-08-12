@@ -82,6 +82,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		buildDir   = fs.String("p", "", "build directory containing compile_commands.json (default: found by walking up from the cwd)")
 		tidyBin    = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
 		showVer    = fs.Bool("version", false, "print version and exit")
+		verbose    = fs.Bool("v", false, "verbose: list the translation units that did not fully parse (instead of only their count)")
 		cmakeCfg   = fs.Bool("cmake", false, "if no compile_commands.json is found, auto-configure a detected CMake project to generate one (runs cmake configure; only use on trusted code)")
 		cmakeBuild = fs.Bool("cmake-build", false, "implies -cmake and also runs 'cmake --build' to generate build-time headers so TUs parse (executes the project build; incremental)")
 		extra      stringSlice
@@ -267,6 +268,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 			files[f.File] = true
 		}
 		fmt.Fprintf(stderr, "perfscanxx: %d translation unit(s) did not fully parse and were partially analyzed\n", len(files))
+		if *verbose {
+			names := make([]string, 0, len(files))
+			for f := range files {
+				names = append(names, relPathCwd(f))
+			}
+			sort.Strings(names)
+			for _, n := range names {
+				fmt.Fprintln(stderr, "  did not fully parse:", n)
+			}
+		} else {
+			fmt.Fprintln(stderr, "perfscanxx: re-run with -v to list them.")
+		}
 		if missing := countMissingHeaderErrors(parseErrs); missing > 0 && !*cmakeBuild {
 			fmt.Fprintln(stderr, "perfscanxx: some reference headers generated at build time — re-run with -cmake-build to generate them.")
 		}
@@ -420,6 +433,7 @@ Examples:
 	perfscanxx -p build -baseline .perfscanxx-baseline.yaml ./...   ratchet: seed, then fail only on NEW findings
 	perfscanxx -cmake ./...              auto-configure a CMake project (generate compile_commands.json)
 	perfscanxx -cmake-build ./...        also build it to generate build-time headers
+	perfscanxx -v ./...                  also list the TUs that did not fully parse
 	perfscanxx -list                     the check table (with an auto-fix coverage summary)
 	perfscanxx -list -fixable            only the auto-fixable checks
 	perfscanxx -list -json               the catalog as machine-readable JSON
@@ -496,6 +510,17 @@ func printListJSON(w io.Writer, fixableOnly bool) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
+}
+
+// relPathCwd renders p relative to the cwd for readable output, falling back to
+// the original path when it can't be made relative.
+func relPathCwd(p string) string {
+	if wd, err := os.Getwd(); err == nil {
+		if rel, err := filepath.Rel(wd, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+	}
+	return p
 }
 
 func printExplain(stdout, stderr io.Writer, id string) int {
