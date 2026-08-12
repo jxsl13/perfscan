@@ -1,0 +1,9 @@
+package ps2130
+
+import "fmt"
+
+// The sole fmt reference in this file is the fixable call, so the fix
+// drops the orphaned fmt import — there is no import to add in its place.
+func dropFmt(s string) string {
+	return fmt.Sprintf("%s", s) // want `fmt\.Sprintf\("%s", s\) on a plain string pays fmt's format parse, interface boxing and a fresh string copy just to return the bytes s already holds; s itself is bit-identical`
+}
