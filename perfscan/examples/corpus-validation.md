@@ -198,6 +198,22 @@ for _, f := range strings.Split(v,",") → for f := range strings.SplitSeq(v,","
 So the auto-fix suite is behavior-preserving even on the standard library — the most
 heterogeneous real Go there is. (`corpus/go` restored with `git checkout .` after.)
 
+**Behavioral equivalence — the stdlib's OWN tests pass after `-fix` (2026-08-12).**
+The build+vet above proves type-safety; running the packages' own test suites with
+the stdlib's own toolchain proves runtime behavior is unchanged on the most diverse
+Go there is. Applying `-fix` to the two packages with applicable fixes and re-testing:
+
+```
+                     before -fix        after -fix (with corpus/go/bin/go)
+encoding/gob     →   ok                 ok    # PS2102 in type.go
+mime/multipart   →   ok                 ok    # PS2107 in writer.go
+```
+
+So the fixes are behavior-preserving under the standard library's own tests — the
+sixth production Go/C++ codebase (after etcd, apimachinery, component-base, client-go,
+and the C++ spdlog) confirmed at the test level, and the most heterogeneous one.
+(Fixes applied in place, then reverted with `git checkout .`.)
+
 ## Generated-file skipping validated at scale (Kubernetes protobuf)
 
 perfscan skips generated files (`// Code generated ... DO NOT EDIT.`) by default —
