@@ -1,0 +1,127 @@
+package ps2130
+
+import (
+	"fmt"
+)
+
+// fmt stays imported: this reference (and the guard cases below) keeps
+// the import alive after every fix in this file is applied.
+func keepFmtAlive() string {
+	return fmt.Sprintln("kept")
+}
+
+func basic(s string) string {
+	return fmt.Sprintf("%s", s) // want `fmt\.Sprintf\("%s", s\) on a plain string pays fmt's format parse, interface boxing and a fresh string copy just to return the bytes s already holds; s itself is bit-identical`
+}
+
+func verbV(s string) string {
+	return fmt.Sprintf("%v", s) // want `fmt\.Sprintf\("%v", s\) on a plain string pays fmt's format parse, interface boxing and a fresh string copy just to return the bytes s already holds; s itself is bit-identical`
+}
+
+func plainSprint(s string) string {
+	return fmt.Sprint(s) // want `fmt\.Sprint\(s\) on a single plain string pays fmt's interface boxing and a fresh string copy just to return the bytes s already holds; s itself is bit-identical`
+}
+
+type box struct{ s string }
+
+// A selector operand is self-delimiting: substituted verbatim, no parens.
+func selector(bx box) string {
+	out := fmt.Sprintf("%v", bx.s) // want `fmt\.Sprintf\("%v", s\) on a plain string pays fmt's format parse, interface boxing and a fresh string copy just to return the bytes s already holds; s itself is bit-identical`
+	return out
+}
+
+// The bare operand would bind differently under the index: the fix
+// parenthesizes, (a + b)[0], never a + b[0].
+func indexed(a, b string) byte {
+	return fmt.Sprintf("%s", a+b)[0] // want `fmt\.Sprintf\("%s", s\) on a plain string pays fmt's format parse, interface boxing and a fresh string copy just to return the bytes s already holds; s itself is bit-identical`
+}
+
+// An untyped string constant defaults to string and is returned verbatim.
+func literal() string {
+	return fmt.Sprint("hello") // want `fmt\.Sprint\(s\) on a single plain string pays fmt's interface boxing and a fresh string copy just to return the bytes s already holds; s itself is bit-identical`
+}
+
+// --- advisory only: reported, but never rewritten ---
+
+// A call is a valid statement; its bare operand is not — no fix.
+func statement(s string) {
+	fmt.Sprint(s) // want `fmt\.Sprint\(s\) on a single plain string pays fmt's interface boxing and a fresh string copy just to return the bytes s already holds; s itself is bit-identical`
+}
+
+// A comment inside the deleted wrapper would be swallowed — no fix.
+func commented(s string) string {
+	return fmt.Sprintf("%s" /* keep me */, s) // want `fmt\.Sprintf\("%s", s\) on a plain string pays fmt's format parse, interface boxing and a fresh string copy just to return the bytes s already holds; s itself is bit-identical`
+}
+
+// --- guards: none of the following may be reported ---
+
+type myStr string
+
+type stamp struct{}
+
+func (stamp) String() string { return "stamp" }
+
+// The whole format must be EXACTLY the one verb: a trailing newline (or
+// anything else) formats differently.
+func trailingNewline(s string) string {
+	return fmt.Sprintf("%s\n", s)
+}
+
+// Any other verb formats, it does not copy: "%q" quotes, "%d" needs a
+// number, "%+v"/"%5s" alter the rendering.
+func otherVerbs(s string, v int) {
+	_ = fmt.Sprintf("%q", s)
+	_ = fmt.Sprintf("%d", v)
+	_ = fmt.Sprintf("%+v", s)
+	_ = fmt.Sprintf("%5s", s)
+}
+
+// The operand must be STATICALLY the predeclared string: %s on a []byte
+// or a Stringer goes through fmt's own formatting, %v on an error calls
+// Error(), and a defined string type would change the expression's
+// static type from string to myStr — not an identity.
+func notString(b []byte, st stamp, m myStr, err error) {
+	_ = fmt.Sprintf("%s", b)
+	_ = fmt.Sprintf("%s", st)
+	_ = fmt.Sprintf("%v", err)
+	_ = fmt.Sprintf("%s", m)
+}
+
+// Only the single-operand forms match: a second operand needs the format
+// (or gains fmt.Sprint's separating space).
+func twoOperands(a, b string) {
+	_ = fmt.Sprintf("%s%s", a, b)
+	_ = fmt.Sprint(a, b)
+}
+
+// No variadic spread.
+func spread(args []any) {
+	_ = fmt.Sprintf("%s", args...)
+}
+
+// A non-literal format never matches, even when it holds the right verb.
+func nonLiteral(s string) string {
+	format := "%s"
+	return fmt.Sprintf(format, s)
+}
+
+// A local object named fmt shadows the package: not stdlib fmt.Sprintf.
+type fakeFmt struct{}
+
+func (fakeFmt) Sprintf(format, s string) string { return "" }
+
+func shadowedFmt(s string) string {
+	var fmt fakeFmt
+	return fmt.Sprintf("%s", s)
+}
+
+type ct struct{ s string }
+
+// A TypeName composite-literal operand must be parenthesized so the bare operand
+// is not a syntax error in a control-clause (if/for/switch) header.
+func compositeInHeader() bool {
+	if fmt.Sprintf("%s", ct{s: "hi"}.s) == "hi" { // want `fmt\.Sprintf\("%s", s\) on a plain string pays fmt's format parse, interface boxing and a fresh string copy just to return the bytes s already holds; s itself is bit-identical`
+		return true
+	}
+	return false
+}
