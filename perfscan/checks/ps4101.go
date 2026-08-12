@@ -293,20 +293,6 @@ func provablySafeLoopCopy(pass *analysis.Pass, loop ast.Node, dstIdent, srcIdent
 	return dstIsPrivateMakeSizedFromSrc(pass, body, loop, dstObj, srcObj)
 }
 
-// builtinInScope reports whether name resolves to the universe builtin at pos —
-// i.e. it is not shadowed by a local, a package-level declaration, or an import
-// alias. Emitting a call to a shadowed builtin would change behavior or break
-// the build, so a fix that inserts one must check this first.
-func builtinInScope(pass *analysis.Pass, pos token.Pos, name string) bool {
-	scope := pass.Pkg.Scope().Innermost(pos)
-	if scope == nil {
-		scope = pass.Pkg.Scope()
-	}
-	_, obj := scope.LookupParent(name, pos)
-	b, ok := obj.(*types.Builtin)
-	return ok && b.Name() == name
-}
-
 // addrTaken reports whether &obj (the whole variable) is taken anywhere in body,
 // which would let a callee reassign it (and thus change its length). &obj[i]
 // (address of an element) does not qualify — it cannot change obj's length.

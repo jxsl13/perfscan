@@ -103,7 +103,7 @@ func runPS2116(pass *analysis.Pass) (any, error) {
 			// The rewrite deletes the loop's whole source range, so it
 			// must not swallow an interior comment, and the injected
 			// identifier must still mean the builtin at this position.
-			if ps2116ClearUsable(pass, loop.Pos()) && !ps2116InteriorComment(pass, f, loop) {
+			if builtinInScope(pass, loop.Pos(), "clear") && !ps2116InteriorComment(pass, f, loop) {
 				diag.SuggestedFixes = []analysis.SuggestedFix{{
 					Message: "replace the loop with " + repl,
 					TextEdits: []analysis.TextEdit{
@@ -315,19 +315,6 @@ func ps2116IsZeroIntLit(pass *analysis.Pass, e ast.Expr) bool {
 	}
 	tv, ok := pass.TypesInfo.Types[lit]
 	return ok && tv.Value != nil && tv.Value.Kind() == constant.Int && constant.Sign(tv.Value) == 0
-}
-
-// ps2116ClearUsable reports whether the identifier clear denotes the
-// builtin at pos: a local or package-level object of that name would
-// capture the injected call, so the fix is suppressed.
-func ps2116ClearUsable(pass *analysis.Pass, pos token.Pos) bool {
-	scope := pass.Pkg.Scope().Innermost(pos)
-	if scope == nil {
-		return false
-	}
-	_, obj := scope.LookupParent("clear", pos)
-	_, isBuiltin := obj.(*types.Builtin)
-	return isBuiltin
 }
 
 // ps2116InteriorComment reports whether a comment overlaps the loop's

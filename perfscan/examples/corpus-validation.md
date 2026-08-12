@@ -279,3 +279,17 @@ findings, every one "exact: one unconditional value per iteration"** — zero
 conditional-only findings leak (the old "0 unconditional / all conditional" upper-bound
 form no longer appears anywhere). So the guard fires exactly on the sites where a
 size hint is warranted.
+
+## `-fix` on fasthttp (perf-heavy HTTP server) — safe on hand-optimized byte code
+
+`perfscan -level 3 ./...` over `github.com/valyala/fasthttp` (94 files, hand-tuned
+byte manipulation) reports cleanly with no crashes or load errors — a small,
+high-signal set: PS3002/PS2110 ×2 each, plus one each of PS3104, PS2114, PS2103,
+PS2004. `-fix` applied the one unambiguous rewrite — `sort.Strings(filenames)` →
+`slices.Sort(filenames)` in `fs.go` (swapping the `sort` import for `slices`,
+bit-identical) — after which the module `go build`s and `TestFS` passes, confirming
+behavior is preserved. The advisory PS2114 (`sync.Pool` non-pointer value) is
+correctly left un-fixed (no safe mechanical rewrite). A companion run of the full
+catalog under `-fix` produced no corrupting edit — in particular PS4101 finds no
+`make([]T, len(src))` copy loop to touch here, and nothing in the pooled/byte-slice
+hot paths is rewritten unsafely.
