@@ -312,3 +312,22 @@ un-compilable `slices.Sort`. (A sibling `sort.Strings` in the same file did gain
 exclusion had nothing to fire on here — no float-keyed sort in the corpus — but
 the report/fix pipeline is confirmed safe on a hand-optimized allocation-critical
 codebase.
+
+## logrus — low-noise on a mature codebase (a false-positive floor check)
+
+`perfscan -level 3 ./...` over `github.com/sirupsen/logrus` (26 files) reports
+just **four findings**, exit 0, no load errors — and every one is a genuine,
+high-signal ADVISORY, not an autofix:
+
+  - PS3003 (integer-keyed map probed in a loop → a dense slice) at hooks.go,
+  - PS3106 (a 288-byte `slog.Record` passed by value) at hooks/slog/handler.go,
+  - PS2104 (a map filled in a bounded loop with no size hint) at internal/testutils,
+  - PS2002 (a buffer written in a loop with no `Grow`) at text_formatter.go.
+
+`-fix` changes nothing (all four are advisory-by-design — none has a safe
+mechanical rewrite), so the module is untouched and still builds. On a small,
+well-written, widely-used library this is the result the low-false-positive model
+is aiming for: a handful of real, actionable structural hints and **zero** noisy
+or unsafe autofixes. It complements the busier corpora (etcd, kubernetes,
+compress) by pinning the quiet end — perfscan does not manufacture findings where
+the code is already clean.
