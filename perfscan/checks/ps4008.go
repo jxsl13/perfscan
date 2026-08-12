@@ -28,7 +28,17 @@ var PS4008 = register(&lint.Check{
 every fused multiply-add on the previous one: the loop runs at FMA latency,
 not throughput. An ikj/axpy loop order (or a small block of independent
 accumulators) breaks the dependency chain and lets the core retire several
-FMAs per cycle.
+FMAs per cycle — WHEN the axpy inner loop is SIMD-vectorized.
+
+MEASURED-IN-GO CAVEAT: gc does not auto-vectorize the axpy inner loop, so the
+throughput win above is a C/Fortran -O3 outcome, not a gc one. Measured on go1.26
+(Apple M2 Pro) across 128/256/512, the ikj form is ≈parity to the
+register-accumulating ijk form — modestly SLOWER at small/cache-resident sizes
+(the extra bounds-checked "c[i][j] +=" read-modify-writes outweigh the broken
+latency chain), ~3% faster only once the matrix spills cache. Treat this as a
+STRUCTURAL pointer: the real speedup comes from vectorizing (asm/cgo/a BLAS
+call), for which the ikj order is the right shape — not from the reorder alone.
+See benchmarks/README.md for why there is no Before/After pair.
 
 L3 (aggressive): reassociating a floating-point reduction changes the
 rounding order, so the result is NOT bit-identical. Gate the rewrite with a

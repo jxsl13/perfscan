@@ -24,6 +24,16 @@ Rules without a pair, and why:
   asserting a speedup would be flaky by construction. Gate real conversions
   with the digest + `-race` procedure the checks document.
 - **PS4002** (vectorized sibling): requires a SIMD kernel to compare against.
+- **PS4008** (serial-dot matmul → ikj/axpy): the throughput win the rewrite
+  targets comes from SIMD-vectorizing the axpy inner loop — which `gc` does NOT
+  do. Measured across sizes (128/256/512, Apple M2 Pro, go1.26), the ikj form is
+  ≈parity to the register-accumulating ijk form: modestly SLOWER at small /
+  cache-resident sizes (the extra bounds-checked `c[i][j] +=` read-modify-writes
+  outweigh the broken latency chain) and only ~3% faster once the matrix spills
+  cache. A Before/After pair would misrepresent a size-dependent wash as a
+  reliable speedup. The rewrite stays bit-identical and L3-opt-in as a structural
+  pointer for codebases that DO vectorize downstream (asm/cgo/a BLAS call); the
+  measured Go reality is documented in the check text.
 - **PS5001**: deliberately un-benchmarked here — the check's own doc explains
   that the win evaporates on any memory-touching path; its evidence table
   lives in the check text.
