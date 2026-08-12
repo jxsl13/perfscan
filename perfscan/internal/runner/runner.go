@@ -214,8 +214,18 @@ func Run(checks []*lint.Check, opts Options) int {
 	}
 
 	if opts.Fix {
-		applied, failed := applyFixes(findings, opts)
-		fmt.Fprintf(opts.Stderr, "perfscan: applied %d fix(es), %d failed\n", applied, failed)
+		applied, overlapping, failed := applyFixes(findings, opts)
+		msg := fmt.Sprintf("perfscan: applied %d fix(es)", applied)
+		if overlapping > 0 {
+			// Benign: these overlapped a fix already applied to the same span
+			// (two checks that rewrite one node), so the code is fixed either
+			// way — reported distinctly from a genuine failure.
+			msg += fmt.Sprintf(", %d skipped (overlaps an applied fix)", overlapping)
+		}
+		if failed > 0 {
+			msg += fmt.Sprintf(", %d failed", failed)
+		}
+		fmt.Fprintln(opts.Stderr, msg)
 	}
 
 	switch {
@@ -563,7 +573,7 @@ type patchedFile struct {
 // is already MaxLevel-gated), merges the sorted TextEdits, and
 // gofmt-formats the result — everything applyFixes does except the final
 // write. applyFixes writes the results; the -diff path renders them.
-func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFile, applied, failed int) {
+func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFile, applied, overlapping, failed int) {
 	type edit struct {
 		start, end int
 		text       []byte
@@ -680,16 +690,21 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		// Resolve overlaps at the FIX level: two checks can target the same
 		// span (e.g. PS2103 and PS2122 both rewrite one fmt.Sprintf into a + b,
 		// via different but equivalent edits). Rather than skip the whole file,
-		// apply a maximal set of non-overlapping fixes; a fix whose edits
-		// collide with an already-accepted one is dropped whole (its finding
-		// counts failed) — the code is still correctly rewritten by the fix
-		// that won. Deterministic: fixes are ordered by their first edit, then
-		// by input order (stable).
+		// apply a maximal set of non-overlapping fixes. A fix that collides with
+		// an already-accepted one is counted OVERLAPPING (benign — the code is
+		// still correctly rewritten by the fix that won), distinct from a
+		// genuine failure; a self-overlapping (malformed) fix is a real failure
+		// since applying it would corrupt the file. Deterministic: fixes are
+		// ordered by their first edit, then by input order (stable).
 		slices.SortStableFunc(fixes, func(a, b fileFix) int { return fixMinStart(a) - fixMinStart(b) })
 		var accepted []edit
 		for i := range fixes {
-			if selfOverlaps(fixes[i].edits) || conflicts(fixes[i].edits, accepted) {
+			if selfOverlaps(fixes[i].edits) {
 				failed++
+				continue
+			}
+			if conflicts(fixes[i].edits, accepted) {
+				overlapping++
 				continue
 			}
 			accepted = append(accepted, fixes[i].edits...)
@@ -710,21 +725,21 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		}
 		files[path] = patchedFile{orig: orig, fixed: src}
 	}
-	return files, applied, failed
+	return files, applied, overlapping, failed
 }
 
 // applyFixes applies the suggested fixes of the reported auto-fixable
 // checks (the enabled set is already MaxLevel-gated), then gofmt-formats
 // touched files.
-func applyFixes(findings []Finding, opts Options) (applied, failed int) {
-	files, applied, failed := patchedFiles(findings, opts)
+func applyFixes(findings []Finding, opts Options) (applied, overlapping, failed int) {
+	files, applied, overlapping, failed := patchedFiles(findings, opts)
 	for path, pf := range files {
 		if err := os.WriteFile(path, pf.fixed, 0o644); err != nil {
 			fmt.Fprintf(opts.Stderr, "perfscan: fix %s: %v\n", path, err)
 			failed++
 		}
 	}
-	return applied, failed
+	return applied, overlapping, failed
 }
 
 type jsonEdit struct {

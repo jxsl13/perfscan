@@ -50,20 +50,20 @@ func TestFixCountExcludesSkippedFiles(t *testing.T) {
 	opts := Options{Stderr: io.Discard}
 
 	// Edit offsets 50..60 exceed the 10-byte file → the file is skipped, so the
-	// fix is FAILED, not applied.
-	if _, applied, failed := patchedFiles([]Finding{mkFinding(50, 60)}, opts); applied != 0 || failed != 1 {
-		t.Errorf("out-of-range fix: applied=%d failed=%d, want applied=0 failed=1", applied, failed)
+	// fix is a genuine FAILURE (not applied, not a benign overlap).
+	if _, applied, overlap, failed := patchedFiles([]Finding{mkFinding(50, 60)}, opts); applied != 0 || overlap != 0 || failed != 1 {
+		t.Errorf("out-of-range fix: applied=%d overlap=%d failed=%d, want 0/0/1", applied, overlap, failed)
 	}
 
 	// Edit offsets 0..8 are within the file → the fix is applied.
-	if _, applied, failed := patchedFiles([]Finding{mkFinding(0, 8)}, opts); applied != 1 || failed != 0 {
-		t.Errorf("in-range fix: applied=%d failed=%d, want applied=1 failed=0", applied, failed)
+	if _, applied, overlap, failed := patchedFiles([]Finding{mkFinding(0, 8)}, opts); applied != 1 || overlap != 0 || failed != 0 {
+		t.Errorf("in-range fix: applied=%d overlap=%d failed=%d, want 1/0/0", applied, overlap, failed)
 	}
 
 	// Two fixes onto the same skipped file: BOTH count as failed, neither
 	// applied (they share the file's fate).
-	if _, applied, failed := patchedFiles([]Finding{mkFinding(50, 60), mkFinding(70, 80)}, opts); applied != 0 || failed != 2 {
-		t.Errorf("two out-of-range fixes: applied=%d failed=%d, want applied=0 failed=2", applied, failed)
+	if _, applied, overlap, failed := patchedFiles([]Finding{mkFinding(50, 60), mkFinding(70, 80)}, opts); applied != 0 || overlap != 0 || failed != 2 {
+		t.Errorf("two out-of-range fixes: applied=%d overlap=%d failed=%d, want 0/0/2", applied, overlap, failed)
 	}
 }
 
@@ -98,11 +98,12 @@ func TestFixConflictResolution(t *testing.T) {
 	opts := Options{Stderr: io.Discard}
 
 	// A replaces [18,24] ("100000" -> "1"); B replaces [20,22] (inside A) —
-	// they overlap. A starts first, so A wins and B is dropped: 1 applied,
-	// 1 failed, and the file IS written with A's rewrite (not skipped whole).
-	files, applied, failed := patchedFiles([]Finding{mk(18, 24, "1"), mk(20, 22, "9")}, opts)
-	if applied != 1 || failed != 1 {
-		t.Fatalf("conflicting fixes: applied=%d failed=%d, want applied=1 failed=1", applied, failed)
+	// they overlap. A starts first, so A wins and B is counted OVERLAPPING (a
+	// benign drop, not a failure): 1 applied, 1 overlapping, 0 failed, and the
+	// file IS written with A's rewrite (not skipped whole).
+	files, applied, overlap, failed := patchedFiles([]Finding{mk(18, 24, "1"), mk(20, 22, "9")}, opts)
+	if applied != 1 || overlap != 1 || failed != 0 {
+		t.Fatalf("conflicting fixes: applied=%d overlap=%d failed=%d, want 1/1/0", applied, overlap, failed)
 	}
 	pf, ok := files[path]
 	if !ok || !bytes.Contains(pf.fixed, []byte("var x = 1\n")) {
@@ -110,9 +111,9 @@ func TestFixConflictResolution(t *testing.T) {
 	}
 
 	// Non-overlapping fixes both apply: C replaces "x" [14,15], D replaces
-	// "100000" [18,24] — disjoint, so 2 applied, 0 failed.
-	if _, applied, failed := patchedFiles([]Finding{mk(14, 15, "y"), mk(18, 24, "1")}, opts); applied != 2 || failed != 0 {
-		t.Errorf("disjoint fixes: applied=%d failed=%d, want applied=2 failed=0", applied, failed)
+	// "100000" [18,24] — disjoint, so 2 applied, 0 overlapping, 0 failed.
+	if _, applied, overlap, failed := patchedFiles([]Finding{mk(14, 15, "y"), mk(18, 24, "1")}, opts); applied != 2 || overlap != 0 || failed != 0 {
+		t.Errorf("disjoint fixes: applied=%d overlap=%d failed=%d, want 2/0/0", applied, overlap, failed)
 	}
 }
 
@@ -140,9 +141,11 @@ func TestSelfOverlappingFixRejected(t *testing.T) {
 			},
 		}},
 	}
-	files, applied, failed := patchedFiles([]Finding{f}, Options{Stderr: io.Discard})
-	if applied != 0 || failed != 1 {
-		t.Fatalf("self-overlapping fix: applied=%d failed=%d, want applied=0 failed=1", applied, failed)
+	// A self-overlapping (malformed) fix is a genuine FAILURE — not a benign
+	// overlap of a different fix — because applying it would corrupt the file.
+	files, applied, overlap, failed := patchedFiles([]Finding{f}, Options{Stderr: io.Discard})
+	if applied != 0 || overlap != 0 || failed != 1 {
+		t.Fatalf("self-overlapping fix: applied=%d overlap=%d failed=%d, want 0/0/1", applied, overlap, failed)
 	}
 	// With no fix applied, the file must not be written at all (not even a
 	// gofmt-only rewrite) — so it is absent from the patched set.
