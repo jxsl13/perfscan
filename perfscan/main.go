@@ -44,6 +44,7 @@ func main() {
 		configPath = flag.String("config", "", "path to perfscan.yaml (default: auto-discover up to the module root; JSON still parses)")
 		exitZero   = flag.Bool("exit-zero", false, "always exit 0, even with findings")
 		baseline   = flag.String("baseline", "", "baseline file: suppress findings recorded in it (ratchet mode)")
+		includeGen = flag.Bool("include-generated", false, "report and fix findings in generated files (those marked \"// Code generated ... DO NOT EDIT.\"); by default they are skipped")
 		writeBase  = flag.Bool("write-baseline", false, "write current findings to -baseline and exit 0")
 		showVer    = flag.Bool("version", false, "print version and exit")
 	)
@@ -65,18 +66,19 @@ func main() {
 
 	runner.Version = version
 	code := runner.Run(checks.All(), runner.Options{
-		Patterns:      flag.Args(),
-		Checks:        *sel,
-		MaxLevel:      lint.Level(*maxLevel),
-		Tests:         *tests,
-		Fix:           *fix,
-		Diff:          *diff,
-		JSON:          *jsonOut,
-		SARIF:         *sarifOut,
-		ConfigPath:    *configPath,
-		ExitZero:      *exitZero,
-		Baseline:      *baseline,
-		WriteBaseline: *writeBase,
+		Patterns:         flag.Args(),
+		Checks:           *sel,
+		MaxLevel:         lint.Level(*maxLevel),
+		Tests:            *tests,
+		Fix:              *fix,
+		Diff:             *diff,
+		JSON:             *jsonOut,
+		SARIF:            *sarifOut,
+		ConfigPath:       *configPath,
+		ExitZero:         *exitZero,
+		Baseline:         *baseline,
+		WriteBaseline:    *writeBase,
+		IncludeGenerated: *includeGen,
 	})
 	os.Exit(code)
 }

@@ -5,7 +5,9 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
+	"go/ast"
 	"go/format"
+	"go/parser"
 	"go/token"
 	"io"
 	"os"
@@ -54,6 +56,10 @@ type Options struct {
 	// WriteBaseline writes the current findings to Baseline instead of
 	// reporting them, and exits 0.
 	WriteBaseline bool
+	// IncludeGenerated reports (and fixes) findings in generated Go files
+	// (those with the conventional "// Code generated ... DO NOT EDIT."
+	// marker). By default they are skipped.
+	IncludeGenerated bool
 
 	Stdout io.Writer
 	Stderr io.Writer
@@ -145,6 +151,11 @@ func Run(checks []*lint.Check, opts Options) int {
 	}
 
 	findings = filterIgnored(findings)
+	before := len(findings)
+	findings = filterGenerated(findings, opts.IncludeGenerated)
+	if dropped := before - len(findings); !opts.IncludeGenerated && dropped > 0 {
+		fmt.Fprintf(opts.Stderr, "perfscan: %d finding(s) in generated files skipped (use -include-generated to report them)\n", dropped)
+	}
 	slices.SortFunc(findings, func(a, b Finding) int {
 		if c := strings.Compare(a.Pos.Filename, b.Pos.Filename); c != 0 {
 			return c
@@ -429,6 +440,37 @@ func filterIgnored(findings []Finding) []Finding {
 			continue
 		}
 		out = append(out, f)
+	}
+	return out
+}
+
+// filterGenerated drops findings located in generated Go files (those with
+// the conventional `// Code generated ... DO NOT EDIT.` marker before the
+// package clause), unless include is true. Detection uses go/ast.IsGenerated,
+// the authoritative check. A file that cannot be parsed is treated as NOT
+// generated (reported), never silently dropped.
+func filterGenerated(findings []Finding, include bool) []Finding {
+	if include {
+		return findings
+	}
+	generated := map[string]bool{}
+	isGenerated := func(path string) bool {
+		if g, ok := generated[path]; ok {
+			return g
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.PackageClauseOnly|parser.ParseComments)
+		g := err == nil && ast.IsGenerated(file)
+		generated[path] = g
+		return g
+	}
+	out := make([]Finding, 0, len(findings))
+	// Iterate by index: a Finding is large enough that ranging by value would
+	// copy it every iteration (perfscan's own PS3103 — dogfooded).
+	for i := range findings {
+		if isGenerated(findings[i].Pos.Filename) {
+			continue
+		}
+		out = append(out, findings[i])
 	}
 	return out
 }
