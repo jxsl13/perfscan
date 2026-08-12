@@ -150,6 +150,14 @@ func TestPS3082(t *testing.T) {
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3082.Analyzer, "ps3082")
 }
 
+// TestPS3082Shadow pins the guard that a package-level max/min declaration
+// disables the fix: injecting a helper whose body calls the max()/min()
+// builtin would instead dispatch to the user's function. The diagnostics
+// must still fire, but with no SuggestedFix (hence no .golden file).
+func TestPS3082Shadow(t *testing.T) {
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3082.Analyzer, "ps3082_shadow")
+}
+
 func TestPS3001(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS3001.Analyzer, "ps3001")
 }
