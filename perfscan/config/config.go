@@ -21,6 +21,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -132,6 +135,46 @@ func Load(path string) (Config, error) {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
 	return c, nil
+}
+
+// knownKeys is the set of recognized top-level config keys, derived from
+// Config's yaml struct tags so it never drifts from the fields.
+func knownKeys() map[string]bool {
+	m := map[string]bool{}
+	t := reflect.TypeOf(Config{})
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("yaml"), ",")
+		if name != "" && name != "-" {
+			m[name] = true
+		}
+	}
+	return m
+}
+
+// UnknownKeys returns the sorted top-level keys in the YAML at path that are
+// NOT recognized Config fields — almost always a typo (e.g. "elementAccesors"
+// for "elementAccessors"), which yaml.Unmarshal silently drops, leaving the
+// domain check that key feeds starved and silent (the failure mode this
+// package's doc warns about). Best-effort: returns nil when the file cannot be
+// read or is not a YAML mapping.
+func UnknownKeys(path string) []string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var raw map[string]yaml.Node
+	if yaml.Unmarshal(b, &raw) != nil {
+		return nil
+	}
+	known := knownKeys()
+	var unknown []string
+	for k := range raw {
+		if !known[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	slices.Sort(unknown)
+	return unknown
 }
 
 // Discover walks from dir upward looking for perfscan.yaml or

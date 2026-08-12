@@ -267,16 +267,27 @@ func relPath(p string) string {
 }
 
 func loadConfig(opts Options) (config.Config, string) {
+	var c config.Config
+	var path string
 	if opts.ConfigPath != "" {
-		c, err := config.Load(opts.ConfigPath)
+		var err error
+		c, err = config.Load(opts.ConfigPath)
 		if err != nil {
 			fmt.Fprintln(opts.Stderr, "perfscan: config:", err)
 			return config.Config{}, ""
 		}
-		return c, opts.ConfigPath
+		path = opts.ConfigPath
+	} else {
+		wd, _ := os.Getwd()
+		c, path = config.Discover(wd)
 	}
-	wd, _ := os.Getwd()
-	return config.Discover(wd)
+	// Warn on unrecognized top-level keys: yaml.Unmarshal silently drops them,
+	// so a typo'd vocabulary key would otherwise leave its domain check starved
+	// and silent — the one failure mode that costs whole investigations.
+	for _, k := range config.UnknownKeys(path) {
+		fmt.Fprintf(opts.Stderr, "perfscan: WARNING: config %s: unrecognized key %q (typo? the domain check keying on it stays silent)\n", path, k)
+	}
+	return c, path
 }
 
 // missingVocab returns the vocabulary fields a domain check needs that the
