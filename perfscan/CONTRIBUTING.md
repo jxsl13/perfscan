@@ -10,7 +10,8 @@ measured win, not by folklore.
 ```bash
 git clone https://github.com/jxsl13/perfscan
 cd perfscan
-make hooks    # install the git pre-commit hook (gofmt, vet, build, test)
+make hooks    # install the git hooks: pre-commit (gofmt/vet/build/test) and
+              # pre-push (full CI mirror: +staticcheck, -race, docs, benchmarks, dogfood)
 make test
 ```
 
@@ -79,11 +80,17 @@ without its regression test is not done.
 
 ## Release process
 
-Releases are tagged `vX.Y.Z` on `main`; CI runs tests on every push and
-GoReleaser builds and publishes binaries on tags. Maintainers follow
-semantic versioning: new checks are minor versions, message/behavior changes
-of existing checks are documented in the changelog, ID semantics never
-change.
+This is a monorepo, so releases are tagged **per module**: `perfscan/vX.Y.Z`
+(and `perfscanxx/vX.Y.Z`) — the module-path prefix is required so
+`go install github.com/jxsl13/perfscan/perfscan@vX.Y.Z` resolves. On a tag, the
+GitHub Actions **release workflow** cross-compiles the binaries per OS/arch and
+publishes them with `softprops/action-gh-release` — GoReleaser's monorepo /
+prefixed-tag mode is Pro-only, so a plain cross-compile matrix is used instead.
+
+Policy: cut a release per feature (bump the minor); ID semantics never change.
+Only the **last 3 releases per tool** are kept — older tags/releases are pruned.
+If the golangci-lint plugin's pinned perfscan version would fall outside that
+window, bump `plugin/go.mod`'s `require` (see `plugin/README.md`).
 
 ## Code of conduct
 
