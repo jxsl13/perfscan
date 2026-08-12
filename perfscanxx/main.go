@@ -600,10 +600,19 @@ func applySequentialFixes(ctx context.Context, stderr io.Writer, base tidy.Optio
 	return nil
 }
 
-// vendoredSegment returns the first vendored path segment in p, if any.
+// vendoredSegment returns the first vendored path segment in p, if any. It
+// walks the '/'-separated segments in place rather than strings.Split so it
+// allocates no []string (this runs per fixed file when -fix warns/excludes).
 func vendoredSegment(p string) (string, bool) {
-	for _, seg := range strings.Split(filepath.ToSlash(p), "/") {
-		if vendoredDirs[strings.ToLower(seg)] {
+	sp := filepath.ToSlash(p)
+	for len(sp) > 0 {
+		seg := sp
+		if i := strings.IndexByte(sp, '/'); i >= 0 {
+			seg, sp = sp[:i], sp[i+1:]
+		} else {
+			sp = ""
+		}
+		if seg != "" && vendoredDirs[strings.ToLower(seg)] {
 			return seg, true
 		}
 	}
