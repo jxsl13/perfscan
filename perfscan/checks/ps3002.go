@@ -29,22 +29,28 @@ direct call, and a sort.Sort on a concrete sort.Interface implementation
 avoids the reflect-based swaps too.
 
 The automatic fix (L2) handles the shape where the sorted value is a plain
-identifier xs and the comparator body is a run of ascending comparisons
-"xs[i]<CHAIN> < xs[j]<CHAIN>" with the same selector chain on both sides of
-each comparison and an ordered basic element/field type. Three forms:
+identifier xs and the comparator body is a run of ordered comparisons
+"xs[i]<CHAIN> < xs[j]<CHAIN>" (ascending) or "xs[i]<CHAIN> > xs[j]<CHAIN>"
+(descending) with the same selector chain on both sides of each comparison
+and an ordered basic element/field type. Three forms:
 
   - Whole element (empty chain, "return xs[i] < xs[j]") → slices.Sort(xs),
     which drops the comparator entirely. Needs only "slices" in scope.
+    Ascending only — slices.Sort has no comparator to reverse.
   - A single field ("return xs[i].f < xs[j].f") → slices.SortFunc(xs,
-    func(a, b T) int { return cmp.Compare(a.f, b.f) }). Needs "slices" and
-    "cmp" in scope and a locally spellable element type T.
+    func(a, b T) int { return cmp.Compare(a.f, b.f) }); a descending
+    "return xs[i].f > xs[j].f" swaps the operands to cmp.Compare(b.f, a.f).
+    Needs "slices" and "cmp" in scope and a locally spellable element type T.
   - A multi-field tie-break chain of "if xs[i].f != xs[j].f { return
     xs[i].f < xs[j].f }" guards (each guard testing the very field it then
     orders) closed by a final "return xs[i].g < xs[j].g" → the equivalent
-    cmp.Compare chain inside slices.SortFunc. Both sorts run the same
-    pdqsort, and the int chain returns the sign of the first differing
-    field exactly where the bool chain returns its '<', so the permutation
-    is identical. Same "slices"+"cmp" requirements as the single field.
+    cmp.Compare chain inside slices.SortFunc. Each field's direction is
+    independent — a chain may mix '<' and '>' (e.g. date descending, then
+    name ascending), each emitted with its own operand order. Both sorts
+    run the same pdqsort, and the int chain returns the sign of the first
+    differing field exactly where the bool chain returns its '<' or '>'
+    (cmp.Compare(b.f, a.f) < 0 iff a.f > b.f), so the permutation is
+    identical. Same "slices"+"cmp" requirements as the single field.
 
 FLOAT is excluded from the fix (advisory only): cmp.Compare and slices.Sort
 order NaN as the smallest value while the '<' comparator treats NaN as
@@ -145,16 +151,20 @@ func runPS3002(pass *analysis.Pass) (any, error) {
 //
 // where xs is a plain identifier of slice type and the comparator body is a
 // run of zero or more `if xs[i]<CHAIN> != xs[j]<CHAIN> { return xs[i]<CHAIN>
-// < xs[j]<CHAIN> }` tie-break guards — each guard ordering the very field it
-// tests — closed by a final `return A < B`. Every comparison's operands must
-// be identical selector chains rooted at xs[i] (left) and xs[j] (right) over
-// an ordered non-float basic type, and the packages slices and cmp must be
-// importable by name at the call site (already imported, un-renamed, not
-// shadowed). Ascending only and same-field guards only: both sorts share the
-// same pdqsort, and under these guards the bool chain and the cmp.Compare
-// chain induce the identical total order, so the resulting permutation is
-// bit-identical (including ties). All other shapes get the advisory report
-// only.
+// OP xs[j]<CHAIN> }` tie-break guards — each guard ordering the very field it
+// tests — closed by a final `return A OP B`, where each OP is independently
+// '<' (ascending) or '>' (descending); an ascending field becomes
+// cmp.Compare(a.f, b.f) and a descending field cmp.Compare(b.f, a.f) with the
+// operands swapped. Every comparison's operands must be identical selector
+// chains rooted at xs[i] (left) and xs[j] (right) over an ordered non-float
+// basic type, and the packages slices and cmp must be importable by name at
+// the call site (already imported, un-renamed, not shadowed). Same-field
+// guards only: both sorts share the same pdqsort, and under these guards the
+// bool chain and the cmp.Compare chain induce the identical total order —
+// cmp.Compare(b.f, a.f) < 0 ⟺ a.f > b.f — so the resulting permutation is
+// bit-identical (including ties). The whole-element form stays ascending
+// only: slices.Sort has no comparator to swap operands in. All other shapes
+// get the advisory report only.
 func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis.SuggestedFix {
 	// The rewrite targets the standard library sort package only: a
 	// same-named third-party package could give Slice other semantics.
@@ -205,12 +215,17 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 		return nil
 	}
 	// Body: zero or more `if xs[i].f != xs[j].f { return xs[i].f < xs[j].f }`
-	// tie-break guards followed by exactly one final `return A < B`.
+	// (or `> xs[j].f`) tie-break guards followed by exactly one final
+	// `return A < B` / `return A > B`. Direction is INDEPENDENT per field.
 	body := fl.Body.List
 	if len(body) == 0 {
 		return nil
 	}
-	suffixes := make([]string, 0, len(body))
+	type fieldCmp struct {
+		suffix     string
+		descending bool
+	}
+	fields := make([]fieldCmp, 0, len(body))
 	for _, stmt := range body[:len(body)-1] {
 		ifs, ok := stmt.(*ast.IfStmt)
 		if !ok || ifs.Init != nil || ifs.Else != nil || len(ifs.Body.List) != 1 {
@@ -224,30 +239,32 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 		if !ok || len(ret.Results) != 1 {
 			return nil
 		}
-		cmpSuffix, ok := ascendingFieldCompare(pass, ret.Results[0], xsObj, params[0], params[1])
+		cmpSuffix, cmpDesc, ok := orderingCompare(pass, ret.Results[0], xsObj, params[0], params[1])
 		// The guard must test the very field it then orders (an empty
 		// chain — a whole-element compare — never belongs in a guard):
-		// otherwise the bool chain and the cmp chain diverge on ties.
+		// otherwise the bool chain and the cmp chain diverge on ties. The
+		// return's direction does not affect the guard: `!=` is symmetric.
 		if !ok || cmpSuffix == "" || cmpSuffix != condSuffix {
 			return nil
 		}
-		suffixes = append(suffixes, cmpSuffix)
+		fields = append(fields, fieldCmp{cmpSuffix, cmpDesc})
 	}
 	final, ok := body[len(body)-1].(*ast.ReturnStmt)
 	if !ok || len(final.Results) != 1 {
 		return nil
 	}
-	finalSuffix, ok := ascendingFieldCompare(pass, final.Results[0], xsObj, params[0], params[1])
+	finalSuffix, finalDesc, ok := orderingCompare(pass, final.Results[0], xsObj, params[0], params[1])
 	if !ok {
 		return nil
 	}
-	// A whole-element compare is only valid as the sole statement (→
-	// slices.Sort); as the tail of a tie-break chain it compares the whole
-	// element, which cmp.Compare cannot express.
-	if finalSuffix == "" && len(suffixes) > 0 {
+	// A whole-element compare is only valid as the sole statement AND
+	// ascending (→ slices.Sort, which has no comparator to swap operands
+	// in); as the tail of a tie-break chain it compares the whole element,
+	// which cmp.Compare cannot express.
+	if finalSuffix == "" && (len(fields) > 0 || finalDesc) {
 		return nil
 	}
-	suffixes = append(suffixes, finalSuffix)
+	fields = append(fields, fieldCmp{finalSuffix, finalDesc})
 	// slices must resolve to the std package at the call site (imported here,
 	// un-renamed, not shadowed) — required by BOTH rewrites below.
 	if !stdPkgInScope(pass, call.Pos(), "slices") {
@@ -260,7 +277,7 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 	// slices.Sort already uses, and equal elements are indistinguishable so a
 	// SliceStable collapses to the same result. No cmp import, no element
 	// spelling needed.
-	if suffixes[0] == "" {
+	if fields[0].suffix == "" {
 		return &analysis.SuggestedFix{
 			Message: fmt.Sprintf("replace sort.%s with slices.Sort", name),
 			TextEdits: []analysis.TextEdit{
@@ -269,10 +286,12 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 		}
 	}
 
-	// Field compare(s) — `xs[i].f < xs[j].f`, possibly behind `!=` tie-break
-	// guards — become slices.SortFunc with one cmp.Compare per field, so cmp
-	// must also be importable and the element type spellable without a new
-	// import.
+	// Field compare(s) — `xs[i].f < xs[j].f` or `xs[i].f > xs[j].f`, possibly
+	// behind `!=` tie-break guards — become slices.SortFunc with one
+	// cmp.Compare per field (operands SWAPPED for a descending field:
+	// cmp.Compare(b.f, a.f) < 0 ⟺ b.f < a.f ⟺ a.f > b.f, the bool
+	// comparator's exact result), so cmp must also be importable and the
+	// element type spellable without a new import.
 	if !stdPkgInScope(pass, call.Pos(), "cmp") {
 		return nil
 	}
@@ -286,13 +305,21 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 	if name == "SliceStable" {
 		fn = "SortStableFunc"
 	}
+	// One cmp.Compare per field, its operand order set by that field's own
+	// direction: ascending → cmp.Compare(a.f, b.f), descending →
+	// cmp.Compare(b.f, a.f).
+	compare := func(f fieldCmp) string {
+		if f.descending {
+			return fmt.Sprintf("cmp.Compare(b%s, a%s)", f.suffix, f.suffix)
+		}
+		return fmt.Sprintf("cmp.Compare(a%s, b%s)", f.suffix, f.suffix)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "slices.%s(%s, func(a, b %s) int { ", fn, xs.Name, elemStr)
-	for _, s := range suffixes[:len(suffixes)-1] {
-		fmt.Fprintf(&b, "if a%s != b%s { return cmp.Compare(a%s, b%s) }; ", s, s, s, s)
+	for _, f := range fields[:len(fields)-1] {
+		fmt.Fprintf(&b, "if a%s != b%s { return %s }; ", f.suffix, f.suffix, compare(f))
 	}
-	last := suffixes[len(suffixes)-1]
-	fmt.Fprintf(&b, "return cmp.Compare(a%s, b%s) })", last, last)
+	fmt.Fprintf(&b, "return %s })", compare(fields[len(fields)-1]))
 	return &analysis.SuggestedFix{
 		Message: fmt.Sprintf("replace sort.%s with slices.%s", name, fn),
 		TextEdits: []analysis.TextEdit{
@@ -301,34 +328,43 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 	}
 }
 
-// ascendingFieldCompare validates a single ascending comparison
-// `xs[i]<CHAIN> < xs[j]<CHAIN>` (identical chains, xs = xsObj, i/j in that
-// order, ordered non-float leaf type) and returns the "."-prefixed selector
-// suffix — empty for a whole-element compare.
-func ascendingFieldCompare(pass *analysis.Pass, expr ast.Expr, xsObj types.Object, iName, jName string) (suffix string, ok bool) {
-	return comparisonSuffix(pass, expr, token.LSS, xsObj, iName, jName)
+// orderingCompare validates a single ordering comparison `xs[i]<CHAIN> <
+// xs[j]<CHAIN>` (ascending) or `xs[i]<CHAIN> > xs[j]<CHAIN>` (descending) —
+// identical chains, xs = xsObj, i/j in that order, ordered non-float leaf
+// type — and returns the "."-prefixed selector suffix (empty for a
+// whole-element compare) plus which direction it saw.
+func orderingCompare(pass *analysis.Pass, expr ast.Expr, xsObj types.Object, iName, jName string) (suffix string, descending bool, ok bool) {
+	bin, isBin := expr.(*ast.BinaryExpr)
+	if !isBin || (bin.Op != token.LSS && bin.Op != token.GTR) {
+		return "", false, false
+	}
+	suffix, ok = comparisonSuffix(pass, bin, xsObj, iName, jName)
+	return suffix, bin.Op == token.GTR, ok
 }
 
 // neqField validates a tie-break guard condition `xs[i]<CHAIN> !=
-// xs[j]<CHAIN>` under the same operand rules as ascendingFieldCompare and
-// returns the same "."-prefixed selector suffix.
+// xs[j]<CHAIN>` under the same operand rules as orderingCompare and
+// returns the same "."-prefixed selector suffix. `!=` is symmetric, so the
+// guard is direction-agnostic: it pairs equally with an ascending or a
+// descending return comparison on the same field.
 func neqField(pass *analysis.Pass, expr ast.Expr, xsObj types.Object, iName, jName string) (suffix string, ok bool) {
-	return comparisonSuffix(pass, expr, token.NEQ, xsObj, iName, jName)
-}
-
-// comparisonSuffix validates a binary comparison with operator op whose
-// operands are identical selector chains rooted at xsObj[iName] (left) and
-// xsObj[jName] (right) over an ordered basic type, and returns the selector
-// chain as a "."-prefixed suffix ("" for the empty whole-element chain).
-// Floats are rejected: cmp.Compare and slices.Sort order NaN as the smallest
-// value, whereas the '<' comparator treats NaN as incomparable, so the two
-// disagree on any slice that can contain a NaN — the same float exclusion
-// PS3104/PS3105 apply for exactly this reason.
-func comparisonSuffix(pass *analysis.Pass, expr ast.Expr, op token.Token, xsObj types.Object, iName, jName string) (string, bool) {
-	bin, ok := expr.(*ast.BinaryExpr)
-	if !ok || bin.Op != op {
+	bin, isBin := expr.(*ast.BinaryExpr)
+	if !isBin || bin.Op != token.NEQ {
 		return "", false
 	}
+	return comparisonSuffix(pass, bin, xsObj, iName, jName)
+}
+
+// comparisonSuffix validates a binary comparison (the operator itself was
+// already vetted by the caller) whose operands are identical selector chains
+// rooted at xsObj[iName] (left) and xsObj[jName] (right) over an ordered
+// basic type, and returns the selector chain as a "."-prefixed suffix (""
+// for the empty whole-element chain). Floats are rejected: cmp.Compare and
+// slices.Sort order NaN as the smallest value, whereas the '<'/'>'
+// comparators treat NaN as incomparable, so the two disagree on any slice
+// that can contain a NaN — the same float exclusion PS3104/PS3105 apply for
+// exactly this reason.
+func comparisonSuffix(pass *analysis.Pass, bin *ast.BinaryExpr, xsObj types.Object, iName, jName string) (string, bool) {
 	fieldsA, baseA, idxA, ok := indexSelectorChain(bin.X)
 	if !ok || idxA.Name != iName {
 		return "", false
