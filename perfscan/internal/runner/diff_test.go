@@ -1,0 +1,209 @@
+package runner
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/jxsl13/perfscan/perfscan/checks"
+	"github.com/jxsl13/perfscan/perfscan/lint"
+)
+
+// -diff is the dry-run twin of -fix: same checks, same -level gating, same
+// baseline filtering, but it renders unified diffs instead of writing files
+// and signals "changes pending" with exit 1.
+
+const diffGoMod = `module diffcorpus
+
+go 1.23
+`
+
+// diffFixable carries one PS3104 site (sort.Ints → slices.Sort, L1
+// auto-fix); its fix also rewrites the import, so the diff spans two hunks.
+const diffFixable = `package main
+
+import "sort"
+
+func main() {
+	xs := []int{3, 1, 2}
+	sort.Ints(xs)
+	_ = xs
+}
+`
+
+// diffClean has no findings at any level.
+const diffClean = `package main
+
+func main() {}
+`
+
+func runDiffMode(t *testing.T, mainSrc string) (stdout, stderr string, code int, onDisk []byte) {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", diffGoMod)
+	write("main.go", mainSrc)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(wd) }()
+
+	var out, errBuf bytes.Buffer
+	code = Run(checks.All(), Options{
+		Patterns: []string{"./..."},
+		MaxLevel: lint.LevelAggressive,
+		Diff:     true,
+		Stdout:   &out,
+		Stderr:   &errBuf,
+	})
+	onDisk, err = os.ReadFile(filepath.Join(dir, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out.String(), errBuf.String(), code, onDisk
+}
+
+func TestDiffModeShowsPendingFixWithoutApplying(t *testing.T) {
+	stdout, stderr, code, onDisk := runDiffMode(t, diffFixable)
+
+	// (a) dry run: the file on disk is byte-for-byte untouched.
+	if string(onDisk) != diffFixable {
+		t.Errorf("-diff must not modify files; on disk now:\n%s", onDisk)
+	}
+	// (c) changes pending → exit 1.
+	if code != 1 {
+		t.Fatalf("want exit 1 with a pending fix, got %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	// (b) a valid unified diff with the expected old/new lines.
+	for _, want := range []string{"--- a/main.go\n", "+++ b/main.go\n", "@@ -"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("diff output missing %q:\n%s", want, stdout)
+		}
+	}
+	var sawMinus, sawPlus bool
+	for line := range strings.Lines(stdout) {
+		if strings.HasPrefix(line, "-") && strings.Contains(line, "sort.Ints(xs)") {
+			sawMinus = true
+		}
+		if strings.HasPrefix(line, "+") && strings.Contains(line, "slices.Sort(xs)") {
+			sawPlus = true
+		}
+	}
+	if !sawMinus || !sawPlus {
+		t.Errorf("expected -sort.Ints(xs) / +slices.Sort(xs) lines, got:\n%s", stdout)
+	}
+	// Findings text is suppressed in diff mode — stdout is only the patch.
+	if strings.Contains(stdout, "PS3104") {
+		t.Errorf("findings text must not pollute the patch on stdout:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "would change") {
+		t.Errorf("expected a pending-changes summary on stderr, got:\n%s", stderr)
+	}
+}
+
+func TestDiffModeCleanFileNoDiffExitZero(t *testing.T) {
+	stdout, stderr, code, onDisk := runDiffMode(t, diffClean)
+	if string(onDisk) != diffClean {
+		t.Errorf("-diff must not modify files; on disk now:\n%s", onDisk)
+	}
+	if code != 0 {
+		t.Fatalf("want exit 0 on a clean tree, got %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if stdout != "" {
+		t.Errorf("clean tree must print no diff, got:\n%s", stdout)
+	}
+}
+
+func TestDiffAndFixAreMutuallyExclusive(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	code := Run(checks.All(), Options{
+		Patterns: []string{"./..."},
+		Diff:     true,
+		Fix:      true,
+		Stdout:   &out,
+		Stderr:   &errBuf,
+	})
+	if code != 2 {
+		t.Fatalf("want exit 2 for -diff -fix, got %d", code)
+	}
+	if !strings.Contains(errBuf.String(), "-diff and -fix are mutually exclusive") {
+		t.Errorf("expected mutual-exclusion message, got:\n%s", errBuf.String())
+	}
+}
+
+func TestUnifiedDiffRendering(t *testing.T) {
+	a := []byte("one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n")
+	b := []byte("one\ntwo\nthree\nfour\nFIVE\nsix\nseven\neight\nnine\nten\n")
+	got := unifiedDiff("f.txt", a, b)
+	want := `--- a/f.txt
++++ b/f.txt
+@@ -2,7 +2,7 @@
+ two
+ three
+ four
+-five
++FIVE
+ six
+ seven
+ eight
+`
+	if got != want {
+		t.Errorf("unified diff mismatch\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestUnifiedDiffMergesNearbyChangesAndMarksNoNewline(t *testing.T) {
+	a := []byte("a\nb\nc\nd\ne\nf\ng")
+	b := []byte("a\nB\nc\nd\ne\nF\ng")
+	got := unifiedDiff("f.txt", a, b)
+	// Changes 2 lines apart (< 2*context equal lines between) merge into
+	// one hunk; the unterminated last line gets the standard marker.
+	want := `--- a/f.txt
++++ b/f.txt
+@@ -1,7 +1,7 @@
+ a
+-b
++B
+ c
+ d
+ e
+-f
++F
+ g
+\ No newline at end of file
+`
+	if got != want {
+		t.Errorf("unified diff mismatch\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	if unifiedDiff("f.txt", a, a) != "" {
+		t.Error("equal contents must render an empty diff")
+	}
+}
+
+func TestUnifiedDiffInsertionAtStart(t *testing.T) {
+	a := []byte("x\ny\n")
+	b := []byte("new\nx\ny\n")
+	got := unifiedDiff("f.txt", a, b)
+	want := `--- a/f.txt
++++ b/f.txt
+@@ -1,2 +1,3 @@
++new
+ x
+ y
+`
+	if got != want {
+		t.Errorf("unified diff mismatch\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
