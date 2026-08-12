@@ -80,3 +80,40 @@ func findClangTidyForTest() string {
 	}
 	return ""
 }
+
+// TestEveryStandardTidyNameIsKnownToClangTidy pins the catalog's load-bearing
+// claim that "every TidyName is a real clang-tidy check". A standard (non-custom)
+// entry whose TidyName is a typo or a check clang-tidy has since renamed would
+// SILENTLY never fire — no error, just missing findings. This runs the real
+// `clang-tidy --checks=* --list-checks` once and asserts every non-custom
+// TidyName is in that set. (Custom query checks are validated separately by
+// TestCustomQueriesAcceptedByClangTidy; their "custom-<name>" is not listed.)
+func TestEveryStandardTidyNameIsKnownToClangTidy(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found; skipping standard-TidyName validation")
+	}
+	out, err := exec.Command(bin, "--checks=*", "--list-checks").CombinedOutput()
+	if err != nil {
+		t.Fatalf("clang-tidy --list-checks: %v\n%s", err, out)
+	}
+	known := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			known[s] = true
+		}
+	}
+	// Sanity: the parse found a plausible number of checks (guards against a
+	// format change silently emptying the set and passing vacuously).
+	if len(known) < 100 {
+		t.Fatalf("parsed only %d checks from --list-checks; output format may have changed:\n%s", len(known), out)
+	}
+	for _, e := range catalog.All() {
+		if e.Custom {
+			continue
+		}
+		if !known[e.TidyName] {
+			t.Errorf("%s: TidyName %q is not a check clang-tidy recognizes — it would silently never fire (typo, or renamed upstream)", e.ID, e.TidyName)
+		}
+	}
+}
