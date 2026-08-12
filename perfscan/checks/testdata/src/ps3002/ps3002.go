@@ -87,3 +87,139 @@ func sortIntsStableWhole(xs []int) {
 func sortFloats(fs []float64) {
 	sort.Slice(fs, func(i, j int) bool { return fs[i] < fs[j] }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
 }
+
+type meta struct{ name string }
+
+type gvk struct {
+	group   string
+	version string
+	kind    string
+	score   float64
+	meta    meta
+}
+
+// Two-field ascending tie-break: each guard tests the very field it orders.
+func sortTwoFields(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].group != xs[j].group {
+			return xs[i].group < xs[j].group
+		}
+		return xs[i].version < xs[j].version
+	})
+}
+
+// Three-field ascending tie-break.
+func sortThreeFields(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].group != xs[j].group {
+			return xs[i].group < xs[j].group
+		}
+		if xs[i].version != xs[j].version {
+			return xs[i].version < xs[j].version
+		}
+		return xs[i].kind < xs[j].kind
+	})
+}
+
+// A nested selector chain in the guard field.
+func sortNestedChain(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].meta.name != xs[j].meta.name {
+			return xs[i].meta.name < xs[j].meta.name
+		}
+		return xs[i].kind < xs[j].kind
+	})
+}
+
+// SliceStable multi-field becomes slices.SortStableFunc.
+func sortStableTwoFields(xs []gvk) {
+	sort.SliceStable(xs, func(i, j int) bool { // want `sort\.SliceStable swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].group != xs[j].group {
+			return xs[i].group < xs[j].group
+		}
+		return xs[i].kind < xs[j].kind
+	})
+}
+
+// A FLOAT field anywhere in the chain keeps the whole chain advisory.
+func sortFloatInChain(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].score != xs[j].score {
+			return xs[i].score < xs[j].score
+		}
+		return xs[i].kind < xs[j].kind
+	})
+}
+
+// The guard tests one field but orders another: not the canonical tie-break,
+// the bool and cmp chains diverge on ties. Advisory only.
+func sortGuardMismatch(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].group != xs[j].group {
+			return xs[i].version < xs[j].version
+		}
+		return xs[i].kind < xs[j].kind
+	})
+}
+
+// A descending '>' in one field. Advisory only.
+func sortDescendingField(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].group != xs[j].group {
+			return xs[i].group < xs[j].group
+		}
+		return xs[i].kind > xs[j].kind
+	})
+}
+
+// A guard with an else branch. Advisory only.
+func sortGuardElse(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].group != xs[j].group {
+			return xs[i].group < xs[j].group
+		} else {
+			return xs[i].kind < xs[j].kind
+		}
+	})
+}
+
+// A guard body with an extra statement. Advisory only.
+func sortGuardExtraStmt(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].group != xs[j].group {
+			g := xs[i].group
+			return g < xs[j].group
+		}
+		return xs[i].kind < xs[j].kind
+	})
+}
+
+// An init statement in the guard. Advisory only.
+func sortGuardInit(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if g := xs[i].group; g != xs[j].group {
+			return g < xs[j].group
+		}
+		return xs[i].kind < xs[j].kind
+	})
+}
+
+// The final compare indexes i/j reversed (descending). Advisory only.
+func sortReversedIndex(xs []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].group != xs[j].group {
+			return xs[i].group < xs[j].group
+		}
+		return xs[j].kind < xs[i].kind
+	})
+}
+
+// The final compare reads a DIFFERENT slice. Advisory only.
+func sortDifferentSlice(xs, ys []gvk) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i].group != xs[j].group {
+			return xs[i].group < xs[j].group
+		}
+		return ys[i].kind < ys[j].kind
+	})
+}
