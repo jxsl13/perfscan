@@ -29,15 +29,22 @@ direct call, and a sort.Sort on a concrete sort.Interface implementation
 avoids the reflect-based swaps too.
 
 The automatic fix (L2) handles the shape where the sorted value is a plain
-identifier xs and the comparator body is exactly "return xs[i]<CHAIN> <
-xs[j]<CHAIN>" with the same (possibly empty) selector chain on both sides and
-an ordered basic element/field type. Two forms:
+identifier xs and the comparator body is a run of ascending comparisons
+"xs[i]<CHAIN> < xs[j]<CHAIN>" with the same selector chain on both sides of
+each comparison and an ordered basic element/field type. Three forms:
 
-  - Whole element (empty chain, "xs[i] < xs[j]") → slices.Sort(xs), which
-    drops the comparator entirely. Needs only "slices" in scope.
-  - A field ("xs[i].f < xs[j].f") → slices.SortFunc(xs, func(a, b T) int {
-    return cmp.Compare(a.f, b.f) }). Needs "slices" and "cmp" in scope and a
-    locally spellable element type T.
+  - Whole element (empty chain, "return xs[i] < xs[j]") → slices.Sort(xs),
+    which drops the comparator entirely. Needs only "slices" in scope.
+  - A single field ("return xs[i].f < xs[j].f") → slices.SortFunc(xs,
+    func(a, b T) int { return cmp.Compare(a.f, b.f) }). Needs "slices" and
+    "cmp" in scope and a locally spellable element type T.
+  - A multi-field tie-break chain of "if xs[i].f != xs[j].f { return
+    xs[i].f < xs[j].f }" guards (each guard testing the very field it then
+    orders) closed by a final "return xs[i].g < xs[j].g" → the equivalent
+    cmp.Compare chain inside slices.SortFunc. Both sorts run the same
+    pdqsort, and the int chain returns the sign of the first differing
+    field exactly where the bool chain returns its '<', so the permutation
+    is identical. Same "slices"+"cmp" requirements as the single field.
 
 FLOAT is excluded from the fix (advisory only): cmp.Compare and slices.Sort
 order NaN as the smallest value while the '<' comparator treats NaN as
@@ -45,8 +52,18 @@ incomparable, so the rewrite is not bit-identical for a slice that may hold a
 NaN — the same exclusion PS3104/PS3105 apply. A SliceStable over an ordered
 basic type collapses to the unstable sort because equal elements are
 indistinguishable. Every other comparator stays advisory.`,
-		Before: `sort.Slice(xs, func(i, j int) bool { return xs[i].Key < xs[j].Key })`,
-		After:  `slices.SortFunc(xs, func(a, b Item) int { return cmp.Compare(a.Key, b.Key) })`,
+		Before: `sort.Slice(xs, func(i, j int) bool {
+	if xs[i].Group != xs[j].Group {
+		return xs[i].Group < xs[j].Group
+	}
+	return xs[i].Kind < xs[j].Kind
+})`,
+		After: `slices.SortFunc(xs, func(a, b GVK) int {
+	if a.Group != b.Group {
+		return cmp.Compare(a.Group, b.Group)
+	}
+	return cmp.Compare(a.Kind, b.Kind)
+})`,
 		MeasuredWin: `BenchmarkPS3002 (a shuffled 10k copy sorted per op, Apple
 M2 Pro, go1.26). Field compare -> slices.SortFunc: 1787 µs/op, 3 allocs ->
 997 µs/op, 0 allocs (~1.8x, reflect-based struct swaps eliminated).
@@ -114,17 +131,30 @@ func runPS3002(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
-// sortFuncFix builds the slices.SortFunc rewrite for the one provably safe
-// shape:
+// sortFuncFix builds the slices.SortFunc rewrite for the provably safe
+// shapes:
 //
 //	sort.Slice(xs, func(i, j int) bool { return xs[i].f.g < xs[j].f.g })
 //
-// where xs is a plain identifier of slice type, the comparator body is a
-// single return of a '<' comparison whose operands are identical selector
-// chains rooted at xs[i] (left) and xs[j] (right), the compared type is an
-// ordered basic type, and the packages slices and cmp are importable by
-// name at the call site (already imported, un-renamed, not shadowed). All
-// other shapes get the advisory report only.
+//	sort.Slice(xs, func(i, j int) bool {
+//		if xs[i].f != xs[j].f {
+//			return xs[i].f < xs[j].f
+//		}
+//		return xs[i].g < xs[j].g
+//	})
+//
+// where xs is a plain identifier of slice type and the comparator body is a
+// run of zero or more `if xs[i]<CHAIN> != xs[j]<CHAIN> { return xs[i]<CHAIN>
+// < xs[j]<CHAIN> }` tie-break guards — each guard ordering the very field it
+// tests — closed by a final `return A < B`. Every comparison's operands must
+// be identical selector chains rooted at xs[i] (left) and xs[j] (right) over
+// an ordered non-float basic type, and the packages slices and cmp must be
+// importable by name at the call site (already imported, un-renamed, not
+// shadowed). Ascending only and same-field guards only: both sorts share the
+// same pdqsort, and under these guards the bool chain and the cmp.Compare
+// chain induce the identical total order, so the resulting permutation is
+// bit-identical (including ties). All other shapes get the advisory report
+// only.
 func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis.SuggestedFix {
 	// The rewrite targets the standard library sort package only: a
 	// same-named third-party package could give Slice other semantics.
@@ -174,56 +204,50 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 	if fl.Type.Results == nil || fl.Type.Results.NumFields() != 1 {
 		return nil
 	}
-	// Body: exactly `return A < B`.
-	if len(fl.Body.List) != 1 {
+	// Body: zero or more `if xs[i].f != xs[j].f { return xs[i].f < xs[j].f }`
+	// tie-break guards followed by exactly one final `return A < B`.
+	body := fl.Body.List
+	if len(body) == 0 {
 		return nil
 	}
-	ret, ok := fl.Body.List[0].(*ast.ReturnStmt)
-	if !ok || len(ret.Results) != 1 {
-		return nil
-	}
-	bin, ok := ret.Results[0].(*ast.BinaryExpr)
-	if !ok || bin.Op != token.LSS {
-		return nil
-	}
-	fieldsA, baseA, idxA, ok := indexSelectorChain(bin.X)
-	if !ok || idxA.Name != params[0] {
-		return nil
-	}
-	fieldsB, baseB, idxB, ok := indexSelectorChain(bin.Y)
-	if !ok || idxB.Name != params[1] {
-		return nil
-	}
-	// Both chains index the SAME variable as the first argument, and walk
-	// the same fields.
-	if pass.TypesInfo.ObjectOf(baseA) != xsObj || pass.TypesInfo.ObjectOf(baseB) != xsObj {
-		return nil
-	}
-	if len(fieldsA) != len(fieldsB) {
-		return nil
-	}
-	for i := range fieldsA {
-		if fieldsA[i] != fieldsB[i] {
+	suffixes := make([]string, 0, len(body))
+	for _, stmt := range body[:len(body)-1] {
+		ifs, ok := stmt.(*ast.IfStmt)
+		if !ok || ifs.Init != nil || ifs.Else != nil || len(ifs.Body.List) != 1 {
 			return nil
 		}
+		condSuffix, ok := neqField(pass, ifs.Cond, xsObj, params[0], params[1])
+		if !ok {
+			return nil
+		}
+		ret, ok := ifs.Body.List[0].(*ast.ReturnStmt)
+		if !ok || len(ret.Results) != 1 {
+			return nil
+		}
+		cmpSuffix, ok := ascendingFieldCompare(pass, ret.Results[0], xsObj, params[0], params[1])
+		// The guard must test the very field it then orders (an empty
+		// chain — a whole-element compare — never belongs in a guard):
+		// otherwise the bool chain and the cmp chain diverge on ties.
+		if !ok || cmpSuffix == "" || cmpSuffix != condSuffix {
+			return nil
+		}
+		suffixes = append(suffixes, cmpSuffix)
 	}
-	// The compared type must be an ordered basic type — the domain of
-	// cmp.Compare and slices.Sort.
-	cmpType := pass.TypesInfo.TypeOf(bin.X)
-	if cmpType == nil {
+	final, ok := body[len(body)-1].(*ast.ReturnStmt)
+	if !ok || len(final.Results) != 1 {
 		return nil
 	}
-	basic, ok := cmpType.Underlying().(*types.Basic)
-	if !ok || basic.Info()&types.IsOrdered == 0 {
+	finalSuffix, ok := ascendingFieldCompare(pass, final.Results[0], xsObj, params[0], params[1])
+	if !ok {
 		return nil
 	}
-	// Floats are ordered but NOT safe: cmp.Compare and slices.Sort order NaN as
-	// the smallest value, whereas the '<' comparator treats NaN as incomparable,
-	// so the two disagree on any slice that can contain a NaN. Advisory only —
-	// the same float exclusion PS3104/PS3105 apply for exactly this reason.
-	if basic.Info()&types.IsFloat != 0 {
+	// A whole-element compare is only valid as the sole statement (→
+	// slices.Sort); as the tail of a tie-break chain it compares the whole
+	// element, which cmp.Compare cannot express.
+	if finalSuffix == "" && len(suffixes) > 0 {
 		return nil
 	}
+	suffixes = append(suffixes, finalSuffix)
 	// slices must resolve to the std package at the call site (imported here,
 	// un-renamed, not shadowed) — required by BOTH rewrites below.
 	if !stdPkgInScope(pass, call.Pos(), "slices") {
@@ -236,7 +260,7 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 	// slices.Sort already uses, and equal elements are indistinguishable so a
 	// SliceStable collapses to the same result. No cmp import, no element
 	// spelling needed.
-	if len(fieldsA) == 0 {
+	if suffixes[0] == "" {
 		return &analysis.SuggestedFix{
 			Message: fmt.Sprintf("replace sort.%s with slices.Sort", name),
 			TextEdits: []analysis.TextEdit{
@@ -245,9 +269,10 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 		}
 	}
 
-	// Field compare — `xs[i].f < xs[j].f` — becomes slices.SortFunc with
-	// cmp.Compare, so cmp must also be importable and the element type spellable
-	// without a new import.
+	// Field compare(s) — `xs[i].f < xs[j].f`, possibly behind `!=` tie-break
+	// guards — become slices.SortFunc with one cmp.Compare per field, so cmp
+	// must also be importable and the element type spellable without a new
+	// import.
 	if !stdPkgInScope(pass, call.Pos(), "cmp") {
 		return nil
 	}
@@ -261,15 +286,84 @@ func sortFuncFix(pass *analysis.Pass, call *ast.CallExpr, name string) *analysis
 	if name == "SliceStable" {
 		fn = "SortStableFunc"
 	}
-	suffix := "." + strings.Join(fieldsA, ".")
-	newText := fmt.Sprintf("slices.%s(%s, func(a, b %s) int { return cmp.Compare(a%s, b%s) })",
-		fn, xs.Name, elemStr, suffix, suffix)
+	var b strings.Builder
+	fmt.Fprintf(&b, "slices.%s(%s, func(a, b %s) int { ", fn, xs.Name, elemStr)
+	for _, s := range suffixes[:len(suffixes)-1] {
+		fmt.Fprintf(&b, "if a%s != b%s { return cmp.Compare(a%s, b%s) }; ", s, s, s, s)
+	}
+	last := suffixes[len(suffixes)-1]
+	fmt.Fprintf(&b, "return cmp.Compare(a%s, b%s) })", last, last)
 	return &analysis.SuggestedFix{
 		Message: fmt.Sprintf("replace sort.%s with slices.%s", name, fn),
 		TextEdits: []analysis.TextEdit{
-			{Pos: call.Pos(), End: call.End(), NewText: []byte(newText)},
+			{Pos: call.Pos(), End: call.End(), NewText: []byte(b.String())},
 		},
 	}
+}
+
+// ascendingFieldCompare validates a single ascending comparison
+// `xs[i]<CHAIN> < xs[j]<CHAIN>` (identical chains, xs = xsObj, i/j in that
+// order, ordered non-float leaf type) and returns the "."-prefixed selector
+// suffix — empty for a whole-element compare.
+func ascendingFieldCompare(pass *analysis.Pass, expr ast.Expr, xsObj types.Object, iName, jName string) (suffix string, ok bool) {
+	return comparisonSuffix(pass, expr, token.LSS, xsObj, iName, jName)
+}
+
+// neqField validates a tie-break guard condition `xs[i]<CHAIN> !=
+// xs[j]<CHAIN>` under the same operand rules as ascendingFieldCompare and
+// returns the same "."-prefixed selector suffix.
+func neqField(pass *analysis.Pass, expr ast.Expr, xsObj types.Object, iName, jName string) (suffix string, ok bool) {
+	return comparisonSuffix(pass, expr, token.NEQ, xsObj, iName, jName)
+}
+
+// comparisonSuffix validates a binary comparison with operator op whose
+// operands are identical selector chains rooted at xsObj[iName] (left) and
+// xsObj[jName] (right) over an ordered basic type, and returns the selector
+// chain as a "."-prefixed suffix ("" for the empty whole-element chain).
+// Floats are rejected: cmp.Compare and slices.Sort order NaN as the smallest
+// value, whereas the '<' comparator treats NaN as incomparable, so the two
+// disagree on any slice that can contain a NaN — the same float exclusion
+// PS3104/PS3105 apply for exactly this reason.
+func comparisonSuffix(pass *analysis.Pass, expr ast.Expr, op token.Token, xsObj types.Object, iName, jName string) (string, bool) {
+	bin, ok := expr.(*ast.BinaryExpr)
+	if !ok || bin.Op != op {
+		return "", false
+	}
+	fieldsA, baseA, idxA, ok := indexSelectorChain(bin.X)
+	if !ok || idxA.Name != iName {
+		return "", false
+	}
+	fieldsB, baseB, idxB, ok := indexSelectorChain(bin.Y)
+	if !ok || idxB.Name != jName {
+		return "", false
+	}
+	// Both chains index the SAME variable as the first argument, and walk
+	// the same fields.
+	if pass.TypesInfo.ObjectOf(baseA) != xsObj || pass.TypesInfo.ObjectOf(baseB) != xsObj {
+		return "", false
+	}
+	if len(fieldsA) != len(fieldsB) {
+		return "", false
+	}
+	for i := range fieldsA {
+		if fieldsA[i] != fieldsB[i] {
+			return "", false
+		}
+	}
+	// The compared type must be an ordered, non-float basic type — the safe
+	// domain of cmp.Compare and slices.Sort (see NaN note above).
+	cmpType := pass.TypesInfo.TypeOf(bin.X)
+	if cmpType == nil {
+		return "", false
+	}
+	basic, ok := cmpType.Underlying().(*types.Basic)
+	if !ok || basic.Info()&types.IsOrdered == 0 || basic.Info()&types.IsFloat != 0 {
+		return "", false
+	}
+	if len(fieldsA) == 0 {
+		return "", true
+	}
+	return "." + strings.Join(fieldsA, "."), true
 }
 
 // indexSelectorChain matches base[idx], base[idx].f, base[idx].f.g, ...
