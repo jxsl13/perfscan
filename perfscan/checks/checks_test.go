@@ -1,6 +1,9 @@
 package checks
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/analysis/analysistest"
@@ -242,6 +245,7 @@ func TestPS2001SilentWithoutVocabulary(t *testing.T) {
 
 func TestRegistryInvariant(t *testing.T) {
 	seen := map[string]bool{}
+	slugs := map[string]string{}
 	for _, c := range All() {
 		if seen[c.ID] {
 			t.Fatalf("duplicate ID %s", c.ID)
@@ -258,6 +262,37 @@ func TestRegistryInvariant(t *testing.T) {
 		}
 		if c.NeedsConfig && len(c.Vocab) == 0 {
 			t.Fatalf("check %s: NeedsConfig without Vocab", c.ID)
+		}
+		if c.Category == "" {
+			t.Errorf("check %s: empty Category (it groups -list output)", c.ID)
+		}
+		if c.Slug == "" {
+			t.Errorf("check %s: empty Slug", c.ID)
+		} else if prev, dup := slugs[c.Slug]; dup {
+			t.Errorf("Slug %q shared by %s and %s", c.Slug, prev, c.ID)
+		} else {
+			slugs[c.Slug] = c.ID
+		}
+		// Every auto-fixable check must ship a golden fixture proving its
+		// rewrite: a fix that is not golden-tested (or a check mislabeled
+		// AutoFix) is a latent hole in the bit-identical safety bar.
+		if c.AutoFix {
+			dir := filepath.Join("testdata", "src", strings.ToLower(c.ID))
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Errorf("check %s: AutoFix but no testdata dir %s", c.ID, dir)
+				continue
+			}
+			hasGolden := false
+			for _, e := range entries {
+				if strings.HasSuffix(e.Name(), ".go.golden") {
+					hasGolden = true
+					break
+				}
+			}
+			if !hasGolden {
+				t.Errorf("check %s: AutoFix but no .go.golden fixture in %s — the fix is not golden-tested", c.ID, dir)
+			}
 		}
 	}
 }
