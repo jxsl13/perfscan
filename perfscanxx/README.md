@@ -37,11 +37,22 @@ perfscanxx -p build ./...             # analyse the whole project (like `perfsca
 perfscanxx -p build ./src/game/...    # just a subtree
 perfscanxx -checks PX1* -p build ./... # only copy checks
 perfscanxx -level 1 -fix -p build ./... # apply only L1 (idiomatic) fix-its
-perfscanxx -json -p build ./...       # machine-readable output
+perfscanxx -diff -p build ./...       # preview what -fix would change, as a unified diff (apply nothing)
+perfscanxx -baseline pxx.yaml -p build ./...  # ratchet: seed, then fail only on NEW findings
+perfscanxx -json -p build ./...       # machine-readable findings (also -sarif for GitHub Code Scanning)
+perfscanxx -v -p build ./...          # also list the TUs that did not fully parse
 perfscanxx -p build src/a.cpp         # a single translation unit
-perfscanxx -list                      # the PX check table
+perfscanxx -list                      # the PX check table (with an auto-fix coverage summary)
+perfscanxx -list -fixable             # only the auto-fixable checks
+perfscanxx -list -json                # the catalog as machine-readable JSON
 perfscanxx -explain PX1001            # a check's documentation
 ```
+
+`-diff` is a non-destructive dry run: it snapshots the affected files, runs
+clang-tidy's real `--fix`, renders the unified diff, and restores the originals — so
+the preview equals `-fix` byte-for-byte and exits 1 if anything would change (a CI
+gate / review preview). `-baseline` records the accepted findings of an existing
+codebase so later runs report only regressions.
 
 A path arg is a Go-style pattern or directory (`./...`, `./src/game/...`)
 expanded against the compilation database to the translation units under it; no
