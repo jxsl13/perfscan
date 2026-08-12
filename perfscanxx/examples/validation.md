@@ -172,6 +172,39 @@ them — **0** `_deps/` files modified, warning silent — while preserving all 
 first-party fixes. So the `_deps` heuristic and `-exclude` work as intended on real
 FetchContent output.
 
+### abseil — a THIRD hazard: fix-it *interactions* in one -fix pass
+
+`perfscanxx -fix -level 3` on **abseil** (78 findings, 41 files) does **not** rebuild
+(`cmake --build` fails). Unlike fmt this is not one check misbehaving — it is *two
+individually-correct fix-its colliding* when applied in the same pass. On the move
+constructor in `absl/cleanup/internal/cleanup.h`, **PX3004** (`noexcept-move-constructor`)
+inserts `noexcept` after `)` and **PX3015** (`prefer-member-initializer`) inserts
+`: is_callback_engaged_(true)` at the same point, and clang-apply-replacements orders
+them wrong:
+
+```cpp
+Storage(Storage&& other) : is_callback_engaged_(true)  noexcept {   // error: noexcept
+                                                                   // must precede the
+                                                                   // member-init list
+```
+
+Disabling one of the pair (`-fix -checks all,-PX3015`) fixes THAT constructor (the
+`noexcept` then lands correctly), proving each check is fine alone. But abseil then
+still fails elsewhere — dense template headers like `absl/container/btree_map.h` show
+adjacent fix-its from different checks corrupting unrelated tokens
+(`GetFromListOr<typename …::Compare, 0,` → `GetFromListOr<, 0,`). So the root cause is
+general: **applying many checks' fix-its in a single clang-apply-replacements pass is
+unsafe on dense C++** where their edit ranges abut or overlap.
+
+Fix-safety picture so far — **-fix-clean:** leveldb, spdlog (and perfscan's Go
+corpora). **-fix-breakers:** fmt (PX3007 on amalgamated gtest; PX3015 on a delegating
+ctor) and abseil (PX3004×PX3015 ordering; overlapping edits in template headers). The
+breakers are all dense, heavily-attributed template code. **Recommended workflow:
+preview with `-diff` before `-fix`** (it renders exactly what would be written, so a
+broken combination is visible before it touches disk), and narrow with `-checks` /
+`-exclude`. A future perfscanxx improvement could apply fixes per-check-family or
+iterate to a fixpoint instead of one combined pass.
+
 ## `-diff` dry-run validated on real C++
 
 `perfscanxx -diff -level 3 ./...` on leveldb printed a **960-line unified diff across
