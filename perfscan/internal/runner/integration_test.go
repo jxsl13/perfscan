@@ -142,3 +142,64 @@ func TestIntegrationDomainChecksOptInWithoutConfig(t *testing.T) {
 		t.Errorf("no warning expected on a wildcard run without config; output:\n%s", out)
 	}
 }
+
+// TestFixIsIdempotent pins convergence: applying -fix, then -fix again, must
+// leave the file byte-identical and apply zero fixes the second time. A fix
+// that re-matched itself (or introduced a finding another check re-fixes) would
+// make CI oscillate; this catches that.
+func TestFixIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", corpusGoMod)
+	write("main.go", corpusMain)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(wd) }()
+
+	fixOnce := func() string {
+		var out, errBuf bytes.Buffer
+		Run(checks.All(), Options{
+			Patterns: []string{"./..."},
+			MaxLevel: lint.LevelAggressive,
+			Fix:      true,
+			Stdout:   &out,
+			Stderr:   &errBuf,
+		})
+		return errBuf.String()
+	}
+
+	// First pass applies the generic PS2101 prealloc (out := []string{} grown
+	// by append in a loop).
+	fixOnce()
+	after1, err := os.ReadFile(filepath.Join(dir, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(after1, []byte("make([]string, 0, len(")) {
+		t.Fatalf("first -fix did not apply the expected PS2101 prealloc; got:\n%s", after1)
+	}
+
+	// Second pass must be a no-op — the fixed code no longer matches, so nothing
+	// changes and zero fixes are applied.
+	stderr2 := fixOnce()
+	after2, err := os.ReadFile(filepath.Join(dir, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after1, after2) {
+		t.Errorf("second -fix changed the file — not idempotent:\n--- after pass 1 ---\n%s\n--- after pass 2 ---\n%s", after1, after2)
+	}
+	if !strings.Contains(stderr2, "applied 0 fix(es)") {
+		t.Errorf("second -fix should apply 0 fixes; stderr:\n%s", stderr2)
+	}
+}
