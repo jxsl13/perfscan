@@ -168,6 +168,19 @@ flood into a clean report; `-include-generated` is there when you do want them. 
 contrast `pkg/apis/...` `zz_generated.deepcopy.go` carries **0** perf findings — plain
 deepcopy code — so skipping is a no-op there; the win is concentrated in protobuf.)
 
+## PS2126 import surgery holds up at scale (etcd)
+
+PS2126 (`fmt.Errorf(const) → errors.New`) is the only check that rewrites imports
+across a package boundary — add `errors`, drop `fmt` only when the file's last `fmt`
+use goes away. That machinery is the risky part, so it was stress-tested on real code:
+`perfscan -fix -checks PS2126` on `go.etcd.io/etcd/server` rewrote **18 files** (31
+findings), and the module both **`go build`s and `go vet`s exit 0**. The import edits
+came out right in each case — e.g. `server/storage/schema/schema.go` gained
+`"errors"` and turned `fmt.Errorf("missing term information")` into
+`errors.New("missing term information")`, while files that still call `fmt.Sprintf`/
+`fmt.Println` kept their `fmt` import (only `errors` added). So the add/keep/drop
+accounting (modeled on PS3104) is correct on production Go, not just the fixtures.
+
 ## `-diff` produces valid patches on real code
 
 `perfscan -diff -level 3 ./...` on the etcd `pkg/` module printed a **179-line
