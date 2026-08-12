@@ -216,3 +216,21 @@ func balancedParens(s string) bool {
 	}
 	return depth == 0
 }
+
+// TestEntryMetadata pins display-metadata completeness for EVERY catalog entry
+// (TestUniqueIDs only covers ID/TidyName): a valid fix level and a non-empty
+// Title and Category, so -list and -explain never render a blank or
+// out-of-range field for any check, current or future.
+func TestEntryMetadata(t *testing.T) {
+	for _, e := range All() {
+		if e.Title == "" {
+			t.Errorf("%s: empty Title", e.ID)
+		}
+		if e.Category == "" {
+			t.Errorf("%s: empty Category (it groups -list output)", e.ID)
+		}
+		if e.Level < LevelIdiomatic || e.Level > LevelAggressive {
+			t.Errorf("%s: invalid Level %d (want L1..L3)", e.ID, e.Level)
+		}
+	}
+}
