@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 )
@@ -23,7 +24,7 @@ func diffFixes(findings []Finding, opts Options) int {
 	slices.Sort(paths)
 	for _, path := range paths {
 		pf := files[path]
-		fmt.Fprint(opts.Stdout, unifiedDiff(relPath(path), pf.orig, pf.fixed))
+		io.WriteString(opts.Stdout, unifiedDiff(relPath(path), pf.orig, pf.fixed))
 	}
 	if failed > 0 {
 		fmt.Fprintf(opts.Stderr, "perfscan: %d fix(es) could not be rendered\n", failed)

@@ -55,6 +55,7 @@ checks' fixes.
 | [PS2125](PS2125.md) | alloc | L1 | yes | len([]rune(s)) / len([]byte(s)) allocate a throwaway conversion just to take a length |
 | [PS2127](PS2127.md) | alloc | L2 | yes | a regexp.MustCompile of a constant pattern used inline in a function body |
 | [PS2128](PS2128.md) | alloc | L2 | yes | a string grown by += in a loop; strings.Builder appends without re-copying |
+| [PS2129](PS2129.md) | alloc | L1 | yes | fmt.Fprintf(w, "%s", s) on a plain string pays fmt's whole machinery; io.WriteString(w, s) writes the bytes directly |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
