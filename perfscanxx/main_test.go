@@ -736,3 +736,57 @@ func TestExcludeFiltersInvocation(t *testing.T) {
 		t.Errorf("all-excluded: want a helpful stderr message, got %q", errOut)
 	}
 }
+
+// TestApplySequentialFixes verifies that -fix-sequential runs clang-tidy once
+// per fixable BUILT-IN check (advisory + query-based custom checks skipped),
+// each isolated to a single --checks value and carrying --fix.
+func TestApplySequentialFixes(t *testing.T) {
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+	var checksSeen []string
+	allHadFix := true
+	tidy.Executor = func(_ context.Context, argv []string, _, _ *bytes.Buffer) (int, error) {
+		fix := false
+		for _, a := range argv {
+			if a == "--fix" {
+				fix = true
+			}
+			if strings.HasPrefix(a, "--checks=") {
+				checksSeen = append(checksSeen, strings.TrimPrefix(a, "--checks="))
+			}
+		}
+		if !fix {
+			allHadFix = false
+		}
+		return 0, nil
+	}
+	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
+
+	selected := []catalog.Entry{
+		{ID: "PX1001", TidyName: "performance-for-range-copy", HasFix: true},
+		{ID: "PX2002", TidyName: "performance-inefficient-string-concatenation", HasFix: false}, // advisory → skip
+		{ID: "PX2101", TidyName: "custom-reserve-before-loop", Custom: true},                    // query-based → skip
+		{ID: "PX3007", TidyName: "modernize-pass-by-value", HasFix: true},
+	}
+	base := tidy.Options{Binary: "clang-tidy", Files: []string{"x.cpp"}}
+	var buf bytes.Buffer
+	if err := applySequentialFixes(context.Background(), &buf, base, selected, false); err != nil {
+		t.Fatal(err)
+	}
+	// Argv builds `--checks=-*,<check>`; only the two fixable built-in checks run.
+	want := []string{"-*,performance-for-range-copy", "-*,modernize-pass-by-value"}
+	if len(checksSeen) != len(want) {
+		t.Fatalf("ran %d passes %v, want %d %v", len(checksSeen), checksSeen, len(want), want)
+	}
+	for i := range want {
+		if checksSeen[i] != want[i] {
+			t.Errorf("pass %d checks = %q, want %q", i, checksSeen[i], want[i])
+		}
+	}
+	if !allHadFix {
+		t.Error("every sequential pass must carry --fix")
+	}
+	if !strings.Contains(buf.String(), "applied 2 check(s)") {
+		t.Errorf("want a summary of 2 applied checks, got %q", buf.String())
+	}
+}
