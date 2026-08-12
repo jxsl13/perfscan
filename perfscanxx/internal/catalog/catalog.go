@@ -237,9 +237,11 @@ var entries = []Entry{
 		HasFix: false,
 		Custom: true,
 		Bind:   "grow",
+		// Any loop kind — forStmt alone missed range-for (the most common C++
+		// loop) and while/do loops.
 		Query: `match cxxMemberCallExpr(` +
 			`callee(cxxMethodDecl(hasAnyName("push_back", "emplace_back"))), ` +
-			`hasAncestor(forStmt())).bind("grow")`,
+			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("grow")`,
 		Message: "vector grown via push_back/emplace_back inside a loop; reserve() before the loop to avoid repeated reallocation (perfscanxx PS2101 analog, query-based)",
 	},
 	{
