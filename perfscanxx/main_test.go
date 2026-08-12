@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -395,5 +396,95 @@ func TestExpandInputs(t *testing.T) {
 				t.Errorf("expandInputs(%v) = %v, want %v", tc.args, got, tc.want)
 			}
 		})
+	}
+}
+
+// exportYAMLFor builds a clang-tidy --export-fixes document carrying one
+// Diagnostic per (tidyName,message,offset) triple, all anchored at src. It lets
+// a test synthesize an exact finding set without a real compiler.
+func exportYAMLFor(src string, diags []struct {
+	name, msg string
+	offset    int
+}) string {
+	b := &strings.Builder{}
+	b.WriteString("MainSourceFile: '" + src + "'\nDiagnostics:\n")
+	for _, d := range diags {
+		fmt.Fprintf(b, "  - DiagnosticName: %s\n", d.name)
+		b.WriteString("    DiagnosticMessage:\n")
+		fmt.Fprintf(b, "      Message: '%s'\n", d.msg)
+		fmt.Fprintf(b, "      FilePath: '%s'\n", src)
+		fmt.Fprintf(b, "      FileOffset: %d\n", d.offset)
+		b.WriteString("      Replacements: []\n")
+	}
+	return b.String()
+}
+
+// TestBaselineRatchetSeedSuppressRegress drives the -baseline flow through main's
+// run() (not just the baseline package): the first run must SEED the file and
+// exit 0; a second run with the identical finding set must SUPPRESS everything
+// and exit 0; a third run that adds a NEW finding must report only that one and
+// exit 1. This covers the flag wiring + exit codes in main.go, which the
+// baseline package's own unit tests do not exercise.
+func TestBaselineRatchetSeedSuppressRegress(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.cpp")
+	// Long enough that offsets 5/40 resolve to a line:col.
+	const content = "void f(std::string s, std::vector<int> v) { for (auto x : v) {} }\n"
+	if err := os.WriteFile(src, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	blPath := filepath.Join(dir, "baseline.yaml")
+
+	type diag = struct {
+		name, msg string
+		offset    int
+	}
+	findingA := diag{"performance-for-range-copy", "loop variable is copied", 50}
+	findingB := diag{"performance-unnecessary-value-param", "parameter is passed by value", 5}
+
+	// Run 1: baseline absent -> seed, exit 0, nothing on stdout.
+	restore := stubTidy(t, exportYAMLFor(src, []diag{findingA}), nil, nil)
+	out, errOut, code := runCLI("-baseline", blPath, src)
+	restore()
+	if code != 0 {
+		t.Fatalf("seed run: exit = %d, want 0\nstderr: %s", code, errOut)
+	}
+	if !strings.Contains(errOut, "wrote 1 finding") {
+		t.Errorf("seed run stderr should report the write, got %q", errOut)
+	}
+	if strings.Contains(out, "loop variable is copied") {
+		t.Errorf("seed run must not report findings on stdout, got:\n%s", out)
+	}
+	if _, err := os.Stat(blPath); err != nil {
+		t.Fatalf("seed run should have created %s: %v", blPath, err)
+	}
+
+	// Run 2: same finding set, baseline present -> fully suppressed, exit 0.
+	restore = stubTidy(t, exportYAMLFor(src, []diag{findingA}), nil, nil)
+	out, errOut, code = runCLI("-baseline", blPath, src)
+	restore()
+	if code != 0 {
+		t.Fatalf("clean run: exit = %d, want 0 (all baselined)\nstderr: %s", code, errOut)
+	}
+	if !strings.Contains(errOut, "suppressed") {
+		t.Errorf("clean run stderr should note suppression, got %q", errOut)
+	}
+	if strings.Contains(out, "loop variable is copied") {
+		t.Errorf("clean run must suppress the baselined finding, got:\n%s", out)
+	}
+
+	// Run 3: a NEW finding appears alongside the baselined one -> only the new
+	// one is reported and the exit code flips to 1 (a regression).
+	restore = stubTidy(t, exportYAMLFor(src, []diag{findingA, findingB}), nil, nil)
+	out, errOut, code = runCLI("-baseline", blPath, src)
+	restore()
+	if code != 1 {
+		t.Fatalf("regression run: exit = %d, want 1\nstderr: %s", code, errOut)
+	}
+	if !strings.Contains(out, "parameter is passed by value") {
+		t.Errorf("regression run must report the NEW finding, got:\n%s", out)
+	}
+	if strings.Contains(out, "loop variable is copied") {
+		t.Errorf("regression run must still suppress the baselined finding, got:\n%s", out)
 	}
 }
