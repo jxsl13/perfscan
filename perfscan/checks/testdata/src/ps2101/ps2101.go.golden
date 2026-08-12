@@ -170,3 +170,74 @@ func (p *registry) keys() []string {
 	}
 	return out
 }
+
+// Regression (etcd tools/etcd-dump-logs): a continue guard EARLIER in the
+// loop body can skip the append, so the append is CONDITIONAL — pre-sizing
+// to len(ents) would over-allocate whenever the guard fires. A
+// conditional-only fill: not reported.
+func continueGuarded(ents []int, endIndex int) []int {
+	entries := make([]int, 0)
+	for _, e := range ents {
+		if e >= endIndex {
+			continue
+		}
+		entries = append(entries, e)
+	}
+	return entries
+}
+
+// A return guard before the append can skip it by exiting the function:
+// the append is conditional. Not reported.
+func returnGuarded(src []int, bad int) []int {
+	out := []int{}
+	for _, v := range src {
+		if v == bad {
+			return nil
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// An unlabeled break directly in the loop body binds to THIS loop and can
+// skip the append: conditional. Not reported.
+func breakGuarded(src []int, stop int) []int {
+	out := []int{}
+	for _, v := range src {
+		if v == stop {
+			break
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// POSITIVE control: the append runs BEFORE the guard, so every iteration
+// that reaches the body appends exactly once — still flagged and fixed.
+func appendThenContinue(src []int) []int {
+	out := make([]int, 0, len(src)) // want `out is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(src\)\) — exact: one unconditional value per iteration`
+	for _, v := range src {
+		out = append(out, v)
+		if v == 0 {
+			continue
+		}
+	}
+	return out
+}
+
+// POSITIVE control: a break inside a NESTED switch binds to the switch,
+// not the loop — the top-level append after it still runs every
+// iteration. Still flagged and fixed.
+func switchBreakNotOurs(src []int, sink func(int)) []int {
+	out := make([]int, 0, len(src)) // want `out is appended to in the following bounded loop but declared without capacity; pre-size it with make\(\.\.\., 0, len\(src\)\) — exact: one unconditional value per iteration`
+	for _, v := range src {
+		switch v {
+		case 0:
+			break
+		default:
+			sink(v)
+		}
+		out = append(out, v)
+	}
+	return out
+}

@@ -20,8 +20,11 @@ import (
 // only flags slices that receive at least one UNCONDITIONAL append per
 // iteration: k unconditional values make k*bound exact; conditional
 // values are excluded, leaving the unconditional count as a lower bound.
-// A conditional-only fill is NOT flagged — pre-sizing it to the loop
-// bound would over-allocate when few iterations append.
+// An append is conditional not only under an if/switch/select but also
+// when an EARLIER statement in the loop body holds a conditional early
+// exit (continue/break/return/goto) that can skip it. A conditional-only
+// fill is NOT flagged — pre-sizing it to the loop bound would
+// over-allocate when few iterations append.
 //
 // PS2101 is a perfscan-original check (the x1xx block per category is
 // reserved for checks that did not originate in the upstream
@@ -48,11 +51,15 @@ only flags slices that receive at least one UNCONDITIONAL append per
 iteration: k unconditional values make k*bound EXACT; with conditional
 appends alongside, only the unconditional count is taken, a LOWER bound
 (the conditional tail may still grow, but every growth copy below the
-floor is removed). A conditional-only fill is NOT flagged — pre-sizing it
-to the loop bound would over-allocate when few iterations append.
-Multi-value appends (append(s, a, b)) count each value; a spread append
-has an unknown per-call count and does not add to the unconditional
-count.
+floor is removed). An append counts as conditional not only under an
+if/switch/select but also when an EARLIER statement in the loop body
+holds a conditional early exit — a continue/break/return/goto that can
+skip the rest of the iteration — so a continue-guarded append is never
+pre-sized to the full loop bound. A conditional-only fill is NOT
+flagged — pre-sizing it to the loop bound would over-allocate when few
+iterations append. Multi-value appends (append(s, a, b)) count each
+value; a spread append has an unknown per-call count and does not add to
+the unconditional count.
 
 The automatic fix rewrites the declaration when the bound is a plain
 identifier (or len of one) that the loop body does not reassign — and only
@@ -430,64 +437,206 @@ func unsizedSliceDecl(s ast.Stmt) (string, ast.Expr, bool, bool) {
 
 // appendCounts counts the values appended to name per iteration of body,
 // separated into unconditional values (top-level statements of the body)
-// and conditional ones (under an if/switch/select). Nested loops and
-// closures are not descended into: an append there is not bounded by THIS
-// loop's trip count. A spread append (append(name, xs...)) has an unknown
-// per-call count and sets unknown.
+// and conditional ones (under an if/switch/select, or FOLLOWING a
+// conditional early exit — a continue/break/return/goto earlier in the
+// body's statement order that can skip the rest of the iteration).
+// Nested loops and closures are not descended into: an append there is
+// not bounded by THIS loop's trip count. A spread append
+// (append(name, xs...)) has an unknown per-call count and sets unknown.
 //
 // The per-iteration counts grade the capacity bound: k unconditional
 // values make k*bound EXACT (with no conditional appends), a LOWER bound
 // otherwise; a slice with zero unconditional appends is not reported at
 // all.
 func appendCounts(body *ast.BlockStmt, name string) (uncond, cond int, unknown bool) {
-	condDepth := 0
-	var walk func(n ast.Node) bool
-	walk = func(n ast.Node) bool {
+	// skippable: an earlier top-level statement can skip the rest of the
+	// iteration, so an append after it does not run every iteration.
+	// Over-detecting a skip only loses a valid prealloc (tolerated);
+	// counting a skippable append as unconditional would over-reserve.
+	skippable := false
+
+	// countCond counts every append to name under n as CONDITIONAL. It
+	// mirrors the structural walk: nested loops and closures are pruned,
+	// and if/switch/select are entered only through their branches (an
+	// append in an init/cond clause is not counted).
+	var countCond func(n ast.Node)
+	countCond = func(n ast.Node) {
 		switch n.(type) {
-		case *ast.RangeStmt, *ast.ForStmt, *ast.FuncLit:
-			return false
 		case *ast.IfStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
-			condDepth++
-			defer func() { condDepth-- }()
 			for _, c := range childrenOf(n) {
-				ast.Inspect(c, walk)
+				countCond(c)
+			}
+			return
+		}
+		ast.Inspect(n, func(m ast.Node) bool {
+			switch m.(type) {
+			case *ast.RangeStmt, *ast.ForStmt, *ast.FuncLit:
+				return false
+			case *ast.IfStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+				countCond(m)
+				return false
+			}
+			if values, spread, ok := appendToName(m, name); ok {
+				if spread {
+					unknown = true
+				} else {
+					cond += values
+				}
+			}
+			return true
+		})
+	}
+
+	// countStmt counts the appends in one top-level statement: appends
+	// outside any conditional construct are unconditional only while no
+	// earlier statement could have skipped them.
+	countStmt := func(s ast.Stmt) {
+		ast.Inspect(s, func(m ast.Node) bool {
+			switch m.(type) {
+			case *ast.RangeStmt, *ast.ForStmt, *ast.FuncLit:
+				return false
+			case *ast.IfStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+				countCond(m)
+				return false
+			}
+			if values, spread, ok := appendToName(m, name); ok {
+				switch {
+				case spread:
+					unknown = true
+				case skippable:
+					cond += values
+				default:
+					uncond += values
+				}
+			}
+			return true
+		})
+	}
+
+	// Top-level statements execute in source order; process them in that
+	// order so a skip guard demotes only the appends AFTER it.
+	var walkOrdered func(list []ast.Stmt)
+	walkOrdered = func(list []ast.Stmt) {
+		for _, s := range list {
+			switch st := s.(type) {
+			case *ast.BlockStmt:
+				walkOrdered(st.List)
+			case *ast.LabeledStmt:
+				walkOrdered([]ast.Stmt{st.Stmt})
+			default:
+				countStmt(s)
+			}
+			if !skippable && stmtCanSkipIteration(s) {
+				skippable = true
+			}
+		}
+	}
+	walkOrdered(body.List)
+	return uncond, cond, unknown
+}
+
+// appendToName matches `name = append(name, ...)` and returns the number
+// of appended values and whether the call is a spread append.
+func appendToName(n ast.Node, name string) (values int, spread, ok bool) {
+	as, isAssign := n.(*ast.AssignStmt)
+	if !isAssign || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+		return 0, false, false
+	}
+	lhs, isIdent := as.Lhs[0].(*ast.Ident)
+	if !isIdent || lhs.Name != name {
+		return 0, false, false
+	}
+	call, isCall := as.Rhs[0].(*ast.CallExpr)
+	if !isCall {
+		return 0, false, false
+	}
+	fn, isIdent := call.Fun.(*ast.Ident)
+	if !isIdent || fn.Name != "append" || len(call.Args) == 0 {
+		return 0, false, false
+	}
+	arg, isIdent := call.Args[0].(*ast.Ident)
+	if !isIdent || arg.Name != name {
+		return 0, false, false
+	}
+	return len(call.Args) - 1, call.Ellipsis.IsValid(), true
+}
+
+// stmtCanSkipIteration reports whether executing s can skip the remainder
+// of the CURRENT iteration of the loop under analysis: a return or goto, a
+// continue/break that binds to this loop, or a LABELED continue/break
+// (conservatively assumed to target an enclosing loop). When s itself is a
+// loop or breakable construct, unlabeled branches inside it bind to s, not
+// to the loop under analysis.
+func stmtCanSkipIteration(s ast.Stmt) bool {
+	switch st := s.(type) {
+	case *ast.LabeledStmt:
+		return stmtCanSkipIteration(st.Stmt)
+	case *ast.RangeStmt, *ast.ForStmt:
+		return skipsIteration(s, true, true)
+	case *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+		return skipsIteration(s, false, true)
+	default:
+		return skipsIteration(s, false, false)
+	}
+}
+
+// skipsIteration reports whether n contains a statement that can skip the
+// remainder of the current iteration of the loop under analysis. inLoop
+// and inBreakable say whether n itself captures an unlabeled continue or
+// break respectively. Function literals are never descended into: their
+// control flow is not ours. Reachability is not analyzed — a skip that can
+// never fire only suppresses a prealloc (false negative), which is the
+// safe direction.
+func skipsIteration(n ast.Node, inLoop, inBreakable bool) bool {
+	found := false
+	ast.Inspect(n, func(m ast.Node) bool {
+		if found {
+			return false
+		}
+		switch b := m.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.ReturnStmt:
+			found = true
+			return false
+		case *ast.BranchStmt:
+			switch b.Tok {
+			case token.GOTO:
+				// A goto may jump past the append (conservative).
+				found = true
+			case token.CONTINUE:
+				// Unlabeled: binds to the nearest loop — ours unless a
+				// nested loop captured it. Labeled: conservatively
+				// assume it targets an enclosing loop.
+				if b.Label != nil || !inLoop {
+					found = true
+				}
+			case token.BREAK:
+				if b.Label != nil || !inBreakable {
+					found = true
+				}
+			}
+			return false
+		case *ast.RangeStmt, *ast.ForStmt:
+			if m == n {
+				return true // flags already reflect this node
+			}
+			if skipsIteration(m, true, true) {
+				found = true
+			}
+			return false
+		case *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+			if m == n {
+				return true
+			}
+			if skipsIteration(m, inLoop, true) {
+				found = true
 			}
 			return false
 		}
-		as, ok := n.(*ast.AssignStmt)
-		if !ok || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
-			return true
-		}
-		lhs, ok := as.Lhs[0].(*ast.Ident)
-		if !ok || lhs.Name != name {
-			return true
-		}
-		call, ok := as.Rhs[0].(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		fn, ok := call.Fun.(*ast.Ident)
-		if !ok || fn.Name != "append" || len(call.Args) == 0 {
-			return true
-		}
-		arg, ok := call.Args[0].(*ast.Ident)
-		if !ok || arg.Name != name {
-			return true
-		}
-		if call.Ellipsis.IsValid() {
-			unknown = true
-			return true
-		}
-		values := len(call.Args) - 1
-		if condDepth > 0 {
-			cond += values
-		} else {
-			uncond += values
-		}
 		return true
-	}
-	ast.Inspect(body, walk)
-	return uncond, cond, unknown
+	})
+	return found
 }
 
 // childrenOf returns the walkable children of a conditional statement so
