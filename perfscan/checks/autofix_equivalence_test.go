@@ -1125,3 +1125,99 @@ func TestEquiv_PS3007Membership(t *testing.T) {
 		t.Fatal("expected slices.Contains(seq, 7) to match before the uncomparable element and NOT panic")
 	}
 }
+
+// TestEquiv_PS5002SymmetricMirror pins both halves of PS5002's fresh-zero
+// gate. The triangle+mirror rewrite replaces the full outer-product
+// accumulation m[i][j] += x[i]*x[j]; the mirrored upper cell receives
+// init[j][i] + x[j]*x[i] where the original computed init[i][j] + x[i]*x[j],
+// so the two are bit-identical exactly when init[i][j] == init[j][i] — i.e.
+// when m is SYMMETRIC at loop entry. Part 1 proves the safe case the fix now
+// requires: for a FRESH-ZERO matrix (trivially symmetric) the results are
+// bit-for-bit identical over random x of varied lengths including ±0, ±Inf
+// and NaN. Part 2 is the regression alarm that documents why the gate
+// exists: with a non-symmetric initial matrix the two forms diverge — the
+// exact bug that used to ship when the fix fired on a parameter matrix.
+func TestEquiv_PS5002SymmetricMirror(t *testing.T) {
+	clone := func(init [][]float64) [][]float64 {
+		m := make([][]float64, len(init))
+		for r := range init {
+			m[r] = append([]float64(nil), init[r]...)
+		}
+		return m
+	}
+	full := func(init [][]float64, x []float64) [][]float64 {
+		m := clone(init)
+		for i := range x {
+			for j := range x {
+				m[i][j] += x[i] * x[j]
+			}
+		}
+		return m
+	}
+	mirrored := func(init [][]float64, x []float64) [][]float64 {
+		m := clone(init)
+		for i := range x {
+			for j := 0; j <= i; j++ {
+				m[i][j] += x[i] * x[j]
+			}
+		}
+		for i := range x { // mirror once
+			for j := i + 1; j < len(x); j++ {
+				m[i][j] = m[j][i]
+			}
+		}
+		return m
+	}
+	bitsEqual := func(a, b [][]float64) bool {
+		for i := range a {
+			for j := range a[i] {
+				if math.Float64bits(a[i][j]) != math.Float64bits(b[i][j]) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+
+	// Part 1: fresh-zero matrix (what the gated fix can ever see) — the full
+	// nest and the triangle+mirror agree bit-for-bit for every x, including
+	// the float specials.
+	rng := rand.New(rand.NewSource(0x5002))
+	specials := []float64{
+		0, math.Copysign(0, -1), math.Inf(1), math.Inf(-1), math.NaN(),
+		math.SmallestNonzeroFloat64, -math.SmallestNonzeroFloat64,
+		math.MaxFloat64, -math.MaxFloat64, 1, -1, 1e-310,
+	}
+	for trial := 0; trial < 3000; trial++ {
+		n := rng.Intn(10) // includes empty and 1-element vectors
+		x := make([]float64, n)
+		for i := range x {
+			if rng.Intn(3) == 0 {
+				x[i] = specials[rng.Intn(len(specials))]
+			} else {
+				x[i] = rng.NormFloat64() * math.Pow(10, float64(rng.Intn(80)-40))
+			}
+		}
+		zero := make([][]float64, n)
+		for r := range zero {
+			zero[r] = make([]float64, n)
+		}
+		a, b := full(zero, x), mirrored(zero, x)
+		if !bitsEqual(a, b) {
+			t.Fatalf("trial %d: fresh-zero divergence for x=%v:\nfull=%v\nmirrored=%v", trial, x, a, b)
+		}
+	}
+
+	// Part 2: the divergence that mandates the gate — a NON-SYMMETRIC
+	// initial matrix. init[0][1]=10 while init[1][0]=20, so the original
+	// leaves 10+1*1=11 in m[0][1] but the mirror copies m[1][0]=20+1*1=21.
+	init := [][]float64{{0, 10}, {20, 0}}
+	x := []float64{1, 1}
+	a, b := full(init, x), mirrored(init, x)
+	if bitsEqual(a, b) {
+		t.Fatalf("expected divergence for non-symmetric init, got identical %v — if this ever holds, the fresh-zero gate could be revisited, but removing it while it diverges ships a behavior-changing fix", a)
+	}
+	if a[0][1] != 11 || b[0][1] != 21 {
+		t.Fatalf("divergence shape changed: full m[0][1]=%v (want 11), mirrored m[0][1]=%v (want 21)", a[0][1], b[0][1])
+	}
+}
