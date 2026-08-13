@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
+	"github.com/jxsl13/perfscan/perfscan/internal/astutil"
 	"github.com/jxsl13/perfscan/perfscan/lint"
 )
 
@@ -24,8 +25,18 @@ var PS5002 = register(&lint.Check{
 		Text: `m[i][j] += x[i]*x[j] over full ranges of i and j computes every
 off-diagonal element twice: the result is symmetric by construction.
 Accumulate one triangle (j ≤ i) and mirror it once at the end — half the
-multiplies and half the memory traffic, and the mirrored value is the SAME
-float, so the result is bit-identical.
+multiplies and half the memory traffic.
+
+The mirror m[i][j] = m[j][i] is bit-identical to the full accumulation ONLY
+when m is SYMMETRIC at loop entry: the original leaves init[i][j] + x[i]*x[j]
+in the upper cell while the mirror copies init[j][i] + x[j]*x[i], and since
+x[i]*x[j] and x[j]*x[i] carry the same bits the two agree exactly when
+init[i][j] == init[j][i]. The automatic fix therefore requires the
+accumulation target to be a freshly zero-initialized LOCAL matrix — declared
+as make([][]T, …), rows allocated only via m[k] = make([]T, …), and not
+otherwise written before the loop — because an all-zero matrix is trivially
+symmetric. A parameter, field, global, or pre-populated matrix (whose
+off-diagonal entries could differ) keeps the advisory report.
 
 Check that the consumer does not rely on the accumulation ORDER of the
 mirrored half (a running use of m mid-build would observe the difference).
@@ -170,8 +181,11 @@ func symmetricAccum(s ast.Stmt, i, j string) (string, bool) {
 // the same range subject); the accumulation row index is the OUTER
 // variable; matrix, vector and bound are simple ident/selector chains that
 // do not involve the loop variables; matrix and range subject are of
-// slice/array type so the mirror nest compiles. Anything else returns nil
-// and the diagnostic stays advisory.
+// slice/array type so the mirror nest compiles; and — the bit-identity
+// gate — the matrix is a provably fresh ALL-ZERO local (see
+// ps5002FreshZeroMatrix), because the mirror is only exact when the matrix
+// is symmetric at loop entry. Anything else returns nil and the diagnostic
+// stays advisory.
 func ps5002TriangleFix(pass *analysis.Pass, outer ast.Node, inner ast.Stmt, accum ast.Stmt, i, j string) *analysis.SuggestedFix {
 	as, ok := accum.(*ast.AssignStmt)
 	if !ok || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
@@ -191,10 +205,15 @@ func ps5002TriangleFix(pass *analysis.Pass, outer ast.Node, inner ast.Stmt, accu
 	if ri, ok := row.Index.(*ast.Ident); !ok || ri.Name != i {
 		return nil
 	}
-	mText := simpleExprText(row.X)
-	if mText == "" || rootIdentName(row.X) == i || rootIdentName(row.X) == j {
+	// The fresh-zero gate below reasons about a single local variable, so
+	// the fix requires the matrix base to be a plain identifier (a
+	// selector like s.m — a field, whose content is unknown — stays
+	// advisory).
+	base, ok := row.X.(*ast.Ident)
+	if !ok || base.Name == i || base.Name == j {
 		return nil
 	}
+	mText := base.Name
 	// Both index levels must be slice/array so m[i][j] = m[j][i] compiles
 	// with the int loop variables of the rewrite.
 	if !ps5002Indexable(pass.TypesInfo.TypeOf(row.X)) || !ps5002Indexable(pass.TypesInfo.TypeOf(target.X)) {
@@ -268,6 +287,14 @@ func ps5002TriangleFix(pass *analysis.Pass, outer ast.Node, inner ast.Stmt, accu
 		outerHeader = fmt.Sprintf("for %s := 0; %s < %s; %s++ {", i, i, obText, i)
 		bound = obText
 	default:
+		return nil
+	}
+
+	// Bit-identity gate: the mirror m[i][j] = m[j][i] reproduces the full
+	// accumulation only when m is symmetric at loop entry, so the fix
+	// requires m provably ALL-ZERO there (all-zero ⇒ symmetric). A
+	// parameter, field, global, or pre-populated matrix stays advisory.
+	if !ps5002FreshZeroMatrix(pass, enclosingFuncBody(pass, outer), base, outer) {
 		return nil
 	}
 
@@ -350,4 +377,211 @@ func ps5002Indexable(t types.Type) bool {
 		return true
 	}
 	return false
+}
+
+// ps5002FreshZeroMatrix reports whether base — the accumulation target of
+// the matched outer-product nest accumLoop — is provably an ALL-ZERO matrix
+// every time the nest is entered. All-zero is trivially symmetric, which is
+// the precondition that makes the triangle+mirror rewrite bit-identical:
+// the original leaves init[i][j] + x[i]*x[j] in the upper cell while the
+// mirror copies init[j][i] + x[j]*x[i], and the two agree exactly iff
+// init[i][j] == init[j][i]. The tractable SOUND conditions, all required:
+//
+//  1. base resolves to a local *types.Var whose declaration is INSIDE
+//     fnBody (not a parameter, receiver, field, or global) and reads
+//     `m := make([][]T, …)` or `var m = make([][]T, …)` — nil rows and
+//     made rows are all-zero — with a non-complex numeric element type
+//     (scalar values cannot alias, and x[i]*x[j] is bitwise commutative);
+//  2. every other write to m is a whole-row init `m[k] = make([]T, …)`
+//     placed between the declaration and accumLoop, not inside a function
+//     literal, and not inside a loop that encloses accumLoop without also
+//     enclosing the declaration (re-zeroing a row between two runs of the
+//     accumulation would break the symmetry the mirror relies on);
+//  3. every read of m is harmless: a key-only `range m`, builtin
+//     len(m)/cap(m), a pure element-value read m[a][b] (never assigned,
+//     ++/--'d, or &-taken), or `return m` (the function instance ends, so
+//     no later accumulation can observe the caller's mutations). Anything
+//     that could alias m or a row — `m2 := m`, `row := m[k]`, `&m`,
+//     passing m or m[k] to a call, append/copy/slicing, a value-binding
+//     range, any use inside a func literal — disqualifies;
+//  4. fnBody contains no goto (a backward jump could re-run a row init
+//     after an accumulation without re-running the declaration).
+//
+// Writes lexically inside accumLoop itself are the accumulation being
+// rewritten and are exempt. When in doubt, this returns false and the
+// diagnostic stays advisory.
+func ps5002FreshZeroMatrix(pass *analysis.Pass, fnBody *ast.BlockStmt, base *ast.Ident, accumLoop ast.Node) bool {
+	if fnBody == nil {
+		return false
+	}
+	info := pass.TypesInfo
+	mObj, ok := info.Uses[base].(*types.Var)
+	if !ok || mObj.IsField() {
+		return false
+	}
+	outerSl, ok := mObj.Type().Underlying().(*types.Slice)
+	if !ok {
+		return false
+	}
+	rowSl, ok := outerSl.Elem().Underlying().(*types.Slice)
+	if !ok {
+		return false
+	}
+	elem, ok := rowSl.Elem().Underlying().(*types.Basic)
+	if !ok || elem.Info()&(types.IsInteger|types.IsFloat) == 0 {
+		return false
+	}
+
+	// Locate the declaration inside fnBody. Parameters, receivers, fields
+	// and globals are all defined elsewhere and fail this search.
+	var declNode ast.Node
+	astutil.WithStack(fnBody, func(n ast.Node, stack []ast.Node) bool {
+		id, isIdent := n.(*ast.Ident)
+		if !isIdent || info.Defs[id] != types.Object(mObj) || len(stack) == 0 {
+			return true
+		}
+		switch p := stack[len(stack)-1].(type) {
+		case *ast.AssignStmt:
+			if p.Tok == token.DEFINE && len(p.Lhs) == 1 && len(p.Rhs) == 1 &&
+				p.Lhs[0] == ast.Expr(id) && ps5002IsMake(info, p.Rhs[0]) {
+				declNode = p
+			}
+		case *ast.ValueSpec:
+			if len(p.Names) == 1 && len(p.Values) == 1 && p.Names[0] == id &&
+				ps5002IsMake(info, p.Values[0]) {
+				declNode = p
+			}
+		}
+		return true
+	})
+	if declNode == nil || declNode.End() > accumLoop.Pos() {
+		return false
+	}
+
+	okZero := true
+	astutil.WithStack(fnBody, func(n ast.Node, stack []ast.Node) bool {
+		if !okZero {
+			return false
+		}
+		if br, isBr := n.(*ast.BranchStmt); isBr && br.Tok == token.GOTO {
+			okZero = false
+			return false
+		}
+		id, isIdent := n.(*ast.Ident)
+		if !isIdent || info.Uses[id] != types.Object(mObj) {
+			return true
+		}
+		if ps5002Within(id, accumLoop) {
+			return true // the accumulation being rewritten
+		}
+		if ps5002Within(id, declNode) {
+			return true // defensive; the declared name is a Def, not a Use
+		}
+		if len(stack) == 0 {
+			okZero = false
+			return false
+		}
+		for _, anc := range stack {
+			if _, isLit := anc.(*ast.FuncLit); isLit {
+				okZero = false // unknowable execution schedule
+				return false
+			}
+		}
+		switch p := stack[len(stack)-1].(type) {
+		case *ast.RangeStmt:
+			if p.X == ast.Expr(id) && p.Value == nil {
+				return true // key-only range: reads only the length
+			}
+		case *ast.ReturnStmt:
+			return true // the function instance ends here
+		case *ast.CallExpr:
+			if len(p.Args) == 1 && p.Args[0] == ast.Expr(id) {
+				if fun, isFun := p.Fun.(*ast.Ident); isFun && (fun.Name == "len" || fun.Name == "cap") {
+					if _, isBuiltin := info.Uses[fun].(*types.Builtin); isBuiltin {
+						return true
+					}
+				}
+			}
+		case *ast.IndexExpr:
+			if p.X == ast.Expr(id) && ps5002MatrixIndexUse(info, p, stack, declNode, accumLoop) {
+				return true
+			}
+		}
+		okZero = false
+		return false
+	})
+	return okZero
+}
+
+// ps5002MatrixIndexUse classifies a use of the matrix through one index
+// level — ix1 is m[k] and stack holds the ancestors of the m ident (ix1
+// last). Allowed: the row init m[k] = make([]T, …) subject to the placement
+// rules of ps5002FreshZeroMatrix condition 2, and a pure element-value read
+// m[a][b]. Everything else disqualifies.
+func ps5002MatrixIndexUse(info *types.Info, ix1 *ast.IndexExpr, stack []ast.Node, declNode, accumLoop ast.Node) bool {
+	if len(stack) < 2 {
+		return false
+	}
+	switch p := stack[len(stack)-2].(type) {
+	case *ast.AssignStmt:
+		// Row init m[k] = make([]T, …): a fresh all-zero row.
+		if p.Tok != token.ASSIGN || len(p.Lhs) != 1 || len(p.Rhs) != 1 ||
+			p.Lhs[0] != ast.Expr(ix1) || !ps5002IsMake(info, p.Rhs[0]) {
+			return false
+		}
+		// It must run between the declaration and the accumulation…
+		if p.Pos() < declNode.End() || p.End() > accumLoop.Pos() {
+			return false
+		}
+		// …and never BETWEEN two accumulations: a loop that encloses the
+		// accumulation but not the declaration would re-run this row init
+		// against an already-accumulated (non-zero) matrix.
+		for _, anc := range stack {
+			if astutil.IsLoop(anc) && ps5002Within(accumLoop, anc) && !ps5002Within(declNode, anc) {
+				return false
+			}
+		}
+		return true
+	case *ast.IndexExpr:
+		// m[a][b]: allowed only as a pure element VALUE read. The element
+		// type is a scalar (enforced by the caller), so a value read
+		// cannot alias the matrix.
+		if p.X != ast.Expr(ix1) || len(stack) < 3 {
+			return false
+		}
+		switch gp := stack[len(stack)-3].(type) {
+		case *ast.AssignStmt:
+			for _, l := range gp.Lhs {
+				if l == ast.Expr(p) {
+					return false // element write
+				}
+			}
+			return true
+		case *ast.IncDecStmt:
+			return false // element write
+		case *ast.UnaryExpr:
+			return gp.Op != token.AND // &m[a][b] aliases an element
+		}
+		return true
+	}
+	return false
+}
+
+// ps5002IsMake reports whether e is a call of the builtin make.
+func ps5002IsMake(info *types.Info, e ast.Expr) bool {
+	call, ok := ast.Unparen(e).(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	fun, ok := call.Fun.(*ast.Ident)
+	if !ok || fun.Name != "make" {
+		return false
+	}
+	_, ok = info.Uses[fun].(*types.Builtin)
+	return ok
+}
+
+// ps5002Within reports whether node a lies lexically inside node b.
+func ps5002Within(a, b ast.Node) bool {
+	return a.Pos() >= b.Pos() && a.End() <= b.End()
 }

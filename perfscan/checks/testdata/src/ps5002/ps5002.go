@@ -1,6 +1,52 @@
 package ps5002
 
-func gram(m [][]float64, x []float64) {
+// Freshly zero-initialized local matrix (make + make'd rows): fixed.
+func gram(x []float64) [][]float64 {
+	m := make([][]float64, len(x))
+	for r := range m {
+		m[r] = make([]float64, len(x))
+	}
+	for i := range x {
+		for j := range x {
+			m[i][j] += x[i] * x[j] // want `m\[i\]\[j\] accumulates a symmetric product over full ranges of i and j — every off-diagonal element is computed twice; accumulate one triangle and mirror it once \(bit-identical\)`
+		}
+	}
+	return m
+}
+
+// Counted form with a shared bound over a fresh local matrix (counted
+// row-init loop): fixed the same way.
+func gramCounted(x []float64, n int) [][]float64 {
+	m := make([][]float64, n)
+	for r := 0; r < n; r++ {
+		m[r] = make([]float64, n)
+	}
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			m[i][j] += x[i] * x[j] // want `m\[i\]\[j\] accumulates a symmetric product over full ranges of i and j — every off-diagonal element is computed twice; accumulate one triangle and mirror it once \(bit-identical\)`
+		}
+	}
+	return m
+}
+
+// Counted form bounded by len(x) on both loops: fixed.
+func gramLen(x []float64) [][]float64 {
+	m := make([][]float64, len(x))
+	for r := range m {
+		m[r] = make([]float64, len(x))
+	}
+	for i := 0; i < len(x); i++ {
+		for j := 0; j < len(x); j++ {
+			m[i][j] += x[i] * x[j] // want `m\[i\]\[j\] accumulates a symmetric product over full ranges of i and j — every off-diagonal element is computed twice; accumulate one triangle and mirror it once \(bit-identical\)`
+		}
+	}
+	return m
+}
+
+// The accumulation target is a PARAMETER: its content is unknown and could
+// be non-symmetric, and the mirror is only bit-identical for a symmetric
+// matrix — advisory only, no automatic fix.
+func gramParam(m [][]float64, x []float64) {
 	for i := range x {
 		for j := range x {
 			m[i][j] += x[i] * x[j] // want `m\[i\]\[j\] accumulates a symmetric product over full ranges of i and j — every off-diagonal element is computed twice; accumulate one triangle and mirror it once \(bit-identical\)`
@@ -8,22 +54,35 @@ func gram(m [][]float64, x []float64) {
 	}
 }
 
-// Counted form with a shared bound: fixed the same way.
-func gramCounted(m [][]float64, x []float64, n int) {
-	for i := 0; i < n; i++ {
-		for j := 0; j < n; j++ {
+// A manual element write before the loop breaks the all-zero (symmetric)
+// precondition: advisory only, no automatic fix.
+func gramPrefilled(x []float64) [][]float64 {
+	m := make([][]float64, len(x))
+	for r := range m {
+		m[r] = make([]float64, len(x))
+	}
+	m[0][1] = 5
+	for i := range x {
+		for j := range x {
 			m[i][j] += x[i] * x[j] // want `m\[i\]\[j\] accumulates a symmetric product over full ranges of i and j — every off-diagonal element is computed twice; accumulate one triangle and mirror it once \(bit-identical\)`
 		}
 	}
+	return m
 }
 
-// Counted form bounded by len(x) on both loops: fixed.
-func gramLen(m [][]float64, x []float64) {
-	for i := 0; i < len(x); i++ {
-		for j := 0; j < len(x); j++ {
+// Rows assigned from an EXISTING slice rather than a make: aliased content
+// of unknown value — advisory only, no automatic fix.
+func gramSharedRows(x, pre []float64) [][]float64 {
+	m := make([][]float64, len(x))
+	for r := range m {
+		m[r] = pre
+	}
+	for i := range x {
+		for j := range x {
 			m[i][j] += x[i] * x[j] // want `m\[i\]\[j\] accumulates a symmetric product over full ranges of i and j — every off-diagonal element is computed twice; accumulate one triangle and mirror it once \(bit-identical\)`
 		}
 	}
+	return m
 }
 
 // Already triangular: silent.
