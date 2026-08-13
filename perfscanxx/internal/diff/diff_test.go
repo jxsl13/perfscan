@@ -162,3 +162,18 @@ func TestUnifiedContextLineNoFinalNewline(t *testing.T) {
 		t.Errorf("expected the -aaa/+AAA change lines:\n%s", got)
 	}
 }
+
+// TestUnifiedTrailingNewlineOnly pins the len(hunks)==0 branch: when the two
+// inputs differ ONLY in the trailing newline (same single line content), there
+// is no LINE-level difference, so Unified returns "" — the newline flip is
+// captured in the noNL flags but has no hunk to hang a "\ No newline" marker on.
+// -diff therefore shows nothing for a fix that only toggles a trailing newline,
+// which is safe: no spurious or misleading diff. Both directions return "".
+func TestUnifiedTrailingNewlineOnly(t *testing.T) {
+	if got := Unified("f", "f", []byte("abc"), []byte("abc\n")); got != "" {
+		t.Errorf(`Unified("abc","abc\n") = %q, want "" (no line-level difference)`, got)
+	}
+	if got := Unified("f", "f", []byte("abc\n"), []byte("abc")); got != "" {
+		t.Errorf(`Unified("abc\n","abc") = %q, want ""`, got)
+	}
+}
