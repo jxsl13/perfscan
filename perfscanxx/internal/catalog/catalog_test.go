@@ -81,6 +81,11 @@ func TestLookups(t *testing.T) {
 	if _, ok := ByID("PX9999"); ok {
 		t.Error("ByID(PX9999): want !ok")
 	}
+	// An unknown TidyName resolves to no entry (the -explain/-list/selector
+	// paths rely on this miss returning a zero Entry, not a stale match).
+	if e, ok := ByTidyName("performance-no-such-check"); ok || e.ID != "" {
+		t.Errorf("ByTidyName(unknown) = %+v, %v; want zero Entry, false", e, ok)
+	}
 }
 
 func TestUniqueIDs(t *testing.T) {
