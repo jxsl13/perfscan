@@ -326,10 +326,21 @@ func TestCaveatsAreWellFormed(t *testing.T) {
 // rationale. Empirically (clang-tidy --fix on a crafted fixture):
 //
 //   - performance-move-constructor-init, performance-noexcept-destructor,
-//     performance-trivially-destructible, performance-type-promotion-in-math-fn:
-//     these are genuine perf checks but apply NO fix-it on this toolchain
-//     (macOS/libc++) — HasFix would be false, so they offer no auto-fix value
-//     over the advisory set already documented.
+//     performance-type-promotion-in-math-fn: these are genuine perf checks but
+//     apply NO fix-it on this toolchain (macOS/libc++) — HasFix would be false,
+//     so they offer no auto-fix value over the advisory set already documented.
+//
+// CORRECTION (later audit): performance-trivially-destructible was previously
+// listed here as "no fix-it", but that was a false negative — the earlier probe
+// used an in-class empty/defaulted destructor, which the check does NOT target.
+// The check fires on an OUT-OF-LINE defaulted destructor (~S(); then
+// S::~S() = default;), and for that exact shape `clang-tidy --fix` DOES apply a
+// working fix-it: it defaults the destructor on the first declaration and drops
+// the out-of-line definition, restoring trivial destructibility (a strict perf
+// win — enables trivial relocation, elides per-element destructor calls). It is
+// now catalog entry PX3026 (HasFix:true, verified end-to-end by
+// TestHasFixChecksActuallyApply). LESSON: probe a check with the EXACT AST shape
+// it matches before concluding "no fix-it".
 //   - modernize-min-max-use-initializer-list: its fix-it DOES apply
 //     (std::max(a,std::max(b,c)) -> std::max({a,b,c})) and is bit-identical for
 //     integers, BUT (1) it is a readability modernization with NO perf angle
@@ -345,7 +356,6 @@ func TestAuditedExclusionsStayExcluded(t *testing.T) {
 		"modernize-min-max-use-initializer-list",
 		"performance-move-constructor-init",
 		"performance-noexcept-destructor",
-		"performance-trivially-destructible",
 		"performance-type-promotion-in-math-fn",
 	}
 	for _, name := range excluded {

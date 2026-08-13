@@ -134,6 +134,7 @@ func hasFixFixtures() []hasFixCase {
 		{"PX3007", "#include <string>\nstruct S { std::string m; S(const std::string& s) : m(s) {} };\n", "std::move(s)", "const std::string& s"},
 		{"PX3011", "struct Big { int a[8]; };\nconst Big make() { return Big(); }\n", "", "const Big"},
 		{"PX3016", "#include <functional>\nvoid g(int,int); auto f(){ return std::bind(g, 1, 2); }\n", "[]", "std::bind"},
+		{"PX3026", "struct S { int a; ~S(); };\nS::~S() = default;\n", "~S() = default", "S::~S()"},
 	}
 }
 

@@ -327,6 +327,24 @@ var entries = []Entry{
 		Title:  "a const local or value parameter that is returned can't be moved — its constness forces a copy where a move was possible",
 		HasFix: false,
 	},
+	{
+		// clang-tidy ships a working fix-it (verified end-to-end by
+		// TestHasFixChecksActuallyApply): it defaults the destructor on its FIRST
+		// (in-class) declaration and deletes the out-of-line `= default`
+		// definition. A user-declared destructor — even one only defaulted out of
+		// line — makes the type NON-trivially-destructible, which blocks trivial
+		// relocation (a vector can no longer memcpy its elements on growth) and
+		// forces a per-element destructor call the trivial case elides entirely.
+		// Strict win, not a trade-off: the defaulted destructor does exactly what
+		// the implicit one would, so behavior is unchanged — only the type's
+		// trivial-destructibility trait is restored, so no caveat. L2 (review):
+		// the fix flips an observable type trait (std::is_trivially_destructible),
+		// so keep it off the default level even though the rewrite is safe.
+		ID: "PX3026", TidyName: "performance-trivially-destructible",
+		Level: LevelStructured, Category: "moves",
+		Title:  "an out-of-line defaulted destructor makes the type non-trivially-destructible (blocks trivial relocation); default it on the first declaration",
+		HasFix: true,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
