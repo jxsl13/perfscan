@@ -50,6 +50,25 @@ should eyeball `-diff` before `-fix`:
 
 This is why `-fix` is opt-in and `-diff`/baseline exist: review before applying.
 
+## Deliberately excluded checks
+
+A periodic audit diffs `clang-tidy --list-checks` (performance-\*/modernize-\*/
+readability-\*) against this catalog. Some fixable-looking checks are **left out
+on purpose** — recorded here (and pinned by `TestAuditedExclusionsStayExcluded`)
+so a future audit doesn't re-add them without the rationale:
+
+- `performance-move-constructor-init`, `performance-noexcept-destructor`,
+  `performance-trivially-destructible`, `performance-type-promotion-in-math-fn`
+  — genuine perf checks, but they apply **no fix-it** on the macOS/libc++
+  toolchain, so they'd be advisory-only with no auto-fix value beyond what the
+  advisory set already covers.
+- `modernize-min-max-use-initializer-list` — its fix-it applies
+  (`std::max(a, std::max(b, c))` → `std::max({a, b, c})`) and is bit-identical
+  for integers, but it is a **readability** modernization with no perf angle
+  (same comparison count), and for **float** arguments it can diverge on **NaN**
+  ordering. A pure-style check with a NaN footgun does not meet the perf-catalog
+  bar; if ever added it would need a ⚠ caveat.
+
 ## Fix levels (C++ semantics)
 
 | Level | Name | Character | Auto-fix policy |
