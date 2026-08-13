@@ -391,3 +391,29 @@ runner **pruning** the now-unused `sort` — on real, hand-optimized codec code,
 and the package builds and its `flate`/`zstd`/`s2` neighbours' tests pass. The
 add-only import strategy (never combining a sort drop/swap with a cmp insert)
 holds across all four repos: no co-located-edit corruption, no leftover orphan.
+
+## The import-machinery batch, validated end to end (v0.40.6–v0.40.9)
+
+Four releases reworked how fixes touch imports: the runner prunes stdlib imports
+that fixes orphan (v0.40.6), PS3002 adds `slices`/`cmp` itself (v0.40.7), five
+checks fire even when they orphan `fmt`/`io` (v0.40.8), and the runner dedupes an
+import two different checks both add (v0.40.9). A `-fix -level 3` sweep across the
+Go corpus confirms the composition is safe on real code:
+
+| repo | files changed | build | import errors | tests |
+|------|---------------|-------|---------------|-------|
+| klauspost/compress | 5 | ok | 0 | flate/zstd/s2/huff0/fse pass |
+| etcd (server) | 3 | ok | 0 | 17 `pkg/` packages pass |
+| fasthttp | 1 | ok | 0 | — |
+| zerolog | 3 | ok | 0 | 7 packages pass |
+| logrus | 0 | ok | 0 | — |
+
+Zero `imported and not used` and zero `redeclared in this block` across every
+tree — the prune (orphans) and dedupe (duplicates) cover both failure modes of
+independent checks editing the same import block. `-diff` is the dry-run twin of
+`-fix` by construction (both render from the shared `patchedFiles`, which now
+runs dedupe + prune), verified on the PS3104+PS3105 double-`slices` case: the
+preview shows the import added exactly **once**, matching what `-fix` writes.
+Three end-to-end regression tests pin the composition — `TestFixPrunesCrossCheckOrphanImport`,
+`TestFixDedupesCrossCheckImportAdd`, and the widening's per-check `orphan.go`
+fixtures — so the whole batch is guarded, not just spot-checked here.
