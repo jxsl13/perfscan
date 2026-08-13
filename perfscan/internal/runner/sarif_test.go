@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"go/token"
+	"strings"
 	"testing"
 
 	"github.com/jxsl13/perfscan/perfscan/lint"
@@ -33,9 +34,11 @@ func TestSARIFStructure(t *testing.T) {
 		Runs    []struct {
 			Tool struct {
 				Driver struct {
-					Name  string `json:"name"`
-					Rules []struct {
+					Name           string `json:"name"`
+					InformationURI string `json:"informationUri"`
+					Rules          []struct {
 						ID                   string `json:"id"`
+						HelpURI              string `json:"helpUri"`
 						DefaultConfiguration struct {
 							Level string `json:"level"`
 						} `json:"defaultConfiguration"`
@@ -75,10 +78,18 @@ func TestSARIFStructure(t *testing.T) {
 	if run.Tool.Driver.Name != "perfscan" {
 		t.Errorf("tool.driver.name = %q, want perfscan", run.Tool.Driver.Name)
 	}
+	// The driver advertises its homepage (informationUri) for GitHub Code Scanning.
+	if !strings.HasPrefix(run.Tool.Driver.InformationURI, "https://") {
+		t.Errorf("tool.driver.informationUri = %q, want an https URL", run.Tool.Driver.InformationURI)
+	}
 	// Rules deduped per check ID: PS9001 (fired twice) + PS9003 -> exactly 2.
 	ruleIDs := map[string]bool{}
 	for _, r := range run.Tool.Driver.Rules {
 		ruleIDs[r.ID] = true
+		// Every rule links to its check's doc page (helpUri).
+		if !strings.HasPrefix(r.HelpURI, "https://") {
+			t.Errorf("rule %s: helpUri = %q, want an https URL", r.ID, r.HelpURI)
+		}
 	}
 	if len(run.Tool.Driver.Rules) != 2 {
 		t.Errorf("rules = %d, want 2 (deduped)", len(run.Tool.Driver.Rules))
