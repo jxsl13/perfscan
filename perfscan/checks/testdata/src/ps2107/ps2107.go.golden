@@ -182,3 +182,12 @@ func fcInt(i int) string {
 func fqConv(tok []byte) string {
 	return strconv.Quote(string(tok)) // want `fmt\.Sprintf\("%q", s\) on a string boxes the argument and walks fmt's formatter state machine; strconv\.Quote converts it directly`
 }
+
+// FORMATTING-DIRECTIVE NEGATIVES: a width, flag, or precision means the verb is
+// no longer a BARE verb — a strconv rewrite would silently drop the
+// padding/sign/alt-form and change the output, so these must stay silent. (%#o
+// and a precision-%g are covered above; these add the common width, explicit
+// sign, and alternate-hex forms a user is most likely to hit.)
+func fWidthPad(n int) string { return fmt.Sprintf("%5d", n) } // minimum-width padding
+func fPlusSign(n int) string { return fmt.Sprintf("%+d", n) } // explicit sign flag
+func fAltHex(n int) string   { return fmt.Sprintf("%#x", n) } // alternate form (0x prefix)
