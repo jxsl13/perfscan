@@ -69,6 +69,10 @@ func TestHasFixChecksActuallyApply(t *testing.T) {
 		{"PX2004", "#include <memory>\nvoid f(){ std::shared_ptr<int> p(new int(5)); (void)p; }\n", "make_shared", "new int"},
 		{"PX3005", "#include <set>\n#include <algorithm>\nbool f(const std::set<int>& s, int k){ return std::find(s.begin(), s.end(), k) != s.end(); }\n", ".find(k)", "std::find("},
 		{"PX3013", "struct S { S() {} };\n", "= default", "S() {}"},
+		{"PX2001", "#include <vector>\nvoid f(){ std::vector<int> v; for(int i=0;i<100;++i) v.push_back(i); }\n", "reserve(", ""},
+		{"PX3004", "#include <vector>\nstruct S { std::vector<int> v; S(S&& o){ v = static_cast<std::vector<int>&&>(o.v); } };\n", "noexcept", ""},
+		{"PX3012", "#include <set>\n#include <functional>\nstd::set<int, std::less<int>> f(){ return {}; }\n", "std::less<>", "std::less<int>"},
+		{"PX3015", "struct S { int x; S(int v){ x = v; } };\n", ": x(v)", "x = v"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
