@@ -191,3 +191,12 @@ func fqConv(tok []byte) string {
 func fWidthPad(n int) string { return fmt.Sprintf("%5d", n) } // minimum-width padding
 func fPlusSign(n int) string { return fmt.Sprintf("%+d", n) } // explicit sign flag
 func fAltHex(n int) string   { return fmt.Sprintf("%#x", n) } // alternate form (0x prefix)
+
+// COMMENT-SAFETY NEGATIVE: a comment INSIDE the call's replaced range blocks the
+// fix — a strconv rewrite would splice out the /* verb */ comment, silently
+// deleting it, so PS2107 still REPORTS but attaches no SuggestedFix and the
+// Sprintf is left byte-for-byte intact (comment preserved). Pins the
+// ps2107CommentsOverlap guard.
+func fCommentInCall(n int) string {
+	return fmt.Sprintf("%d" /* verb */, n) // want `fmt\.Sprintf of a single %d value boxes the argument`
+}
