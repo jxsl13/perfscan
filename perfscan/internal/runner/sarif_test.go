@@ -35,7 +35,10 @@ func TestSARIFStructure(t *testing.T) {
 				Driver struct {
 					Name  string `json:"name"`
 					Rules []struct {
-						ID string `json:"id"`
+						ID                   string `json:"id"`
+						DefaultConfiguration struct {
+							Level string `json:"level"`
+						} `json:"defaultConfiguration"`
 					} `json:"rules"`
 				} `json:"driver"`
 			} `json:"tool"`
@@ -95,8 +98,14 @@ func TestSARIFStructure(t *testing.T) {
 		// ruleIndex must point into rules[] and resolve to the same id as ruleId.
 		if res.RuleIndex < 0 || res.RuleIndex >= len(rules) {
 			t.Errorf("result[%d] ruleIndex %d out of range [0,%d)", i, res.RuleIndex, len(rules))
-		} else if rules[res.RuleIndex].ID != res.RuleID {
-			t.Errorf("result[%d] ruleIndex %d -> rule %q, but ruleId is %q", i, res.RuleIndex, rules[res.RuleIndex].ID, res.RuleID)
+		} else {
+			if rules[res.RuleIndex].ID != res.RuleID {
+				t.Errorf("result[%d] ruleIndex %d -> rule %q, but ruleId is %q", i, res.RuleIndex, rules[res.RuleIndex].ID, res.RuleID)
+			}
+			// The rule's defaultConfiguration.level must match the result level.
+			if dl := rules[res.RuleIndex].DefaultConfiguration.Level; dl != res.Level {
+				t.Errorf("result[%d] level %q != rule defaultConfiguration.level %q", i, res.Level, dl)
+			}
 		}
 		if res.Level != wantLevel[res.RuleID] {
 			t.Errorf("result[%d] (%s) level = %q, want %q", i, res.RuleID, res.Level, wantLevel[res.RuleID])

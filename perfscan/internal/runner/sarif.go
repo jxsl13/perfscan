@@ -32,10 +32,19 @@ type sarifDriver struct {
 }
 
 type sarifRule struct {
-	ID               string            `json:"id"`
-	ShortDescription sarifText         `json:"shortDescription"`
-	HelpURI          string            `json:"helpUri"`
-	Properties       map[string]string `json:"properties,omitempty"`
+	ID               string    `json:"id"`
+	ShortDescription sarifText `json:"shortDescription"`
+	HelpURI          string    `json:"helpUri"`
+	// DefaultConfiguration.level is the rule's default SARIF severity — what a
+	// consumer applies when a result omits its own level, and what GitHub Code
+	// Scanning shows for the rule itself. Mirrors the per-result level so the
+	// two never disagree.
+	DefaultConfiguration sarifConfig       `json:"defaultConfiguration"`
+	Properties           map[string]string `json:"properties,omitempty"`
+}
+
+type sarifConfig struct {
+	Level string `json:"level"`
 }
 
 type sarifText struct {
@@ -84,9 +93,10 @@ func emitSARIF(w io.Writer, findings []Finding) {
 		if _, ok := ruleIndex[f.Check.ID]; !ok {
 			ruleIndex[f.Check.ID] = len(rules)
 			rules = append(rules, sarifRule{
-				ID:               f.Check.ID,
-				ShortDescription: sarifText{Text: f.Check.Doc.Title},
-				HelpURI:          "https://github.com/jxsl13/perfscan/perfscan/blob/main/docs/checks/" + f.Check.ID + ".md",
+				ID:                   f.Check.ID,
+				ShortDescription:     sarifText{Text: f.Check.Doc.Title},
+				HelpURI:              "https://github.com/jxsl13/perfscan/perfscan/blob/main/docs/checks/" + f.Check.ID + ".md",
+				DefaultConfiguration: sarifConfig{Level: sarifLevel(f.Check.Level)},
 				Properties: map[string]string{
 					"category": f.Check.Category,
 					"fixLevel": f.Check.Level.String(),
