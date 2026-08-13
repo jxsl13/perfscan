@@ -1704,3 +1704,47 @@ func TestEquiv_PS2003RepeatNegativeCountPanicRelocation(t *testing.T) {
 		t.Fatal("non-negative count must not panic in either form")
 	}
 }
+
+// TestEquiv_PS2116ClearFloatZeroing pins that PS2116's rewrite of a slice-
+// zeroing loop `for i := range c { c[i] = 0 }` to `clear(c)` is BIT-identical
+// for float and complex element types even when the buffer already holds -0.0,
+// NaN, or ±Inf. Both the loop's `c[i] = 0` and clear(c) write the element
+// type's zero value (+0.0 / 0+0i), overwriting any prior bit pattern, so the
+// post-state is bitwise identical. Motivated by corpus -fix validation on
+// gonum/blas/gonum, where PS2116 zeroed []float64/[]complex128 scratch buffers
+// (clear(ctmp)/clear(btmp)) and gonum's FP-sensitive BLAS conformance tests
+// passed — this locks the float-zero property the runtime clear() relies on.
+func TestEquiv_PS2116ClearFloatZeroing(t *testing.T) {
+	negZero := math.Copysign(0, -1) // a real negative zero (the `-0.0` literal is +0.0 in Go)
+	seed := []float64{0, negZero, math.NaN(), math.Inf(1), math.Inf(-1), 1.5, -3.25, 1e308}
+	// float64 slice.
+	loopF := append([]float64(nil), seed...)
+	clearF := append([]float64(nil), seed...)
+	for i := range loopF {
+		loopF[i] = 0
+	}
+	clear(clearF)
+	for i := range loopF {
+		if math.Float64bits(loopF[i]) != math.Float64bits(clearF[i]) {
+			t.Errorf("float64[%d]: loop=%#x clear=%#x", i, math.Float64bits(loopF[i]), math.Float64bits(clearF[i]))
+		}
+		if math.Float64bits(clearF[i]) != 0 {
+			t.Errorf("clear(float64)[%d] = %#x, want +0.0 (0x0)", i, math.Float64bits(clearF[i]))
+		}
+	}
+	// complex128 slice: real+imag both must be +0.0.
+	cseed := []complex128{complex(math.NaN(), negZero), complex(negZero, math.Inf(1)), 2 + 3i}
+	loopC := append([]complex128(nil), cseed...)
+	clearC := append([]complex128(nil), cseed...)
+	for i := range loopC {
+		loopC[i] = 0
+	}
+	clear(clearC)
+	for i := range loopC {
+		lb := [2]uint64{math.Float64bits(real(loopC[i])), math.Float64bits(imag(loopC[i]))}
+		cb := [2]uint64{math.Float64bits(real(clearC[i])), math.Float64bits(imag(clearC[i]))}
+		if lb != cb || cb != [2]uint64{0, 0} {
+			t.Errorf("complex128[%d]: loop=%v clear=%v (want both 0x0)", i, lb, cb)
+		}
+	}
+}
