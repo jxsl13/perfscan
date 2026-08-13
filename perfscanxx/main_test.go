@@ -928,3 +928,30 @@ func TestApplySequentialFixesVerboseAndError(t *testing.T) {
 		t.Fatalf("expected a wrapped -fix-sequential error, got %v", err)
 	}
 }
+
+// TestExpandInputsNoDBPaths covers the two database-less branches: explicit
+// files with no -p need no compilation database (returned verbatim), while a
+// directory/pattern arg with no resolvable database is an error.
+func TestExpandInputsNoDBPaths(t *testing.T) {
+	// Concrete files, no -p, no db anywhere: returned as-is, no error.
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	if err := os.Chdir(t.TempDir()); err != nil { // an empty dir with no compile_commands.json
+		t.Fatal(err)
+	}
+	files, eff, err := expandInputs([]string{"a.cpp", "sub/b.cpp"}, "")
+	if err != nil {
+		t.Fatalf("concrete files with no -p should not error: %v", err)
+	}
+	if eff != "" {
+		t.Errorf("effBuildDir = %q, want empty (no database consulted)", eff)
+	}
+	if len(files) != 2 || files[0] != "a.cpp" || files[1] != "sub/b.cpp" {
+		t.Errorf("concrete files = %v, want [a.cpp sub/b.cpp] verbatim", files)
+	}
+
+	// A pattern arg with no database resolvable -> error.
+	if _, _, err := expandInputs([]string{"./..."}, ""); err == nil {
+		t.Error("a ./... pattern with no compilation database should error")
+	}
+}
