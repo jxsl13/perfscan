@@ -55,6 +55,14 @@ type Entry struct {
 	Title string
 	// HasFix reports whether clang-tidy emits fix-its for this check.
 	HasFix bool
+	// Caveat, when non-empty, warns that clang-tidy's fix-it — though it
+	// applies cleanly — can be UNSAFE to accept blindly for this check: the
+	// rewrite may change observable behavior in cases clang-tidy's syntactic
+	// analysis cannot see (e.g. reordering member reads past a lock, or
+	// removing a deliberately-omitted noexcept). perfscanxx surfaces the fix
+	// faithfully; the caveat tells a reviewer to eyeball `-diff` before `-fix`.
+	// Only meaningful when HasFix is true. Printed by `-explain`.
+	Caveat string
 
 	// Custom marks a perfscanxx-defined query-based custom check (run via
 	// clang-tidy --experimental-custom-checks). Its TidyName is the
@@ -143,6 +151,10 @@ var entries = []Entry{
 		Level: LevelStructured, Category: "moves",
 		Title:  "a move constructor/assignment not marked noexcept forces containers to copy; add noexcept",
 		HasFix: true,
+		Caveat: "a move op is sometimes left non-noexcept ON PURPOSE because a member " +
+			"operation it performs can throw (e.g. a move-assignment that closes a file/handle " +
+			"whose close may throw). Adding noexcept turns any such throw into std::terminate. " +
+			"Confirm the move body cannot throw before -fix.",
 	},
 	{
 		ID: "PX3005", TidyName: "performance-inefficient-algorithm",
@@ -209,6 +221,11 @@ var entries = []Entry{
 		Level: LevelStructured, Category: "copies",
 		Title:  "member assigned in the constructor body default-constructs then assigns; a member initializer constructs it once directly",
 		HasFix: true,
+		Caveat: "the fix hoists the field reads into the member-initializer list, " +
+			"which runs BEFORE the constructor body — so if the body acquires a lock " +
+			"(or otherwise synchronizes) before reading those fields, the rewrite moves " +
+			"the reads out from under it and can introduce a data race. Review -diff for " +
+			"any lock_guard/mutex in the constructor body before -fix.",
 	},
 	{
 		ID: "PX3016", TidyName: "modernize-avoid-bind",

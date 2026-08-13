@@ -16,11 +16,32 @@ analysis sees syntax, not hotness.
 > perfscanxx -list            # the check table + an auto-fix coverage summary
 > perfscanxx -list -fixable   # only the auto-fixable checks
 > perfscanxx -list -json      # the whole catalog as machine-readable JSON
-> perfscanxx -explain PX3007  # one check: title, level, fix status, upstream doc URL
+> perfscanxx -explain PX3007  # one check: title, level, fix status, caveats, upstream doc URL
 > ```
 >
 > This document describes the *model*; it deliberately does not re-list every
 > check (that would drift). The catalog is the code in `internal/catalog`.
+
+## Fix caveats
+
+perfscanxx surfaces clang-tidy's fix-its **faithfully** — it does not second-guess
+them. A few checks carry a fix-it that *applies cleanly* but can be **unsafe to
+accept blindly**, because clang-tidy's syntactic analysis cannot see the
+surrounding semantics. For these, `-explain <ID>` prints a **⚠ caveat**, and you
+should eyeball `-diff` before `-fix`:
+
+- **PX3015** (`cppcoreguidelines-prefer-member-initializer`) hoists field reads
+  into the member-initializer list, which runs *before* the constructor body. If
+  the body takes a lock before reading those fields, the rewrite moves the reads
+  out from under it — a potential data race. (Seen in the wild on spdlog's
+  `backtracer` copy-constructor.)
+- **PX3004** (`performance-noexcept-move-constructor`) adds `noexcept` to a move
+  op that may have been left non-`noexcept` *on purpose* because a member
+  operation can throw (e.g. a move-assignment that closes a handle whose close
+  throws); `noexcept` would turn such a throw into `std::terminate`. (Seen on
+  fmt's `file` move-assignment, commented "not noexcept because close may throw".)
+
+This is why `-fix` is opt-in and `-diff`/baseline exist: review before applying.
 
 ## Fix levels (C++ semantics)
 
