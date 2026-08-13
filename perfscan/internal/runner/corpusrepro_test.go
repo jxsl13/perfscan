@@ -335,3 +335,66 @@ func render(names []string, key []byte) string {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixPrometheusVerbArmsCompose pins a composition observed during corpus
+// -fix validation on prometheus/prometheus, where the recent PS2107 verb arms
+// (%g -> strconv.FormatFloat, %q -> strconv.Quote) fired on real code
+// (fmt.Sprintf("%g", bucket) in a histogram bucket formatter, fmt.Sprintf("%q",
+// item.Val) in the promql parser). Both arms need "strconv" — the runner must
+// add it exactly ONCE — while PS3104 (sort.Strings -> slices.Sort) adds "slices"
+// and orphans "sort", PS5102 (WriteRune -> WriteByte) is import-neutral, and
+// "strings" (Builder) stays. FP-stress note: the recent advisory family
+// (PS2131-2134) fired ZERO times across all of prometheus AND the Go stdlib.
+//
+// On the real prometheus this was part of 22 bit-identical fixes across 11 files;
+// the tree built and all changed packages' tests passed.
+func TestFixPrometheusVerbArmsCompose(t *testing.T) {
+	const src = `package p
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+type item struct{ Val string }
+
+func render(names []string, buckets []float64, it item) (string, []string) {
+	sort.Strings(names)
+	var sb strings.Builder
+	sb.WriteRune('[')
+	var out []string
+	for _, b := range buckets {
+		out = append(out, fmt.Sprintf("%g", b))
+	}
+	return fmt.Sprintf("%q", it.Val), append(out, sb.String())
+}
+`
+	got := string(runFixMode(t, src))
+
+	for _, want := range []string{
+		"slices.Sort(names)",
+		"sb.WriteByte('[')",
+		"strconv.FormatFloat(b, 'g', -1, 64)", // %g arm, in an append arg
+		"strconv.Quote(it.Val)",               // %q arm, field-selector arg
+		`"slices"`,
+		`"strconv"`,
+		`"strings"`, // Builder still uses it
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in the composed fix:\n%s", want, got)
+		}
+	}
+	// strconv added exactly once despite two arms needing it.
+	if n := strings.Count(got, `"strconv"`); n != 1 {
+		t.Errorf(`"strconv" import should appear exactly once, got %d:\n%s`, n, got)
+	}
+	for _, gone := range []string{`"sort"`, `"fmt"`} {
+		if strings.Contains(got, gone) {
+			t.Errorf("import %s should have been pruned as an orphan:\n%s", gone, got)
+		}
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
