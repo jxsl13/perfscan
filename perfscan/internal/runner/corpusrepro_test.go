@@ -662,3 +662,57 @@ func hasTwoParts(i string) bool {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixCelGoBuilderComparisonRead pins a PS2128 accumulator rewrite observed in
+// the wild during corpus -fix validation on google/cel-go (common/env/io.go,
+// parseNamespaceIdentifier): a `var id string` grown with `id += …` in a loop is
+// converted to a strings.Builder. The distinguishing real-world detail is a
+// mid-function READ of the accumulator in a COMPARISON (`if id == ""`) — which
+// must become `if id.String() == ""`, not just the final `return id` -> `return
+// id.String()`. Every read of the accumulated string must route through String();
+// missing the comparison read would leave `id == ""` comparing a strings.Builder
+// to a string and fail to compile. On the real file this rewrote cleanly and
+// cel-go built + its common/env tests passed (byte-identical).
+func TestFixCelGoBuilderComparisonRead(t *testing.T) {
+	const src = `package p
+
+import (
+	"fmt"
+)
+
+func build(parts []string) (string, error) {
+	var id string
+	for _, s := range parts {
+		id += "."
+		id += s
+	}
+	if id == "" {
+		return "", fmt.Errorf("empty")
+	}
+	return id, nil
+}
+`
+	got := string(runFixMode(t, src))
+
+	if !strings.Contains(got, "var id strings.Builder") {
+		t.Errorf("accumulator should become a strings.Builder:\n%s", got)
+	}
+	for _, want := range []string{`id.WriteString(".")`, "id.WriteString(s)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q (each += rewritten to WriteString):\n%s", want, got)
+		}
+	}
+	// The comparison read AND the return read must both route through String().
+	if !strings.Contains(got, `if id.String() == ""`) {
+		t.Errorf("the comparison read `if id == \"\"` must become id.String():\n%s", got)
+	}
+	if !strings.Contains(got, "return id.String(), nil") {
+		t.Errorf("the return read must become id.String():\n%s", got)
+	}
+	if strings.Contains(got, "id +=") {
+		t.Errorf("no += concatenation should remain:\n%s", got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
