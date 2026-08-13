@@ -297,18 +297,19 @@ func TestLevelString(t *testing.T) {
 
 // TestCaveatsAreWellFormed pins the Caveat invariants: a caveat is only
 // meaningful on an auto-fixable check (it warns about clang-tidy's fix-it), so
-// no advisory/custom entry may carry one; and the two checks whose upstream
-// fix-it is known to be unsafe-if-applied-blindly — PX3015 (member-init hoists
-// reads past a constructor-body lock) and PX3004 (noexcept may be omitted on
-// purpose when a member op can throw), both found during corpus validation on
-// spdlog/fmt — must keep their caveat so `-explain` warns reviewers.
+// no advisory/custom entry may carry one; and the checks whose upstream fix-it
+// is known to be unsafe-or-a-tradeoff-if-applied-blindly must keep their caveat
+// so `-explain` warns reviewers: PX3015 (member-init hoists reads past a
+// constructor-body lock) and PX3004 (noexcept may be omitted on purpose when a
+// member op can throw), both found during corpus validation on spdlog/fmt; and
+// PX3007 (pass-by-value pessimizes lvalue callers and changes copy/move counts).
 func TestCaveatsAreWellFormed(t *testing.T) {
 	for _, e := range All() {
 		if e.Caveat != "" && !e.HasFix {
 			t.Errorf("%s has a Caveat but HasFix=false; caveats only apply to fixable checks", e.ID)
 		}
 	}
-	for _, id := range []string{"PX3015", "PX3004"} {
+	for _, id := range []string{"PX3015", "PX3004", "PX3007"} {
 		e, ok := ByID(id)
 		if !ok {
 			t.Fatalf("%s missing from catalog", id)
