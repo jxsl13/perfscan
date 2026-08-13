@@ -116,6 +116,37 @@ func TestUniqueIDs(t *testing.T) {
 	}
 }
 
+// TestAllReturnsIndependentCopy pins that All() returns a fresh copy of the
+// catalog, not the internal slice: a caller that mutates the returned entries
+// (or their fields) must not corrupt the catalog for the rest of the process.
+// All() feeds -list, -json, the check selectors and the report enrichment, all
+// of which run within one process; a regression to `return entries` would let
+// any of them silently rewrite a shared PX entry's id/level/title for everyone
+// else. Asserts a mutation of one All() result leaves a subsequent All() and
+// ByID unaffected.
+func TestAllReturnsIndependentCopy(t *testing.T) {
+	first := All()
+	if len(first) == 0 {
+		t.Fatal("catalog is empty")
+	}
+	origID, origTitle := first[0].ID, first[0].Title
+	// Mutate the returned slice's first entry.
+	first[0].ID = "PX0000"
+	first[0].Title = "corrupted"
+
+	second := All()
+	if second[0].ID != origID || second[0].Title != origTitle {
+		t.Errorf("All() must return an independent copy: mutating a prior result changed the catalog (got %s/%q, want %s/%q)",
+			second[0].ID, second[0].Title, origID, origTitle)
+	}
+	if _, ok := ByID(origID); !ok {
+		t.Errorf("ByID(%s) must still resolve after a caller mutated a previous All() result", origID)
+	}
+	if _, ok := ByID("PX0000"); ok {
+		t.Error("the mutated id PX0000 must not have leaked into the catalog")
+	}
+}
+
 func TestUniqueTidyNames(t *testing.T) {
 	seen := map[string]string{}
 	for _, e := range All() {
