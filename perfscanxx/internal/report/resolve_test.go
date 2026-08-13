@@ -36,3 +36,26 @@ func TestLineColFromOffset(t *testing.T) {
 		t.Errorf("lineCol offset0 = %d:%d want 1:1", l, c)
 	}
 }
+
+// TestLineColIsByteBasedWithMultibyte pins that lineCol computes the column as a
+// BYTE offset from the line start, matching clang-tidy's --export-fixes FileOffset
+// (a byte offset) and its byte-based column convention. A multi-byte UTF-8 rune
+// before the diagnostic on the same line must advance the column by its BYTE
+// length, not by one rune — a rune-based "fix" would drift the reported column on
+// every non-ASCII line and disagree with clang-tidy's own line:col.
+func TestLineColIsByteBasedWithMultibyte(t *testing.T) {
+	old := ReadFile
+	defer func() { ReadFile = old }()
+
+	// "日X\nY": 日 is 3 bytes (offsets 0-2), X at 3, \n at 4, Y at 5.
+	ReadFile = func(string) ([]byte, error) { return []byte("日X\nY"), nil }
+	// X is on line 1 at byte column 4 (日 occupies byte columns 1-3). Rune-based
+	// counting would wrongly report column 2.
+	if l, c := lineCol("x", 3); l != 1 || c != 4 {
+		t.Errorf("lineCol('日X', offset 3='X') = %d:%d, want 1:4 (byte column, not 1:2 rune)", l, c)
+	}
+	// Y is the first byte of line 2 → column 1, unaffected by the multibyte line 1.
+	if l, c := lineCol("x", 5); l != 2 || c != 1 {
+		t.Errorf("lineCol offset 5 ('Y' on line 2) = %d:%d, want 2:1", l, c)
+	}
+}
