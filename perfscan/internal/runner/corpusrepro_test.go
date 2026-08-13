@@ -513,3 +513,61 @@ func TestFixBboltRegexpHoistRawStringPattern(t *testing.T) {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixBadgerMultiKeySortComposition pins a composition observed in the wild
+// during corpus -fix validation on dgraph-io/badger (levels.go): one file where
+// PS3002 rewrites a MULTI-KEY sort.Slice (a nested Level-then-ID comparator over
+// NON-FLOAT fields) to slices.SortFunc with cmp.Compare, and PS3104 rewrites a
+// sort.Strings to slices.Sort. Both checks ADD "slices" (must dedupe to one),
+// PS3002 also ADDS "cmp", and "sort" — whose only two uses are both rewritten —
+// must be pruned as an orphan. This exercises the multi-key cmp.Compare rewrite
+// (bit-identical only for non-float keys) together with the shared import
+// machinery on a realistic two-sort function. On the real file this rewrote
+// cleanly and badger built + its changed-package tests passed.
+func TestFixBadgerMultiKeySortComposition(t *testing.T) {
+	const src = `package p
+
+import "sort"
+
+type TableInfo struct {
+	Level int
+	ID    uint64
+}
+
+func order(result []TableInfo, splits []string) []string {
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Level != result[j].Level {
+			return result[i].Level < result[j].Level
+		}
+		return result[i].ID < result[j].ID
+	})
+	sort.Strings(splits)
+	return splits
+}
+`
+	got := string(runFixMode(t, src))
+
+	for _, want := range []string{
+		"slices.SortFunc(result, func(a, b TableInfo) int {",
+		"cmp.Compare(a.Level, b.Level)",
+		"cmp.Compare(a.ID, b.ID)",
+		"slices.Sort(splits)",
+		`"cmp"`,
+		`"slices"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in the composed fix:\n%s", want, got)
+		}
+	}
+	// "slices" added by BOTH checks must appear exactly once.
+	if n := strings.Count(got, `"slices"`); n != 1 {
+		t.Errorf(`"slices" import should appear exactly once, got %d:\n%s`, n, got)
+	}
+	// "sort" had only the two now-rewritten uses — it must be pruned.
+	if strings.Contains(got, `"sort"`) {
+		t.Errorf(`"sort" should have been pruned as an orphan:\n%s`, got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
