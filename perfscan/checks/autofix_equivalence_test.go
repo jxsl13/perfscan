@@ -1555,3 +1555,68 @@ func TestEquiv_PS1010ColMean(t *testing.T) {
 		t.Fatalf("partial writes diverge before panic: serial=%v interchanged=%v", ms, mi)
 	}
 }
+
+// TestEquiv_PS1007OuterUnroll pins PS1007's rank-1-update outer unroll. The
+// rewrite adds v0 then v1 into the SAME out[d] within one d-loop, so each out[d]
+// still accumulates over i in ASCENDING, left-associated order — identical to the
+// serial form, with NO reassociation (contrast the separate-accumulator PS6010).
+// It is in-place `+=` (no scratch/copy write-back), so out's pre-existing content
+// and the accumulation are both preserved bit-for-bit. Odd n exercises the serial
+// tail; a non-zero initial out catches any accidental zeroing.
+func TestEquiv_PS1007OuterUnroll(t *testing.T) {
+	serial := func(w, in, out []float64, n, dim int) {
+		for i := 0; i < n; i++ {
+			v := w[i]
+			for d := 0; d < dim; d++ {
+				out[d] += v * in[i*dim+d]
+			}
+		}
+	}
+	unrolled := func(w, in, out []float64, n, dim int) {
+		i := 0
+		for ; i+1 < n; i += 2 {
+			v0, v1 := w[i], w[i+1]
+			for d := 0; d < dim; d++ {
+				out[d] += v0 * in[i*dim+d]
+				out[d] += v1 * in[(i+1)*dim+d]
+			}
+		}
+		for ; i < n; i++ {
+			v := w[i]
+			for d := 0; d < dim; d++ {
+				out[d] += v * in[i*dim+d]
+			}
+		}
+	}
+	rng := rand.New(rand.NewSource(0x1007))
+	vals := []float64{1, -1, 1e300, 1e-300, math.Pi, 0, math.Copysign(0, -1), 1e16, math.SmallestNonzeroFloat64}
+	pick := func() float64 {
+		if rng.Intn(3) == 0 {
+			return vals[rng.Intn(len(vals))]
+		}
+		return (rng.Float64() - 0.5) * rng.Float64() * 1e8
+	}
+	for trial := 0; trial < 2000; trial++ {
+		n, dim := rng.Intn(7)+1, rng.Intn(6)+1 // n includes odd values -> tail
+		w := make([]float64, n)
+		for i := range w {
+			w[i] = pick()
+		}
+		in := make([]float64, n*dim)
+		for i := range in {
+			in[i] = pick()
+		}
+		o1, o2 := make([]float64, dim), make([]float64, dim)
+		for d := range o1 { // non-zero initial out (accumulated into, not overwritten)
+			o1[d] = pick()
+			o2[d] = o1[d]
+		}
+		serial(w, in, o1, n, dim)
+		unrolled(w, in, o2, n, dim)
+		for d := 0; d < dim; d++ {
+			if math.Float64bits(o1[d]) != math.Float64bits(o2[d]) {
+				t.Fatalf("trial %d n=%d dim=%d out[%d]: serial=%x unrolled=%x", trial, n, dim, d, math.Float64bits(o1[d]), math.Float64bits(o2[d]))
+			}
+		}
+	}
+}
