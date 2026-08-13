@@ -2016,3 +2016,32 @@ func TestEquiv_PS2107SprintfQuote(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS5106StringsCompareToOperator pins that strings.Compare(a, b)
+// compared to 0 is bit-identical to the direct operator, for all six comparison
+// operators and both operand orders (mirrored when Compare is on the right).
+// strings.Compare returns exactly -1/0/+1 by definition, so this holds for every
+// string pair including empties, prefixes, unicode, and embedded NUL.
+func TestEquiv_PS5106StringsCompareToOperator(t *testing.T) {
+	vals := []string{"", "a", "b", "ab", "ba", "abc", "abd", "日", "日本", "日本語", "\x00", "a\x00", "z", "aa"}
+	for _, a := range vals {
+		for _, b := range vals {
+			c := strings.Compare(a, b)
+			// Compare on the left: operator kept.
+			if (c == 0) != (a == b) || (c != 0) != (a != b) ||
+				(c < 0) != (a < b) || (c <= 0) != (a <= b) ||
+				(c > 0) != (a > b) || (c >= 0) != (a >= b) {
+				t.Errorf("left(%q,%q): Compare=%d disagrees with an operator", a, b, c)
+			}
+			// Compare on the right of 0: operator mirrored. The Yoda spelling
+			// (0 OP Compare) is exactly the shape PS5106 rewrites, so it is
+			// deliberate here.
+			//lint:ignore ST1017 deliberately exercising the 0-on-the-left form PS5106 mirrors
+			if (0 == c) != (a == b) || (0 != c) != (a != b) ||
+				(0 < c) != (a > b) || (0 <= c) != (a >= b) ||
+				(0 > c) != (a < b) || (0 >= c) != (a <= b) {
+				t.Errorf("right(%q,%q): 0 OP Compare=%d disagrees with the mirrored operator", a, b, c)
+			}
+		}
+	}
+}
