@@ -234,9 +234,10 @@ func SARIF(w io.Writer, findings []Finding) error {
 		return "warning"
 	}
 	type sarifDriver struct {
-		Name    string      `json:"name"`
-		Rules   []sarifRule `json:"rules"`
-		Version string      `json:"version,omitempty"`
+		Name           string      `json:"name"`
+		InformationURI string      `json:"informationUri"`
+		Rules          []sarifRule `json:"rules"`
+		Version        string      `json:"version,omitempty"`
 	}
 	type sarifTool struct {
 		Driver sarifDriver `json:"driver"`
@@ -302,7 +303,7 @@ func SARIF(w io.Writer, findings []Finding) error {
 		Schema:  "https://json.schemastore.org/sarif-2.1.0.json",
 		Version: "2.1.0",
 		Runs: []sarifRun{{
-			Tool:    sarifTool{Driver: sarifDriver{Name: "perfscanxx", Rules: rules}},
+			Tool:    sarifTool{Driver: sarifDriver{Name: "perfscanxx", InformationURI: "https://github.com/jxsl13/perfscan/perfscanxx", Rules: rules}},
 			Results: results,
 		}},
 	})

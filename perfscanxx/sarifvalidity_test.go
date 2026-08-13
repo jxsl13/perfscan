@@ -60,8 +60,9 @@ func TestSARIFOutputIsStructurallyValid(t *testing.T) {
 		Runs   []struct {
 			Tool struct {
 				Driver struct {
-					Name  string `json:"name"`
-					Rules []struct {
+					Name           string `json:"name"`
+					InformationURI string `json:"informationUri"`
+					Rules          []struct {
 						ID                   string `json:"id"`
 						HelpURI              string `json:"helpUri"`
 						DefaultConfiguration *struct {
@@ -100,6 +101,11 @@ func TestSARIFOutputIsStructurallyValid(t *testing.T) {
 	run := log.Runs[0]
 	if run.Tool.Driver.Name != "perfscanxx" {
 		t.Errorf("driver.name = %q, want perfscanxx", run.Tool.Driver.Name)
+	}
+	// The driver must advertise its homepage so GitHub Code Scanning can link
+	// "about this tool" (parity with perfscan's SARIF).
+	if !strings.HasPrefix(run.Tool.Driver.InformationURI, "https://") {
+		t.Errorf("tool.driver.informationUri = %q, want an https URL", run.Tool.Driver.InformationURI)
 	}
 	rules := run.Tool.Driver.Rules
 	validLevels := map[string]bool{"warning": true, "note": true, "error": true}
