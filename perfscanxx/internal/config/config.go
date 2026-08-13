@@ -25,6 +25,11 @@ type File struct {
 	Level   *int     `yaml:"level"`
 	Checks  *string  `yaml:"checks"`
 	Exclude []string `yaml:"exclude"`
+	// Tidy is the clang-tidy binary path (the -tidy flag). ExtraArgs are passed
+	// to the compiler via clang-tidy (the repeatable -extra-arg), e.g. the
+	// macOS `-isysroot <sdk>` pair — the flags most painful to repeat in CI.
+	Tidy      *string  `yaml:"tidy"`
+	ExtraArgs []string `yaml:"extra-args"`
 }
 
 // Discover returns the path of the first config filename that exists in dir,
