@@ -195,3 +195,20 @@ func TestUnifiedContextLineNoNewlineOnBSide(t *testing.T) {
 		t.Errorf("no-newline marker wrongly attached to the -aaa line:\n%s", got)
 	}
 }
+
+// TestDiffHunksEmptyInputs pins diffHunks's len(raw)==0 guard directly: two
+// empty (or identical) line sets produce no LCS ops, so diffHunks returns nil
+// rather than an empty-hunk artifact. Unified reaches this only after its
+// byte-level bytes.Equal early return, so exercise diffHunks itself.
+func TestDiffHunksEmptyInputs(t *testing.T) {
+	if h := diffHunks(nil, nil, 3); h != nil {
+		t.Errorf("diffHunks(nil, nil) = %v, want nil", h)
+	}
+	if h := diffHunks([]string{}, []string{}, 3); h != nil {
+		t.Errorf("diffHunks([], []) = %v, want nil", h)
+	}
+	// Identical non-empty inputs: all context, no change -> also nil.
+	if h := diffHunks([]string{"a", "b"}, []string{"a", "b"}, 3); h != nil {
+		t.Errorf("diffHunks(identical) = %v, want nil", h)
+	}
+}
