@@ -102,6 +102,36 @@ func TestRunMissingBinary(t *testing.T) {
 	}
 }
 
+// TestRunNoInputFiles pins the empty-Files guard: with a resolvable binary but
+// no files, Run must error before ever invoking clang-tidy.
+func TestRunNoInputFiles(t *testing.T) {
+	origLook, origExec := LookPath, Executor
+	defer func() { LookPath, Executor = origLook, origExec }()
+	LookPath = func(string) (string, error) { return "/fake/clang-tidy", nil }
+	Executor = func(context.Context, []string, *bytes.Buffer, *bytes.Buffer) (int, error) {
+		t.Fatal("Executor must not run when there are no input files")
+		return 0, nil
+	}
+	if _, err := Run(context.Background(), Options{}); err == nil || !strings.Contains(err.Error(), "no input files") {
+		t.Fatalf("Run with no files: err = %v, want a \"no input files\" error", err)
+	}
+}
+
+// TestRunExecutorError pins the Executor-failure path: a clang-tidy invocation
+// error is wrapped, not swallowed.
+func TestRunExecutorError(t *testing.T) {
+	origLook, origExec := LookPath, Executor
+	defer func() { LookPath, Executor = origLook, origExec }()
+	LookPath = func(string) (string, error) { return "/fake/clang-tidy", nil }
+	Executor = func(context.Context, []string, *bytes.Buffer, *bytes.Buffer) (int, error) {
+		return -1, errors.New("boom")
+	}
+	_, err := Run(context.Background(), Options{Files: []string{"a.cpp"}})
+	if err == nil || !strings.Contains(err.Error(), "invoking clang-tidy") {
+		t.Fatalf("Run with a failing Executor: err = %v, want it wrapped with \"invoking clang-tidy\"", err)
+	}
+}
+
 // TestArgvVariants pins the invocation contract's branches that TestArgv leaves
 // uncovered — most importantly that ConfigFile mode OMITS --checks (a stray
 // --checks would override the config's Checks line and silently break the
