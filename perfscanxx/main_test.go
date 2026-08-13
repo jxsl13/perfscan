@@ -143,6 +143,34 @@ func TestExplainBuildsCorrectUpstreamURLPerFamily(t *testing.T) {
 	}
 }
 
+// TestExplainByTidyName pins printExplain's ByTidyName FALLBACK: -explain accepts
+// a clang-tidy check NAME (what a user sees in output and docs), not only a PX id.
+// Every existing -explain test passes a PX id, so the ByID-miss -> ByTidyName path
+// was unexercised — a regression dropping the fallback would break `-explain
+// performance-for-range-copy` while the PX-id suite stayed green.
+func TestExplainByTidyName(t *testing.T) {
+	// A clang-tidy name resolves to the same entry its PX id does.
+	out, _, code := runCLI("-explain", "performance-for-range-copy")
+	if code != 0 {
+		t.Fatalf("-explain performance-for-range-copy exit = %d, want 0", code)
+	}
+	if !strings.Contains(out, "PX1001") {
+		t.Errorf("-explain by tidy name must resolve to PX1001:\n%s", out)
+	}
+	if !strings.Contains(out, "performance-for-range-copy") {
+		t.Errorf("-explain output should name the clang-tidy check:\n%s", out)
+	}
+	// Surrounding whitespace is trimmed before the tidy-name lookup.
+	if _, _, code := runCLI("-explain", "  performance-for-range-copy  "); code != 0 {
+		t.Errorf("-explain with a padded tidy name should still resolve (TrimSpace), exit = %d", code)
+	}
+	// A tidy-name-shaped string that matches nothing still fails cleanly (exit 2),
+	// exercising the ByID-miss -> ByTidyName-miss -> error path.
+	if _, _, code := runCLI("-explain", "performance-does-not-exist"); code != 2 {
+		t.Errorf("-explain of an unknown tidy name: exit = %d, want 2", code)
+	}
+}
+
 // TestExplainURLForEveryCheck guards the -explain doc URL for the WHOLE catalog:
 // every non-custom check must point at checks/<family>/<name>.html built from its
 // clang-tidy family prefix (not a hard-coded performance/ path), and every
