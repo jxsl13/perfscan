@@ -110,15 +110,20 @@ func runPS2107(pass *analysis.Pass) (any, error) {
 			}
 			var fix *analysis.SuggestedFix
 			if c.repl != "" && !ps2107CommentsOverlap(f, call) {
-				needImport, usable := true, true
+				useName, needImport, usable := c.pkgName, false, true
 				if c.pkgName != "" {
-					needImport, usable = ps2107PkgUsable(pass, call.Pos(), c.pkgName, c.pkgPath)
-				} else {
-					needImport = false
+					useName, needImport, usable = ps2107PkgUsable(pass, f, call.Pos(), c.pkgName, c.pkgPath)
 				}
 				if usable && !(needImport && ps2107ImportsC(f)) {
+					repl := c.repl
+					// Reuse an existing import's name (e.g. an alias) by rewriting
+					// the replacement's leading `pkg.` qualifier; c.repl always
+					// begins with c.pkgName+"." for the package-referencing arms.
+					if c.pkgName != "" && useName != c.pkgName {
+						repl = strings.Replace(c.repl, c.pkgName+".", useName+".", 1)
+					}
 					edits := []analysis.TextEdit{
-						{Pos: call.Pos(), End: call.End(), NewText: []byte(c.repl)},
+						{Pos: call.Pos(), End: call.End(), NewText: []byte(repl)},
 					}
 					if needImport && !importAdded[c.pkgPath] {
 						edits = append(edits, ps2107ImportEdit(f, c.pkgPath))
@@ -392,20 +397,54 @@ func ps2107CommentsOverlap(f *ast.File, call *ast.CallExpr) bool {
 	return false
 }
 
-// ps2107PkgUsable reports whether name can reference the package at path
-// from pos: needImport is true when the file must add the import, ok is
-// false when some other object owns the name there (a local or
-// package-level declaration, or a same-named other package).
-func ps2107PkgUsable(pass *analysis.Pass, pos token.Pos, name, path string) (needImport, ok bool) {
+// ps2107PkgUsable reports how the package at path should be referenced from
+// pos. useName is the identifier to qualify the replacement with: an EXISTING
+// import's name — its alias when the package is imported under one — so the
+// rewrite reuses it (as PS3104 does for slices) instead of adding a SECOND
+// import of the same path (`import ( "strconv"; sc "strconv" )`, redundant and
+// rejected by strict import linters). When the path is not imported, the default
+// name is returned and needImport is true. ok is false when the name is unusable
+// at pos: a local/other-package object owns it, or a blank/dot import gives no
+// usable qualified name.
+func ps2107PkgUsable(pass *analysis.Pass, f *ast.File, pos token.Pos, name, path string) (useName string, needImport, ok bool) {
+	quoted := strconv.Quote(path)
+	for _, imp := range f.Imports {
+		if imp.Path.Value != quoted {
+			continue
+		}
+		local := name
+		if imp.Name != nil {
+			local = imp.Name.Name
+		}
+		if local == "_" || local == "." {
+			return name, false, false // blank/dot import: no usable qualifier
+		}
+		// Reuse the existing import (honoring its alias); confirm the name still
+		// resolves to this package at pos (not shadowed by a local).
+		return local, false, ps2107NameIsPkg(pass, pos, local, path)
+	}
+	// Not imported: usable under its default name iff nothing owns it at pos.
 	scope := pass.Pkg.Scope().Innermost(pos)
 	if scope == nil {
-		return false, false
+		return name, false, false
 	}
 	if _, obj := scope.LookupParent(name, pos); obj != nil {
 		pn, isPkg := obj.(*types.PkgName)
-		return false, isPkg && pn.Imported().Path() == path
+		return name, false, isPkg && pn.Imported().Path() == path
 	}
-	return true, true
+	return name, true, true
+}
+
+// ps2107NameIsPkg reports whether name resolves to the package at path at pos
+// (i.e. it is not shadowed there by a local or other declaration).
+func ps2107NameIsPkg(pass *analysis.Pass, pos token.Pos, name, path string) bool {
+	scope := pass.Pkg.Scope().Innermost(pos)
+	if scope == nil {
+		return false
+	}
+	_, obj := scope.LookupParent(name, pos)
+	pn, isPkg := obj.(*types.PkgName)
+	return isPkg && pn.Imported() != nil && pn.Imported().Path() == path
 }
 
 // ps2107ImportsC reports whether f is a cgo file: its import block must
