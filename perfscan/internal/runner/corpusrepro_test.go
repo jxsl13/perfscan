@@ -795,3 +795,45 @@ func sortRefs(keys []*Collection) []*Collection {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixStaysAlignedWithMultibyteUTF8 pins that a SuggestedFix stays correctly
+// byte-aligned when multi-byte UTF-8 text precedes it — in a comment, in an
+// earlier string literal, and on the same line. Go token positions and the
+// runner's edit application are BYTE offsets, so a check that ever computed a
+// position by rune-counting (or a runner that mixed byte/rune offsets) would
+// misalign the replacement and corrupt or shift the surrounding multi-byte text.
+// Here a PS2107 fmt.Sprintf("%d", n) -> strconv.Itoa(n) sits after Japanese, an
+// emoji, and accented Latin; after -fix the rewrite must land exactly and every
+// multi-byte string/comment must survive byte-for-byte, and the file must parse.
+func TestFixStaysAlignedWithMultibyteUTF8(t *testing.T) {
+	const src = `package p
+
+import "fmt"
+
+// 日本語コメント — a multibyte comment above the fixable code
+func f(n int) (string, string) {
+	greet := "こんにちは世界 🌍 café ☕ üñïçödé"
+	return greet, fmt.Sprintf("%d", n)
+}
+`
+	got := string(runFixMode(t, src))
+
+	if !strings.Contains(got, "strconv.Itoa(n)") {
+		t.Errorf("the PS2107 rewrite must land after multibyte text:\n%s", got)
+	}
+	if strings.Contains(got, `fmt.Sprintf("%d", n)`) {
+		t.Errorf("the fmt.Sprintf should have been rewritten:\n%s", got)
+	}
+	// Every multi-byte literal/comment must survive byte-for-byte (no shift/mojibake).
+	for _, want := range []string{
+		"日本語コメント",
+		`"こんにちは世界 🌍 café ☕ üñïçödé"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("multibyte text %q must survive the fix intact:\n%s", want, got)
+		}
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
