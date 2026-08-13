@@ -79,3 +79,20 @@ func TestDiagnoseNoMatchNoDatabase(t *testing.T) {
 		t.Errorf("diagnoseNoMatch with no database = %q, want \"\"", got)
 	}
 }
+
+// TestDiagnoseNoMatchEmptyDatabase pins the len(tus)==0 guard, distinct from the
+// no-file case above: a compile_commands.json that PARSES but lists zero TUs (an
+// "[]" — cmake configured but nothing compiled yet, or an empty target). Here
+// diagnoseNoMatch must still return "" rather than fall through to the stale/
+// wrong-subtree branches, which would otherwise emit the nonsensical "lists 0
+// translation unit(s) but none exist on disk — the build directory looks stale".
+// An empty DB isn't stale; it's empty, and the generic no-match guidance fits.
+func TestDiagnoseNoMatchEmptyDatabase(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte("[]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := diagnoseNoMatch([]string{"a.cpp"}, dir); got != "" {
+		t.Errorf("diagnoseNoMatch with an empty database = %q, want \"\" (no stale/wrong-subtree claim)", got)
+	}
+}
