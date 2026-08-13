@@ -112,3 +112,13 @@ func assignedKey(m map[string]int) string {
 	}
 	return k
 }
+
+// An interior comment would be DELETED by the clear(m) rewrite, which replaces
+// the whole range-delete loop, so PS3102 reports it WITHOUT a fix (the
+// ps3102CommentsOverlap guard). Sibling of PS2116's interiorComment negative.
+func interiorComment(m map[string]int) {
+	for k := range m { // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call`
+		// drop every entry so the map's backing store can be reused
+		delete(m, k)
+	}
+}
