@@ -377,3 +377,48 @@ func TestLineColBounds(t *testing.T) {
 		t.Errorf("lineCol(off=4) = %d,%d, want 2,2", l, c)
 	}
 }
+
+// TestFromExportSortsAcrossFiles pins the primary sort key: findings from
+// DIFFERENT files are ordered by file path first (then by offset within a
+// file). The sampleExport fixture is single-file, so this exercises the
+// file-differs branch of the sort comparator. Two files given out of order,
+// each with two out-of-order offsets, must come back fully sorted.
+func TestFromExportSortsAcrossFiles(t *testing.T) {
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+	ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+
+	mk := func(file string, off int) fixes.Diagnostic {
+		return fixes.Diagnostic{
+			DiagnosticName: "performance-for-range-copy", // PX1001, L1
+			DiagnosticMessage: fixes.DiagnosticMessage{
+				Message: "x", FilePath: file, FileOffset: off,
+			},
+		}
+	}
+	ef := &fixes.ExportFile{
+		MainSourceFile: "/src/b.cpp",
+		// Deliberately scrambled: file b before a, and offsets descending.
+		Diagnostics: []fixes.Diagnostic{
+			mk("/src/b.cpp", 50), mk("/src/a.cpp", 40),
+			mk("/src/b.cpp", 10), mk("/src/a.cpp", 20),
+		},
+	}
+	got := FromExport(ef, catalog.LevelAggressive)
+	if len(got) != 4 {
+		t.Fatalf("got %d findings, want 4", len(got))
+	}
+	type fo struct {
+		file string
+		off  int
+	}
+	want := []fo{
+		{"/src/a.cpp", 20}, {"/src/a.cpp", 40}, // a before b, ascending offset
+		{"/src/b.cpp", 10}, {"/src/b.cpp", 50},
+	}
+	for i, w := range want {
+		if got[i].File != w.file || got[i].Offset != w.off {
+			t.Errorf("finding[%d] = (%s, %d), want (%s, %d)", i, got[i].File, got[i].Offset, w.file, w.off)
+		}
+	}
+}
