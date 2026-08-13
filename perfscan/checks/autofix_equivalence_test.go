@@ -815,3 +815,145 @@ func TestEquiv_Sincos(t *testing.T) {
 		check(float64(i) * 1234.5678)
 	}
 }
+
+// psClamp3077 is a verbatim copy of the helper PS3077's fix emits
+// (ps3077HelperText in ps3077.go); the tests below pin the emitted code's
+// semantics, so any edit to the helper must be mirrored here.
+func psClamp3077(v, lo, hi float64) float64 {
+	r := v
+	if r <= lo {
+		r = lo
+	}
+	if r >= hi {
+		r = hi
+	}
+	return r
+}
+
+// equivSpecialFloats is the float64 special-value set the PS3077/PS3082
+// bit-identity pins iterate: both zeros, both infinities, NaN, subnormals,
+// the extremes, and a couple of ordinary values.
+var equivSpecialFloats = []float64{
+	0, math.Copysign(0, -1), 1, -1, 0.5, -0.5, 2.5, -2.5, 100.5, -100.5, 255, 256,
+	math.Inf(1), math.Inf(-1), math.NaN(),
+	math.SmallestNonzeroFloat64, -math.SmallestNonzeroFloat64, 1e-310, -1e-310,
+	math.MaxFloat64, -math.MaxFloat64,
+}
+
+// TestEquiv_PS3077ClampConstBounds pins the bit-identity that lets PS3077
+// rewrite math.Min(math.Max(v, lo), hi) — and the math.Max(math.Min(v, hi),
+// lo) order — to the psClamp branch form when BOTH bounds are compile-time
+// constants. A Go constant can never be negative zero (untyped -0.0 is
+// exactly 0, converting to +0.0) or NaN (no constant expression produces
+// one), and for every other bound pair psClamp is bit-for-bit identical to
+// the math pair for EVERY input v: both zeros, both infinities, NaN,
+// subnormals, the extremes, each exact boundary and its neighbors, and a
+// dense sweep. Any single bit of divergence fails CI.
+func TestEquiv_PS3077ClampConstBounds(t *testing.T) {
+	// Safe constant bound pairs (what the gated fix can ever see).
+	boundPairs := [][2]float64{{0, 1}, {-1, 1}, {0, 255}, {-100.5, 100.5}, {0.25, 0.75}}
+	for _, bp := range boundPairs {
+		lo, hi := bp[0], bp[1]
+		check := func(v float64) {
+			want := math.Min(math.Max(v, lo), hi)
+			got := psClamp3077(v, lo, hi)
+			if math.Float64bits(got) != math.Float64bits(want) {
+				t.Errorf("psClamp(%v, %v, %v)=%#x != math.Min(math.Max(...))=%#x",
+					v, lo, hi, math.Float64bits(got), math.Float64bits(want))
+			}
+			// The reverse spelling PS3077 also rewrites must agree too.
+			if wantRev := math.Max(math.Min(v, hi), lo); math.Float64bits(got) != math.Float64bits(wantRev) {
+				t.Errorf("psClamp(%v, %v, %v)=%#x != math.Max(math.Min(...))=%#x",
+					v, lo, hi, math.Float64bits(got), math.Float64bits(wantRev))
+			}
+		}
+		for _, v := range equivSpecialFloats {
+			check(v)
+		}
+		// Each exact boundary and its ULP neighbors.
+		for _, b := range []float64{lo, hi} {
+			check(b)
+			check(math.Nextafter(b, math.Inf(-1)))
+			check(math.Nextafter(b, math.Inf(1)))
+		}
+		// Dense deterministic sweep across and beyond every bound pair.
+		for i := -30000; i <= 30000; i++ {
+			check(float64(i) * 0.0173)
+		}
+	}
+}
+
+// TestEquiv_PS3077ClampVariableBoundDivergence pins WHY the constant-bound
+// gate exists: with a -0 or NaN BOUND — values only a runtime variable can
+// carry, never a Go constant — psClamp is NOT the math pair. If any arm
+// below starts agreeing, the gate could be revisited; until then weakening
+// it to admit variable bounds ships a behavior-changing fix.
+func TestEquiv_PS3077ClampVariableBoundDivergence(t *testing.T) {
+	negZero := math.Copysign(0, -1)
+	// lo = -0, v = +0: math.Max(+0, -0) is +0 so the pair returns +0, but
+	// psClamp's '+0 <= -0' comparison is true and returns -0.
+	if math.Float64bits(psClamp3077(0, negZero, 1)) == math.Float64bits(math.Min(math.Max(0, negZero), 1)) {
+		t.Error("expected psClamp(+0, -0, 1) to DIFFER from math.Min(math.Max(+0, -0), 1); the constant-bound gate looks unnecessary — it is not")
+	}
+	// hi = NaN: math.Min(x, NaN) is NaN, but psClamp's 'x >= NaN' is false
+	// and v passes through unclamped.
+	if math.Float64bits(psClamp3077(0.5, 0, math.NaN())) == math.Float64bits(math.Min(math.Max(0.5, 0), math.NaN())) {
+		t.Error("expected psClamp(0.5, 0, NaN) to DIFFER from math.Min(math.Max(0.5, 0), NaN)")
+	}
+	// lo = NaN: same failed-comparison fallthrough on the lower bound.
+	if math.Float64bits(psClamp3077(0.5, math.NaN(), 1)) == math.Float64bits(math.Min(math.Max(0.5, math.NaN()), 1)) {
+		t.Error("expected psClamp(0.5, NaN, 1) to DIFFER from math.Min(math.Max(0.5, NaN), 1)")
+	}
+}
+
+// psFmax3082 and psFmin3082 are verbatim copies of the wrappers PS3082's fix
+// emits (ps3082FmaxText/ps3082FminText in ps3082.go); the pin below tracks
+// the real emitted code, so any edit to the helpers must be mirrored here.
+func psFmax3082(a, b float64) float64 {
+	if r := max(a, b); r == r {
+		return r
+	}
+	return math.Max(a, b)
+}
+
+func psFmin3082(a, b float64) float64 {
+	if r := min(a, b); r == r {
+		return r
+	}
+	return math.Min(a, b)
+}
+
+// TestEquiv_PS3082MinMaxWrapper pins PS3082's bit-identity claim: the
+// builtin-with-NaN-fallback wrappers return exactly math.Max/math.Min's bits
+// for EVERY pair. The builtins and the math functions disagree only on
+// NaN-vs-Inf pairs (math.Max documents +Inf as beating NaN, math.Min -Inf),
+// which is exactly when the builtin returns NaN and the wrapper delegates —
+// so the full ±0/±Inf/NaN cross product plus a numeric sweep must agree
+// bit-for-bit, including the -0/+0 ordering both sides define.
+func TestEquiv_PS3082MinMaxWrapper(t *testing.T) {
+	check := func(a, b float64) {
+		if got, want := psFmax3082(a, b), math.Max(a, b); math.Float64bits(got) != math.Float64bits(want) {
+			t.Errorf("psFmax(%v, %v)=%#x != math.Max=%#x", a, b, math.Float64bits(got), math.Float64bits(want))
+		}
+		if got, want := psFmin3082(a, b), math.Min(a, b); math.Float64bits(got) != math.Float64bits(want) {
+			t.Errorf("psFmin(%v, %v)=%#x != math.Min=%#x", a, b, math.Float64bits(got), math.Float64bits(want))
+		}
+	}
+	for _, a := range equivSpecialFloats {
+		for _, b := range equivSpecialFloats {
+			check(a, b)
+		}
+	}
+	// Deterministic numeric sweep: dense pairs, including equal values and
+	// opposite signs, plus each special value against the sweep.
+	for i := -2000; i <= 2000; i++ {
+		x := float64(i) * 0.317
+		check(x, x)
+		check(x, -x)
+		check(x, x+1)
+		for _, s := range equivSpecialFloats {
+			check(x, s)
+			check(s, x)
+		}
+	}
+}
