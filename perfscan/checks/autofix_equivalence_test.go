@@ -2064,3 +2064,31 @@ func TestEquiv_PS2107SprintfCharToString(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS2131MatchStringEqualsPrecompiled pins the equivalence PS2131's
+// advice relies on: for a VALID pattern, the (bool) result of the recompiling
+// helper regexp.MatchString(pattern, s) equals the reused-regexp form
+// regexp.MustCompile(pattern).MatchString(s) — the recommended hoist. (The
+// helper additionally returns a nil error for a valid pattern, which the hoisted
+// form drops; hence PS2131 is advisory, not an automatic in-place rewrite.)
+// Verified for MatchString and Match over several patterns and inputs.
+func TestEquiv_PS2131MatchStringEqualsPrecompiled(t *testing.T) {
+	pats := []string{"^[a-z]+$", "[0-9]+", "a.c", "^$", "x*", "\\bword\\b"}
+	inputs := []string{"", "abc", "a1c", "123", "word here", "AxC"}
+	for _, p := range pats {
+		re := regexp.MustCompile(p)
+		for _, s := range inputs {
+			got, err := regexp.MatchString(p, s)
+			if err != nil {
+				t.Fatalf("MatchString(%q,%q) unexpected err: %v", p, s, err)
+			}
+			if got != re.MatchString(s) {
+				t.Errorf("MatchString(%q,%q)=%v != MustCompile(%q).MatchString=%v", p, s, got, p, re.MatchString(s))
+			}
+			gotB, _ := regexp.Match(p, []byte(s))
+			if gotB != re.Match([]byte(s)) {
+				t.Errorf("Match(%q,[]byte(%q)) disagrees with the precompiled form", p, s)
+			}
+		}
+	}
+}
