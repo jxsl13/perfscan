@@ -262,3 +262,32 @@ func f(a []int) { sort.Ints(a) }
 		t.Errorf("file with no missing imports must be returned unchanged:\n%s", got)
 	}
 }
+
+// TestFixAddsMultiSegmentImportWhenCarrierFiltered pins the trickiest allowlist
+// entry: utf8 -> "unicode/utf8" (a MULTI-SEGMENT path, unlike slices/sort/etc.).
+// With the first PS2125 finding suppressed by //perfscan:ignore, the surviving
+// len([]rune(s)) rewrite to utf8.RuneCountInString must pull in the correct
+// `import "unicode/utf8"` (not a bare "utf8") so the file still compiles.
+func TestFixAddsMultiSegmentImportWhenCarrierFiltered(t *testing.T) {
+	const src = `package p
+
+func f(s string) int {
+	return len([]rune(s)) //perfscan:ignore PS2125
+}
+
+func g(s string) int {
+	return len([]rune(s))
+}
+`
+	got := string(runFixMode(t, src))
+	if !strings.Contains(got, "utf8.RuneCountInString(s)") {
+		t.Errorf("surviving len([]rune(s)) should be rewritten to utf8.RuneCountInString:\n%s", got)
+	}
+	if !strings.Contains(got, `"unicode/utf8"`) {
+		t.Errorf("expected import \"unicode/utf8\" added (multi-segment path):\n%s", got)
+	}
+	if !strings.Contains(got, "len([]rune(s)) //perfscan:ignore") {
+		t.Errorf("the ignored finding must remain unfixed:\n%s", got)
+	}
+	assertFixedCompiles(t, []byte(got))
+}
