@@ -43,3 +43,10 @@ func shadowed(s string) string {
 	strings := fakeStrings{}
 	return strings.NewReplacer("a", "b").Replace(s)
 }
+
+// Escape-sequence constant pairs (CRLF normalizer) chained to Replace: flagged.
+// This is the exact shape found in the wild on gitea's ssh_key_parse.go, where
+// it rebuilds the replacer once per parsed SSH key.
+func normalizeNewlines(content string) string {
+	return strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(content) // want `strings\.NewReplacer with constant pairs rebuilds its lookup structure on every call`
+}
