@@ -104,3 +104,23 @@ func TestLoadTidyAndExtraArgs(t *testing.T) {
 		t.Errorf("ExtraArgs = %v, want [-isysroot /sdk/path]", f.ExtraArgs)
 	}
 }
+
+func TestLoadBaselineAndFixErrors(t *testing.T) {
+	p := write(t, t.TempDir(), "c.yml", "baseline: .perfscanxx-baseline.yaml\nfix-errors: true\n")
+	f, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Baseline == nil || *f.Baseline != ".perfscanxx-baseline.yaml" {
+		t.Errorf("Baseline = %v", f.Baseline)
+	}
+	if f.FixErrors == nil || *f.FixErrors != true {
+		t.Errorf("FixErrors = %v, want true", f.FixErrors)
+	}
+	// omitted -> nil (leave flag default)
+	p2 := write(t, t.TempDir(), "c.yml", "level: 1\n")
+	f2, _ := Load(p2)
+	if f2.Baseline != nil || f2.FixErrors != nil {
+		t.Errorf("omitted keys should be nil: %+v", f2)
+	}
+}
