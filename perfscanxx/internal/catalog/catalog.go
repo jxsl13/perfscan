@@ -431,12 +431,14 @@ var entries = []Entry{
 		// clang-tidy ships no equivalent check. hasAnyName also catches the float
 		// and long-double variants (powf/powl) numeric C/C++ code uses.
 		// ignoringImpCasts sees through the int-literal -> double conversion so
-		// pow(x, 2) matches as well as pow(x, 2.0). NO auto-fix, deliberately: the
-		// rewrite x*x evaluates the base TWICE (unsafe if it has side effects,
-		// e.g. pow(f(), 2)), and the right form depends on the exponent (multiply
-		// vs sqrt) — a human call.
+		// pow(x, 2) matches as well as pow(x, 2.0). The unless(equals 0/1) excludes
+		// the NON-actionable integer exponents where "multiply directly" is wrong
+		// advice: pow(x, 0) is 1 and pow(x, 1) is x (corpus finding on abseil).
+		// NO auto-fix, deliberately: the rewrite x*x evaluates the base TWICE
+		// (unsafe if it has side effects, e.g. pow(f(), 2)), and the right form
+		// depends on the exponent (multiply vs sqrt) — a human call.
 		Query: `match callExpr(isExpansionInMainFile(), callee(functionDecl(hasAnyName("pow", "powf", "powl"))), ` +
-			`hasArgument(1, ignoringImpCasts(anyOf(integerLiteral(), floatLiteral())))).bind("pow")`,
+			`hasArgument(1, ignoringImpCasts(anyOf(integerLiteral(unless(anyOf(equals(0), equals(1)))), floatLiteral())))).bind("pow")`,
 		Message: "std::pow with a constant exponent pays a full libm call; for a small integer power multiply directly (x*x, x*x*x) and for pow(x, 0.5) use std::sqrt(x) — mind that x*x evaluates the base twice, so hoist it first if it has side effects (query-based, no auto-fix)",
 	},
 }
