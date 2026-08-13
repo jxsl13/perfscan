@@ -48,6 +48,51 @@ func TestFixIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestPX3026FixIsIdempotent pins convergence for the trivially-destructible fix,
+// whose rewrite is more involved than PX3013's: it defaults the destructor on the
+// FIRST (in-class) declaration AND deletes the out-of-line `= default` definition
+// — a two-location edit that could plausibly re-fire or oscillate. After one
+// pass the type is trivially destructible with an in-class defaulted destructor,
+// which the check no longer targets (it only fires on OUT-OF-LINE defaulted
+// destructors), so a second pass must be a no-op. Headerless TU, so no sysroot is
+// needed. Skipped when clang-tidy is unavailable.
+func TestPX3026FixIsIdempotent(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found; skipping PX3026 -fix idempotency test")
+	}
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "t.cpp")
+	if err := os.WriteFile(cpp, []byte("struct S { int a; ~S(); };\nS::~S() = default;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"clang++ -std=c++17 -c t.cpp"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fix := func() { runCLI("-tidy", bin, "-fix", "-checks", "PX3026", "-p", dir, cpp) }
+
+	fix()
+	after1, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The out-of-line definition must be gone and the in-class dtor defaulted.
+	if strings.Contains(string(after1), "S::~S()") || !strings.Contains(string(after1), "~S() = default") {
+		t.Fatalf("first -fix did not apply PX3026 as expected; got:\n%s", after1)
+	}
+
+	fix()
+	after2, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after1) != string(after2) {
+		t.Errorf("second -fix changed the file — PX3026 not idempotent:\n--- after pass 1 ---\n%s\n--- after pass 2 ---\n%s", after1, after2)
+	}
+}
+
 // TestExcludeKeepsFixOffIncludedHeader is the regression for -exclude leaking a
 // fix into an EXCLUDED header that a non-excluded TU includes. Before the
 // --exclude-header-filter wiring, `-fix -exclude deps/` still rewrote deps/dep.h
