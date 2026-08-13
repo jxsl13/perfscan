@@ -76,7 +76,7 @@ func runPS2103(pass *analysis.Pass) (any, error) {
 			if !ok || len(call.Args) < 2 {
 				return true
 			}
-			if _, ok := astutil.PkgFuncCall(call.Fun, "fmt", map[string]bool{"Sprintf": true}); !ok {
+			if _, ok := astutil.PkgFuncCall(pass.TypesInfo, call.Fun, "fmt", map[string]bool{"Sprintf": true}); !ok {
 				return true
 			}
 			lit, ok := call.Args[0].(*ast.BasicLit)

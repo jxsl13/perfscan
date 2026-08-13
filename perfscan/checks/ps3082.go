@@ -128,19 +128,19 @@ func runPS3082(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			name, call, ok := isMathMinMax(expr)
+			name, call, ok := isMathMinMax(pass.TypesInfo, expr)
 			if !ok {
 				return true
 			}
 			// Clamps belong to PS3077: skip a call that wraps the
 			// opposite call, and skip a call directly wrapped by one.
 			for _, arg := range call.Args {
-				if inner, _, ok := isMathMinMax(arg); ok && inner != name {
+				if inner, _, ok := isMathMinMax(pass.TypesInfo, arg); ok && inner != name {
 					return true
 				}
 			}
 			if len(stack) > 0 {
-				if outerName, _, ok := isMathMinMax(exprOrNil(stack[len(stack)-1])); ok && outerName != name {
+				if outerName, _, ok := isMathMinMax(pass.TypesInfo, exprOrNil(stack[len(stack)-1])); ok && outerName != name {
 					return true
 				}
 			}
@@ -168,7 +168,7 @@ func runPS3082(pass *analysis.Pass) (any, error) {
 		// selector); the runner never prunes imports, so a file that does
 		// not receive a helper must keep at least one reference of its own
 		// or the whole file stays advisory.
-		if fixable > 0 && !hosts && ps3077MathRefs(f)-fixable <= 0 {
+		if fixable > 0 && !hosts && ps3077MathRefs(pass.TypesInfo, f)-fixable <= 0 {
 			for i := range findings {
 				findings[i].fix = false
 			}

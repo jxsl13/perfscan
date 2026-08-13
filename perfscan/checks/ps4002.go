@@ -72,7 +72,7 @@ func runPS4002(pass *analysis.Pass) (any, error) {
 				if !ok {
 					return true
 				}
-				name, ok := astutil.PkgFuncCall(call.Fun, "math", scalarTranscendentals)
+				name, ok := astutil.PkgFuncCall(pass.TypesInfo, call.Fun, "math", scalarTranscendentals)
 				if !ok {
 					return true
 				}

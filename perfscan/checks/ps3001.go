@@ -57,7 +57,7 @@ func runPS3001(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			name, ok := astutil.PkgFuncCall(call.Fun, "fmt", fmtScanFuncs)
+			name, ok := astutil.PkgFuncCall(pass.TypesInfo, call.Fun, "fmt", fmtScanFuncs)
 			if !ok {
 				return true
 			}

@@ -65,7 +65,7 @@ func runPS2003(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			name, ok := astutil.PkgFuncCall(call.Fun, "strings", stringsAllocFuncs)
+			name, ok := astutil.PkgFuncCall(pass.TypesInfo, call.Fun, "strings", stringsAllocFuncs)
 			if !ok {
 				return true
 			}

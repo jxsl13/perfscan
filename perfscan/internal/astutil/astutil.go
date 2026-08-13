@@ -3,6 +3,7 @@ package astutil
 
 import (
 	"go/ast"
+	"go/types"
 )
 
 // WithStack walks root and calls fn for every non-nil node with the stack of
@@ -96,8 +97,13 @@ func CalleeName(fun ast.Expr) string {
 }
 
 // PkgFuncCall reports whether fun is a selector pkg.Name with Name in set
-// (nil set matches any), returning the name.
-func PkgFuncCall(fun ast.Expr, pkg string, set map[string]bool) (string, bool) {
+// (nil set matches any), returning the name. The qualifier must resolve —
+// via info — to the imported package whose path is pkg (a *types.PkgName).
+// A var/func/type/const named like the package does not match; in
+// particular a PACKAGE-LEVEL shadow declared in another file leaves
+// Ident.Obj nil, so only type resolution discriminates it from the real
+// import.
+func PkgFuncCall(info *types.Info, fun ast.Expr, pkg string, set map[string]bool) (string, bool) {
 	sel, ok := fun.(*ast.SelectorExpr)
 	if !ok {
 		return "", false
@@ -106,8 +112,14 @@ func PkgFuncCall(fun ast.Expr, pkg string, set map[string]bool) (string, bool) {
 	if !ok || id.Name != pkg {
 		return "", false
 	}
-	// A local object named like the package shadows it.
-	if id.Obj != nil {
+	pn, ok := info.Uses[id].(*types.PkgName)
+	if !ok {
+		return "", false
+	}
+	// Defensive: the qualifier must be THE stdlib package, not e.g. a
+	// third-party package imported under the same name. All callers pass a
+	// single-segment stdlib name, for which name == import path.
+	if pn.Imported().Path() != pkg {
 		return "", false
 	}
 	if set == nil || set[sel.Sel.Name] {

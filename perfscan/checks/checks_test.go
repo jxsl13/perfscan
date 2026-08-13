@@ -16,7 +16,7 @@ func TestPS2002(t *testing.T) {
 }
 
 func TestPS2005(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2005.Analyzer, "ps2005")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2005.Analyzer, "ps2005", "pkgshadow")
 }
 
 func TestPS2101(t *testing.T) {
@@ -24,7 +24,7 @@ func TestPS2101(t *testing.T) {
 }
 
 func TestPS2103(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2103.Analyzer, "ps2103")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2103.Analyzer, "ps2103", "pkgshadow")
 	// cgo lives in its own package: import "C" turns the WHOLE package
 	// into a cgo package. An orphaning rewrite stays advisory there (no
 	// fix, golden identical) because a cgo file's import block is never
@@ -34,12 +34,12 @@ func TestPS2103(t *testing.T) {
 
 func TestPS4001(t *testing.T) {
 	defer config.SetForTesting(config.Config{BulkCopyHelpers: []string{"rawCopyLE"}})()
-	analysistest.Run(t, analysistest.TestData(), PS4001.Analyzer, "ps4001")
+	analysistest.Run(t, analysistest.TestData(), PS4001.Analyzer, "ps4001", "pkgshadow")
 }
 
 func TestPS4002(t *testing.T) {
 	defer config.SetForTesting(config.Config{VectorizedSiblingFuncs: []string{"vsiluF32"}})()
-	analysistest.Run(t, analysistest.TestData(), PS4002.Analyzer, "ps4002")
+	analysistest.Run(t, analysistest.TestData(), PS4002.Analyzer, "ps4002", "pkgshadow")
 }
 
 func TestPS6004(t *testing.T) {
@@ -58,7 +58,7 @@ func TestPS5001(t *testing.T) {
 }
 
 func TestPS5008(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS5008.Analyzer, "ps5008")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS5008.Analyzer, "ps5008", "pkgshadow")
 }
 
 func TestPS6010(t *testing.T) {
@@ -97,7 +97,7 @@ func TestPS2007(t *testing.T) {
 }
 
 func TestPS3005(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3005.Analyzer, "ps3005")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3005.Analyzer, "ps3005", "pkgshadow")
 }
 
 func TestPS2006(t *testing.T) {
@@ -105,7 +105,7 @@ func TestPS2006(t *testing.T) {
 }
 
 func TestPS2003(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2003.Analyzer, "ps2003")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2003.Analyzer, "ps2003", "pkgshadow")
 }
 
 func TestPS2008(t *testing.T) {
@@ -154,11 +154,11 @@ func TestPS3083(t *testing.T) {
 }
 
 func TestPS3077(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3077.Analyzer, "ps3077")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3077.Analyzer, "ps3077", "pkgshadow")
 }
 
 func TestPS3082(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3082.Analyzer, "ps3082")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3082.Analyzer, "ps3082", "pkgshadow")
 }
 
 // TestPS3082Shadow pins the guard that a package-level max/min declaration
@@ -170,11 +170,11 @@ func TestPS3082Shadow(t *testing.T) {
 }
 
 func TestPS3001(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS3001.Analyzer, "ps3001")
+	analysistest.Run(t, analysistest.TestData(), PS3001.Analyzer, "ps3001", "pkgshadow")
 }
 
 func TestPS3002(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3002.Analyzer, "ps3002")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3002.Analyzer, "ps3002", "pkgshadow")
 	// cgo lives in its own package: import "C" turns the WHOLE package
 	// into a cgo package, which must stay away from the plain fixtures.
 	// The finding is advisory there (no fix, golden identical) because a
@@ -323,7 +323,7 @@ func TestPS2106(t *testing.T) {
 }
 
 func TestPS2107(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2107.Analyzer, "ps2107")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2107.Analyzer, "ps2107", "pkgshadow")
 	// cgo lives in its own package: import "C" turns the WHOLE package
 	// into a cgo package. An orphaning rewrite stays advisory there (no
 	// fix, golden identical) because a cgo file's import block is never

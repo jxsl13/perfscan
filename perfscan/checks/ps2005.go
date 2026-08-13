@@ -63,7 +63,7 @@ func runPS2005(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			name, ok := astutil.PkgFuncCall(call.Fun, "regexp", regexpCompileFuncs)
+			name, ok := astutil.PkgFuncCall(pass.TypesInfo, call.Fun, "regexp", regexpCompileFuncs)
 			if !ok {
 				return true
 			}

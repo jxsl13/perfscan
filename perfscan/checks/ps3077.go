@@ -63,12 +63,12 @@ already declares a psClamp that is not this helper — stays advisory.`,
 var mathMinMax = map[string]bool{"Min": true, "Max": true}
 
 // isMathMinMax reports whether e is a math.Min or math.Max call.
-func isMathMinMax(e ast.Expr) (string, *ast.CallExpr, bool) {
+func isMathMinMax(info *types.Info, e ast.Expr) (string, *ast.CallExpr, bool) {
 	call, ok := e.(*ast.CallExpr)
 	if !ok {
 		return "", nil, false
 	}
-	name, ok := astutil.PkgFuncCall(call.Fun, "math", mathMinMax)
+	name, ok := astutil.PkgFuncCall(info, call.Fun, "math", mathMinMax)
 	return name, call, ok
 }
 
@@ -109,13 +109,13 @@ func runPS3077(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			outer, outerCall, ok := isMathMinMax(expr)
+			outer, outerCall, ok := isMathMinMax(pass.TypesInfo, expr)
 			if !ok {
 				return true
 			}
 			inner := ""
 			for _, arg := range outerCall.Args {
-				if name, _, ok := isMathMinMax(arg); ok && name != outer {
+				if name, _, ok := isMathMinMax(pass.TypesInfo, arg); ok && name != outer {
 					inner = name
 					break
 				}
@@ -142,7 +142,7 @@ func runPS3077(pass *analysis.Pass) (any, error) {
 				fixable++
 			}
 		}
-		if fixable > 0 && ps3077MathRefs(f)-2*fixable <= 0 {
+		if fixable > 0 && ps3077MathRefs(pass.TypesInfo, f)-2*fixable <= 0 {
 			for i := range findings {
 				findings[i].repl = ""
 			}
@@ -183,7 +183,7 @@ func ps3077ClampReplacement(pass *analysis.Pass, outer string, outerCall *ast.Ca
 	if len(outerCall.Args) != 2 {
 		return ""
 	}
-	innerName, innerCall, ok := isMathMinMax(outerCall.Args[0])
+	innerName, innerCall, ok := isMathMinMax(pass.TypesInfo, outerCall.Args[0])
 	if !ok || innerName == outer || len(innerCall.Args) != 2 {
 		return ""
 	}
@@ -249,15 +249,20 @@ func ps3077Float64(pass *analysis.Pass, e ast.Expr) bool {
 }
 
 // ps3077MathRefs counts the file's math.* selector references, using the
-// same shadowing heuristic as astutil.PkgFuncCall.
-func ps3077MathRefs(f *ast.File) int {
+// same qualifier resolution as astutil.PkgFuncCall: the ident must resolve
+// to the imported math package, not an object that merely shares the name.
+func ps3077MathRefs(info *types.Info, f *ast.File) int {
 	n := 0
 	ast.Inspect(f, func(node ast.Node) bool {
 		sel, ok := node.(*ast.SelectorExpr)
 		if !ok {
 			return true
 		}
-		if id, ok := sel.X.(*ast.Ident); ok && id.Name == "math" && id.Obj == nil {
+		id, ok := sel.X.(*ast.Ident)
+		if !ok || id.Name != "math" {
+			return true
+		}
+		if pn, ok := info.Uses[id].(*types.PkgName); ok && pn.Imported().Path() == "math" {
 			n++
 		}
 		return true

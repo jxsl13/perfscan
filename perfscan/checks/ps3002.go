@@ -135,7 +135,7 @@ func runPS3002(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			name, ok := astutil.PkgFuncCall(call.Fun, "sort", sortSliceFuncs)
+			name, ok := astutil.PkgFuncCall(pass.TypesInfo, call.Fun, "sort", sortSliceFuncs)
 			if !ok {
 				return true
 			}
