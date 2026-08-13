@@ -140,6 +140,51 @@ func TestPX3026DoesNotFireOnNonTrivialMember(t *testing.T) {
 	}
 }
 
+// TestPX3027DoesNotFireOnNoexceptDestructor pins the SAFETY BOUNDARY of the
+// noexcept-destructor fix (PX3027), which carries a std::terminate footgun: it
+// inserts `noexcept` only when the destructor is implicitly noexcept(false)
+// because a base/member destructor can throw. A class whose members all have
+// ordinary (implicitly noexcept) destructors already has a noexcept destructor,
+// so there is nothing to add — clang-tidy must stay silent and leave the source
+// byte-for-byte. This is the exact positive shape (a defaulted destructor with a
+// member) EXCEPT the member's destructor is not noexcept(false), isolating that
+// single dimension. Locks the boundary against the LIVE toolchain so an added
+// noexcept is never applied where the destructor could actually throw.
+func TestPX3027DoesNotFireOnNoexceptDestructor(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	const src = "struct S { ~S() {} };\nstruct T { S s; ~T() = default; };\n"
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "s.cpp")
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile, ok := cppCompileCmdForTest("s.cpp")
+	if !ok {
+		t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, _ := runCLI("-tidy", bin, "-fix", "-checks", "PX3027", "-p", dir, cpp)
+	if strings.Contains(stderr, "file not found") || strings.Contains(stderr, "fatal error") {
+		t.Skipf("toolchain could not parse the fixture; skipping. stderr:\n%s", stderr)
+	}
+	gotB, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotB) != src {
+		t.Errorf("PX3027 added noexcept to a destructor whose members are all non-throwing — it must fire ONLY when a subobject destructor can throw:\n%s", string(gotB))
+	}
+	if strings.Contains(out, "PX3027") {
+		t.Errorf("PX3027 reported on an already-noexcept destructor; it must stay silent:\n%s", out)
+	}
+}
+
 // TestFixWithArgumentsFormCompdb pins the FULL pipeline against a compilation
 // database that uses the "arguments" ARRAY form instead of the "command" STRING
 // form. The JSON Compilation Database spec allows either and real generators
