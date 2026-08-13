@@ -253,3 +253,55 @@ func f(buf *bytes.Buffer, b []byte, a []int, s string, n int) {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixKeepsVersionedStdlibImport is the regression for a real -fix build break
+// found during corpus validation on gonum (stat/distmv/studentst.go): a
+// sort.Ints -> slices.Sort rewrite (PS3104) orphaned the adjacent "sort" import,
+// and pruneOrphanedImports THEN wrongly deleted "math/rand/v2" too — because it
+// inferred that import's package name from the last path segment ("v2") instead
+// of its real name ("rand"), saw no `v2.` usage, and pruned a LIVE import,
+// producing `undefined: rand`. The stdlib-only gate (dot-in-path) did not catch
+// it because math/rand/v2 has no dot. A versioned import must be left intact.
+func TestFixKeepsVersionedStdlibImport(t *testing.T) {
+	const src = `package p
+
+import (
+	"math/rand/v2"
+	"sort"
+)
+
+func f(xs []int) int {
+	sort.Ints(xs)
+	return rand.IntN(10)
+}
+`
+	got := string(runFixMode(t, src))
+
+	// sort was genuinely orphaned by the rewrite and must be pruned; slices added.
+	if !strings.Contains(got, "slices.Sort(xs)") {
+		t.Errorf("expected sort.Ints -> slices.Sort:\n%s", got)
+	}
+	if strings.Contains(got, `"sort"`) {
+		t.Errorf(`orphaned "sort" should have been pruned:\n%s`, got)
+	}
+	// The live versioned import must NOT be pruned (rand is still used).
+	if !strings.Contains(got, `"math/rand/v2"`) {
+		t.Errorf(`"math/rand/v2" is live (rand.IntN) and must not be pruned:\n%s`, got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
+
+func TestIsVersionSegment(t *testing.T) {
+	for _, s := range []string{"v2", "v3", "v10", "v0"} {
+		if !isVersionSegment(s) {
+			t.Errorf("isVersionSegment(%q) = false, want true", s)
+		}
+	}
+	for _, s := range []string{"v", "rand", "sort", "v2x", "2", "", "version2"} {
+		if isVersionSegment(s) {
+			t.Errorf("isVersionSegment(%q) = true, want false", s)
+		}
+	}
+}
