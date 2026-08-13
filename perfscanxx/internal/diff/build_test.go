@@ -91,6 +91,80 @@ func TestBuildDiffsAndRestores(t *testing.T) {
 	}
 }
 
+// TestBuildMultiFileDiffsSortedAndRestored pins the multi-file shape that real
+// projects produce (motivated by a corpus run on fmtlib/fmt, where one clang-
+// tidy --fix touched base.h, format.h AND os.h): a single ExportFile whose
+// diagnostics edit THREE separate files. Build must (1) return one FileDiff per
+// changed file, DETERMINISTICALLY ordered by path regardless of diagnostic input
+// order, and (2) snapshot+restore each file INDEPENDENTLY so every one is byte-
+// identical afterward. Every existing Build test edits a single file, so the
+// sort-and-per-file-restore path was unexercised.
+func TestBuildMultiFileDiffsSortedAndRestored(t *testing.T) {
+	// Intentionally NOT in sorted order, to prove Build sorts.
+	const pB = "/abs/b.cpp"
+	const pA = "/abs/a.cpp"
+	const pC = "/abs/c.cpp"
+	orig := map[string]string{
+		pB: "for (auto x : bs) {}\n",
+		pA: "for (auto x : as) {}\n",
+		pC: "for (auto x : cs) {}\n",
+	}
+	fixed := map[string]string{
+		pB: "for (const auto& x : bs) {}\n",
+		pA: "for (const auto& x : as) {}\n",
+		pC: "for (const auto& x : cs) {}\n",
+	}
+	fs := newMemFS(orig)
+	mkDiag := func(p string) fixes.Diagnostic {
+		return fixes.Diagnostic{
+			DiagnosticName: "performance-for-range-copy", // PX1001, L1
+			DiagnosticMessage: fixes.DiagnosticMessage{
+				FilePath:     p,
+				Replacements: []fixes.Replacement{{FilePath: p, Offset: 5, Length: 6, ReplacementText: "const auto& x"}},
+			},
+		}
+	}
+	ef := &fixes.ExportFile{
+		MainSourceFile: pA,
+		Diagnostics:    []fixes.Diagnostic{mkDiag(pB), mkDiag(pC), mkDiag(pA)}, // scrambled
+	}
+	runFix := func() error {
+		for p, f := range fixed {
+			if err := fs.WriteFile(p, []byte(f)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	diffs, snapshots, err := Build(ef, catalog.LevelAggressive, runFix, fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 3 {
+		t.Fatalf("got %d diffs, want 3 (one per file)", len(diffs))
+	}
+	// (1) Deterministic path-sorted order: a.cpp, b.cpp, c.cpp.
+	wantOrder := []string{pA, pB, pC}
+	for i, d := range diffs {
+		if d.AbsPath != wantOrder[i] {
+			t.Errorf("diffs[%d].AbsPath = %q, want %q (sorted)", i, d.AbsPath, wantOrder[i])
+		}
+		if !strings.Contains(d.Patch, "+for (const auto& x :") {
+			t.Errorf("diffs[%d] patch missing the fixed line:\n%s", i, d.Patch)
+		}
+	}
+	// (2) Every file snapshotted with its own original and restored on disk.
+	for p, want := range orig {
+		if got := string(snapshots[p]); got != want {
+			t.Errorf("snapshot[%s] = %q, want %q", p, got, want)
+		}
+		if got := fs.files[p]; got != want {
+			t.Errorf("file %s not restored: on disk %q, want %q", p, got, want)
+		}
+	}
+}
+
 func TestBuildLevelGating(t *testing.T) {
 	const path = "/abs/v.cpp"
 	ef := &fixes.ExportFile{
