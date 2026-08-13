@@ -847,6 +847,7 @@ var fixableStdlibImports = map[string]string{
 	"strings": "strings",
 	"errors":  "errors",
 	"utf8":    "unicode/utf8",
+	"hex":     "encoding/hex", // PS2107 rewrites fmt.Sprintf("%x", b) -> hex.EncodeToString(b)
 }
 
 // addReferencedStdlibImports adds any stdlib import the just-applied fixes
