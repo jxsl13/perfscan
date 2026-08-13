@@ -58,10 +58,14 @@ on purpose** — recorded here (and pinned by `TestAuditedExclusionsStayExcluded
 so a future audit doesn't re-add them without the rationale:
 
 - `performance-move-constructor-init`, `performance-noexcept-destructor`,
-  `performance-trivially-destructible`, `performance-type-promotion-in-math-fn`
-  — genuine perf checks, but they apply **no fix-it** on the macOS/libc++
-  toolchain, so they'd be advisory-only with no auto-fix value beyond what the
-  advisory set already covers.
+  `performance-type-promotion-in-math-fn` — genuine perf checks, but they apply
+  **no fix-it** on the macOS/libc++ toolchain, so they'd be advisory-only with no
+  auto-fix value beyond what the advisory set already covers.
+  - **Correction:** `performance-trivially-destructible` was once listed here as
+    "no fix-it" — a false negative from probing the wrong AST shape. It fires on
+    an **out-of-line defaulted destructor** (`~S();` then `S::~S() = default;`),
+    and for that shape `clang-tidy --fix` **does** apply a working fix-it, so it
+    is now a fixable catalog entry (**PX3026**), not an exclusion.
 - `modernize-min-max-use-initializer-list` — its fix-it applies
   (`std::max(a, std::max(b, c))` → `std::max({a, b, c})`) and is bit-identical
   for integers, but it is a **readability** modernization with no perf angle
