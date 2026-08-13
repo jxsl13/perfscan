@@ -91,5 +91,6 @@ checks' fixes.
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
 | [PS5104](PS5104.md) | arith | L1 | yes | strings.Count/bytes.Count compared against 0 or 1 for membership, where Contains short-circuits |
 | [PS5105](PS5105.md) | arith | L1 | yes | strings.Index/bytes.Index compared == 0 for a prefix test, where HasPrefix stops at the first mismatch |
+| [PS5106](PS5106.md) | arith | L1 | yes | strings.Compare(a, b) compared to 0 where the direct operator is clearer and faster |
 | [PS6004](PS6004.md) | verify | L2 |  | a fast-path/fallback dual path whose bit-identity claim needs coverage on both arms |
 | [PS6010](PS6010.md) | verify | L3 | yes | an accumulator loop re-reading an operand invariant in the output index |
