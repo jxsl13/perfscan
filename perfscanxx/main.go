@@ -387,6 +387,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		default:
 			fmt.Fprintf(stderr, "perfscanxx: -fix: applied fix-its for %d finding(s) across %d file(s)\n", n, files)
 		}
+		// L1 checks are idiomatic/behavior-preserving; L2 (structured) and L3
+		// (aggressive) fixes CAN change behavior and are meant to be reviewed —
+		// a plain -fix defaults to -level 3. Remind the user once when any
+		// non-idiomatic fix could have been applied (observed: an L2 fix flipped
+		// a thrown exception's type on yaml-cpp; L1 left its tests green).
+		if n > 0 && *maxLevel >= 2 {
+			fmt.Fprintf(stderr, "perfscanxx: note: -level %d applied structured/aggressive fixes that can change behavior — review the diff and run your tests (only L1 fixes are behavior-preserving by design).\n", *maxLevel)
+		}
 	}
 
 	// -diff (dry run): render the unified diff that -fix would produce, IDENTICAL
