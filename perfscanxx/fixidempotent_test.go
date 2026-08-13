@@ -142,6 +142,57 @@ func TestExcludeKeepsFixOffIncludedHeader(t *testing.T) {
 	}
 }
 
+// TestFixAppliesToIncludedHeader pins the POSITIVE header-fix guarantee: a
+// fixable finding anchored in a HEADER that a scanned TU #includes is actually
+// rewritten by -fix — not just findings in the .cpp main file. This is the
+// counterpart to TestExcludeKeepsFixOffIncludedHeader (which pins the EXCLUSION
+// direction and only checks this as a soft, skip-on-failure precondition). It was
+// motivated by a corpus investigation on gabime/spdlog: some header findings in a
+// vendored library (fmt/bundled/) report "fix available" yet clang-tidy declines
+// the fix-it for those specific template/macro constructs — which is correct and
+// graceful, but made clear that "header fixes apply" was never hard-asserted. A
+// minimal, ordinary header (PX3013 ~Dep(){} -> = default) must be rewritten.
+// Headerless-adjacent (no sysroot needed). Skipped when clang-tidy is absent.
+func TestFixAppliesToIncludedHeader(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	dir := t.TempDir()
+	proj := filepath.Join(dir, "proj")
+	deps := filepath.Join(dir, "deps")
+	for _, d := range []string{proj, deps} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const header = "#pragma once\nstruct Dep {\n  ~Dep() {}\n};\n" // PX3013 fixable
+	hpath := filepath.Join(deps, "dep.h")
+	if err := os.WriteFile(hpath, []byte(header), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cpp := filepath.Join(proj, "a.cpp")
+	if err := os.WriteFile(cpp, []byte("#include \"dep.h\"\nDep* make() { return new Dep(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + proj + `","file":"` + cpp + `","command":"clang++ -std=c++17 -I` + deps + ` -c a.cpp"}]`
+	if err := os.WriteFile(filepath.Join(proj, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, _ := runCLI("-tidy", bin, "-fix", "-checks", "PX3013", "-p", proj, proj)
+	got, err := os.ReadFile(hpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "= default") {
+		if strings.Contains(stderr, "file not found") || strings.Contains(stderr, "fatal error") {
+			t.Skipf("toolchain could not parse the fixture; skipping. stderr:\n%s", stderr)
+		}
+		t.Errorf("-fix must apply a fixable finding in an #included header, but dep.h was left unchanged:\n%s", got)
+	}
+}
+
 // TestFixSequentialExcludeKeepsHeaderUntouched pins that -fix-sequential (the
 // one-clang-tidy-pass-per-check path used to avoid cross-check fix-it collisions)
 // honors -exclude for an included header exactly as plain -fix does. It is a
