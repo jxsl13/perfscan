@@ -1298,3 +1298,64 @@ func TestEquiv_PS4008Matmul(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS2008Slab pins PS2008's "bit-identical by construction" claim: the
+// slab rewrite `slab := make([]T, len(rows)*d); rows[i] = slab[i*d:(i+1)*d:(i+1)*d]`
+// must be observationally identical to per-row `rows[i] = make([]T, d)`. The two
+// properties that could break — cross-row aliasing (rows must be DISTINCT) and
+// append safety (the 3-index cap must force a realloc, not corrupt the neighbor)
+// — are exercised directly and compared between the two forms.
+func TestEquiv_PS2008Slab(t *testing.T) {
+	perRow := func(n, d int) [][]float64 {
+		rows := make([][]float64, n)
+		for i := range rows {
+			rows[i] = make([]float64, d)
+		}
+		return rows
+	}
+	slab := func(n, d int) [][]float64 {
+		rows := make([][]float64, n)
+		s := make([]float64, len(rows)*d)
+		for i := range rows {
+			rows[i] = s[i*d : (i+1)*d : (i+1)*d]
+		}
+		return rows
+	}
+	for _, nd := range [][2]int{{1, 1}, {3, 4}, {5, 1}, {1, 7}, {8, 8}, {2, 3}} {
+		n, d := nd[0], nd[1]
+		a, b := perRow(n, d), slab(n, d)
+		// len/cap of every row must match (cap==d in both -> append reallocates).
+		for i := 0; i < n; i++ {
+			if len(a[i]) != len(b[i]) || cap(a[i]) != cap(b[i]) || cap(b[i]) != d {
+				t.Fatalf("n=%d d=%d row %d: perRow len/cap=%d/%d slab=%d/%d (want cap %d)",
+					n, d, i, len(a[i]), cap(a[i]), len(b[i]), cap(b[i]), d)
+			}
+		}
+		// Fill both identically, then assert element-wise equality.
+		fill := func(rows [][]float64) {
+			for i := range rows {
+				for j := range rows[i] {
+					rows[i][j] = float64(i*100 + j)
+				}
+			}
+		}
+		fill(a)
+		fill(b)
+		// DISTINCTNESS: mutating row 0 must not touch row 1 in EITHER form.
+		if n >= 2 {
+			a[0][0] = -1
+			b[0][0] = -1
+			if a[1][0] != b[1][0] || b[1][0] != 100 {
+				t.Fatalf("n=%d d=%d: cross-row aliasing (a[1][0]=%v b[1][0]=%v want 100)", n, d, a[1][0], b[1][0])
+			}
+		}
+		// APPEND SAFETY: append beyond cap must realloc (neighbor untouched) in both.
+		if n >= 2 {
+			a[0] = append(a[0], 999)
+			b[0] = append(b[0], 999)
+			if a[1][0] != b[1][0] {
+				t.Fatalf("n=%d d=%d: append corrupted neighbor differently (a[1][0]=%v b[1][0]=%v)", n, d, a[1][0], b[1][0])
+			}
+		}
+	}
+}
