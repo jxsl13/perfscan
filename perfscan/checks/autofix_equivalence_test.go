@@ -2045,3 +2045,22 @@ func TestEquiv_PS5106StringsCompareToOperator(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS2107SprintfCharToString pins PS2107's %c arm: fmt.Sprintf("%c", r)
+// over a rune equals string(r) for the full rune range, including out-of-range
+// and negative code points (both render as U+FFFD). Restricted to rune (int32)
+// operands — a wider integer would truncate under rune() but %c still prints
+// U+FFFD, so those are deliberately not rewritten.
+func TestEquiv_PS2107SprintfCharToString(t *testing.T) {
+	edge := []rune{'A', '0', '日', 0, 1, 0x7f, 0x80, 0x10FFFF, 0x110000, 0x1FFFFF, utf8.RuneError, -1, -100, 0x1F600, '\n', '\t'}
+	for _, r := range edge {
+		if fmt.Sprintf("%c", r) != string(r) {
+			t.Errorf("%%c(rune %d): %q != string(r) %q", r, fmt.Sprintf("%c", r), string(r))
+		}
+	}
+	for r := rune(-2); r < 0x110020; r++ {
+		if fmt.Sprintf("%c", r) != string(r) {
+			t.Fatalf("%%c(rune %d) diverges from string(r)", r)
+		}
+	}
+}
