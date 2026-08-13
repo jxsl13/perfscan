@@ -957,3 +957,57 @@ func TestEquiv_PS3082MinMaxWrapper(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS3005IndirectKeySort pins PS3005's float/NaN safety. PS3005 is the
+// only sort-rewrite check that deliberately ALLOWS float keys (PS3002/3104/3105
+// exclude or name-limit them) — its bit-identity rests entirely on the rewrite
+// keeping the SAME '<' predicate, only changing where the value is loaded from
+// (m[idx[a]][f] -> key[idx[a]] where key[i]=m[i][f]). Because both forms feed
+// sort.Slice the identical comparator RESULTS over the identical values, the
+// deterministic pdqsort yields the identical permutation — even for a NaN key,
+// where '<' is an inconsistent comparator (all-false), because BOTH sorts run
+// that same inconsistent comparator on the same input. This asserts the two
+// permutations match bit-for-bit over many random 2-D matrices whose sort
+// column carries NaN, +/-0, +/-Inf and ordinary values.
+func TestEquiv_PS3005IndirectKeySort(t *testing.T) {
+	rng := rand.New(rand.NewSource(0x3005))
+	pool := []float64{math.NaN(), math.Inf(1), math.Inf(-1), 0, math.Copysign(0, -1),
+		1, -1, 2.5, -2.5, math.MaxFloat64, -math.MaxFloat64, math.SmallestNonzeroFloat64}
+	const f = 1 // sort column
+	for trial := 0; trial < 4000; trial++ {
+		n := rng.Intn(12) + 1
+		m := make([][]float64, n)
+		for i := range m {
+			m[i] = []float64{rng.Float64(), pool[rng.Intn(len(pool))], rng.Float64()}
+		}
+
+		// Original: comparator dereferences the 2-D structure.
+		idxA := make([]int, n)
+		for i := range idxA {
+			idxA[i] = i
+		}
+		sort.Slice(idxA, func(a, b int) bool { return m[idxA[a]][f] < m[idxA[b]][f] })
+
+		// Rewritten: flat key column, SAME '<' predicate.
+		key := make([]float64, len(m))
+		for i := range m {
+			key[i] = m[i][f]
+		}
+		idxB := make([]int, n)
+		for i := range idxB {
+			idxB[i] = i
+		}
+		sort.Slice(idxB, func(a, b int) bool { return key[idxB[a]] < key[idxB[b]] })
+
+		if !slices.Equal(idxA, idxB) {
+			t.Fatalf("trial %d: permutation diverged\n orig=%v\n rewritten=%v\n column=%v",
+				trial, idxA, idxB, func() []float64 {
+					c := make([]float64, n)
+					for i := range m {
+						c[i] = m[i][f]
+					}
+					return c
+				}())
+		}
+	}
+}
