@@ -78,7 +78,7 @@ func TestPS2104(t *testing.T) {
 }
 
 func TestPS3101(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3101.Analyzer, "ps3101")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3101.Analyzer, "ps3101", "ps3101shadow")
 }
 
 func TestPS4101(t *testing.T) {

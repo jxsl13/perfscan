@@ -1,0 +1,52 @@
+package ps3101
+
+import (
+	"bytes"
+	bs "bytes"
+)
+
+// Positive hoist cases proving the guard is not over-broad: each conversion
+// is a direct argument of a read-only stdlib bytes predicate and the operand
+// provably cannot change between iterations.
+
+// A local CONSTANT operand is immutable: always safe to hoist.
+func fixConstOperand(lines [][]byte) {
+	const csep = ","
+	psConv16_28 := []byte(csep)
+	for _, line := range lines {
+		use(bytes.Contains(line, psConv16_28)) // want `\[\]byte\(csep\) copies its operand on every iteration but csep is loop-invariant; hoist the conversion above the loop`
+	}
+}
+
+// The stdlib package resolved through an IMPORT ALIAS is still the stdlib
+// package: the guard is type-resolved, not spelled-name-based.
+func fixAliasImport(lines [][]byte, sep string) {
+	psConv24_25 := []byte(sep)
+	for _, line := range lines {
+		use(bs.Contains(line, psConv24_25)) // want `\[\]byte\(sep\) copies its operand on every iteration but sep is loop-invariant; hoist the conversion above the loop`
+	}
+}
+
+// Two independent read-only conversions of DIFFERENT operands in sibling
+// loops: each gets its own hoisted binding.
+func fixTwoLoops(lines [][]byte, pre, suf string) {
+	psConv32_29 := []byte(pre)
+	for _, line := range lines {
+		use(bytes.HasPrefix(line, psConv32_29)) // want `\[\]byte\(pre\) copies its operand on every iteration but pre is loop-invariant; hoist the conversion above the loop`
+	}
+	psConv35_29 := []byte(suf)
+	for _, line := range lines {
+		use(bytes.HasSuffix(line, psConv35_29)) // want `\[\]byte\(suf\) copies its operand on every iteration but suf is loop-invariant; hoist the conversion above the loop`
+	}
+}
+
+// Both arguments of a read-only predicate are invariant conversions: both are
+// hoisted, sharing two distinct read-only buffers.
+func fixBothArgs(n int, a, b string) {
+	psConv43_19 := []byte(a)
+	psConv43_30 := []byte(b)
+	for i := 0; i < n; i++ {
+		use(bytes.Equal(psConv43_19, psConv43_30)) // want `\[\]byte\(a\) copies its operand on every iteration but a is loop-invariant; hoist the conversion above the loop` `\[\]byte\(b\) copies its operand on every iteration but b is loop-invariant; hoist the conversion above the loop`
+	}
+}
+
