@@ -319,3 +319,38 @@ func TestCaveatsAreWellFormed(t *testing.T) {
 		}
 	}
 }
+
+// TestAuditedExclusionsStayExcluded records the result of a clang-tidy 22
+// perf/modernize/readability audit (checks NOT in the catalog) and pins the
+// DELIBERATE exclusions so a future audit does not re-add them without the
+// rationale. Empirically (clang-tidy --fix on a crafted fixture):
+//
+//   - performance-move-constructor-init, performance-noexcept-destructor,
+//     performance-trivially-destructible, performance-type-promotion-in-math-fn:
+//     these are genuine perf checks but apply NO fix-it on this toolchain
+//     (macOS/libc++) — HasFix would be false, so they offer no auto-fix value
+//     over the advisory set already documented.
+//   - modernize-min-max-use-initializer-list: its fix-it DOES apply
+//     (std::max(a,std::max(b,c)) -> std::max({a,b,c})) and is bit-identical for
+//     integers, BUT (1) it is a readability modernization with NO perf angle
+//     (identical comparison count), and (2) for FLOAT args it can diverge on
+//     NaN ordering (the same float-NaN hazard perfscan's min/max checks
+//     exclude). A pure-readability check with a NaN footgun does not meet the
+//     perf-catalog bar. If ever added, it MUST carry a Caveat.
+//
+// Removing an entry here is a deliberate decision, not a mechanical bump: read
+// the rationale first.
+func TestAuditedExclusionsStayExcluded(t *testing.T) {
+	excluded := []string{
+		"modernize-min-max-use-initializer-list",
+		"performance-move-constructor-init",
+		"performance-noexcept-destructor",
+		"performance-trivially-destructible",
+		"performance-type-promotion-in-math-fn",
+	}
+	for _, name := range excluded {
+		if _, ok := ByTidyName(name); ok {
+			t.Errorf("%s is in the catalog but was deliberately excluded (see this test's rationale); if adding it intentionally, update the audit note", name)
+		}
+	}
+}
