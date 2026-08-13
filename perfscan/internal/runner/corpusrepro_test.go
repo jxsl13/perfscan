@@ -716,3 +716,38 @@ func build(parts []string) (string, error) {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixSamberLoGenericMapPrealloc pins a PS2104 rewrite observed in the wild
+// during corpus -fix validation on samber/lo (slice.go, GroupByMap) — a FULLY
+// GENERIC function (type params T any, K comparable, V any). A map literal
+// `result := map[K][]V{}` populated in a range loop over `collection` is
+// pre-sized to `make(map[K][]V, len(collection))`. This exercises the check on a
+// TYPE-PARAM map type (generic key K and slice-of-type-param value []V) and a
+// type-parameter-typed source slice — the concrete-type testdata does not reach
+// generics. Bit-identical (a capacity hint only avoids rehash growth) and
+// compiles under the instantiated types. On the real file this rewrote cleanly
+// and lo built + its test suite passed.
+func TestFixSamberLoGenericMapPrealloc(t *testing.T) {
+	const src = `package p
+
+func GroupByMap[T any, K comparable, V any](collection []T, transform func(T) (K, V)) map[K][]V {
+	result := map[K][]V{}
+	for i := range collection {
+		k, v := transform(collection[i])
+		result[k] = append(result[k], v)
+	}
+	return result
+}
+`
+	got := string(runFixMode(t, src))
+
+	if !strings.Contains(got, "result := make(map[K][]V, len(collection))") {
+		t.Errorf("generic map literal should be pre-sized with make(map[K][]V, len(collection)):\n%s", got)
+	}
+	if strings.Contains(got, "result := map[K][]V{}") {
+		t.Errorf("the un-sized map literal should have been rewritten:\n%s", got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
