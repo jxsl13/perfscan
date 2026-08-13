@@ -851,3 +851,22 @@ func TestRelPathCwd(t *testing.T) {
 		t.Errorf("relPathCwd(outside) = %q, want it unchanged %q", got, outside)
 	}
 }
+
+// TestExplainDocLine pins the three -explain doc-line branches: a custom check
+// (no upstream page), a built-in whose TidyName yields a doc URL, and a built-in
+// whose (malformed) TidyName has no family/name split so DocURL declines and the
+// generic checks-list page is offered instead.
+func TestExplainDocLine(t *testing.T) {
+	custom := explainDocLine(catalog.Entry{Custom: true, TidyName: "custom-x"})
+	if !strings.Contains(custom, "query-based") || strings.Contains(custom, "https://clang.llvm.org") {
+		t.Errorf("custom explain line = %q, want the no-upstream-page message", custom)
+	}
+	withURL := explainDocLine(catalog.Entry{TidyName: "performance-for-range-copy"})
+	if !strings.Contains(withURL, "checks/performance/for-range-copy.html") {
+		t.Errorf("built-in explain line = %q, want the upstream doc URL", withURL)
+	}
+	noSplit := explainDocLine(catalog.Entry{TidyName: "nohyphen"})
+	if !strings.Contains(noSplit, "checks/list.html") {
+		t.Errorf("malformed-TidyName explain line = %q, want the checks-list fallback", noSplit)
+	}
+}
