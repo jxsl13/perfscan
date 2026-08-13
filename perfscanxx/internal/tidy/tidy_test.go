@@ -229,3 +229,29 @@ func TestArgvFixErrors(t *testing.T) {
 		t.Error("--fix-errors must be absent when FixErrors is false")
 	}
 }
+
+// TestRunExportReadError pins the failure path where the export-fixes file
+// exists but cannot be read (a non-os.ErrNotExist error): Run must surface a
+// wrapped "reading export-fixes" error rather than silently returning empty
+// YAML. The absent-file case is normal (clang-tidy writes nothing when it found
+// no diagnostics) and is handled elsewhere; this is the corrupted/unreadable
+// case, reproduced by pointing ExportFixes at a DIRECTORY so os.ReadFile fails
+// with "is a directory".
+func TestRunExportReadError(t *testing.T) {
+	origLook, origExec := LookPath, Executor
+	defer func() { LookPath, Executor = origLook, origExec }()
+	LookPath = func(string) (string, error) { return "/fake/clang-tidy", nil }
+	Executor = func(context.Context, []string, *bytes.Buffer, *bytes.Buffer) (int, error) {
+		return 0, nil // succeed without writing anything
+	}
+
+	dir := t.TempDir() // a directory where a file is expected -> ReadFile errors
+	_, err := Run(context.Background(), Options{
+		ExportFixes: dir,
+		Checks:      []string{"performance-avoid-endl"},
+		Files:       []string{"/src/a.cpp"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "reading export-fixes") {
+		t.Fatalf("Run with an unreadable export path = %v, want a 'reading export-fixes' error", err)
+	}
+}
