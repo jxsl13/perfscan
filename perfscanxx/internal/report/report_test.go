@@ -58,6 +58,59 @@ func TestFromExportLevelGating(t *testing.T) {
 	}
 }
 
+// TestFromExportDeduplicatesRepeatedDiagnostics pins the report-layer guarantee
+// that an identical diagnostic (same file + byte offset + check name) is reported
+// ONCE, even if the --export-fixes document lists it more than once. When
+// clang-tidy runs over several TUs, a finding anchored in a SHARED HEADER can be
+// exported per-TU that includes the header; perfscanxx must not double-count it
+// in its report/JSON/SARIF/summary. clang-tidy's console output currently
+// collapses these upstream, but the report layer owns the guarantee rather than
+// depending on that. A DIFFERENT check at the same offset (different name) is a
+// distinct finding and must be kept.
+func TestFromExportDeduplicatesRepeatedDiagnostics(t *testing.T) {
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+	ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+
+	dup := fixes.Diagnostic{
+		DiagnosticName: "performance-trivially-destructible", // PX3026
+		DiagnosticMessage: fixes.DiagnosticMessage{
+			Message:    "class can be made trivially destructible",
+			FilePath:   "/inc/shared.h",
+			FileOffset: 100,
+		},
+	}
+	ef := &fixes.ExportFile{
+		MainSourceFile: "/src/a.cpp",
+		Diagnostics: []fixes.Diagnostic{
+			dup, // as surfaced compiling a.cpp
+			dup, // the SAME header finding surfaced again compiling b.cpp
+			{ // a different check at the SAME offset — must be kept
+				DiagnosticName: "performance-noexcept-swap", // PX3006
+				DiagnosticMessage: fixes.DiagnosticMessage{
+					Message:    "swap should be noexcept",
+					FilePath:   "/inc/shared.h",
+					FileOffset: 100,
+				},
+			},
+		},
+	}
+	got := FromExport(ef, catalog.LevelAggressive)
+	if len(got) != 2 {
+		t.Fatalf("FromExport deduped = %d findings, want 2 (the repeated PX3026 collapsed, the distinct PX3006 kept):\n%+v", len(got), got)
+	}
+	ids := map[string]int{}
+	for _, f := range got {
+		ids[f.ID]++
+	}
+	if ids["PX3026"] != 1 {
+		t.Errorf("PX3026 should appear exactly once after dedup, got %d", ids["PX3026"])
+	}
+	if ids["PX3006"] != 1 {
+		t.Errorf("PX3006 (distinct check at same offset) must be kept, got %d", ids["PX3006"])
+	}
+}
+
 func TestFromExportPassThrough(t *testing.T) {
 	origRead := ReadFile
 	defer func() { ReadFile = origRead }()
