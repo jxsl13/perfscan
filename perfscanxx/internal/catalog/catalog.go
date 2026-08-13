@@ -418,6 +418,25 @@ var entries = []Entry{
 			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("ss")`,
 		Message: "std::stringstream constructed inside a loop heap-allocates a new buffer (and re-imbues the locale) every iteration; hoist the stream out of the loop and reset it with .str(\"\") each pass (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2107", TidyName: "custom-pow-const-exponent",
+		Level: LevelStructured, Category: "algorithms",
+		Title:  "std::pow with a constant exponent pays a full libm call where a couple of multiplies (or std::sqrt) would do",
+		HasFix: false,
+		Custom: true,
+		Bind:   "pow",
+		// std::pow(x, <literal>) — a compile-time-constant exponent. pow() is a
+		// general transcendental routine (tens of ns); for a small integer power
+		// x*x / x*x*x is a multiply or two, and pow(x, 0.5) is std::sqrt(x).
+		// clang-tidy ships no equivalent check. ignoringImpCasts sees through the
+		// int-literal -> double conversion so pow(x, 2) matches as well as
+		// pow(x, 2.0). NO auto-fix, deliberately: the rewrite x*x evaluates the
+		// base TWICE (unsafe if it has side effects, e.g. pow(f(), 2)), and the
+		// right form depends on the exponent (multiply vs sqrt) — a human call.
+		Query: `match callExpr(isExpansionInMainFile(), callee(functionDecl(hasName("pow"))), ` +
+			`hasArgument(1, ignoringImpCasts(anyOf(integerLiteral(), floatLiteral())))).bind("pow")`,
+		Message: "std::pow with a constant exponent pays a full libm call; for a small integer power multiply directly (x*x, x*x*x) and for pow(x, 0.5) use std::sqrt(x) — mind that x*x evaluates the base twice, so hoist it first if it has side effects (query-based, no auto-fix)",
+	},
 }
 
 // Deliberately NOT in the catalog (do not re-add on a future audit):

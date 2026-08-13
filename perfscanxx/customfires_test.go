@@ -11,20 +11,23 @@ import (
 	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
 )
 
-// customTriggerSrc exhibits ALL six query-based custom-check anti-patterns in one
+// customTriggerSrc exhibits ALL query-based custom-check anti-patterns in one
 // main-file translation unit (the checks carry isExpansionInMainFile guards):
 //
 //	PX2101 reserve-before-loop, PX2102 pessimizing-move, PX2103 catch-by-value,
-//	PX2104 regex-in-loop, PX2105 dynamic-cast-in-loop, PX2106 stringstream-in-loop.
+//	PX2104 regex-in-loop, PX2105 dynamic-cast-in-loop, PX2106 stringstream-in-loop,
+//	PX2107 pow-const-exponent.
 const customTriggerSrc = `#include <vector>
 #include <regex>
 #include <sstream>
 #include <exception>
+#include <cmath>
 struct B { virtual ~B(){} }; struct D : B {};
 std::vector<int> pessimizing() {
   std::vector<int> v;
   return std::move(v); // PX2102
 }
+double g(double x) { return std::pow(x, 2); } // PX2107 (constant exponent)
 void f(B* p) {
   std::vector<int> grow;
   for (int i = 0; i < 10; ++i) {
