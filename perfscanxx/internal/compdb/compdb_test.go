@@ -51,6 +51,32 @@ func TestFindAndLoad(t *testing.T) {
 	}
 }
 
+// TestLoadDedupsSameFileAcrossPathForms pins that Load dedups on the RESOLVED
+// absolute path, not the raw "file" string: the same translation unit spelled
+// three different ways — absolute, relative + a matching "directory", and with a
+// ".." segment — collapses to one entry. TestFindAndLoad only dedups two
+// byte-identical "file" strings, so the resolve-then-dedup behavior (what real
+// multi-config CMake databases need, where one source is listed per target with
+// slightly different path spellings) was unexercised. A regression keying dedup
+// on the raw string would return the same TU up to three times and scan it thrice.
+func TestLoadDedupsSameFileAcrossPathForms(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	db := writeDB(t, dir, []map[string]string{
+		{"directory": dir, "file": filepath.Join(src, "x.cpp")},                // absolute
+		{"directory": src, "file": "x.cpp"},                                    // relative + directory
+		{"directory": dir, "file": filepath.Join("src", "sub", "..", "x.cpp")}, // ".." segment
+	})
+	tus, err := Load(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(src, "x.cpp")
+	if len(tus) != 1 || tus[0] != want {
+		t.Errorf("Load = %v, want exactly [%s] (dedup must key on the resolved abs path, not the raw file string)", tus, want)
+	}
+}
+
 func TestFindInBuildSubdir(t *testing.T) {
 	root := t.TempDir()
 	build := filepath.Join(root, "build")
