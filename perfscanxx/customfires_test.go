@@ -246,3 +246,91 @@ func TestPX2107ExcludesTrivialExponents(t *testing.T) {
 		t.Errorf("PX2107 fired %d time(s), want exactly 1 (only pow(x,2); pow(x,0)/pow(x,1) excluded):\n%s", n, output)
 	}
 }
+
+// loopKindBreadthSrc exhibits the three "-in-loop" custom checks (regex,
+// dynamic-cast, stringstream) inside a RANGE-FOR and a WHILE loop — NOT the
+// counted for that TestCustomChecksFireOnTargetPattern uses. All three share
+// PX2101's anyOf(forStmt, cxxForRangeStmt, whileStmt, doStmt) ancestor matcher;
+// this pins that they fire across loop kinds, so a regression to a narrower
+// matcher is caught. Motivated by corpus validation on yaml-cpp, where PX2106
+// (stringstream-in-loop) fired on a real site.
+const loopKindBreadthSrc = `#include <vector>
+#include <regex>
+#include <sstream>
+struct B { virtual ~B(){} }; struct D : B {};
+void rangeFor(const std::vector<int>& xs, B* p) {
+  for (int x : xs) {                 // cxxForRangeStmt
+    std::regex re("x");              // PX2104
+    (void)dynamic_cast<D*>(p);       // PX2105
+    std::ostringstream ss;           // PX2106
+    (void)x; (void)re; (void)ss;
+  }
+}
+void whileLoop(int n, B* p) {
+  int i = 0;
+  while (i < n) {                    // whileStmt
+    std::regex re("y");              // PX2104
+    (void)dynamic_cast<D*>(p);       // PX2105
+    std::ostringstream ss;           // PX2106
+    (void)re; (void)ss; ++i;
+  }
+}
+`
+
+// TestInLoopChecksFireAcrossLoopKinds pins that PX2104/PX2105/PX2106 each fire on
+// a range-for AND a while loop (not just a counted for) — expecting at least 2
+// diagnostics per check (one per loop). Guards the loop-kind breadth of the
+// shared ancestor matcher for the "-in-loop" custom-check family.
+func TestInLoopChecksFireAcrossLoopKinds(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	var sel []catalog.Entry
+	for _, id := range []string{"PX2104", "PX2105", "PX2106"} {
+		e, ok := catalog.ByID(id)
+		if !ok || !e.Custom {
+			t.Fatalf("%s missing or not a custom check", id)
+		}
+		sel = append(sel, e)
+	}
+	cfg := catalog.ClangTidyConfig(sel)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".clang-tidy")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "loops.cpp")
+	if err := os.WriteFile(src, []byte(loopKindBreadthSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--experimental-custom-checks", "--config-file=" + cfgPath, "--", "-std=c++17"}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+
+	if strings.Contains(output, "Unknown command line argument") && strings.Contains(output, "experimental-custom-checks") {
+		t.Skip("clang-tidy is too old for --experimental-custom-checks; skipping")
+	}
+	if strings.Contains(output, "[clang-tidy-config]") {
+		t.Fatalf("clang-tidy rejected a custom-check query:\n%s", output)
+	}
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture headers; skipping:\n%s", output)
+	}
+
+	for _, e := range sel {
+		tag := "[" + e.TidyName + "]"
+		if n := strings.Count(output, tag); n < 2 {
+			t.Errorf("%s fired %d time(s) on a range-for + while fixture, want >= 2 (loop-kind breadth regressed?):\n%s", e.ID, n, output)
+		}
+	}
+}
