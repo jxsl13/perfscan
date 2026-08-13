@@ -51,3 +51,23 @@ func TestSelectCompositions(t *testing.T) {
 		t.Errorf("-PX1001 = %d entries, want %d (all but one)", len(lone), len(All())-1)
 	}
 }
+
+// TestSelectEmptySegments pins that empty selector segments — from a double,
+// leading, or trailing comma — are skipped, not treated as an (empty, hence
+// match-nothing or match-all) pattern. A malformed-but-harmless selector like
+// "PX1001,,PX3003" or "PX1001," must resolve to exactly the same set as the
+// clean "PX1001,PX3003" / "PX1001".
+func TestSelectEmptySegments(t *testing.T) {
+	clean := ids(Select("PX1001,PX3003", LevelAggressive))
+	for _, sloppy := range []string{"PX1001,,PX3003", ",PX1001,PX3003", "PX1001,PX3003,", "PX1001, ,PX3003"} {
+		got := ids(Select(sloppy, LevelAggressive))
+		if len(got) != len(clean) {
+			t.Errorf("Select(%q) = %v, want same set as clean %v", sloppy, got, clean)
+		}
+	}
+	// A selector that is ONLY empty segments defaults to "all" (include stays
+	// empty -> the len(include)==0 fallback), not the empty set.
+	if n := len(Select(",, ,", LevelAggressive)); n != len(All()) {
+		t.Errorf("Select(\",, ,\") = %d entries, want all (%d)", n, len(All()))
+	}
+}
