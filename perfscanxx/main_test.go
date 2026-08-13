@@ -870,3 +870,28 @@ func TestExplainDocLine(t *testing.T) {
 		t.Errorf("malformed-TidyName explain line = %q, want the checks-list fallback", noSplit)
 	}
 }
+
+// TestWarnVendoredFixesTruncates pins the maxList cap: with more than 10 distinct
+// vendored files, the warning lists the first 10 and summarizes the rest as
+// "… and N more" rather than flooding stderr.
+func TestWarnVendoredFixesTruncates(t *testing.T) {
+	var findings []report.Finding
+	for i := 0; i < 13; i++ {
+		findings = append(findings, report.Finding{
+			File:  fmt.Sprintf("/p/vendor/dep%02d/x.cpp", i),
+			Fixes: 1,
+		})
+	}
+	var buf bytes.Buffer
+	warnVendoredFixes(&buf, findings)
+	out := buf.String()
+	if !strings.Contains(out, "13 file(s) under vendored") {
+		t.Errorf("expected the 13-file count in the header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "… and 3 more") {
+		t.Errorf("expected the '… and 3 more' truncation (13-10), got:\n%s", out)
+	}
+	if n := strings.Count(out, "modified vendored file:"); n != 10 {
+		t.Errorf("expected exactly 10 listed files, got %d:\n%s", n, out)
+	}
+}
