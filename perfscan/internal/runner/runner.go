@@ -749,6 +749,7 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		// not used" error. Best-effort and centralized here so it covers every
 		// check pair, not just the sort family.
 		src = dedupeImports(src)
+		src = addReferencedStdlibImports(src, orig)
 		src = pruneOrphanedImports(src)
 		if formatted, err := format.Source(src); err == nil {
 			src = formatted
@@ -829,6 +830,173 @@ func dedupeImports(src []byte) []byte {
 		return src
 	}
 	return buf.Bytes()
+}
+
+// fixableStdlibImports maps package NAME -> import PATH for exactly the
+// standard-library packages perfscan's import-adding fixes introduce. It is
+// the allowlist gate of addReferencedStdlibImports: only these, and never a
+// third-party path, may be added to a fixed file.
+var fixableStdlibImports = map[string]string{
+	"slices":  "slices",
+	"cmp":     "cmp",
+	"io":      "io",
+	"strconv": "strconv",
+	"bytes":   "bytes",
+	"fmt":     "fmt",
+	"sort":    "sort",
+	"strings": "strings",
+	"errors":  "errors",
+	"utf8":    "unicode/utf8",
+}
+
+// addReferencedStdlibImports adds any stdlib import the just-applied fixes
+// reference but no surviving fix declares. Import-adding checks (PS3104,
+// PS2110, PS3002, PS2129, ...) attach the `import "slices"`-style edit to
+// only the FIRST fixable finding in a file (to avoid overlapping
+// import-block edits), but the runner filters findings (//perfscan:ignore,
+// -exclude, baseline) AFTER the checks run and BEFORE fixes apply: when the
+// finding carrying the import-add is filtered out while a sibling finding of
+// the same check survives and is rewritten, the rewrite references a package
+// that was never imported — "undefined: slices", a broken build. This pass
+// restores the invariant: every allowlisted package name the FIXED file uses
+// as a qualifier but neither imports nor declares gets its stdlib import
+// added. It runs after dedupeImports and before pruneOrphanedImports (an
+// import added here is by construction used, so the prune never removes it).
+//
+// Safety: allowlist-gated (fixableStdlibImports, stdlib only); a qualifier
+// whose name is declared ANYWHERE in the file (func/type/var/const, params,
+// results, receivers, :=, range vars, labels, fields) is skipped so a user
+// local shadowing a package name is never clobbered; a qualifier the ORIGINAL
+// (pre-fix, compiling) file already used without importing is skipped too —
+// there it must resolve to a cross-file package-level identifier or dot
+// import, and adding the import would redeclare it. Same best-effort cgo /
+// //line / parse guards as dedupeImports and pruneOrphanedImports.
+func addReferencedStdlibImports(src, orig []byte) []byte {
+	if bytes.Contains(src, []byte("//line ")) || bytes.Contains(src, []byte("/*line ")) {
+		return src
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
+	if err != nil {
+		return src
+	}
+	missing := missingFixableImports(f)
+	if len(missing) == 0 {
+		return src
+	}
+	for _, imp := range f.Imports {
+		if imp.Path.Value == `"C"` {
+			return src // cgo: leave the preprocessed import block untouched
+		}
+	}
+	// Pre-fix guard: if the ORIGINAL file (which compiled) already used the
+	// qualifier without importing it, the name resolves to something else
+	// (cross-file package-level identifier, dot import) — do not add.
+	if of, err := parser.ParseFile(token.NewFileSet(), "", orig, parser.ParseComments); err == nil {
+		preexisting := missingFixableImports(of)
+		missing = slices.DeleteFunc(missing, func(path string) bool {
+			return slices.Contains(preexisting, path)
+		})
+	}
+	if len(missing) == 0 {
+		return src
+	}
+	for _, path := range missing {
+		astutil.AddImport(fset, f, path)
+	}
+	var buf bytes.Buffer
+	if err := format.Node(&buf, fset, f); err != nil {
+		return src
+	}
+	return buf.Bytes()
+}
+
+// missingFixableImports returns the import paths (in first-use order) of
+// allowlisted stdlib packages that f uses as a selector qualifier but neither
+// imports under that name nor declares as any identifier in the file.
+func missingFixableImports(f *ast.File) []string {
+	// Local names the import block already provides.
+	imported := make(map[string]bool, len(f.Imports))
+	for _, imp := range f.Imports {
+		path, uerr := strconv.Unquote(imp.Path.Value)
+		if uerr != nil {
+			continue
+		}
+		name := path
+		if i := strings.LastIndexByte(path, '/'); i >= 0 {
+			name = path[i+1:]
+		}
+		if imp.Name != nil {
+			if imp.Name.Name == "_" || imp.Name.Name == "." {
+				continue
+			}
+			name = imp.Name.Name
+		}
+		imported[name] = true
+	}
+	// Every identifier NAME declared anywhere in the file: if a user local
+	// (or type, func, field, label, ...) shares a package's name, adding the
+	// import could clobber it — be conservative and never add.
+	declared := map[string]bool{}
+	declare := func(id *ast.Ident) {
+		if id != nil && id.Name != "_" {
+			declared[id.Name] = true
+		}
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncDecl:
+			declare(n.Name)
+		case *ast.Field: // receivers, params, results, struct fields, type params
+			for _, id := range n.Names {
+				declare(id)
+			}
+		case *ast.ValueSpec: // var / const names
+			for _, id := range n.Names {
+				declare(id)
+			}
+		case *ast.TypeSpec:
+			declare(n.Name)
+		case *ast.AssignStmt:
+			if n.Tok == token.DEFINE {
+				for _, lhs := range n.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok {
+						declare(id)
+					}
+				}
+			}
+		case *ast.RangeStmt:
+			if id, ok := n.Key.(*ast.Ident); ok {
+				declare(id)
+			}
+			if id, ok := n.Value.(*ast.Ident); ok {
+				declare(id)
+			}
+		case *ast.LabeledStmt:
+			declare(n.Label)
+		}
+		return true
+	})
+	var missing []string
+	seen := map[string]bool{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		id, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		path, ok := fixableStdlibImports[id.Name]
+		if !ok || imported[id.Name] || declared[id.Name] || seen[id.Name] {
+			return true
+		}
+		seen[id.Name] = true
+		missing = append(missing, path)
+		return true
+	})
+	return missing
 }
 
 func pruneOrphanedImports(src []byte) []byte {
