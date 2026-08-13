@@ -80,6 +80,10 @@ func TestSARIFOutputIsStructurallyValid(t *testing.T) {
 						ArtifactLocation struct {
 							URI string `json:"uri"`
 						} `json:"artifactLocation"`
+						Region struct {
+							StartLine   int `json:"startLine"`
+							StartColumn int `json:"startColumn"`
+						} `json:"region"`
 					} `json:"physicalLocation"`
 				} `json:"locations"`
 			} `json:"results"`
@@ -150,6 +154,19 @@ func TestSARIFOutputIsStructurallyValid(t *testing.T) {
 		}
 		if len(res.Locations) == 0 || res.Locations[0].PhysicalLocation.ArtifactLocation.URI == "" {
 			t.Errorf("result[%d] missing a location uri", i)
+			continue
+		}
+		// Every diagnostic maps a byte offset to a physical region. The stub
+		// source is a single line, so startLine must be exactly 1, and the
+		// 1-based startColumn must be positive — a dropped/zeroed region (a
+		// refactor regression) would make GitHub Code Scanning mis-place or
+		// discard the finding.
+		region := res.Locations[0].PhysicalLocation.Region
+		if region.StartLine != 1 {
+			t.Errorf("result[%d] region.startLine = %d, want 1 (single-line stub source)", i, region.StartLine)
+		}
+		if region.StartColumn < 1 {
+			t.Errorf("result[%d] region.startColumn = %d, want >= 1", i, region.StartColumn)
 		}
 	}
 
