@@ -748,6 +748,7 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		// as orphaned, so without this the file is left with an "imported and
 		// not used" error. Best-effort and centralized here so it covers every
 		// check pair, not just the sort family.
+		src = dedupeImports(src)
 		src = pruneOrphanedImports(src)
 		if formatted, err := format.Source(src); err == nil {
 			src = formatted
@@ -769,6 +770,67 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 // whereas a versioned third-party path (k8s.io/klog/v2, package "klog") would
 // be misjudged. The source compiled BEFORE the fixes, so any stdlib import
 // unused AFTER them was orphaned by them, never pre-existing.
+// dedupeImports collapses exact-duplicate import specs the applied fixes may
+// have introduced. Two DIFFERENT checks can each add the SAME import — PS3104
+// rewriting sort.Ints and PS3105 rewriting sort.Sort(sort.IntSlice) both add
+// "slices" — yielding two `import "slices"` declarations, which is a "redeclared
+// in this block" compile error. It removes the extra copies, keeping one,
+// matching on (alias, path) so two intentionally-different aliases of one path
+// are preserved. Blank (_) imports are left alone (duplicate blank imports are
+// legal and deliberate). Same best-effort cgo / //line / parse guards as
+// pruneOrphanedImports.
+func dedupeImports(src []byte) []byte {
+	if bytes.Contains(src, []byte("//line ")) || bytes.Contains(src, []byte("/*line ")) {
+		return src
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
+	if err != nil {
+		return src
+	}
+	for _, imp := range f.Imports {
+		if imp.Path.Value == `"C"` {
+			return src
+		}
+	}
+	type spec struct{ name, path string }
+	count := map[spec]int{}
+	var dups []spec
+	for _, imp := range f.Imports {
+		name := ""
+		if imp.Name != nil {
+			name = imp.Name.Name
+			if name == "_" || name == "." {
+				continue // blank/dot duplicates are legal / not our concern
+			}
+		}
+		path, uerr := strconv.Unquote(imp.Path.Value)
+		if uerr != nil {
+			return src
+		}
+		s := spec{name, path}
+		count[s]++
+		if count[s] == 2 {
+			dups = append(dups, s)
+		}
+	}
+	if len(dups) == 0 {
+		return src
+	}
+	for _, s := range dups {
+		// Remove every copy, then add exactly one back — robust whether
+		// DeleteNamedImport removes a single match or all of them per call.
+		for astutil.DeleteNamedImport(fset, f, s.name, s.path) {
+		}
+		astutil.AddNamedImport(fset, f, s.name, s.path)
+	}
+	var buf bytes.Buffer
+	if err := format.Node(&buf, fset, f); err != nil {
+		return src
+	}
+	return buf.Bytes()
+}
+
 func pruneOrphanedImports(src []byte) []byte {
 	if bytes.Contains(src, []byte("//line ")) || bytes.Contains(src, []byte("/*line ")) {
 		return src
