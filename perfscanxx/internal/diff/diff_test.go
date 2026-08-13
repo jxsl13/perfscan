@@ -16,6 +16,29 @@ func TestUnifiedEqual(t *testing.T) {
 	}
 }
 
+// TestUnifiedEmptySide pins splitLines' empty-input branch via the real diff:
+// an empty original diffed against content (a file created / fully populated)
+// and content diffed against empty (a file emptied). Both must render a valid
+// unified diff that adds/removes every line, not a panic or an empty result.
+func TestUnifiedEmptySide(t *testing.T) {
+	created := Unified("f", "f", nil, []byte("added one\nadded two\n"))
+	if created == "" || !strings.HasPrefix(created, "--- a/f\n+++ b/f\n") ||
+		!strings.Contains(created, "+added one\n") || !strings.Contains(created, "+added two\n") {
+		t.Errorf("empty->content diff malformed:\n%s", created)
+	}
+	if strings.Contains(created, "-added") {
+		t.Errorf("empty->content diff must not delete anything:\n%s", created)
+	}
+
+	emptied := Unified("f", "f", []byte("gone one\ngone two\n"), nil)
+	if emptied == "" || !strings.Contains(emptied, "-gone one\n") || !strings.Contains(emptied, "-gone two\n") {
+		t.Errorf("content->empty diff malformed:\n%s", emptied)
+	}
+	if strings.Contains(emptied, "+gone") {
+		t.Errorf("content->empty diff must not add anything:\n%s", emptied)
+	}
+}
+
 func TestUnifiedSingleLineChange(t *testing.T) {
 	orig := "line one\nline two\nline three\n"
 	patched := "line one\nline TWO\nline three\n"
