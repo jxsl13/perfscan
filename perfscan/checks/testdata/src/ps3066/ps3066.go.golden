@@ -124,6 +124,22 @@ func callInBody(buf []float64) {
 	}
 }
 
+// No fix: the middle loop reads a SECOND buffer k[i]. Distinct slices can alias
+// each other at an offset, so fusing a write of buf[i] with a read of k[i] is
+// not provably independent — the fix declines and the diagnostic stays advisory
+// (isolates the second-buffer axis from cross-index/scalar/call declines).
+func secondBuffer(buf, k []float64) {
+	for i := range buf { // want `3 consecutive loops over the same bound stream buf once each; if the per-index work is independent across the loops, merge them so the buffer stays in cache \(a later loop needing ALL of an earlier one's output cannot merge\)`
+		buf[i] *= 2
+	}
+	for i := range buf {
+		buf[i] += k[i]
+	}
+	for i := range buf {
+		buf[i] *= 3
+	}
+}
+
 func clamp01(x float64) float64 {
 	if x > 1 {
 		return 1
