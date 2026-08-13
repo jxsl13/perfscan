@@ -215,6 +215,22 @@ func TestArgvExcludeHeaderFilter(t *testing.T) {
 	if strings.Contains(without, "header-filter") {
 		t.Errorf("no ExcludeHeaderFilter set, but argv carries a header-filter: %s", without)
 	}
+
+	// An EXPLICIT HeaderFilter must be preserved, not clobbered by the ".*"
+	// default: the `.*` only fills in a MISSING HeaderFilter. The case above
+	// exercises only the empty→".*" default; this pins the non-empty branch so a
+	// regression that always forced ".*" (dropping a caller's header-filter)
+	// would be caught.
+	explicit := strings.Join(Argv(Options{Checks: []string{"c"}, Files: []string{"a.cpp"}, HeaderFilter: "src/", ExcludeHeaderFilter: "deps/"}), " ")
+	if !strings.Contains(explicit, "--header-filter=src/") {
+		t.Errorf("explicit HeaderFilter not preserved (want --header-filter=src/): %s", explicit)
+	}
+	if strings.Contains(explicit, "--header-filter=.*") {
+		t.Errorf("explicit HeaderFilter was clobbered by the .* default: %s", explicit)
+	}
+	if !strings.Contains(explicit, "--exclude-header-filter=deps/") {
+		t.Errorf("argv missing --exclude-header-filter: %s", explicit)
+	}
 }
 
 func TestArgvFixErrors(t *testing.T) {
