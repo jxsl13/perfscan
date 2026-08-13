@@ -247,7 +247,15 @@ func ps2127HoistFix(pass *analysis.Pass, fn *ast.FuncDecl, call *ast.CallExpr, f
 	if fn.Doc != nil {
 		insertPos = fn.Doc.Pos()
 	}
-	binding := fmt.Sprintf("var %s = regexp.%s(%s)\n\n", varName, fnName, lit.Value)
+	// Reuse the SOURCE qualifier (regexp, or its import alias), not a hardcoded
+	// "regexp": on an aliased import (import rx "regexp") the name "regexp" is
+	// not bound, so a hardcoded qualifier hoists to uncompilable code. The caller
+	// validated call.Fun is a stdlib-regexp selector, so this assertion holds.
+	qualifier := "regexp"
+	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+		qualifier = exprTextRendered(sel.X)
+	}
+	binding := fmt.Sprintf("var %s = %s.%s(%s)\n\n", varName, qualifier, fnName, lit.Value)
 	return analysis.SuggestedFix{
 		Message: fmt.Sprintf("hoist regexp.%s to a package-level var", fnName),
 		TextEdits: []analysis.TextEdit{
