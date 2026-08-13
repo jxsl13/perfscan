@@ -267,6 +267,26 @@ func h() {
 	if _, ok := PkgFuncCall(info, selectorCalls(files...)["Sprintf"].Fun, "fmt", nil); ok {
 		t.Error("PkgFuncCall must not match example.com/notfmt imported as fmt")
 	}
+
+	// The mirror case, pinned deliberately: the REAL stdlib package imported
+	// under an ALIAS (import f "fmt") does NOT match "fmt" either. PkgFuncCall
+	// requires the qualifier ident to read exactly the package name (id.Name ==
+	// pkg) AND resolve to that path — so it matches stdlib SOURCE calls only by
+	// their canonical spelling. This is intentional and shared by all ~14
+	// callers (PS2107, PS3002, PS3077, …): they conservatively skip aliased
+	// stdlib sources rather than risk mis-detection. Broadening to path-only
+	// matching would make every caller start firing on aliased imports and MUST
+	// be validated per-check (each fix must handle the alias / prune it), not
+	// flipped here. This case is the tripwire that flags such a change.
+	aliasedStdlib := `package p
+import f "fmt"
+func k(i int) string {
+	return f.Sprintf("%d", i)
+}`
+	files, info = typeCheckSnippets(t, aliasedStdlib)
+	if _, ok := PkgFuncCall(info, selectorCalls(files...)["Sprintf"].Fun, "fmt", nil); ok {
+		t.Error("PkgFuncCall matches by canonical name, not path alone: an aliased `import f \"fmt\"` must not match \"fmt\" (intentional — see comment)")
+	}
 }
 
 func TestCalleeName(t *testing.T) {
