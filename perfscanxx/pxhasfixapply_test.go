@@ -244,6 +244,55 @@ func TestPX3026FiresWithDeletedCopyOps(t *testing.T) {
 	}
 }
 
+// TestFixAppliesMultipleChecksInOneRun pins the multi-check compose path: a
+// single -fix run over one TU that has findings from TWO different fixable checks
+// must apply BOTH. This is the everyday case (a broad -fix applies every fixable
+// check that fired) and the path exercised heavily during corpus validation on
+// google/leveldb (23 fix-its across many checks and 15 files, all 39 TUs still
+// compiled) — but every other -fix test here restricts to a single -checks id.
+// Here PX3013 (~S(){} -> = default) and PX3008 (v.size()==0 -> v.empty()) fire in
+// one TU; after -fix both rewrites must be present. Skipped when clang-tidy absent.
+func TestFixAppliesMultipleChecksInOneRun(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	const src = "#include <vector>\n" +
+		"struct S { ~S() {} };\n" +
+		"bool isEmpty(const std::vector<int>& v) { return v.size() == 0; }\n"
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "m.cpp")
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile, ok := cppCompileCmdForTest("m.cpp")
+	if !ok {
+		t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, _ := runCLI("-tidy", bin, "-fix", "-checks", "PX3013,PX3008", "-p", dir, cpp)
+	gotB, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(gotB)
+	if got == src {
+		if strings.Contains(stderr, "file not found") || strings.Contains(stderr, "fatal error") {
+			t.Skipf("toolchain could not parse the fixture; skipping. stderr:\n%s", stderr)
+		}
+		t.Fatalf("neither fix applied in a multi-check run:\n%s", got)
+	}
+	if !strings.Contains(got, "= default") {
+		t.Errorf("PX3013 fix (~S() = default) missing in the multi-check run:\n%s", got)
+	}
+	if !strings.Contains(got, ".empty()") || strings.Contains(got, "size() == 0") {
+		t.Errorf("PX3008 fix (v.empty()) missing in the multi-check run:\n%s", got)
+	}
+}
+
 // hasFixCase is one HasFix:true built-in fixture: src triggers check id, and
 // after `perfscanxx -fix` want must appear and unwant must be gone (either "" to
 // skip that assertion).
