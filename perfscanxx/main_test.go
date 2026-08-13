@@ -391,6 +391,12 @@ func TestExpandInputs(t *testing.T) {
 		{"subtree pattern", []string{"./src/..."}, "", []string{"src/a.cpp", "src/sub/b.cpp"}},
 		{"a directory arg", []string{"other"}, "", []string{"other/c.cpp"}},
 		{"a concrete file with -p", []string{"src/a.cpp"}, "build", []string{"src/a.cpp"}},
+		// A file named BOTH explicitly and via an overlapping pattern must appear
+		// exactly once — the set-dedup contract. Without it a.cpp would be scanned
+		// twice (double findings, double fix passes).
+		{"concrete file overlapping a pattern dedups", []string{"./src/...", "src/a.cpp"}, "", []string{"src/a.cpp", "src/sub/b.cpp"}},
+		// Two overlapping patterns likewise collapse to the union, no duplicates.
+		{"overlapping patterns dedup to the union", []string{"./...", "./src/..."}, "", []string{"other/c.cpp", "src/a.cpp", "src/sub/b.cpp"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
