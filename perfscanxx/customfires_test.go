@@ -103,3 +103,80 @@ func TestCustomChecksFireOnTargetPattern(t *testing.T) {
 		}
 	}
 }
+
+// px2101LoopKindsSrc grows a vector via push_back in a RANGE-FOR and in a WHILE
+// loop — NOT the counted `for` that TestCustomChecksFireOnTargetPattern uses.
+// PX2101's matcher was once forStmt()-only and MISSED range-for (a false
+// negative fixed by broadening to anyOf(forStmt, cxxForRangeStmt, whileStmt,
+// doStmt)); leveldb corpus validation showed it firing across loop kinds. This
+// pins that breadth so a regression to a narrower matcher is caught.
+const px2101LoopKindsSrc = `#include <vector>
+void rangeFor(const std::vector<int>& in) {
+  std::vector<int> out;
+  for (int x : in) {        // cxxForRangeStmt
+    out.push_back(x);       // PX2101
+  }
+  (void)out;
+}
+void whileLoop(int n) {
+  std::vector<int> out;
+  int i = 0;
+  while (i < n) {           // whileStmt
+    out.push_back(i);       // PX2101
+    ++i;
+  }
+  (void)out;
+}
+`
+
+// TestPX2101FiresAcrossLoopKinds pins that the reserve-before-loop custom check
+// fires on a range-for AND a while loop, not just a counted for. It expects at
+// least two PX2101 diagnostics (one per loop). Guards the loop-kind breadth of
+// the query matcher (anyOf(forStmt, cxxForRangeStmt, whileStmt, doStmt)).
+func TestPX2101FiresAcrossLoopKinds(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	e, ok := catalog.ByID("PX2101")
+	if !ok || !e.Custom {
+		t.Fatal("PX2101 missing or not a custom check")
+	}
+	cfg := catalog.ClangTidyConfig([]catalog.Entry{e})
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".clang-tidy")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "loops.cpp")
+	if err := os.WriteFile(src, []byte(px2101LoopKindsSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--experimental-custom-checks", "--config-file=" + cfgPath, "--", "-std=c++17"}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+
+	if strings.Contains(output, "Unknown command line argument") && strings.Contains(output, "experimental-custom-checks") {
+		t.Skip("clang-tidy is too old for --experimental-custom-checks; skipping")
+	}
+	if strings.Contains(output, "[clang-tidy-config]") {
+		t.Fatalf("clang-tidy rejected the PX2101 query:\n%s", output)
+	}
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture headers; skipping:\n%s", output)
+	}
+
+	tag := "[" + e.TidyName + "]"
+	if n := strings.Count(output, tag); n < 2 {
+		t.Errorf("PX2101 fired %d time(s) on a range-for + while fixture, want >= 2 (loop-kind breadth regressed?):\n%s", n, output)
+	}
+}
