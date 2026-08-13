@@ -195,7 +195,16 @@ func ps2132HoistFix(pass *analysis.Pass, stack []ast.Node, inner *ast.CallExpr, 
 	if fn.Doc != nil {
 		insertPos = fn.Doc.Pos()
 	}
-	binding := fmt.Sprintf("var %s = strings.NewReplacer(%s)\n\n", varName, strings.Join(parts, ", "))
+	// Reuse the SOURCE qualifier (strings, or its import alias), not a hardcoded
+	// "strings": on an aliased import (import str "strings") the name "strings"
+	// is not bound, so a hardcoded qualifier hoists to uncompilable code. The
+	// caller validated inner.Fun is a stdlib-strings selector, so this holds.
+	qualifier, methodName := "strings", "NewReplacer"
+	if sel, ok := inner.Fun.(*ast.SelectorExpr); ok {
+		qualifier = exprTextRendered(sel.X)
+		methodName = sel.Sel.Name
+	}
+	binding := fmt.Sprintf("var %s = %s.%s(%s)\n\n", varName, qualifier, methodName, strings.Join(parts, ", "))
 	return analysis.SuggestedFix{
 		Message: "hoist strings.NewReplacer to a package-level var",
 		TextEdits: []analysis.TextEdit{
