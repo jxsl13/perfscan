@@ -60,6 +60,11 @@ func TestHasFixChecksActuallyApply(t *testing.T) {
 		{"PX3014", "#include <string>\nbool f(const std::string& a, const std::string& b){ return a.compare(b) == 0; }\n", "a == b", ".compare("},
 		{"PX3018", "#include <string>\nvoid f(){ std::string s = \"\"; (void)s; }\n", "", "= \"\""},
 		{"PX2005", "#include <memory>\nvoid f(){ std::unique_ptr<int> p(new int(5)); (void)p; }\n", "make_unique", "new int"},
+		{"PX3001", "#include <utility>\nstruct T{}; void sink(T); void f(){ const T t; sink(std::move(t)); }\n", "", "std::move"},
+		{"PX3002", "#include <string>\nstd::string::size_type f(const std::string& s){ return s.find(\"x\"); }\n", "find('x')", "find(\"x\")"},
+		{"PX3010", "#include <set>\nbool f(const std::set<int>& s, int k){ return s.find(k) != s.end(); }\n", ".contains(", "!= s.end()"},
+		{"PX3019", "#include <string>\nbool f(const std::string& s, const std::string& pre){ return s.substr(0, pre.size()) == pre; }\n", "starts_with", ".substr("},
+		{"PX3023", "#include <vector>\nvoid f(std::vector<int>& v){ std::vector<int>(v).swap(v); }\n", "shrink_to_fit", ".swap("},
 	}
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
