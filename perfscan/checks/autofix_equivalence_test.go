@@ -85,6 +85,45 @@ func TestEquiv_FieldsSeq(t *testing.T) {
 	}
 }
 
+// PS2112: append(append([]T(nil), a...), b...) -> slices.Concat(a, b). Concat
+// must yield exactly the chained-append result INCLUDING nil-ness on the edges.
+// The subtle part: slices.Concat is nil-PRESERVING for all-empty inputs (it does
+// Grow(nil, 0), which returns nil) — UNLIKE slices.Clone, which returns a non-nil
+// empty. Since the chained append onto []T(nil) also yields nil when everything
+// is empty, the two agree; this pins that agreement so a future change to Grow's
+// zero behavior (or Concat's) would fail rather than silently ship a nil/non-nil
+// divergence.
+func TestEquiv_Concat(t *testing.T) {
+	var nilS []int
+	empt := []int{}
+	full := []int{1, 2, 3}
+	cases := [][2][]int{
+		{nilS, nilS}, // all-nil -> both nil
+		{empt, empt}, // all-empty non-nil -> both STILL nil (Grow(nil,0))
+		{nilS, empt}, // mixed empty -> nil
+		{full, nilS}, // one side empty
+		{nilS, full}, // other side empty
+		{full, full}, // both non-empty
+		{empt, full}, // empty + non-empty
+	}
+	for _, c := range cases {
+		a, b := c[0], c[1]
+		got := append(append([]int(nil), a...), b...)
+		want := slices.Concat(a, b)
+		if (got == nil) != (want == nil) || !slices.Equal(got, want) {
+			t.Errorf("append(append([]int(nil), %v...), %v...)=%v (nil=%v) != slices.Concat=%v (nil=%v)",
+				a, b, got, got == nil, want, want == nil)
+		}
+	}
+	// bytes form (PS2112 handles any element type): all-empty stays nil, too.
+	if gb, wb := append(append([]byte(nil), []byte(nil)...), []byte{}...), slices.Concat([]byte(nil), []byte{}); (gb == nil) != (wb == nil) {
+		t.Errorf("bytes all-empty: chained nil=%v != slices.Concat nil=%v", gb == nil, wb == nil)
+	}
+	if gb, wb := append(append([]byte(nil), []byte("x")...), []byte("yz")...), slices.Concat([]byte("x"), []byte("yz")); !bytes.Equal(gb, wb) {
+		t.Errorf("bytes non-empty: chained append != slices.Concat")
+	}
+}
+
 // PS3104: sort.Ints/sort.Strings -> slices.Sort. Both must produce the identical
 // ordering (they share pdqsort since go1.21); pinned across random + tie-heavy
 // inputs so a divergence would be caught.
