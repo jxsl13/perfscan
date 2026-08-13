@@ -984,3 +984,40 @@ func TestFlagValidationErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestExplainShowsCaveat pins the end-to-end -explain caveat contract across the
+// WHOLE catalog: a check that carries a Caveat (PX3004 noexcept-move, PX3007
+// pass-by-value, PX3015 member-initializer — all of which fire heavily on real
+// class-heavy code, e.g. googletest) must print a "⚠ caveat:" line containing
+// its caveat text, and a check WITHOUT a caveat must not. TestCaveatsAreWell-
+// Formed checks the catalog struct; this checks the user-facing CLI output a
+// reviewer actually sees before -fix.
+func TestExplainShowsCaveat(t *testing.T) {
+	sawCaveat := false
+	for _, e := range catalog.All() {
+		out, _, code := runCLI("-explain", e.ID)
+		if code != 0 {
+			t.Errorf("-explain %s exit = %d", e.ID, code)
+			continue
+		}
+		if e.Caveat != "" {
+			sawCaveat = true
+			if !strings.Contains(out, "⚠ caveat:") {
+				t.Errorf("-explain %s has a Caveat but no '⚠ caveat:' line:\n%s", e.ID, out)
+			}
+			// A distinctive slice of the caveat text must be reproduced.
+			head := e.Caveat
+			if len(head) > 24 {
+				head = head[:24]
+			}
+			if !strings.Contains(out, head) {
+				t.Errorf("-explain %s: caveat text %q not reproduced:\n%s", e.ID, head, out)
+			}
+		} else if strings.Contains(out, "⚠ caveat:") {
+			t.Errorf("-explain %s has no Caveat but printed a '⚠ caveat:' line:\n%s", e.ID, out)
+		}
+	}
+	if !sawCaveat {
+		t.Fatal("no caveat'd checks found — the caveat mechanism appears unwired")
+	}
+}
