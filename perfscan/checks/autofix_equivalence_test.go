@@ -1828,3 +1828,31 @@ func TestEquiv_PS2128BuilderAccumulator(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS2103SprintfSpliceToConcat pins the property PS2103 relies on:
+// rewriting fmt.Sprintf with a format of only literal text and %s/%v verbs over
+// STRING args into plain `+` concatenation is byte-identical. The critical
+// safety point is that %s/%v splice each string arg VERBATIM — an arg that
+// itself contains '%', "%s", or "%d" is NOT re-interpreted as a verb (fmt only
+// parses the FORMAT literal), exactly as concatenation splices it verbatim.
+// Escape sequences in the format (\t, \n) are literal bytes in both. Mirrors the
+// three fixed golden shapes; args include %-laden, tab/newline, unicode, empty.
+func TestEquiv_PS2103SprintfSpliceToConcat(t *testing.T) {
+	vals := []string{"", "x", "100%", "%s", "%d", "%!v(int=3)", "a\tb", "line\n", "日本語", ":", "="}
+	for _, a := range vals {
+		for _, b := range vals {
+			// "%s:%s" -> a+":"+b
+			if got, want := fmt.Sprintf("%s:%s", a, b), a+":"+b; got != want {
+				t.Errorf("%%s:%%s (a=%q b=%q): sprintf=%q concat=%q", a, b, got, want)
+			}
+			// "%s\t%s!" -> a+"\t"+b+"!"
+			if got, want := fmt.Sprintf("%s\t%s!", a, b), a+"\t"+b+"!"; got != want {
+				t.Errorf("%%s\\t%%s! (a=%q b=%q): sprintf=%q concat=%q", a, b, got, want)
+			}
+		}
+		// "name=%v" -> "name="+a  (%v over a string == the string, no quoting)
+		if got, want := fmt.Sprintf("name=%v", a), "name="+a; got != want {
+			t.Errorf("name=%%v (a=%q): sprintf=%q concat=%q", a, got, want)
+		}
+	}
+}
