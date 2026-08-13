@@ -523,6 +523,54 @@ func TestDiffRespectsLevelGating(t *testing.T) {
 	}
 }
 
+// TestFixOnAdvisoryOnlyFindingsIsClean pins the -fix path when a TU produces
+// findings but NONE carry a fix-it (every finding is advisory, e.g. an over-wide
+// enum -> PX3022, which reports but ships no rewrite). perfscanxx must not be
+// silent or error: it prints "no reported finding carries a fix-it", leaves the
+// file byte-for-byte unchanged, and exits 0 (the -fix run completed with nothing
+// to apply — reporting-mode gating is a separate, non-fix run). This user-facing
+// message and behavior had no test. Skipped when clang-tidy is absent.
+func TestFixOnAdvisoryOnlyFindingsIsClean(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	// An enum whose fixed base type is wider than its value set needs triggers
+	// PX3022 (advisory, L3) and nothing fixable.
+	const src = "enum class E : long long { A = 1, B = 2 };\n" +
+		"E use() { return E::A; }\n"
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "m.cpp")
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile, ok := cppCompileCmdForTest("m.cpp")
+	if !ok {
+		t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runCLI("-tidy", bin, "-fix", "-p", dir, cpp)
+	got, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != src {
+		if strings.Contains(stderr, "fatal error") || strings.Contains(stderr, "file not found") {
+			t.Skipf("toolchain could not parse the fixture; skipping. stderr:\n%s", stderr)
+		}
+		t.Errorf("-fix must not modify a TU whose findings carry no fix-it:\n%s", got)
+	}
+	if !strings.Contains(stderr, "no reported finding carries a fix-it") {
+		t.Errorf("expected the 'no fix-it' -fix summary on advisory-only findings; stderr:\n%s", stderr)
+	}
+	if code != 0 {
+		t.Errorf("-fix with only advisory findings: exit = %d, want 0 (the fix run completed with nothing to apply)", code)
+	}
+}
+
 // hasFixCase is one HasFix:true built-in fixture: src triggers check id, and
 // after `perfscanxx -fix` want must appear and unwant must be gone (either "" to
 // skip that assertion).
