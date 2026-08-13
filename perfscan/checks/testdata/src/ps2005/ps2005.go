@@ -60,6 +60,31 @@ func variantIndex(pats, lines []string) int {
 	return n
 }
 
+func invalidPattern(lines []string) int {
+	n := 0
+	for _, s := range lines {
+		// Invalid pattern: MustCompile panics whenever it runs. Hoisting would
+		// move the panic before the loop (and introduce it for empty lines).
+		// Advisory only — no fix.
+		if regexp.MustCompile("(").MatchString(s) { // want `regexp\.MustCompile inside a loop recompiles an invariant pattern every iteration; hoist it out of the loop`
+			n++
+		}
+	}
+	return n
+}
+
+func invalidPatternPOSIX(lines []string) int {
+	n := 0
+	for _, s := range lines {
+		// Invalid POSIX pattern: MustCompilePOSIX panics whenever it runs.
+		// Advisory only — no fix.
+		if regexp.MustCompilePOSIX("(").MatchString(s) { // want `regexp\.MustCompilePOSIX inside a loop recompiles an invariant pattern every iteration; hoist it out of the loop`
+			n++
+		}
+	}
+	return n
+}
+
 func build() string { return "x" }
 
 func invariantVar(lines []string) int {
