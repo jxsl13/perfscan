@@ -58,7 +58,7 @@ checks' fixes.
 | [PS2129](PS2129.md) | alloc | L1 | yes | fmt.Fprintf(w, "%s", s) on a plain string pays fmt's whole machinery; io.WriteString(w, s) writes the bytes directly |
 | [PS2130](PS2130.md) | alloc | L1 | yes | fmt.Sprintf("%s", s) on a plain string is the identity paid at fmt prices; the expression is just s |
 | [PS2131](PS2131.md) | alloc | L2 |  | regexp.MatchString/Match/MatchReader recompiles the pattern on every call |
-| [PS2132](PS2132.md) | alloc | L2 |  | strings.NewReplacer with constant pairs built and discarded on every call |
+| [PS2132](PS2132.md) | alloc | L2 | yes | strings.NewReplacer with constant pairs built and discarded on every call |
 | [PS2133](PS2133.md) | alloc | L2 |  | time.LoadLocation with a constant zone name re-reads the tzdata on every call |
 | [PS2134](PS2134.md) | alloc | L2 |  | text/template or html/template New().Parse() of a constant template built inline every call |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
