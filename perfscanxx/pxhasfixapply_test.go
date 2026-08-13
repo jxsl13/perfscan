@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -136,6 +137,52 @@ func TestPX3026DoesNotFireOnNonTrivialMember(t *testing.T) {
 	}
 	if strings.Contains(out, "PX3026") {
 		t.Errorf("PX3026 reported on a non-trivially-destructible type; it must stay silent:\n%s", out)
+	}
+}
+
+// TestFixWithArgumentsFormCompdb pins the FULL pipeline against a compilation
+// database that uses the "arguments" ARRAY form instead of the "command" STRING
+// form. The JSON Compilation Database spec allows either and real generators
+// (Bazel; CMake with some generators) emit "arguments" — every other test here
+// uses "command", so this is the untested real-world variant. perfscanxx
+// enumerates the TU from directory+file (form-agnostic) and hands it to
+// clang-tidy, which reads the arguments to compile; the PX3013 fix must apply
+// end-to-end exactly as it does for the command form. Headerless TU, so no
+// sysroot is needed. Skipped when clang-tidy is unavailable.
+func TestFixWithArgumentsFormCompdb(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	const before = "struct S {\n  ~S() {}\n};\n"
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "t.cpp")
+	if err := os.WriteFile(cpp, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The "arguments" array form (json.Marshal keeps each path a valid literal).
+	fileJSON, _ := json.Marshal(cpp)
+	dirJSON, _ := json.Marshal(dir)
+	cc := `[{"directory":` + string(dirJSON) + `,"file":` + string(fileJSON) +
+		`,"arguments":["clang++","-std=c++17","-c","t.cpp"]}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, _ := runCLI("-tidy", bin, "-fix", "-checks", "PX3013", "-p", dir, cpp)
+	gotB, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(gotB)
+	if got == before {
+		if strings.Contains(stderr, "file not found") || strings.Contains(stderr, "fatal error") {
+			t.Skipf("toolchain could not parse the fixture; skipping. stderr:\n%s", stderr)
+		}
+		t.Fatalf("PX3013 did not apply with an arguments-form compdb — the array form is not being honored:\n%s", got)
+	}
+	if !strings.Contains(got, "= default") {
+		t.Errorf("expected the PX3013 fix (`= default`) with an arguments-form compdb:\n%s", got)
 	}
 }
 
