@@ -228,6 +228,35 @@ func jsonStr(s string) string {
 	return string(b)
 }
 
+// TestLoadNormalizesDotDotInFilePath pins that a translation-unit path with a
+// ".." segment is normalized (cleaned) when resolved. An OUT-OF-TREE cmake build
+// records each TU relative to the build dir, so a source in a sibling tree comes
+// out as "../src/a.cpp"; without cleaning, the resolved path would be
+// "<build>/../src/a.cpp", which does not string-match a pattern like ./src/... —
+// the TU would be silently skipped. Load must resolve it to the clean
+// "<root>/src/a.cpp".
+func TestLoadNormalizesDotDotInFilePath(t *testing.T) {
+	root := t.TempDir()
+	build := filepath.Join(root, "build")
+	if err := os.MkdirAll(build, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db := writeDB(t, build, []map[string]string{
+		{"directory": build, "file": "../src/a.cpp"}, // out-of-tree: TU is up a level
+	})
+	tus, err := Load(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, "src", "a.cpp")
+	if len(tus) != 1 || tus[0] != want {
+		t.Errorf("Load = %v, want [%s] (the '..' must be cleaned so out-of-tree cmake TUs match path patterns)", tus, want)
+	}
+	if len(tus) == 1 && strings.Contains(tus[0], "..") {
+		t.Errorf("resolved TU path still contains '..': %s", tus[0])
+	}
+}
+
 // TestPlural pins the singular/plural suffix used in the "loaded N director(y/ies)"
 // message so a count of 1 reads correctly and any other count pluralizes.
 func TestPlural(t *testing.T) {
