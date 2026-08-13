@@ -244,6 +244,57 @@ func TestPX3026FiresWithDeletedCopyOps(t *testing.T) {
 	}
 }
 
+// TestDefaultFixAppliesWholeCatalog pins the EVERYDAY user path: `perfscanxx
+// -fix` with NO -checks restriction. That resolves the enabled set from the whole
+// catalog (all built-in + custom checks, via TidyChecksArg) rather than an
+// explicit id list, then applies every fixable check that fired — a different
+// selection branch from the -checks tests here (including
+// TestFixAppliesMultipleChecksInOneRun, which pins the same two fixes under an
+// explicit -checks). On the same PX3013 + PX3008 TU, the default run must apply
+// both. Skipped when clang-tidy is absent. Validated broadly by the leveldb and
+// Catch2 adversarial audits (a bare -fix over 39 / 107 TUs recompiled clean).
+func TestDefaultFixAppliesWholeCatalog(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	const src = "#include <vector>\n" +
+		"struct S { ~S() {} };\n" +
+		"bool isEmpty(const std::vector<int>& v) { return v.size() == 0; }\n"
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "m.cpp")
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile, ok := cppCompileCmdForTest("m.cpp")
+	if !ok {
+		t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No -checks: the whole catalog is enabled.
+	_, stderr, _ := runCLI("-tidy", bin, "-fix", "-p", dir, cpp)
+	gotB, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(gotB)
+	if got == src {
+		if strings.Contains(stderr, "file not found") || strings.Contains(stderr, "fatal error") {
+			t.Skipf("toolchain could not parse the fixture; skipping. stderr:\n%s", stderr)
+		}
+		t.Fatalf("default -fix (whole catalog) applied nothing:\n%s", got)
+	}
+	if !strings.Contains(got, "= default") {
+		t.Errorf("default -fix missing the PX3013 rewrite (~S() = default):\n%s", got)
+	}
+	if !strings.Contains(got, ".empty()") || strings.Contains(got, "size() == 0") {
+		t.Errorf("default -fix missing the PX3008 rewrite (v.empty()):\n%s", got)
+	}
+}
+
 // TestFixAppliesMultipleChecksInOneRun pins the multi-check compose path: a
 // single -fix run over one TU that has findings from TWO different fixable checks
 // must apply BOTH. This is the everyday case (a broad -fix applies every fixable
