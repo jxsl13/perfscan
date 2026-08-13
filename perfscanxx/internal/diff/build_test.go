@@ -198,3 +198,60 @@ func TestBuildRestoresOnPanic(t *testing.T) {
 		t.Errorf("file must be restored even on panic: on disk %q, want %q", got, orig)
 	}
 }
+
+// TestBuildSnapshotReadError pins that a diagnostic pointing at a file that
+// cannot be read surfaces a snapshot error (rather than silently proceeding to
+// -fix an unsnapshotted, hence unrestorable, file).
+func TestBuildSnapshotReadError(t *testing.T) {
+	const missing = "/abs/vanished.cpp"
+	fs := newMemFS(map[string]string{}) // the target is NOT present
+	ef := &fixes.ExportFile{
+		MainSourceFile: missing,
+		Diagnostics: []fixes.Diagnostic{{
+			DiagnosticName: "performance-for-range-copy",
+			DiagnosticMessage: fixes.DiagnosticMessage{
+				FilePath:     missing,
+				Replacements: []fixes.Replacement{{FilePath: missing, Offset: 0, Length: 1, ReplacementText: "x"}},
+			},
+		}},
+	}
+	_, _, err := Build(ef, catalog.LevelAggressive, func() error { return nil }, fs)
+	if err == nil || !strings.Contains(err.Error(), "snapshot") {
+		t.Fatalf("Build with an unreadable target = %v, want a snapshot error", err)
+	}
+}
+
+// failWriteFS reads like memFS but fails WriteFile for one path, to exercise the
+// restore-write error path (a failed restore must be surfaced, not swallowed —
+// otherwise -diff could leave the tree modified).
+type failWriteFS struct {
+	*memFS
+	failPath string
+}
+
+func (f *failWriteFS) WriteFile(path string, data []byte) error {
+	if path == f.failPath {
+		return errors.New("disk full")
+	}
+	return f.memFS.WriteFile(path, data)
+}
+
+func TestBuildRestoreWriteError(t *testing.T) {
+	const path = "/abs/main.cpp"
+	fs := &failWriteFS{memFS: newMemFS(map[string]string{path: "orig\n"}), failPath: path}
+	ef := &fixes.ExportFile{
+		MainSourceFile: path,
+		Diagnostics: []fixes.Diagnostic{{
+			DiagnosticName: "performance-for-range-copy",
+			DiagnosticMessage: fixes.DiagnosticMessage{
+				FilePath:     path,
+				Replacements: []fixes.Replacement{{FilePath: path, Offset: 0, Length: 4, ReplacementText: "NEW"}},
+			},
+		}},
+	}
+	// runFix "modifies" the file; the deferred restore then fails on WriteFile.
+	_, _, err := Build(ef, catalog.LevelAggressive, func() error { return nil }, fs)
+	if err == nil || !strings.Contains(err.Error(), "restore") {
+		t.Fatalf("Build with a failing restore = %v, want a restore error", err)
+	}
+}
