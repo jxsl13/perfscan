@@ -70,6 +70,26 @@ func TestFindMissing(t *testing.T) {
 	}
 }
 
+// TestFindWalkNotFound covers the auto-discovery walk that reaches the
+// filesystem root without finding a build database (buildDir empty): the error
+// must name the searched build subdirs so the user knows to pass -p or run
+// cmake. A nested start dir with no db in it or any ancestor exercises the
+// walk-to-root termination branch (distinct from the -p error TestFindMissing
+// hits).
+func TestFindWalkNotFound(t *testing.T) {
+	start := filepath.Join(t.TempDir(), "a", "b")
+	if err := os.MkdirAll(start, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Find("", start)
+	if err == nil {
+		t.Fatal("expected a not-found error when no compile_commands.json exists up to root")
+	}
+	if !strings.Contains(err.Error(), "no "+Name+" found") {
+		t.Errorf("error = %q, want it to mention no %s found", err, Name)
+	}
+}
+
 // TestLoadParseErrors pins the actionable diagnosis for a malformed database:
 // each case must name the likely cause and how to fix it, and must never leak
 // the internal Go type name from encoding/json.
