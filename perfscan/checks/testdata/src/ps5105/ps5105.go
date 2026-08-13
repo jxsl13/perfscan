@@ -55,6 +55,14 @@ func atOne(s string) bool {
 	return strings.Index(s, "x") == 1
 }
 
+// The literal-on-LEFT twin of atOne: `1 == Index` must also stay silent. atOne
+// exercises the zero-literal reject on the RIGHT operand; ps5105Match checks the
+// OTHER operand when the call is on the right, so this pins the left-operand
+// reject — a distinct branch a right-only negative never reaches.
+func atOneReversed(s string) bool {
+	return 1 == strings.Index(s, "x")
+}
+
 // Membership and position questions are a different rewrite — out of scope.
 func membership(s string) bool {
 	return strings.Index(s, "x") >= 0
