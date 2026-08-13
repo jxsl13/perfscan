@@ -25,4 +25,14 @@ func TestClangTidyConfigNoCustom(t *testing.T) {
 	if AnyCustom(sel) {
 		t.Fatal("AnyCustom = true for a builtin-only selection")
 	}
+	// A builtin-only selection must emit the Checks line and NOTHING else — no
+	// CustomChecks section (the early-return path in ClangTidyConfig). Emitting
+	// an empty CustomChecks would make clang-tidy reject the config.
+	cfg := ClangTidyConfig(sel)
+	if !strings.HasPrefix(cfg, "Checks: '") {
+		t.Errorf("config should start with the Checks line, got:\n%s", cfg)
+	}
+	if strings.Contains(cfg, "CustomChecks:") {
+		t.Errorf("builtin-only selection must not emit a CustomChecks section:\n%s", cfg)
+	}
 }
