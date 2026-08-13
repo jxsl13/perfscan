@@ -220,6 +220,54 @@ func TestLineColAndText(t *testing.T) {
 	}
 }
 
+// TestSARIFEmptyFindingsIsValid pins the clean-scan SARIF: with NO findings the
+// output must still be a well-formed SARIF 2.1.0 log — one run whose rules and
+// results are EMPTY ARRAYS (not JSON null). GitHub Code Scanning uploads a SARIF
+// file on every run, including clean ones; if results serialized as `null` (a nil
+// slice) instead of `[]`, the upload action rejects the file and the whole scan
+// job fails. This is the zero-finding counterpart to TestSARIFOutputIsStructurally
+// Valid (which uses three findings) and is a pure unit test — no clang-tidy.
+func TestSARIFEmptyFindingsIsValid(t *testing.T) {
+	var buf bytes.Buffer
+	if err := SARIF(&buf, nil); err != nil {
+		t.Fatalf("SARIF(nil): %v", err)
+	}
+	var log struct {
+		Version string `json:"version"`
+		Runs    []struct {
+			Tool struct {
+				Driver struct {
+					Rules []json.RawMessage `json:"rules"`
+				} `json:"driver"`
+			} `json:"tool"`
+			Results []json.RawMessage `json:"results"`
+		} `json:"runs"`
+	}
+	raw := buf.Bytes()
+	if err := json.Unmarshal(raw, &log); err != nil {
+		t.Fatalf("clean-scan SARIF is not valid JSON: %v\n%s", err, raw)
+	}
+	if log.Version != "2.1.0" {
+		t.Errorf("SARIF version = %q, want 2.1.0", log.Version)
+	}
+	if len(log.Runs) != 1 {
+		t.Fatalf("runs = %d, want exactly 1 even with no findings", len(log.Runs))
+	}
+	if log.Runs[0].Results == nil {
+		t.Errorf("results must be an empty array, not null (GitHub rejects null):\n%s", raw)
+	}
+	if len(log.Runs[0].Results) != 0 {
+		t.Errorf("results = %d, want 0", len(log.Runs[0].Results))
+	}
+	if log.Runs[0].Tool.Driver.Rules == nil {
+		t.Errorf("rules must be an empty array, not null:\n%s", raw)
+	}
+	// Belt-and-suspenders: the raw bytes must contain the empty arrays, not null.
+	if !bytes.Contains(raw, []byte(`"results": []`)) {
+		t.Errorf("expected `\"results\": []` literally in the clean-scan SARIF:\n%s", raw)
+	}
+}
+
 func TestJSONAndSARIF(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("SARIF/JSON fixtures use POSIX absolute paths; path handling is filepath-based, covered on unix")
