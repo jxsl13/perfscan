@@ -58,4 +58,31 @@ func mapHoist(lines []string) {
 	}
 }
 
+// arg reassigned via += -> identWrittenIn catches the ADD_ASSIGN write, so the
+// per-iteration result differs and the transform stays advisory.
+func argAddAssign(names []string, s string) {
+	for range names {
+		emit(strings.ReplaceAll(s, "-", "_")) // want `strings\.ReplaceAll in a loop allocates a fresh string per iteration; hoist the transform, build a strings\.Replacer once, or reuse a byte buffer`
+		s += "x"
+	}
+}
+
+// arg reassigned inside a closure -> identWrittenIn descends into the FuncLit
+// and declines the hoist.
+func argClosureMut(names []string, s string) {
+	for range names {
+		emit(strings.ReplaceAll(s, "-", "_")) // want `strings\.ReplaceAll in a loop allocates a fresh string per iteration; hoist the transform, build a strings\.Replacer once, or reuse a byte buffer`
+		func() { s = "y" }()
+	}
+}
+
+// an index-expr arg is not a plain identifier, so it never reaches the fixable
+// shape (only basic literals and plain, unwritten idents hoist).
+func argIndexExpr(names []string, m map[int]string) {
+	for range names {
+		emit(strings.ReplaceAll(m[0], "-", "_")) // want `strings\.ReplaceAll in a loop allocates a fresh string per iteration; hoist the transform, build a strings\.Replacer once, or reuse a byte buffer`
+		m[0] = "z"
+	}
+}
+
 func swap(r rune) rune { return r }
