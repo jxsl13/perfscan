@@ -49,6 +49,20 @@ loop body are kept verbatim. The Seq functions live in the very package
 already imported, so no import editing is needed and the import can
 never be orphaned.
 
+The fix is offered for the strings functions ONLY; the bytes twins are
+reported advisory (no fix). Strings are immutable, so the eager and
+lazy forms cannot be told apart. Byte slices can: bytes.Split pins
+every fragment boundary BEFORE the body runs, while bytes.SplitSeq
+re-runs Index lazily between yields — a body that writes into the
+ranged slice's backing array changes the number and content of later
+fragments under the Seq form only. And bytes.Split's FINAL fragment is
+the raw tail (its capacity reaches the source's spare capacity) while
+SplitSeq cap-clamps every fragment — cap(v) diverges and an append to
+the last piece writes into the source buffer under the eager form but
+allocates under the lazy one. No body analysis can rule those out
+soundly (any call may mutate the slice through an alias), so the bytes
+report stays advisory and the human confirms the body is inert.
+
 The report only fires when the file's effective language version is at
 least go1.24 — below that the suggested API does not exist and the
 advice would be moot.`,
@@ -141,6 +155,24 @@ func runPS2119(pass *analysis.Pass) (any, error) {
 				Message: fmt.Sprintf(
 					"ranging directly over %s allocates the whole result slice per loop entry; %s.%s yields the same pieces in the same order with no slice allocation (go1.24)",
 					funText, pkgPath, m.seq),
+			}
+			if pkgPath == "bytes" {
+				// ADVISORY ONLY for bytes: the rewrite is NOT bit-identical
+				// against a mutable source. bytes.Split pins all fragment
+				// boundaries before the body runs; bytes.SplitSeq re-runs
+				// Index lazily, so a body write into the ranged slice's
+				// backing array changes later fragments under the Seq form
+				// only. And genSplit's final fragment is the raw tail
+				// (unclamped cap) while SplitSeq clamps every fragment:
+				// cap(v) diverges and append on the last piece writes into
+				// the source's spare capacity vs allocating. Any call in the
+				// body may mutate the slice through an alias, so no sound
+				// body guard exists — report, never fix. Pinned by
+				// TestEquiv_SplitSeq_BytesAliasingDivergence and the
+				// bytesMutatedInBody/bytesCapObserved fixtures.
+				diag.Message += "; fix withheld: not bit-identical if the loop body mutates the byte slice or appends to/measures the final piece"
+				pass.Report(diag)
+				return true
 			}
 			// Two edits: rename only the selector (args stay verbatim) and
 			// drop a now-redundant blank key. A comment inside the deleted

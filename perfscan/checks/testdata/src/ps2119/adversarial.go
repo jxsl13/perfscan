@@ -1,0 +1,161 @@
+package ps2119
+
+import (
+	"bytes"
+	str "strings"
+	"strings"
+)
+
+// --- adversarial shapes: single-var index trap ---
+
+// The single range var over a SLICE binds the INDEX (an int), not the
+// value. Rewriting to SplitSeq would rebind v to the yielded string —
+// a type change and a behavior change. Must stay silent.
+func indexTrap(s string) int {
+	last := -1
+	for v := range strings.Split(s, ",") {
+		last = v
+	}
+	return last
+}
+
+// Named key with blank value still USES the index. Must stay silent.
+func indexBlankValue(s string) int {
+	n := 0
+	for i, _ := range strings.Split(s, ",") {
+		n += i
+	}
+	return n
+}
+
+// --- adversarial shapes: indirect callees ---
+
+// A func value holding strings.Split is not a direct selector call;
+// the check requires the selector form and stays silent.
+func funcValue(s string) {
+	split := strings.Split
+	for _, p := range split(s, ",") {
+		process(p)
+	}
+}
+
+// A parenthesized call is not rng.X.(*ast.CallExpr); conservative miss,
+// never a wrong fix.
+func parenWrapped(s string) {
+	for _, p := range (strings.Split(s, ",")) {
+		process(p)
+	}
+}
+
+// --- positives that must keep compiling after the fix ---
+
+// Aliased import: only the selector is renamed, the alias survives.
+func aliased(s string) {
+	for _, p := range str.Split(s, ",") { // want `ranging directly over str\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		process(p)
+	}
+}
+
+// Nested ranges: both levels fire and both fixes compile.
+func nested(s string) int {
+	n := 0
+	for _, line := range strings.Split(s, "\n") { // want `ranging directly over strings\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		for _, f := range strings.Fields(line) { // want `ranging directly over strings\.Fields allocates the whole result slice per loop entry; strings\.FieldsSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+			n += len(f)
+		}
+	}
+	return n
+}
+
+// Labeled loop with break LABEL: label semantics are identical for the
+// slice range and the iterator range.
+func labeled(s string) int {
+	n := 0
+L:
+	for _, part := range strings.Split(s, ",") { // want `ranging directly over strings\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		for _, r := range part {
+			if r == 'x' {
+				break L
+			}
+			n++
+		}
+	}
+	return n
+}
+
+// Reassigning s in the body is SAFE for strings: both Split and
+// SplitSeq evaluate their arguments once at loop entry and s is
+// immutable (pinned at runtime by TestEquiv_SplitSeq_ArgSnapshot).
+func reassignsInBody(s string) int {
+	n := 0
+	for _, part := range strings.Split(s, ",") { // want `ranging directly over strings\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		s = "mutated"
+		n += len(part)
+	}
+	return len(s) + n
+}
+
+// Assignment form with a non-ident assignable: `_,` is dropped, the
+// map-index target survives verbatim.
+func mapValue(s string, m map[string]string) {
+	for _, m["last"] = range strings.Split(s, ",") { // want `ranging directly over strings\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+	}
+}
+
+// Closure capture and &v: since go1.22 the := range variable is
+// per-iteration for slice ranges, exactly like the iterator form —
+// distinct captures either way.
+func captured(s string) []func() string {
+	var fs []func() string
+	for _, part := range strings.Split(s, ",") { // want `ranging directly over strings\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		fs = append(fs, func() string { return part })
+	}
+	return fs
+}
+
+func addrTaken(s string) []*string {
+	var ps []*string
+	for _, part := range strings.Split(s, ",") { // want `ranging directly over strings\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		ps = append(ps, &part)
+	}
+	return ps
+}
+
+// --- bytes: REPORTED but NEVER fixed (advisory-by-proof) ---
+
+// REGRESSION PIN: the body writes into the ranged slice's backing
+// array. bytes.Split pins all fragment boundaries eagerly and yields
+// ["a" "b" "c"]; bytes.SplitSeq re-runs Index lazily and would yield
+// ["a" "bXc"]. A fix here would change the program's output — PS2119
+// must report advisory only.
+func bytesMutatedInBody(b []byte) []string {
+	var out []string
+	for _, v := range bytes.Split(b, []byte{','}) { // want `ranging directly over bytes\.Split allocates the whole result slice per loop entry; bytes\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\); fix withheld: not bit-identical if the loop body mutates the byte slice or appends to/measures the final piece`
+		out = append(out, string(v))
+		if len(b) > 3 {
+			b[3] = 'X'
+		}
+	}
+	return out
+}
+
+// REGRESSION PIN: cap of the FINAL fragment differs — bytes.Split
+// yields the raw tail (cap reaches the source's spare capacity),
+// bytes.SplitSeq clamps every fragment to its length. cap(v) and
+// append-to-v behavior diverge, so no fix.
+func bytesCapObserved(b []byte) int {
+	total := 0
+	for _, v := range bytes.Split(b, []byte{','}) { // want `ranging directly over bytes\.Split allocates the whole result slice per loop entry; bytes\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\); fix withheld: not bit-identical if the loop body mutates the byte slice or appends to/measures the final piece`
+		total += cap(v)
+	}
+	return total
+}
+
+// SplitAfter shares genSplit's unclamped tail: advisory too.
+func bytesSplitAfterAdvisory(b []byte) int {
+	n := 0
+	for _, v := range bytes.SplitAfter(b, []byte{';'}) { // want `ranging directly over bytes\.SplitAfter allocates the whole result slice per loop entry; bytes\.SplitAfterSeq yields the same pieces in the same order with no slice allocation \(go1\.24\); fix withheld: not bit-identical if the loop body mutates the byte slice or appends to/measures the final piece`
+		n += len(v)
+	}
+	return n
+}
