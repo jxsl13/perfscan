@@ -85,6 +85,7 @@ checks' fixes.
 | [PS5001](PS5001.md) | arith | L3 |  | a divide by a loop-invariant scalar on every element |
 | [PS5002](PS5002.md) | arith | L2 | yes | a nested loop accumulating a full symmetric matrix |
 | [PS5008](PS5008.md) | arith | L1 | yes | math.Sin and math.Cos on the same argument (fusable to math.Sincos) |
+| [PS5009](PS5009.md) | arith | L2 |  | math.Pow with a small constant exponent |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
