@@ -54,6 +54,20 @@ the preview equals `-fix` byte-for-byte and exits 1 if anything would change (a 
 gate / review preview). `-baseline` records the accepted findings of an existing
 codebase so later runs report only regressions.
 
+### Exit codes
+
+For scripting and CI, the process exit code is:
+
+| Code | Meaning |
+|------|---------|
+| `0`  | clean — no findings; or `-fix` completed (fixes applied, or nothing to apply); or `-baseline` suppressed everything |
+| `1`  | findings reported (default mode), `-diff` found pending changes, or new findings appeared past the baseline |
+| `2`  | usage or configuration error — a bad flag, an unknown `-explain` id, no `compile_commands.json`, or no translation units matched |
+
+Branch on `1` (found perf issues / would-change) versus `2` (the run itself
+failed); a bare `-fix` returns `0` even when advisory-only findings remain, since
+its job is to apply fixes, not to gate.
+
 A path arg is a Go-style pattern or directory (`./...`, `./src/game/...`)
 expanded against the compilation database to the translation units under it; no
 args means `./...`. The `compile_commands.json` is found via `-p` or by walking
