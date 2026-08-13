@@ -710,6 +710,48 @@ func TestEquiv_Sprintf2107(t *testing.T) {
 	}
 }
 
+// PS2107 (%g case): fmt.Sprintf("%g", f) -> strconv.FormatFloat(f, 'g', -1, 64)
+// for float64, and -> strconv.FormatFloat(float64(f), 'g', -1, 32) for
+// float32. %g prints the SHORTEST representation that round-trips at the
+// operand's width — exactly FormatFloat's precision -1 with the matching
+// bitSize — including the special values (-0 keeps its sign, NaN, ±Inf).
+// %e/%f are NOT equivalent (they default to 6 digits) and are not rewritten.
+func TestEquiv_PS2107SprintfGFloatToFormatFloat(t *testing.T) {
+	f64s := []float64{
+		0, math.Copysign(0, -1), 1, -1,
+		math.NaN(), math.Inf(1), math.Inf(-1),
+		math.MaxFloat64, math.SmallestNonzeroFloat64,
+		3.14159, 0.1, 2.0 / 3.0, 1e20, 1e-20,
+	}
+	// A few thousand computed values: sign/magnitude sweeps plus a
+	// deterministic pseudo-random walk over interesting exponents.
+	for i := 1; i <= 2000; i++ {
+		v := float64(i) * 1.000123
+		f64s = append(f64s, v, -v, 1/v, v*1e17, v*1e-17, math.Sqrt(v), math.Exp(-v/100))
+	}
+	for _, f := range f64s {
+		if got, want := fmt.Sprintf("%g", f), strconv.FormatFloat(f, 'g', -1, 64); got != want {
+			t.Errorf("fmt.Sprintf(%%g, %v)=%q != strconv.FormatFloat(f, 'g', -1, 64)=%q", f, got, want)
+		}
+	}
+
+	f32s := []float32{
+		0, float32(math.Copysign(0, -1)), 1, -1,
+		float32(math.NaN()), float32(math.Inf(1)), float32(math.Inf(-1)),
+		math.MaxFloat32, math.SmallestNonzeroFloat32,
+		3.14159, 0.1, 2.0 / 3.0, 1e20, 1e-20,
+	}
+	for i := 1; i <= 2000; i++ {
+		v := float32(i) * 1.000123
+		f32s = append(f32s, v, -v, 1/v, v*1e17, v*1e-17)
+	}
+	for _, f := range f32s {
+		if got, want := fmt.Sprintf("%g", f), strconv.FormatFloat(float64(f), 'g', -1, 32); got != want {
+			t.Errorf("fmt.Sprintf(%%g, float32(%v))=%q != strconv.FormatFloat(float64(f), 'g', -1, 32)=%q", f, got, want)
+		}
+	}
+}
+
 // PS3101: `for ... { bytes.Contains(line, []byte(sep)) }` -> hoist
 // `bsep := []byte(sep)` above the loop. The hoist shares ONE []byte buffer
 // across every iteration instead of a fresh copy per iteration, so it is

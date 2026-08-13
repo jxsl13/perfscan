@@ -33,6 +33,8 @@ direct conversion for each such shape:
                         -> strconv.FormatInt/FormatUint (other widths)
   fmt.Sprintf("%t", b)  -> strconv.FormatBool(b)
   fmt.Sprintf("%x", bs) -> hex.EncodeToString(bs)     (bs is []byte)
+  fmt.Sprintf("%g", f)  -> strconv.FormatFloat(f, 'g', -1, 64)          (f is float64)
+                        -> strconv.FormatFloat(float64(f), 'g', -1, 32) (f is float32)
 
 Only formats that are EXACTLY one of these verbs and nothing else are
 reported, with a single non-variadic argument of the matching type.
@@ -41,7 +43,7 @@ belongs to PS2130 — reporting it here too would double-report the call.)
 
 The automatic fix rewrites the call when the rewrite is provably
 bit-identical: the argument's type must be the unnamed predeclared kind
-(int/uint/... , bool, []byte, string) — a named type could implement
+(int/uint/... , bool, []byte, float32/float64) — a named type could implement
 fmt.Formatter and change what fmt prints, so named types keep the plain
 advisory report. The fix adds the strconv or encoding/hex import when the
 file lacks it and is suppressed when the needed package name is shadowed
@@ -154,7 +156,7 @@ type ps2107Case struct {
 	pkgPath  string // its import path
 }
 
-// ps2107Classify matches verb+argument against the four recognized shapes.
+// ps2107Classify matches verb+argument against the recognized shapes.
 // It returns nil when the call is not one of them (wrong verb, wrong
 // argument type). A shape match with a NAMED argument type yields an
 // advisory-only case (repl == ""): a named type may implement
@@ -212,6 +214,37 @@ func ps2107Classify(pass *analysis.Pass, verb string, arg ast.Expr) *ps2107Case 
 		}
 		c.repl = "strconv.FormatBool(" + argText + ")"
 		c.replName = "strconv.FormatBool"
+		c.pkgName, c.pkgPath = "strconv", "strconv"
+		return c
+	case "%g":
+		// Only %g maps onto FormatFloat's shortest form ('g' with precision
+		// -1): %e/%f default to 6 digits, which FormatFloat(-1) does not
+		// reproduce, so they are deliberately NOT recognized here. The
+		// bitSize argument must match the operand's float width, so that the
+		// shortest representation rounds back to the ORIGINAL float32/float64
+		// value — exactly what %g prints (including -0, NaN and the Infs).
+		if !underBasic || under.Info()&types.IsFloat == 0 {
+			return nil
+		}
+		c := &ps2107Case{msg: "fmt.Sprintf of a single %g float value" + boxes + "strconv.FormatFloat converts it directly"}
+		if !tIsBasic {
+			return c
+		}
+		argText, ok := ps2107ExprText(arg)
+		if !ok {
+			return c
+		}
+		switch basic.Kind() {
+		case types.Float64:
+			c.repl = "strconv.FormatFloat(" + argText + ", 'g', -1, 64)"
+		case types.Float32:
+			// FormatFloat takes a float64; the widening float64(f) is
+			// value-preserving and bitSize 32 keeps the float32 rounding.
+			c.repl = "strconv.FormatFloat(float64(" + argText + "), 'g', -1, 32)"
+		default:
+			return c
+		}
+		c.replName = "strconv.FormatFloat"
 		c.pkgName, c.pkgPath = "strconv", "strconv"
 		return c
 	case "%x":
