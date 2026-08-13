@@ -1856,3 +1856,42 @@ func TestEquiv_PS2103SprintfSpliceToConcat(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS2120WriteStringSprintfToFprintf pins that PS2120's rewrite of
+// `w.WriteString(fmt.Sprintf(f, a...))` to `fmt.Fprintf(w, f, a...)` is
+// byte-identical in what it writes AND in its (n, err) return: fmt.Fprintf
+// formats into the same bytes fmt.Sprintf produces and writes them to w, so both
+// the written content and the byte count match, and both surface w's write error
+// identically. Verified over several formats/args by writing each way into two
+// bytes.Buffers and comparing bytes + the returned (n, err). Observed applying
+// ~11x during corpus validation on gohugoio/hugo. The io.StringWriter fast path
+// (WriteString) vs Fprintf's generic path produce the same observable result.
+func TestEquiv_PS2120WriteStringSprintfToFprintf(t *testing.T) {
+	type tc struct {
+		format string
+		args   []any
+	}
+	cases := []tc{
+		{"%d", []any{42}},
+		{"x=%d,%s", []any{-7, "hi"}},
+		{"%s", []any{"100%"}}, // arg-% not re-parsed by either path
+		{"%q %v", []any{"a\tb", 3.5}},
+		{"no verbs here", nil},
+		{"%x", []any{[]byte{0x00, 0xff, 0x10}}},
+		{"日本%d語", []any{9}},
+	}
+	for _, c := range cases {
+		var wA, wB bytes.Buffer
+		nA, errA := wA.WriteString(fmt.Sprintf(c.format, c.args...)) // original
+		nB, errB := fmt.Fprintf(&wB, c.format, c.args...)            // rewritten
+		if wA.String() != wB.String() {
+			t.Errorf("format %q: WriteString wrote %q but Fprintf wrote %q", c.format, wA.String(), wB.String())
+		}
+		if nA != nB {
+			t.Errorf("format %q: byte count differs: WriteString=%d Fprintf=%d", c.format, nA, nB)
+		}
+		if (errA == nil) != (errB == nil) {
+			t.Errorf("format %q: error mismatch: WriteString=%v Fprintf=%v", c.format, errA, errB)
+		}
+	}
+}
