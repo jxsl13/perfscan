@@ -235,6 +235,21 @@ var entries = []Entry{
 		HasFix: true,
 	},
 	{
+		// Advisory (clang-tidy emits no fix-it — Replacements is empty): the loop
+		// variable's type differs from the element type the iterator yields, so
+		// every iteration performs an implicit conversion that materializes a
+		// temporary bound to the reference. The remedy is a judgment call
+		// clang-tidy won't make mechanically — match the element type, use
+		// `const auto&`, or drop the reference to make the per-element copy
+		// explicit — so it stays advisory. A cheap conversion (e.g. int->float on
+		// a hot reduction) can be intentional, so it is L2 (review), never a
+		// default-level auto-fix.
+		ID: "PX3024", TidyName: "performance-implicit-conversion-in-loop",
+		Level: LevelStructured, Category: "copies",
+		Title:  "a range-for loop variable whose type differs from the element type converts (materializing a temporary) every iteration; match the type or use const auto&",
+		HasFix: false,
+	},
+	{
 		// Advisory (clang-tidy emits no fix-it): the corrected std::move can't be
 		// inserted mechanically without knowing the parameter is dead afterwards.
 		// KNOWN false positives: clang-tidy only recognizes std::move(param) /
