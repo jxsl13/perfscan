@@ -27,4 +27,11 @@ func TestDocURL(t *testing.T) {
 			t.Errorf("DocURL(%s) = %q,%v; want %q,%v", tc.id, url, gotOK, tc.wantURL, tc.wantOK)
 		}
 	}
+
+	// Defensive branch: a non-custom entry whose TidyName has no "-" (no
+	// family/name split) yields no URL rather than a malformed one. No real
+	// catalog entry is shaped this way, so it is exercised synthetically.
+	if url, ok := DocURL(Entry{TidyName: "nohyphen"}); ok || url != "" {
+		t.Errorf("DocURL(hyphen-less TidyName) = %q,%v; want \"\",false", url, ok)
+	}
 }
