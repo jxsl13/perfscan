@@ -238,7 +238,7 @@ func ps2112Fix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, operands []
 		// observable — advisory only.
 		return nil
 	}
-	needImport, usable := ps2112PkgUsable(pass, call.Pos(), "slices", "slices")
+	useName, needImport, usable := ps2112PkgUsable(pass, f, call.Pos(), "slices", "slices")
 	if !usable {
 		return nil
 	}
@@ -254,7 +254,7 @@ func ps2112Fix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, operands []
 		pos, end token.Pos
 		text     string
 	}
-	gaps := []gap{{call.Pos(), operands[0].Pos(), "slices.Concat("}}
+	gaps := []gap{{call.Pos(), operands[0].Pos(), useName + ".Concat("}}
 	for i := 0; i+1 < len(operands); i++ {
 		gaps = append(gaps, gap{operands[i].End(), operands[i+1].Pos(), ", "})
 	}
@@ -294,19 +294,49 @@ func ps2112MentionsPkg(pass *analysis.Pass, e ast.Expr) bool {
 	return found
 }
 
-// ps2112PkgUsable reports whether name can reference the package at path
-// from pos: needImport is true when the file must add the import, ok is
-// false when some other object owns the name there.
-func ps2112PkgUsable(pass *analysis.Pass, pos token.Pos, name, path string) (needImport, ok bool) {
+// ps2112PkgUsable reports how the package at path should be referenced from
+// pos, returning the identifier to qualify the rewrite with: an existing
+// import's name (its alias when aliased) so the fix reuses it instead of adding
+// a SECOND import of the same path (the aliased-import duplicate PS2107 also
+// guards against). needImport is true only when the file must add the import; ok
+// is false when the name is unusable (a local/other-package shadow, or a
+// blank/dot import that gives no usable qualifier).
+func ps2112PkgUsable(pass *analysis.Pass, f *ast.File, pos token.Pos, name, path string) (useName string, needImport, ok bool) {
+	quoted := `"` + path + `"`
+	for _, imp := range f.Imports {
+		if imp.Path.Value != quoted {
+			continue
+		}
+		local := name
+		if imp.Name != nil {
+			local = imp.Name.Name
+		}
+		if local == "_" || local == "." {
+			return name, false, false
+		}
+		return local, false, ps2112NameIsPkg(pass, pos, local, path)
+	}
 	scope := pass.Pkg.Scope().Innermost(pos)
 	if scope == nil {
-		return false, false
+		return name, false, false
 	}
 	if _, obj := scope.LookupParent(name, pos); obj != nil {
 		pn, isPkg := obj.(*types.PkgName)
-		return false, isPkg && pn.Imported().Path() == path
+		return name, false, isPkg && pn.Imported().Path() == path
 	}
-	return true, true
+	return name, true, true
+}
+
+// ps2112NameIsPkg reports whether name resolves to the package at path at pos
+// (not shadowed there by a local or other declaration).
+func ps2112NameIsPkg(pass *analysis.Pass, pos token.Pos, name, path string) bool {
+	scope := pass.Pkg.Scope().Innermost(pos)
+	if scope == nil {
+		return false
+	}
+	_, obj := scope.LookupParent(name, pos)
+	pn, isPkg := obj.(*types.PkgName)
+	return isPkg && pn.Imported() != nil && pn.Imported().Path() == path
 }
 
 // ps2112ImportsC reports whether f is a cgo file: its import block must

@@ -150,7 +150,7 @@ func ps2102Fixes(pass *analysis.Pass, f *ast.File) map[*ast.AssignStmt]*analysis
 			if g == nil {
 				continue
 			}
-			needImport, ok := ps2102StringsUsable(pass, g.decl.Pos())
+			pkgName, needImport, ok := ps2102StringsName(pass, f, g.decl.Pos())
 			if !ok {
 				continue
 			}
@@ -169,7 +169,7 @@ func ps2102Fixes(pass *analysis.Pass, f *ast.File) map[*ast.AssignStmt]*analysis
 			edits := []analysis.TextEdit{{
 				Pos:     g.decl.Pos(),
 				End:     g.decl.End(),
-				NewText: []byte("var " + name + " strings.Builder"),
+				NewText: []byte("var " + name + " " + pkgName + ".Builder"),
 			}}
 			renderOK := true
 			for _, w := range g.writes {
@@ -405,16 +405,45 @@ func ps2102CommentsOverlap(f *ast.File, g *ps2102Group) bool {
 // strings package at pos: needImport is true when the file must add the
 // import, ok is false when some other object owns the name there (a local
 // or package-level declaration, or a same-named non-stdlib package).
-func ps2102StringsUsable(pass *analysis.Pass, pos token.Pos) (needImport, ok bool) {
+// ps2102StringsName returns the identifier to qualify the Builder type with:
+// the file's existing strings import name (its alias when aliased) so the fix
+// reuses it instead of adding a SECOND import of "strings", or "strings" when
+// not imported (the import is then added). ok is false when the name is unusable
+// at pos: a blank/dot import gives no qualifier, or a local shadows the name.
+func ps2102StringsName(pass *analysis.Pass, f *ast.File, pos token.Pos) (useName string, needImport, ok bool) {
+	for _, imp := range f.Imports {
+		if imp.Path.Value != `"strings"` {
+			continue
+		}
+		local := "strings"
+		if imp.Name != nil {
+			local = imp.Name.Name
+		}
+		if local == "_" || local == "." {
+			return "strings", false, false
+		}
+		return local, false, ps2102NameIsPkg(pass, pos, local)
+	}
 	scope := pass.Pkg.Scope().Innermost(pos)
 	if scope == nil {
-		return false, false
+		return "strings", false, false
 	}
 	if _, obj := scope.LookupParent("strings", pos); obj != nil {
 		pn, isPkg := obj.(*types.PkgName)
-		return false, isPkg && pn.Imported().Path() == "strings"
+		return "strings", false, isPkg && pn.Imported().Path() == "strings"
 	}
-	return true, true
+	return "strings", true, true
+}
+
+// ps2102NameIsPkg reports whether name resolves to the strings package at pos.
+func ps2102NameIsPkg(pass *analysis.Pass, pos token.Pos, name string) bool {
+	scope := pass.Pkg.Scope().Innermost(pos)
+	if scope == nil {
+		return false
+	}
+	_, obj := scope.LookupParent(name, pos)
+	pn, isPkg := obj.(*types.PkgName)
+	return isPkg && pn.Imported() != nil && pn.Imported().Path() == "strings"
 }
 
 // ps2102ImportsC reports whether f is a cgo file.

@@ -2,8 +2,10 @@ package ps2128
 
 import stx "strings"
 
-// The strings import is RENAMED: the fix must add a plain strings import
-// alongside it rather than referencing str.
+// The strings import is RENAMED to stx: the fix REUSES that alias
+// (var acc stx.Builder) rather than adding a second "strings" import — a
+// duplicate import of the same path is redundant and rejected by strict import
+// linters. Matches PS3104/PS2125/PS2107/PS2112 alias-reuse behavior.
 func renamedImport(items []string) string {
 	acc := "" // want `acc is grown by string concatenation on every loop iteration`
 	for _, it := range items {

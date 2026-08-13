@@ -384,3 +384,45 @@ func f(n, m int) (string, string) {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixReusesAliasedImportAcrossChecks pins that the import-adding checks reuse
+// an EXISTING aliased import of their target package instead of adding a second
+// import of the same path — the aliased-import-duplicate bug found (via hermetic
+// probing) in PS2107 (fixed prior) and then PS2112/PS2102/PS2128. A duplicate
+// import of one path (`import ( "slices"; sl "slices" )`) compiles but is
+// redundant and rejected by strict import linters (golangci-lint gci/importas),
+// so -fix must never introduce one. Covers PS2112 (slices.Concat) and the
+// string-concat->strings.Builder family (PS2102/PS2128, which overlap — whichever
+// applies must still reuse the alias).
+func TestFixReusesAliasedImportAcrossChecks(t *testing.T) {
+	cases := []struct {
+		name, src, path, useName string
+	}{
+		{
+			name:    "PS2112_slices_concat",
+			src:     "package p\n\nimport sl \"slices\"\n\nfunc f(a, b []int) ([]int, bool) {\n\treturn append(append([]int(nil), a...), b...), sl.Contains(a, 1)\n}\n",
+			path:    `"slices"`,
+			useName: "sl.Concat(",
+		},
+		{
+			name:    "PS2102_2128_strings_builder",
+			src:     "package p\n\nimport st \"strings\"\n\nfunc f(parts []string) string {\n\tacc := \"\"\n\tfor _, p := range parts {\n\t\tacc += p\n\t}\n\treturn st.TrimSpace(acc)\n}\n",
+			path:    `"strings"`,
+			useName: "st.Builder",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(runFixMode(t, tc.src))
+			if n := strings.Count(got, tc.path); n != 1 {
+				t.Errorf("%s must be imported exactly once (no duplicate), got %d:\n%s", tc.path, n, got)
+			}
+			if !strings.Contains(got, tc.useName) {
+				t.Errorf("the rewrite must reuse the alias (%s):\n%s", tc.useName, got)
+			}
+			if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+				t.Errorf("fixed file does not parse: %v\n%s", err, got)
+			}
+		})
+	}
+}

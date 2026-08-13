@@ -443,6 +443,26 @@ func ps2128PlainRead(id *ast.Ident, stack []ast.Node) bool {
 	return true
 }
 
+// ps2128StringsName returns the identifier to qualify the Builder type with: an
+// existing strings import's name (its alias when the package is aliased), or
+// "strings" when the package is not imported (the import is then added). ok is
+// false for a blank or dot import, which give no usable qualifier.
+func ps2128StringsName(f *ast.File) (name string, ok bool) {
+	for _, imp := range f.Imports {
+		if imp.Path.Value != `"strings"` {
+			continue
+		}
+		if imp.Name == nil {
+			return "strings", true
+		}
+		if imp.Name.Name == "_" || imp.Name.Name == "." {
+			return "", false
+		}
+		return imp.Name.Name, true
+	}
+	return "strings", true
+}
+
 // ps2128Fix builds the strings.Builder rewrite, or nil when the strings
 // name is not usable at every edit site, the file is a cgo file that would
 // need the import, or a comment overlaps replaced punctuation — then the
@@ -458,9 +478,17 @@ func ps2128Fix(pass *analysis.Pass, f *ast.File, declStmt ast.Stmt, seed ast.Exp
 	for i := range reads {
 		positions = append(positions, reads[i].Pos())
 	}
+	// Qualify strings.Builder with the file's existing strings import name — its
+	// alias when aliased — so the rewrite reuses it instead of adding a SECOND
+	// import of "strings" (the aliased-import duplicate PS2107/PS2112 also guard
+	// against). A blank/dot import gives no usable qualifier.
+	pkgName, ok := ps2128StringsName(f)
+	if !ok {
+		return nil
+	}
 	needImport := false
 	for i := range positions {
-		ni, usable := ps2110PkgUsable(pass, positions[i], "strings", "strings")
+		ni, usable := ps2110PkgUsable(pass, positions[i], pkgName, "strings")
 		if !usable {
 			return nil
 		}
@@ -495,7 +523,7 @@ func ps2128Fix(pass *analysis.Pass, f *ast.File, declStmt ast.Stmt, seed ast.Exp
 			analysis.TextEdit{
 				Pos:     declStmt.Pos(),
 				End:     seed.Pos(),
-				NewText: []byte("var " + name + " strings.Builder\n" + indent + name + ".WriteString("),
+				NewText: []byte("var " + name + " " + pkgName + ".Builder\n" + indent + name + ".WriteString("),
 			},
 			analysis.TextEdit{Pos: seed.End(), End: declStmt.End(), NewText: []byte(")")},
 		)
@@ -503,7 +531,7 @@ func ps2128Fix(pass *analysis.Pass, f *ast.File, declStmt ast.Stmt, seed ast.Exp
 		edits = append(edits, analysis.TextEdit{
 			Pos:     declStmt.Pos(),
 			End:     declStmt.End(),
-			NewText: []byte("var " + name + " strings.Builder"),
+			NewText: []byte("var " + name + " " + pkgName + ".Builder"),
 		})
 	}
 	for i := range appends {
