@@ -41,6 +41,7 @@ func TestSARIFStructure(t *testing.T) {
 			} `json:"tool"`
 			Results []struct {
 				RuleID    string `json:"ruleId"`
+				RuleIndex int    `json:"ruleIndex"`
 				Level     string `json:"level"`
 				Locations []struct {
 					PhysicalLocation struct {
@@ -86,9 +87,16 @@ func TestSARIFStructure(t *testing.T) {
 		t.Fatalf("results = %d, want 3", len(run.Results))
 	}
 	wantLevel := map[string]string{"PS9001": "warning", "PS9003": "note"} // L1 -> warning, L3 -> note
+	rules := run.Tool.Driver.Rules
 	for i, res := range run.Results {
 		if !ruleIDs[res.RuleID] {
 			t.Errorf("result[%d] ruleId %q is not declared in tool.driver.rules", i, res.RuleID)
+		}
+		// ruleIndex must point into rules[] and resolve to the same id as ruleId.
+		if res.RuleIndex < 0 || res.RuleIndex >= len(rules) {
+			t.Errorf("result[%d] ruleIndex %d out of range [0,%d)", i, res.RuleIndex, len(rules))
+		} else if rules[res.RuleIndex].ID != res.RuleID {
+			t.Errorf("result[%d] ruleIndex %d -> rule %q, but ruleId is %q", i, res.RuleIndex, rules[res.RuleIndex].ID, res.RuleID)
 		}
 		if res.Level != wantLevel[res.RuleID] {
 			t.Errorf("result[%d] (%s) level = %q, want %q", i, res.RuleID, res.Level, wantLevel[res.RuleID])
