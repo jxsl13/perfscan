@@ -178,8 +178,12 @@ func TestExplainURLForEveryCheck(t *testing.T) {
 
 func TestExplainUnknownCheckFails(t *testing.T) {
 	_, errOut, code := runCLI("-explain", "PX9999")
-	if code == 0 {
-		t.Error("-explain PX9999: want non-zero exit")
+	// Exit 2 specifically (the usage/config-error code), NOT 1. perfscanxx's exit
+	// contract is 0 = clean, 1 = findings, 2 = usage/config error; a CI script
+	// that treats exit 1 as "found perf issues" would misfire if a bad -explain id
+	// returned 1. Assert the exact code, not merely non-zero.
+	if code != 2 {
+		t.Errorf("-explain PX9999: exit = %d, want 2 (usage error, not 1=findings)", code)
 	}
 	if !strings.Contains(errOut, "unknown check") {
 		t.Errorf("-explain PX9999: want 'unknown check' on stderr, got %q", errOut)
