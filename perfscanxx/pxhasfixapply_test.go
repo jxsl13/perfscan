@@ -344,6 +344,60 @@ func TestFixAppliesMultipleChecksInOneRun(t *testing.T) {
 	}
 }
 
+// TestFixSequentialAppliesMultipleChecksEndToEnd pins the RAISON D'ÊTRE of
+// -fix-sequential end-to-end: applying two different fixable checks in SEPARATE
+// clang-tidy --fix passes (one per check) so their edits can never combine into
+// invalid code on dense C++, with BOTH rewrites landing in the file. Existing
+// coverage does not reach this: TestApplySequentialFixes stubs the executor and
+// only checks the per-check argv structure, and the -fix-sequential end-to-end
+// tests use a SINGLE check (header exclude/idempotency). Here PX3013 (L2:
+// ~S(){} -> = default) and PX3008 (L1: v.size()==0 -> v.empty()) fire in one TU;
+// after -fix -fix-sequential both rewrites must be present. Skipped when
+// clang-tidy is absent.
+func TestFixSequentialAppliesMultipleChecksEndToEnd(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	const src = "#include <vector>\n" +
+		"struct S { ~S() {} };\n" +
+		"bool e(const std::vector<int>& v) { S s; (void)s; return v.size() == 0; }\n"
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "m.cpp")
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile, ok := cppCompileCmdForTest("m.cpp")
+	if !ok {
+		t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, _ := runCLI("-tidy", bin, "-fix", "-fix-sequential", "-p", dir, cpp)
+	gotB, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(gotB)
+	if got == src {
+		if strings.Contains(stderr, "file not found") || strings.Contains(stderr, "fatal error") {
+			t.Skipf("toolchain could not parse the fixture; skipping. stderr:\n%s", stderr)
+		}
+		t.Fatalf("-fix-sequential applied nothing:\n%s", got)
+	}
+	if !strings.Contains(got, "= default") {
+		t.Errorf("-fix-sequential missing the PX3013 rewrite (~S() = default):\n%s", got)
+	}
+	if !strings.Contains(got, ".empty()") || strings.Contains(got, "size() == 0") {
+		t.Errorf("-fix-sequential missing the PX3008 rewrite (v.empty()):\n%s", got)
+	}
+	if !strings.Contains(out+stderr, "isolated passes") {
+		t.Errorf("expected the -fix-sequential 'isolated passes' summary; out:\n%s\nstderr:\n%s", out, stderr)
+	}
+}
+
 // TestFixLevelGatesWhichFixesApply pins the -level fix-gating contract: with -fix
 // -level 1, only L1 (behavior-preserving-by-design) fix-its are applied — L2/L3
 // fixes, which the tool warns can change behavior, must be withheld. A user who
