@@ -807,3 +807,28 @@ func TestExcludeHeaderRegex(t *testing.T) {
 		t.Errorf("excludeHeaderRegex = %q, want %q", got, want)
 	}
 }
+
+// TestUnderDir pins the containment check that gates the vendored-fix warning:
+// it must treat the directory boundary correctly — a mere string prefix that
+// is NOT a path-component boundary ("/a/bc" under "/a/b") is NOT containment.
+func TestUnderDir(t *testing.T) {
+	sep := string(filepath.Separator)
+	dir := sep + filepath.Join("a", "b")
+	cases := []struct {
+		file string
+		want bool
+	}{
+		{dir, true},                                  // the dir itself
+		{filepath.Join(dir, "c.cpp"), true},          // direct child
+		{filepath.Join(dir, "c", "d.cpp"), true},     // nested child
+		{sep + filepath.Join("a", "bc"), false},      // string prefix, NOT a boundary
+		{sep + filepath.Join("a", "bc", "x"), false}, // deeper non-boundary prefix
+		{sep + filepath.Join("a"), false},            // parent, not contained
+		{sep + filepath.Join("x", "y"), false},       // unrelated
+	}
+	for _, tc := range cases {
+		if got := underDir(tc.file, dir); got != tc.want {
+			t.Errorf("underDir(%q, %q) = %v, want %v", tc.file, dir, got, tc.want)
+		}
+	}
+}
