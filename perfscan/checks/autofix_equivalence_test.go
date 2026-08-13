@@ -1011,3 +1011,117 @@ func TestEquiv_PS3005IndirectKeySort(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS3007Membership pins both halves of PS3007's strict-comparability
+// gate. For STRICTLY comparable key types (int, struct-of-ints, string — types
+// whose == can never panic) the map-membership set and slices.Contains answer
+// identically for every probe, so the rewrite is safe; that equivalence is
+// asserted over random slices with duplicates and random hit/miss probes. For
+// an interface key the two forms diverge on panic TIMING: the build loop
+// inserts (and so compares/hashes) EVERY element eagerly and panics at build
+// time on the first uncomparable dynamic value, while slices.Contains compares
+// lazily and panics only if the scan actually reaches that element — never,
+// when no probe runs or a match comes first. That divergence is pinned with
+// recover() below; if it ever stops holding, the guard could be revisited,
+// but weakening the guard while it holds ships a behavior-changing fix.
+func TestEquiv_PS3007Membership(t *testing.T) {
+	rng := rand.New(rand.NewSource(0x3007))
+
+	// Part 1: strictly-comparable keys — map membership == slices.Contains.
+	for trial := 0; trial < 3000; trial++ {
+		n := rng.Intn(12) // includes empty slices
+		ints := make([]int, n)
+		for i := range ints {
+			ints[i] = rng.Intn(6) // small domain: duplicates likely
+		}
+		intSet := make(map[int]bool, len(ints))
+		for _, b := range ints {
+			intSet[b] = true
+		}
+		for probe := 0; probe < 8; probe++ {
+			tok := rng.Intn(8) // hits and misses
+			if got, want := slices.Contains(ints, tok), intSet[tok]; got != want {
+				t.Fatalf("trial %d: int key: slices.Contains(%v, %d)=%v != map membership %v", trial, ints, tok, got, want)
+			}
+		}
+
+		type pair struct{ a, b int }
+		pairs := make([]pair, n)
+		for i := range pairs {
+			pairs[i] = pair{rng.Intn(3), rng.Intn(3)}
+		}
+		pairSet := make(map[pair]bool, len(pairs))
+		for _, b := range pairs {
+			pairSet[b] = true
+		}
+		for probe := 0; probe < 8; probe++ {
+			tok := pair{rng.Intn(4), rng.Intn(4)}
+			if got, want := slices.Contains(pairs, tok), pairSet[tok]; got != want {
+				t.Fatalf("trial %d: struct key: slices.Contains(%v, %v)=%v != map membership %v", trial, pairs, tok, got, want)
+			}
+		}
+
+		words := make([]string, n)
+		for i := range words {
+			words[i] = strconv.Itoa(rng.Intn(6))
+		}
+		wordSet := make(map[string]bool, len(words))
+		for _, b := range words {
+			wordSet[b] = true
+		}
+		for probe := 0; probe < 8; probe++ {
+			tok := strconv.Itoa(rng.Intn(8))
+			if got, want := slices.Contains(words, tok), wordSet[tok]; got != want {
+				t.Fatalf("trial %d: string key: slices.Contains(%v, %q)=%v != map membership %v", trial, words, tok, got, want)
+			}
+		}
+	}
+
+	// Part 2: the interface-key divergence that justifies the guard.
+	panics := func(f func()) (p bool) {
+		defer func() {
+			if recover() != nil {
+				p = true
+			}
+		}()
+		f()
+		return
+	}
+	buildSet := func(seq []any) {
+		set := make(map[any]bool, len(seq))
+		for _, b := range seq {
+			set[b] = true // eager insert: panics here on an uncomparable element
+		}
+		_ = set
+	}
+	scanAll := func(seq, window []any) {
+		for _, tok := range window {
+			_ = slices.Contains(seq, tok) // lazy compare: panics only on reach
+		}
+	}
+
+	// Empty probe window: the original panics at build, the rewrite runs zero
+	// comparisons and cannot panic.
+	seq := []any{1, []int{2}, 3}
+	origPanics := panics(func() { buildSet(seq) })
+	rewrittenPanics := panics(func() { scanAll(seq, nil) })
+	if !origPanics {
+		t.Fatal("expected map build over []any{1, []int{2}, 3} to panic on the uncomparable element")
+	}
+	if rewrittenPanics {
+		t.Fatal("expected slices.Contains scans with an empty probe window to NOT panic")
+	}
+	if origPanics == rewrittenPanics {
+		t.Fatal("expected orig-panics != rewritten-panics; the strict-comparability guard looks unnecessary — it is not")
+	}
+
+	// Match before the uncomparable element: the rewrite finds 7 and returns
+	// without ever comparing against []int{9}; the original still panics.
+	seq2 := []any{7, []int{9}}
+	if !panics(func() { buildSet(seq2) }) {
+		t.Fatal("expected map build over []any{7, []int{9}} to panic")
+	}
+	if panics(func() { scanAll(seq2, []any{7}) }) {
+		t.Fatal("expected slices.Contains(seq, 7) to match before the uncomparable element and NOT panic")
+	}
+}

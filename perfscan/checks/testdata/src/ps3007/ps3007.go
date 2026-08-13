@@ -161,6 +161,48 @@ func shadowedSrc(seq []int64, window []int64) {
 	}
 }
 
+// An interface key can hold an uncomparable dynamic value (a slice, map, or
+// func): the map build inserts every element and panics at BUILD time, while
+// slices.Contains compares lazily and panics only if the scan reaches that
+// element at PROBE time. Panic timing diverges: advisory only, no fix.
+func interfaceKey(seq []any, window []any) {
+	set := make(map[any]bool, len(seq))
+	for _, b := range seq {
+		set[b] = true
+	}
+	for _, tok := range window {
+		use(set[tok]) // want `set set is built from slice seq and only probed; for a small source, scanning seq directly beats the map build plus a hash per probe \(crossover ≈8–16 elements\)`
+	}
+}
+
+type ifaceField struct{ x any }
+
+// A struct key containing an interface field inherits the same panic-timing
+// divergence: advisory only, no fix.
+func interfaceFieldKey(seq []ifaceField, window []ifaceField) {
+	set := make(map[ifaceField]bool, len(seq))
+	for _, b := range seq {
+		set[b] = true
+	}
+	for _, tok := range window {
+		use(set[tok]) // want `set set is built from slice seq and only probed; for a small source, scanning seq directly beats the map build plus a hash per probe \(crossover ≈8–16 elements\)`
+	}
+}
+
+type intPair struct{ a, b int }
+
+// A strictly-comparable struct key can never panic on ==: the fix still
+// applies, proving the interface guard is not over-broad.
+func comparableStructKey(seq []intPair, window []intPair) {
+	set := make(map[intPair]bool, len(seq))
+	for _, b := range seq {
+		set[b] = true
+	}
+	for _, tok := range window {
+		use(set[tok]) // want `set set is built from slice seq and only probed; for a small source, scanning seq directly beats the map build plus a hash per probe \(crossover ≈8–16 elements\)`
+	}
+}
+
 // A probe inside a closure may run after the function returns, when the
 // caller can mutate the source again: advisory only, no fix.
 func escapingClosure(seq []int64, window []int64) func(int64) bool {

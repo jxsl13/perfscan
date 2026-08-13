@@ -48,7 +48,16 @@ local slice, where every other use of the set is a plain boolean probe
 SET[k] after the build (no comma-ok, no len, never passed on, none inside a
 closure) and "slices" resolves to the standard library at each probe. The
 declaration and build loop are deleted and each probe becomes
-slices.Contains(SRC, k).`,
+slices.Contains(SRC, k).
+
+The key type must additionally be STRICTLY comparable — an interface key
+(or a key containing an interface anywhere in its structure) stays advisory.
+With an interface key holding an uncomparable dynamic value (a slice, map,
+or func), the map build inserts every element and panics at BUILD time,
+while slices.Contains compares lazily and panics only if the scan actually
+reaches that element at PROBE time — never, when no probe runs or a match
+comes first. That is a panic-timing behavior divergence, so such sets keep
+the map.`,
 		Before: `breakers := make(map[int64]bool, len(seq))
 for _, b := range seq {
 	breakers[b] = true
@@ -347,6 +356,15 @@ func ps3007Fix(pass *analysis.Pass, file *ast.File, fn *ast.FuncDecl, loop *ast.
 	if !ok || !types.Identical(mt.Key(), st.Elem()) {
 		return nil
 	}
+	// The key must be STRICTLY comparable: a comparison that can panic (an
+	// interface key, or a key containing one, holding an uncomparable dynamic
+	// value) makes the two forms diverge on panic TIMING — the build loop
+	// inserts every element and panics at build time, while slices.Contains
+	// compares lazily and panics only if the scan actually reaches that
+	// element (never, when no probe runs or a match comes first).
+	if ps3007MayPanicOnCompare(mt.Key()) {
+		return nil
+	}
 
 	// Re-verify the build loop by object identity: for _, v := range SRC
 	// { SET[v] = true } with a constant-true value.
@@ -612,6 +630,49 @@ func ps3007Fix(pass *analysis.Pass, file *ast.File, fn *ast.FuncDecl, loop *ast.
 	return &analysis.SuggestedFix{
 		Message:   fmt.Sprintf("replace set %s with slices.Contains scans of %s", setObj.Name(), srcName),
 		TextEdits: edits,
+	}
+}
+
+// ps3007MayPanicOnCompare reports whether comparing two values of type t
+// with == can panic at runtime. Go comparison panics only when an interface
+// value holds an uncomparable dynamic type, so any interface type — or any
+// composite that CONTAINS one (a struct field, an array element) — may
+// panic, while basics, pointers, and channels compare by value or identity
+// and never do. The fix demands strict comparability because the map build
+// inserts (and therefore compares/hashes) EVERY element eagerly, while
+// slices.Contains compares lazily; on a panicking key they diverge in panic
+// timing even though both are legal map-key types.
+func ps3007MayPanicOnCompare(t types.Type) bool {
+	return ps3007MayPanicOnCompareRec(t, make(map[types.Type]bool))
+}
+
+func ps3007MayPanicOnCompareRec(t types.Type, seen map[types.Type]bool) bool {
+	if seen[t] {
+		// Already being examined: a cycle cannot introduce a new panic path
+		// (and comparable recursive types only recur through pointers, which
+		// stop the walk anyway).
+		return false
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Interface:
+		return true // may hold an uncomparable dynamic value
+	case *types.Struct:
+		for i := 0; i < u.NumFields(); i++ {
+			if ps3007MayPanicOnCompareRec(u.Field(i).Type(), seen) {
+				return true
+			}
+		}
+		return false
+	case *types.Array:
+		return ps3007MayPanicOnCompareRec(u.Elem(), seen)
+	case *types.Basic, *types.Pointer, *types.Chan:
+		return false
+	default:
+		// Slices, maps, and signatures are not comparable at all and cannot
+		// have reached here as a valid map key; anything else unexpected
+		// (e.g. a type parameter) is treated as may-panic, declining the fix.
+		return true
 	}
 }
 
