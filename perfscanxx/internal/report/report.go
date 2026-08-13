@@ -195,6 +195,7 @@ func SARIF(w io.Writer, findings []Finding) error {
 		ID                   string       `json:"id"`
 		Name                 string       `json:"name,omitempty"`
 		ShortDescription     *sarifText   `json:"shortDescription,omitempty"`
+		HelpURI              string       `json:"helpUri,omitempty"`
 		DefaultConfiguration *sarifConfig `json:"defaultConfiguration,omitempty"`
 	}
 	type sarifMessage struct {
@@ -265,8 +266,15 @@ func SARIF(w io.Writer, findings []Finding) error {
 			// Scanning shows what each PX rule means, not just its id.
 			// Pass-through diagnostics (clang-diagnostic-*) aren't in the
 			// catalog and simply carry no shortDescription.
-			if e, ok := catalog.ByID(f.ID); ok && e.Title != "" {
-				r.ShortDescription = &sarifText{Text: e.Title}
+			if e, ok := catalog.ByID(f.ID); ok {
+				if e.Title != "" {
+					r.ShortDescription = &sarifText{Text: e.Title}
+				}
+				// Link each rule to its upstream clang-tidy page so GitHub Code
+				// Scanning offers a "learn more" per rule (custom checks have none).
+				if url, ok := catalog.DocURL(e); ok {
+					r.HelpURI = url
+				}
 			}
 			rules = append(rules, r)
 		}

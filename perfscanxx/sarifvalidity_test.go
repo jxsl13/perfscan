@@ -63,6 +63,7 @@ func TestSARIFOutputIsStructurallyValid(t *testing.T) {
 					Name  string `json:"name"`
 					Rules []struct {
 						ID                   string `json:"id"`
+						HelpURI              string `json:"helpUri"`
 						DefaultConfiguration *struct {
 							Level string `json:"level"`
 						} `json:"defaultConfiguration"`
@@ -113,6 +114,11 @@ func TestSARIFOutputIsStructurallyValid(t *testing.T) {
 		seen[r.ID] = true
 		if r.DefaultConfiguration == nil || !validLevels[r.DefaultConfiguration.Level] {
 			t.Errorf("rule %s: defaultConfiguration.level invalid (%+v)", r.ID, r.DefaultConfiguration)
+		}
+		// PX1001/PX3021 are built-in checks, so each rule must link to its
+		// upstream clang-tidy page.
+		if !strings.HasPrefix(r.HelpURI, "https://clang.llvm.org/extra/clang-tidy/checks/") {
+			t.Errorf("rule %s: helpUri %q is not an upstream clang-tidy doc URL", r.ID, r.HelpURI)
 		}
 	}
 	if len(rules) != 2 {
