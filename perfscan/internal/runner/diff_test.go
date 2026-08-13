@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -225,6 +226,47 @@ func TestUnifiedDiffSplitsFarApartChangesIntoSeparateHunks(t *testing.T) {
 	}
 	if n := strings.Count(got, "@@ -"); n != 2 {
 		t.Errorf("expected exactly 2 hunks, got %d:\n%s", n, got)
+	}
+}
+
+// TestUnifiedDiffIsValidPatch feeds a rendered diff to the real `patch` binary
+// (skipped if absent) and confirms it reproduces the patched bytes — the acceptance
+// test the exact-string cases above cannot give: it proves the hunk headers'
+// line counts and offsets are correct, not merely that the +/- lines match a
+// snapshot. Covers the realistic multi-hunk + mid-file-deletion shape a multi-fix
+// run produces. This is the perfscan counterpart to perfscanxx's TestUnified
+// IsValidPatch.
+func TestUnifiedDiffIsValidPatch(t *testing.T) {
+	patchBin, err := exec.LookPath("patch")
+	if err != nil {
+		t.Skip("patch not available")
+	}
+	// region 1: change line 2 (-> X) and delete line 3; region 2 (far apart, 7
+	// equal lines away -> a separate hunk): change line 11 (-> Y). Two hunks, one
+	// carrying a deletion.
+	orig := []byte("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n")
+	patched := []byte("1\nX\n4\n5\n6\n7\n8\n9\n10\nY\n12\n")
+	diff := unifiedDiff("s.txt", orig, patched)
+	if n := strings.Count(diff, "@@ -"); n < 2 {
+		t.Fatalf("expected a multi-hunk diff, got %d hunk(s):\n%s", n, diff)
+	}
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "s.txt")
+	if err := os.WriteFile(src, orig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(patchBin, "-p1", "-d", dir)
+	cmd.Stdin = strings.NewReader(diff)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("patch rejected the diff: %v\n%s\ndiff:\n%s", err, out, diff)
+	}
+	got, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, patched) {
+		t.Errorf("patched file = %q, want %q\ndiff:\n%s", got, patched, diff)
 	}
 }
 
