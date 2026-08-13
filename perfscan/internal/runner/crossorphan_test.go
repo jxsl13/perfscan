@@ -305,3 +305,42 @@ func TestIsVersionSegment(t *testing.T) {
 		}
 	}
 }
+
+// TestFixKeepsAliasedStdlibImport is the sibling regression to
+// TestFixKeepsVersionedStdlibImport: both guard the "package name is not the
+// last path segment" hazard in pruneOrphanedImports, but via DIFFERENT
+// mechanisms. Here an ALIASED stdlib import (j "encoding/json", used as j.Marshal)
+// sits next to a "sort" import that a PS3104 rewrite orphans. Pruning must keep
+// the aliased import — its usage detection must honor the alias, not the inferred
+// path name ("json"), which the code uses "j." for. This holds because
+// astutil.UsesImport resolves the import spec's actual name; the test locks that
+// so a future change to the pruner's usage check cannot silently prune live
+// aliased imports (the same failure class as the math/rand/v2 bug).
+func TestFixKeepsAliasedStdlibImport(t *testing.T) {
+	const src = `package p
+
+import (
+	j "encoding/json"
+	"sort"
+)
+
+func f(xs []int, v any) ([]byte, error) {
+	sort.Ints(xs)
+	return j.Marshal(v)
+}
+`
+	got := string(runFixMode(t, src))
+
+	if !strings.Contains(got, "slices.Sort(xs)") {
+		t.Errorf("expected sort.Ints -> slices.Sort:\n%s", got)
+	}
+	if strings.Contains(got, `"sort"`) {
+		t.Errorf(`orphaned "sort" should have been pruned:\n%s`, got)
+	}
+	if !strings.Contains(got, `j "encoding/json"`) {
+		t.Errorf(`aliased "encoding/json" is live (j.Marshal) and must not be pruned:\n%s`, got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
