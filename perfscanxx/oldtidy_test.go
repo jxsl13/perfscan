@@ -63,3 +63,17 @@ func TestOldClangTidySkipsCustomChecks(t *testing.T) {
 		}
 	}
 }
+
+// TestFixErrorsRequiresFix pins that -fix-errors without -fix is rejected with a
+// clear message (it has no meaning on its own).
+func TestFixErrorsRequiresFix(t *testing.T) {
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "t.cpp")
+	_ = os.WriteFile(cpp, []byte("int main(){return 0;}\n"), 0o644)
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"clang++ -std=c++17 -c t.cpp"}]`
+	_ = os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644)
+	_, stderr, code := runCLI("-fix-errors", "-p", dir, dir)
+	if code != 2 || !strings.Contains(stderr, "-fix-errors has no effect without -fix") {
+		t.Errorf("expected exit 2 + require-fix message; code=%d stderr=%q", code, stderr)
+	}
+}

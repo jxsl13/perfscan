@@ -79,6 +79,12 @@ type Options struct {
 	Experimental bool
 	// Fix makes clang-tidy apply its fix-its in place.
 	Fix bool
+	// FixErrors adds --fix-errors, applying fix-its even to a translation unit
+	// that failed to compile. clang-tidy otherwise SKIPS any TU with an error,
+	// so on a project with a missing build-time header (fmt, leveldb, abseil…)
+	// plain --fix silently changes nothing. Opt-in because a fix based on a
+	// partly-erroneous AST could be wrong; see the -fix-errors flag's caveat.
+	FixErrors bool
 	// ExcludeHeaderFilter, when non-empty, is a regex passed as
 	// --exclude-header-filter so clang-tidy does not DIAGNOSE (and therefore
 	// does not --fix) any header whose path matches it — the mechanism that
@@ -124,6 +130,9 @@ func Argv(o Options) []string {
 	}
 	if o.Fix {
 		args = append(args, "--fix")
+	}
+	if o.FixErrors {
+		args = append(args, "--fix-errors")
 	}
 	if o.ExcludeHeaderFilter != "" {
 		hf := o.HeaderFilter

@@ -78,6 +78,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fix        = fs.Bool("fix", false, "apply the fix-its of every reported check; -level gates both reporting and fixing (e.g. -level 1 -fix applies only idiomatic fixes)")
 		diff       = fs.Bool("diff", false, "print a unified diff of what -fix would change, without modifying files; exit 1 if anything would change (mutually exclusive with -fix)")
 		fixSeq     = fs.Bool("fix-sequential", false, "with -fix: apply each check's fix-its in its own clang-tidy pass (one invocation per check) so fix-its from different checks never combine into invalid code on dense C++ (e.g. noexcept + member-initializer on one ctor); slower but collision-free")
+		fixErrors  = fs.Bool("fix-errors", false, "with -fix: also apply fix-its to a translation unit that failed to compile (clang-tidy --fix-errors) — clang-tidy otherwise SKIPS an erroring TU, so on a project with a missing build-time header (prefer -cmake-build) plain -fix changes nothing; use with care — a fix on a partly-erroneous AST can be wrong")
 		list       = fs.Bool("list", false, "list all checks and exit")
 		fixable    = fs.Bool("fixable", false, "with -list: show only checks that carry an auto-fix (-fix applies them)")
 		explain    = fs.String("explain", "", "print the documentation of a check (e.g. PX1001) and exit")
@@ -169,6 +170,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if *fixSeq && !*fix {
 		fmt.Fprintln(stderr, "perfscanxx: -fix-sequential has no effect without -fix")
 		return 2
+	}
+	if *fixErrors && !*fix {
+		fmt.Fprintln(stderr, "perfscanxx: -fix-errors has no effect without -fix")
+		return 2
+	}
+	if *fixErrors {
+		fmt.Fprintln(stderr, "perfscanxx: -fix-errors: applying fix-its even to translation units that fail to compile — review the results (a missing build-time header is the usual reason; -cmake-build is the clean alternative).")
 	}
 	// Optional CMake bootstrap: when no compilation database exists yet and the
 	// user opted in, configure a detected CMake project (and, with -cmake-build,
@@ -279,6 +287,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// applied afterwards, one check per pass, to avoid cross-check fix-it
 		// collisions.
 		Fix:                 *fix && !*fixSeq,
+		FixErrors:           *fixErrors && *fix,
 		Files:               files,
 		ExtraArgs:           extraArgs,
 		ExcludeHeaderFilter: excludeHeaderRegex(excludes),
@@ -890,6 +899,7 @@ Examples:
 	perfscanxx -diff -p build ./...      preview what -fix would change as a unified diff (no writes; exit 1 if any change)
 	perfscanxx -fix -exclude vendor/,third_party/ -p build ./...   fix, but skip vendored/third-party trees
 	perfscanxx -fix -fix-sequential -p build ./...   apply each check's fixes in its own pass (collision-free on dense C++)
+	perfscanxx -fix -fix-errors -p build ./...   also fix TUs that fail to compile (e.g. a missing generated header); use with care
 	perfscanxx -p build src/main.cpp     a single translation unit
 	perfscanxx -p build -baseline .perfscanxx-baseline.yaml ./...   ratchet: seed, then fail only on NEW findings
 	perfscanxx -cmake ./...              auto-configure a CMake project (generate compile_commands.json)
