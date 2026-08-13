@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -66,5 +67,43 @@ func TestFindInBuildSubdir(t *testing.T) {
 func TestFindMissing(t *testing.T) {
 	if _, err := Find(t.TempDir(), ""); err == nil {
 		t.Error("expected error for -p without compile_commands.json")
+	}
+}
+
+// TestLoadParseErrors pins the actionable diagnosis for a malformed database:
+// each case must name the likely cause and how to fix it, and must never leak
+// the internal Go type name from encoding/json.
+func TestLoadParseErrors(t *testing.T) {
+	cases := []struct {
+		name, content, wantSub string
+	}{
+		{"object-not-array", `{"directory":"/x","file":"a.cpp"}`, "single JSON object"},
+		{"truncated-array", `[{"directory":"/x",`, "malformed JSON"},
+		{"lfs-pointer", "version https://git-lfs.github.com/spec/v1\noid sha256:deadbeef", "does not look like JSON"},
+		{"empty-file", "", "file is empty"},
+		{"bom-then-object", "\xEF\xBB\xBF{}", "single JSON object"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, Name)
+			if err := os.WriteFile(p, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(p)
+			if err == nil {
+				t.Fatalf("Load(%q) succeeded, want error", tc.content)
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, tc.wantSub) {
+				t.Errorf("error %q does not contain %q", msg, tc.wantSub)
+			}
+			if !strings.Contains(msg, "cmake") {
+				t.Errorf("error %q lacks the regenerate hint", msg)
+			}
+			if strings.Contains(msg, "compdb.entry") || strings.Contains(msg, "Go value") {
+				t.Errorf("error %q leaks the internal Go type name", msg)
+			}
+		})
 	}
 }

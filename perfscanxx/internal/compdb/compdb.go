@@ -71,7 +71,7 @@ func Load(path string) ([]string, error) {
 	}
 	var entries []entry
 	if err := json.Unmarshal(data, &entries); err != nil {
-		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+		return nil, fmt.Errorf("%s: %s", filepath.Base(path), describeParseError(data, err))
 	}
 	if len(entries) == 0 {
 		return nil, errors.New(filepath.Base(path) + ": empty compilation database")
@@ -111,6 +111,49 @@ func Load(path string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// regenHint is the standing advice for producing a valid compilation database,
+// shared by the parse-error and empty-database messages.
+const regenHint = "regenerate it with `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (or a tool like bear/compdb)"
+
+// describeParseError turns the raw encoding/json failure — which leaks Go type
+// names (\"cannot unmarshal object into Go value of type []compdb.entry\") or is
+// opaque (\"invalid character 'v' looking for beginning of value\") — into a
+// message that names the likely cause and how to fix it. It inspects the first
+// meaningful byte to distinguish an empty file, a single JSON object mistaken
+// for the array, and non-JSON content (a Git LFS pointer, an HTML error page, or
+// simply the wrong file).
+func describeParseError(data []byte, err error) string {
+	// Skip a UTF-8 BOM and leading whitespace to find the first real byte.
+	trimmed := data
+	if len(trimmed) >= 3 && trimmed[0] == 0xEF && trimmed[1] == 0xBB && trimmed[2] == 0xBF {
+		trimmed = trimmed[3:]
+	}
+	i := 0
+	for i < len(trimmed) {
+		switch trimmed[i] {
+		case ' ', '\t', '\r', '\n':
+			i++
+			continue
+		}
+		break
+	}
+	trimmed = trimmed[i:]
+
+	switch {
+	case len(trimmed) == 0:
+		return "file is empty; " + regenHint
+	case trimmed[0] == '{':
+		return "expected a JSON array of compile commands but found a single JSON object; " + regenHint
+	case trimmed[0] == '[':
+		// Well-formed opening bracket but Unmarshal still failed: the array is
+		// truncated or an element is malformed. Keep the position detail json
+		// provides, drop the Go type-name noise if present.
+		return fmt.Sprintf("malformed JSON compilation database (%v); %s", err, regenHint)
+	default:
+		return "does not look like JSON (a Git LFS pointer, an HTML error page, or the wrong file?); " + regenHint
+	}
 }
 
 func plural(n int) string {
