@@ -1,0 +1,303 @@
+package ps2128
+
+import (
+	"fmt"
+)
+
+// Adversarial fixtures: shapes where a strings.Builder rewrite would change
+// behavior or not compile MUST stay silent (or report-only, never fixed);
+// tricky shapes where the rewrite IS bit-identical must produce it.
+
+// NEGATIVE: PREPEND — acc = it + acc. A Builder can only append; rewriting
+// would reverse the assembly order. Must stay silent.
+func advPrepend(items []string) string {
+	acc := ""
+	for _, it := range items {
+		acc = it + acc
+	}
+	return acc
+}
+
+// NEGATIVE: mixed prepend chain (it + acc + "|"). Silent.
+func advPrependMixed(items []string) string {
+	acc := ""
+	for _, it := range items {
+		acc = it + acc + "|"
+	}
+	return acc
+}
+
+// NEGATIVE: acc = acc + a + b — appendable in principle, but not the matched
+// two-operand shape; conservatively silent.
+func advMultiConcat(items []string) string {
+	acc := ""
+	for _, it := range items {
+		acc = acc + it + ","
+	}
+	return acc
+}
+
+// NEGATIVE: the accumulator is reset mid-loop; a Builder has no such
+// assignment. Silent.
+func advResetMidLoop(items []string) string {
+	acc := ""
+	for i, it := range items {
+		if i == 1 {
+			acc = ""
+		}
+		acc += it
+	}
+	return acc
+}
+
+// NEGATIVE: conditional plain reassignment inside the loop. Silent.
+func advCondReassign(items []string) string {
+	acc := ""
+	for _, it := range items {
+		if it == "" {
+			acc = "?"
+		} else {
+			acc += it
+		}
+	}
+	return acc
+}
+
+// NEGATIVE: the loop CONDITION reads acc — a read the rewrite would leave
+// referencing a Builder. Silent.
+func advCondReads() string {
+	acc := ""
+	for len(acc) < 8 {
+		acc += "x"
+	}
+	return acc
+}
+
+// NEGATIVE: a nested loop header inside the body reads acc. Silent.
+func advInnerHeaderRead(items []string) string {
+	acc := ""
+	for _, it := range items {
+		for j := 0; j < len(acc); j++ {
+			_ = j
+		}
+		acc += it
+	}
+	return acc
+}
+
+// NEGATIVE: the loop ranges over acc itself while appending. Silent.
+func advRangeOverAcc() string {
+	acc := "ab"
+	for range acc {
+		acc += "x"
+	}
+	return acc
+}
+
+// NEGATIVE: the append sits in the loop POST statement, not the body. Silent.
+func advAppendInPost() string {
+	acc := ""
+	for i := 0; i < 3; acc += "x" {
+		i++
+	}
+	return acc
+}
+
+// NEGATIVE: a snapshot read of acc inside the loop (x := acc). Silent.
+func advMidLoopSnapshot(items []string) string {
+	acc := ""
+	for _, it := range items {
+		acc += it
+		x := acc + "!"
+		_ = x
+	}
+	return acc
+}
+
+// NEGATIVE: same-named redeclaration in a nested block after the loop;
+// conservatively silent.
+func advRedeclAfter(items []string) string {
+	acc := ""
+	for _, it := range items {
+		acc += it
+	}
+	{
+		acc := "inner"
+		_ = acc
+	}
+	return acc
+}
+
+// NEGATIVE: address taken through parentheses. Silent.
+func advParenAddress(items []string) *string {
+	acc := ""
+	for _, it := range items {
+		acc += it
+	}
+	p := &(acc)
+	return p
+}
+
+// NEGATIVE: parenthesized assignment target after the loop. Silent.
+func advParenAssign(items []string) string {
+	acc := ""
+	for _, it := range items {
+		acc += it
+	}
+	(acc) = acc + "!"
+	return acc
+}
+
+// NEGATIVE: acc becomes the key target of a later range loop (a write). Silent.
+func advRangeKeyAfter(items []string, m map[string]int) string {
+	acc := ""
+	for _, it := range items {
+		acc += it
+	}
+	for acc = range m {
+		_ = acc
+	}
+	return acc
+}
+
+// NEGATIVE: a defined (named) string type, declared via conversion. The use
+// sites require advStr, but Builder.String() returns string. Silent.
+type advStr string
+
+func advNamedType(items []string) advStr {
+	acc := advStr("")
+	for _, it := range items {
+		acc += advStr(it)
+	}
+	return acc
+}
+
+// NEGATIVE: the seed mentions a FIELD named like the accumulator (t.acc);
+// conservatively silent (name-based seed guard).
+type advT struct{ acc string }
+
+func advSeedFieldName(items []string, t advT) string {
+	acc := t.acc
+	for _, it := range items {
+		acc += it
+	}
+	return acc
+}
+
+// REPORT-ONLY: the loop variable is named strings, so the fix machinery
+// considers the name unusable at the append site; diagnostic without a fix.
+func advLoopVarNamedStrings(items []string) string {
+	acc := "" // want `acc is grown by string concatenation on every loop iteration`
+	for strings := 0; strings < len(items); strings++ {
+		acc += items[strings]
+	}
+	return acc
+}
+
+// REPORT-ONLY: the accumulator itself is named strings — a fix would produce
+// `var strings strings.Builder`; the shadow guard keeps it report-only.
+func advAccNamedStrings(items []string) string {
+	strings := "" // want `strings is grown by string concatenation on every loop iteration`
+	for _, it := range items {
+		strings += it
+	}
+	return strings
+}
+
+// FIXED: a goto re-enters the declaration+loop region. The spec re-executes
+// the declaration on each pass, re-zeroing the Builder exactly like acc = "".
+func advGotoReenter(items []string) string {
+	n := 0
+again:
+	n++
+	acc := "" // want `acc is grown by string concatenation on every loop iteration`
+	for _, it := range items {
+		acc += it
+	}
+	if n < 2 {
+		goto again
+	}
+	return acc
+}
+
+// FIXED: every post-loop read form becomes String(): if-init, switch tag,
+// range expression, deferred call argument, copy, index, slice, map key.
+func advReadsVariety(items []string, m map[string]int) (string, byte, string, int) {
+	acc := "seed" // want `acc is grown by string concatenation on every loop iteration`
+	for _, it := range items {
+		acc += it
+	}
+	if x := acc; x == "" {
+		_ = x
+	}
+	switch acc {
+	case "a":
+	}
+	for _, r := range acc {
+		_ = r
+	}
+	defer fmt.Println(acc)
+	x := acc
+	return x, acc[0], acc[1:2], m[acc]
+}
+
+// FIXED: the whole candidate sits inside an outer loop, and the outer
+// accumulator is itself a candidate; both rewrite, composing cleanly.
+func advOuterWrapped(items []string) string {
+	out := "" // want `out is grown by string concatenation on every loop iteration`
+	for i := 0; i < 2; i++ {
+		acc := "" // want `acc is grown by string concatenation on every loop iteration`
+		for _, it := range items {
+			acc += it
+		}
+		out += acc
+	}
+	return out
+}
+
+// FIXED: a second candidate whose SEED reads the first accumulator; the
+// first fix's String() rewrite composes with the second fix's seed rewrite.
+func advNestedSeed(items []string) string {
+	acc := "" // want `acc is grown by string concatenation on every loop iteration`
+	for _, it := range items {
+		acc += it
+	}
+	inner := acc + "-" // want `inner is grown by string concatenation on every loop iteration`
+	for _, it := range items {
+		inner += it
+	}
+	return acc + inner
+}
+
+// FIXED: a backtick empty literal is a (vacuous) seed; writing an empty
+// raw literal appends nothing — still bit-identical.
+func advBacktickSeed(items []string) string {
+	acc := `` // want `acc is grown by string concatenation on every loop iteration`
+	for _, it := range items {
+		acc += it
+	}
+	return acc
+}
+
+// FIXED: parenthesized single-spec var declaration, seeded.
+func advParenSpec(items []string) string {
+	var (acc = "p:") // want `acc is grown by string concatenation on every loop iteration`
+	for _, it := range items {
+		acc += it
+	}
+	return acc
+}
+
+// FIXED: an inner shadow of the accumulator inside the loop stays a string;
+// only the outer accumulator changes type.
+func advInnerShadow(items []string) string {
+	acc := "" // want `acc is grown by string concatenation on every loop iteration`
+	for _, it := range items {
+		{
+			acc := "local"
+			_ = acc
+		}
+		acc += it
+	}
+	return acc
+}
