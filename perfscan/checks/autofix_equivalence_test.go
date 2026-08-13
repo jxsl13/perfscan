@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"text/template"
 	"time"
 	"unicode/utf8"
 )
@@ -2142,6 +2143,34 @@ func TestEquiv_PS2133LoadLocationReuseEquivalent(t *testing.T) {
 		ref := time.Unix(1700000000, 0)
 		if ref.In(fresh).Format(time.RFC3339) != ref.In(cached).Format(time.RFC3339) {
 			t.Errorf("LoadLocation(%q): In() disagrees between fresh and cached", name)
+		}
+	}
+}
+
+// TestEquiv_PS2134TemplateReuseEquivalent pins the equivalence PS2134's advice
+// relies on: for a fixed template text, a freshly parsed template.New(name).Parse
+// and a package-level one parsed once render identical output for the same data.
+// Hoisting the parse to package scope is therefore behavior-preserving — it only
+// removes the per-call re-parse.
+func TestEquiv_PS2134TemplateReuseEquivalent(t *testing.T) {
+	const src = "Hello {{.Name}}, you have {{.Count}} messages{{if .Admin}} (admin){{end}}."
+	cached := template.Must(template.New("t").Parse(src))
+	datas := []map[string]any{
+		{"Name": "Ann", "Count": 3, "Admin": true},
+		{"Name": "", "Count": 0, "Admin": false},
+		{"Name": "日本", "Count": 99, "Admin": false},
+	}
+	for _, d := range datas {
+		fresh := template.Must(template.New("t").Parse(src))
+		var a, b strings.Builder
+		if err := fresh.Execute(&a, d); err != nil {
+			t.Fatalf("fresh.Execute: %v", err)
+		}
+		if err := cached.Execute(&b, d); err != nil {
+			t.Fatalf("cached.Execute: %v", err)
+		}
+		if a.String() != b.String() {
+			t.Errorf("data=%v: fresh=%q != cached=%q", d, a.String(), b.String())
 		}
 	}
 }
