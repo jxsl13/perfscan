@@ -1969,3 +1969,50 @@ func TestEquiv_PS2109SprintfBytesToAppendf(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS2107SprintfBinOctToFormat pins PS2107's %b/%o arms: base-2 and
+// base-8 integer formatting via fmt is byte-identical to strconv.FormatInt/
+// FormatUint with the matching base, for signed and unsigned across the full
+// range incl. MinInt64/MaxInt64 (Itoa is base-10 only, hence FormatInt/Uint).
+func TestEquiv_PS2107SprintfBinOctToFormat(t *testing.T) {
+	ints := []int64{0, -1, 1, math.MaxInt64, math.MinInt64, math.MaxInt32, math.MinInt32, 255, -255}
+	for i := int64(-5000); i < 5000; i++ {
+		ints = append(ints, i)
+	}
+	for _, i := range ints {
+		if fmt.Sprintf("%b", i) != strconv.FormatInt(i, 2) {
+			t.Errorf("%%b(%d): %q != FormatInt base2 %q", i, fmt.Sprintf("%b", i), strconv.FormatInt(i, 2))
+		}
+		if fmt.Sprintf("%o", i) != strconv.FormatInt(i, 8) {
+			t.Errorf("%%o(%d): %q != FormatInt base8 %q", i, fmt.Sprintf("%o", i), strconv.FormatInt(i, 8))
+		}
+	}
+	uints := []uint64{0, 1, math.MaxUint64, math.MaxUint32, 255, 1<<63 - 1, 1 << 63}
+	for _, u := range uints {
+		if fmt.Sprintf("%b", u) != strconv.FormatUint(u, 2) {
+			t.Errorf("%%b(uint %d): %q != FormatUint base2 %q", u, fmt.Sprintf("%b", u), strconv.FormatUint(u, 2))
+		}
+		if fmt.Sprintf("%o", u) != strconv.FormatUint(u, 8) {
+			t.Errorf("%%o(uint %d): %q != FormatUint base8 %q", u, fmt.Sprintf("%o", u), strconv.FormatUint(u, 8))
+		}
+	}
+}
+
+// TestEquiv_PS2107SprintfQuote pins PS2107's %q arms: fmt.Sprintf("%q", s) over a
+// string equals strconv.Quote(s), and fmt.Sprintf("%q", r) over a rune equals
+// strconv.QuoteRune(r) — including control bytes, escapes, unicode, and the
+// out-of-range/invalid runes that both render as U+FFFD.
+func TestEquiv_PS2107SprintfQuote(t *testing.T) {
+	strs := []string{"", "a", "hello\tworld", "quote\"me", "日本語", "back\\slash", "\x00\x01\x1f", "line\nbreak", "emoji😀", "\x7f"}
+	for _, s := range strs {
+		if fmt.Sprintf("%q", s) != strconv.Quote(s) {
+			t.Errorf("%%q(%q): %q != strconv.Quote %q", s, fmt.Sprintf("%q", s), strconv.Quote(s))
+		}
+	}
+	runes := []rune{'A', '日', 0, 0x10FFFF, 0x110000, utf8.RuneError, -1, 0x1F600, '\t', '\'', '\\', 0x7f, '\n'}
+	for _, r := range runes {
+		if fmt.Sprintf("%q", r) != strconv.QuoteRune(r) {
+			t.Errorf("%%q(rune %d): %q != QuoteRune %q", r, fmt.Sprintf("%q", r), strconv.QuoteRune(r))
+		}
+	}
+}
