@@ -107,3 +107,28 @@ func TestLoadParseErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestLoadRelativeDirectoryResolvesAgainstDBDir pins the fallback for a
+// non-spec-compliant compile_commands.json whose entries carry a RELATIVE or
+// EMPTY "directory" (some generators emit these): the translation unit is
+// resolved against the DATABASE's own location, not the process CWD, so
+// `perfscanxx -p build` yields the same TUs no matter where it is invoked.
+func TestLoadRelativeDirectoryResolvesAgainstDBDir(t *testing.T) {
+	root := t.TempDir()
+	build := filepath.Join(root, "build")
+	if err := os.MkdirAll(build, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db := writeDB(t, build, []map[string]string{
+		{"directory": "", "file": "a.cpp"},    // empty directory -> resolve against build/
+		{"directory": "sub", "file": "b.cpp"}, // relative directory -> build/sub/b.cpp
+	})
+	tus, err := Load(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(build, "a.cpp"), filepath.Join(build, "sub", "b.cpp")}
+	if len(tus) != 2 || tus[0] != want[0] || tus[1] != want[1] {
+		t.Errorf("Load = %v, want %v (relative/empty directory must resolve against the db dir)", tus, want)
+	}
+}
