@@ -173,6 +173,13 @@ var entries = []Entry{
 		Level: LevelStructured, Category: "moves",
 		Title:  "sink parameter taken by const& then copied; take by value and std::move (one copy or move, not always a copy)",
 		HasFix: true,
+		Caveat: "this is a trade-off, not a strict win. by-value + std::move pays off " +
+			"only when callers pass RVALUES (moved in) of a nothrow-movable type; an LVALUE " +
+			"caller that previously bound to the const& for free now pays a full COPY, so on " +
+			"lvalue-heavy call sites it PESSIMIZES. It also changes how many copy/move " +
+			"constructors run — observable if the type's copy/move has side effects " +
+			"(refcounting, logging, allocation counters). Benchmark/review the call sites " +
+			"before -fix.",
 	},
 	{
 		ID: "PX3008", TidyName: "readability-container-size-empty",

@@ -40,6 +40,13 @@ should eyeball `-diff` before `-fix`:
   operation can throw (e.g. a move-assignment that closes a handle whose close
   throws); `noexcept` would turn such a throw into `std::terminate`. (Seen on
   fmt's `file` move-assignment, commented "not noexcept because close may throw".)
+- **PX3007** (`modernize-pass-by-value`) rewrites a `const&` sink parameter to
+  by-value + `std::move`. This is a **trade-off, not a strict win**: it pays off
+  only for callers passing *rvalues* of a nothrow-movable type; an *lvalue*
+  caller that bound to the `const&` for free now pays a full copy, so on
+  lvalue-heavy call sites it *pessimizes*. It also changes how many copy/move
+  constructors run — observable if the type's copy/move has side effects
+  (refcounting, logging). Benchmark the call sites before applying.
 
 This is why `-fix` is opt-in and `-diff`/baseline exist: review before applying.
 
