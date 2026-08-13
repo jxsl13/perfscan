@@ -65,6 +65,10 @@ func TestPS2131(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS2131.Analyzer, "ps2131")
 }
 
+func TestPS2132(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), PS2132.Analyzer, "ps2132")
+}
+
 func TestPS5008(t *testing.T) {
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS5008.Analyzer, "ps5008", "pkgshadow")
 }

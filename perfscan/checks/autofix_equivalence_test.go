@@ -2092,3 +2092,28 @@ func TestEquiv_PS2131MatchStringEqualsPrecompiled(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS2132NewReplacerReuseEquivalent pins the equivalence PS2132's advice
+// relies on: for a fixed set of pairs, a freshly-built strings.NewReplacer(pairs)
+// and a reused package-level one produce identical output. Hoisting the
+// constructor to package scope is therefore behavior-preserving (it only removes
+// the per-call rebuild). Verified over several pair sets and inputs incl. empties,
+// overlapping keys, and text with no matches.
+func TestEquiv_PS2132NewReplacerReuseEquivalent(t *testing.T) {
+	pairSets := [][]string{
+		{"&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&#34;", "'", "&#39;"},
+		{"a", "b", "c", "d"},
+		{"foo", "bar"},
+		{"", "X"}, // empty key
+	}
+	inputs := []string{"", "a<b>&c \"d\" 'e'", "no specials here", "foofoo", "aaa", "&&&<<<"}
+	for _, ps := range pairSets {
+		reused := strings.NewReplacer(ps...)
+		for _, s := range inputs {
+			fresh := strings.NewReplacer(ps...).Replace(s)
+			if fresh != reused.Replace(s) {
+				t.Errorf("pairs=%v input=%q: inline=%q reused=%q", ps, s, fresh, reused.Replace(s))
+			}
+		}
+	}
+}
