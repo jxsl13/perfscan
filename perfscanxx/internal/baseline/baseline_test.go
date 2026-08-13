@@ -52,6 +52,30 @@ func TestFilterReportsOnlyNewFindings(t *testing.T) {
 	}
 }
 
+// TestFilterDistinguishesByMessage pins the MESSAGE component of the baseline key
+// {file, id, message}. Two findings that share file AND check id but differ only
+// in message (two performance-for-range-copy loops naming different variables, say)
+// are distinct keys: baselining one must NOT suppress the other. A regression that
+// dropped message from keyOf — keying on file+id alone — would wrongly swallow the
+// second as already-accepted. TestFilterReportsOnlyNewFindings varies file AND id
+// together, so it never isolates this component.
+func TestFilterDistinguishesByMessage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bl.yaml")
+	if _, err := Write(path, []report.Finding{f("a.cpp", "PX1001", "copy of x")}); err != nil {
+		t.Fatal(err)
+	}
+	kept, suppressed, err := Filter(path, []report.Finding{
+		f("a.cpp", "PX1001", "copy of x"), // baselined -> suppressed
+		f("a.cpp", "PX1001", "copy of y"), // same file+id, different message -> NEW
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suppressed != 1 || len(kept) != 1 || kept[0].Message != "copy of y" {
+		t.Fatalf("kept=%v suppressed=%d; want the differently-messaged finding kept, 1 suppressed", kept, suppressed)
+	}
+}
+
 func TestFilterIsCountedPerKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bl.yaml")
 	// Baseline accepts TWO identical {file,id,message} findings.
