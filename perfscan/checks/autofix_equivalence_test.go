@@ -89,6 +89,104 @@ func TestEquiv_FieldsSeq(t *testing.T) {
 	}
 }
 
+// PS2119 (argument snapshot): both the eager and the lazy form evaluate the
+// range operand — Split(s, sep) or SplitSeq(s, sep) — exactly ONCE at loop
+// entry, and a string argument is an immutable value copy. Reassigning s
+// inside the body therefore affects NEITHER form; this pins that the fix
+// needs no "s reassigned in body" guard for the strings arm.
+func TestEquiv_SplitSeq_ArgSnapshot(t *testing.T) {
+	s1 := "a,b,c"
+	var eager []string
+	for _, v := range strings.Split(s1, ",") {
+		eager = append(eager, v)
+		s1 = "x,y"
+	}
+	s2 := "a,b,c"
+	var lazy []string
+	for v := range strings.SplitSeq(s2, ",") {
+		lazy = append(lazy, v)
+		s2 = "x,y"
+	}
+	want := []string{"a", "b", "c"}
+	if !slices.Equal(eager, want) || !slices.Equal(lazy, want) {
+		t.Errorf("reassigning s in the body must affect neither form: eager=%q lazy=%q want=%q", eager, lazy, want)
+	}
+}
+
+// PS2119 (bytes arm is ADVISORY-ONLY — this pins the divergences that forbid
+// the auto-fix). Unlike strings, a []byte source is mutable and the fragments
+// alias it, and the two forms are observably different in three ways:
+//
+//  1. bytes.Split pins every fragment boundary BEFORE the body runs;
+//     bytes.SplitSeq re-runs Index lazily between yields, so a body write
+//     into the source's backing array changes the number and content of
+//     later fragments under the Seq form only.
+//  2. genSplit's FINAL fragment is the raw tail `s` (cap reaches the
+//     source's spare capacity) while splitSeq clamps every fragment to its
+//     length — cap(lastPiece) diverges.
+//  3. Consequently, append to the final piece writes into the source
+//     buffer's spare capacity under the eager form but allocates a fresh
+//     array under the lazy one.
+//
+// If a future stdlib change makes any arm below fail, re-evaluate the
+// advisory (mutation, arm 1, is inherent to laziness and cannot converge).
+func TestEquiv_SplitSeq_BytesAliasingDivergence(t *testing.T) {
+	// 1: boundary divergence under body mutation.
+	b := []byte("a,b,c")
+	var eager []string
+	for _, v := range bytes.Split(b, []byte{','}) {
+		eager = append(eager, string(v))
+		b[3] = 'X' // clobber the 2nd separator after the 1st yield
+	}
+	b2 := []byte("a,b,c")
+	var lazy []string
+	for v := range bytes.SplitSeq(b2, []byte{','}) {
+		lazy = append(lazy, string(v))
+		b2[3] = 'X'
+	}
+	if want := []string{"a", "b", "c"}; !slices.Equal(eager, want) {
+		t.Errorf("bytes.Split under body mutation: got %q, want %q (eager boundaries must be pinned)", eager, want)
+	}
+	if want := []string{"a", "bXc"}; !slices.Equal(lazy, want) {
+		t.Errorf("bytes.SplitSeq under body mutation: got %q, want %q (lazy re-scan)", lazy, want)
+	}
+
+	// 2: cap of the final fragment.
+	src := make([]byte, 0, 64)
+	src = append(src, "a,b"...)
+	frags := bytes.Split(src, []byte{','})
+	eagerLast := frags[len(frags)-1]
+	var lazyLast []byte
+	for v := range bytes.SplitSeq(src, []byte{','}) {
+		lazyLast = v
+	}
+	if cap(lazyLast) != len(lazyLast) {
+		t.Errorf("bytes.SplitSeq final fragment must be cap-clamped: len=%d cap=%d", len(lazyLast), cap(lazyLast))
+	}
+	if cap(eagerLast) == cap(lazyLast) {
+		t.Errorf("cap parity reached (eager=%d lazy=%d): the bytes advisory's cap arm no longer holds — re-check genSplit", cap(eagerLast), cap(lazyLast))
+	}
+
+	// 3: append to the final piece — eager spills into src's spare capacity.
+	mk := func() []byte { b := make([]byte, 0, 16); return append(b, "a,b"...) }
+	e := mk()
+	for _, v := range bytes.Split(e, []byte{','}) {
+		v = append(v, '!')
+		_ = v
+	}
+	l := mk()
+	for v := range bytes.SplitSeq(l, []byte{','}) {
+		v = append(v, '!')
+		_ = v
+	}
+	if e[:4][3] != '!' {
+		t.Errorf("eager append to final piece must spill into the source's spare capacity, got %q", e[:4])
+	}
+	if l[:4][3] == '!' {
+		t.Errorf("lazy append to final piece must NOT touch the source buffer, got %q", l[:4])
+	}
+}
+
 // PS2112: append(append([]T(nil), a...), b...) -> slices.Concat(a, b). Concat
 // must yield exactly the chained-append result INCLUDING nil-ness on the edges.
 // The subtle part: slices.Concat is nil-PRESERVING for all-empty inputs (it does

@@ -29,7 +29,7 @@ func splitAfterDirect(s string) {
 
 func bytesSplitDirect(b []byte) int {
 	n := 0
-	for part := range bytes.SplitSeq(b, []byte{','}) { // want `ranging directly over bytes\.Split allocates the whole result slice per loop entry; bytes\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+	for _, part := range bytes.Split(b, []byte{','}) { // want `ranging directly over bytes\.Split allocates the whole result slice per loop entry; bytes\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\); fix withheld: not bit-identical if the loop body mutates the byte slice or appends to/measures the final piece`
 		n += len(part)
 	}
 	return n
@@ -37,7 +37,7 @@ func bytesSplitDirect(b []byte) int {
 
 func bytesFieldsDirect(b []byte) int {
 	n := 0
-	for f := range bytes.FieldsSeq(b) { // want `ranging directly over bytes\.Fields allocates the whole result slice per loop entry; bytes\.FieldsSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+	for _, f := range bytes.Fields(b) { // want `ranging directly over bytes\.Fields allocates the whole result slice per loop entry; bytes\.FieldsSeq yields the same pieces in the same order with no slice allocation \(go1\.24\); fix withheld: not bit-identical if the loop body mutates the byte slice or appends to/measures the final piece`
 		n += len(f)
 	}
 	return n
