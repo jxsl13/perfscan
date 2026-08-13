@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
@@ -318,6 +319,30 @@ func TestSARIFLevelMapping(t *testing.T) {
 	for _, res := range run.Results {
 		if got := res.Level; got != want[res.RuleID] {
 			t.Errorf("result %s level = %q, want %q", res.RuleID, got, want[res.RuleID])
+		}
+	}
+}
+
+// TestJSONEmptyIsArray pins that JSON emits an empty ARRAY (not null) when there
+// are no findings — tooling that parses -json expects an array unconditionally,
+// and Go's json.Encode would otherwise render a nil slice as `null`.
+func TestJSONEmptyIsArray(t *testing.T) {
+	for _, findings := range [][]Finding{nil, {}} {
+		var buf bytes.Buffer
+		if err := JSON(&buf, findings); err != nil {
+			t.Fatalf("JSON: %v", err)
+		}
+		got := strings.TrimSpace(buf.String())
+		if got != "[]" {
+			t.Errorf("JSON(%v) = %q, want %q", findings, got, "[]")
+		}
+		// Must be valid JSON that unmarshals to an empty array.
+		var arr []Finding
+		if err := json.Unmarshal(buf.Bytes(), &arr); err != nil {
+			t.Errorf("JSON output not valid: %v", err)
+		}
+		if len(arr) != 0 {
+			t.Errorf("unmarshaled %d findings, want 0", len(arr))
 		}
 	}
 }
