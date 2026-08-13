@@ -316,6 +316,38 @@ func TestIsVersionSegment(t *testing.T) {
 // astutil.UsesImport resolves the import spec's actual name; the test locks that
 // so a future change to the pruner's usage check cannot silently prune live
 // aliased imports (the same failure class as the math/rand/v2 bug).
+// TestFixPrunesAliasedOrphanImport is the counterpart to
+// TestFixKeepsAliasedStdlibImport: when a fix orphans an import that is ALIASED,
+// the pruner must remove the aliased spec, not just a canonically-named one. The
+// runner's orphan detection keys on (alias, path) — imp.Name is read when present
+// — but every other prune test orphans a non-aliased import ("sort"/"fmt"), so
+// the imp.Name branch was unexercised. PS2118 reaches it: it detects io by import
+// PATH (so it fires on `iow.WriteString`), rewrites the call to w.Write(b) — which
+// drops the only io reference — and the now-orphaned `iow "io"` must be pruned. A
+// regression matching orphans by canonical name alone would leave a dangling
+// aliased import ("imported and not used").
+func TestFixPrunesAliasedOrphanImport(t *testing.T) {
+	const src = `package p
+
+import iow "io"
+
+func f(w interface{ Write([]byte) (int, error) }, b []byte) {
+	iow.WriteString(w, string(b))
+}
+`
+	got := string(runFixMode(t, src))
+
+	if !strings.Contains(got, "w.Write(b)") {
+		t.Errorf("expected iow.WriteString(w, string(b)) -> w.Write(b):\n%s", got)
+	}
+	if strings.Contains(got, `"io"`) || strings.Contains(got, "iow") {
+		t.Errorf(`orphaned aliased import iow "io" should have been pruned:\n%s`, got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
+
 func TestFixKeepsAliasedStdlibImport(t *testing.T) {
 	const src = `package p
 
