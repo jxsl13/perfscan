@@ -119,3 +119,46 @@ func f(a []int, b []string) {
 		t.Errorf("fixed file does not parse (duplicate import?): %v\n%s", err, got)
 	}
 }
+
+// TestFixMaximalCrossCheckComposition stresses the whole import-machinery
+// interaction at once: one file where four different checks each churn the
+// import block — PS2129 (fmt.Fprint -> io.WriteString, adds io), PS2118
+// (io.WriteString(w,string(b)) -> w.Write(b), removes an io ref), PS2107
+// (fmt.Sprintf("%d",n) -> strconv.Itoa, adds strconv + removes the last fmt),
+// PS3104 (sort.Ints -> slices.Sort, adds slices + removes the last sort). The
+// combined result must add slices+strconv, keep io (still used), prune fmt+sort,
+// and compile — exercising prune + dedupe + the widening together.
+func TestFixMaximalCrossCheckComposition(t *testing.T) {
+	const src = `package p
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"sort"
+)
+
+func f(buf *bytes.Buffer, b []byte, a []int, s string, n int) {
+	fmt.Fprint(buf, s)
+	io.WriteString(buf, string(b))
+	_ = fmt.Sprintf("%d", n)
+	sort.Ints(a)
+}
+`
+	got := string(runFixMode(t, src))
+
+	for _, gone := range []string{`"fmt"`, `"sort"`} {
+		if strings.Contains(got, gone) {
+			t.Errorf("%s should have been pruned:\n%s", gone, got)
+		}
+	}
+	for _, want := range []string{`"io"`, `"slices"`, `"strconv"`,
+		"io.WriteString(buf, s)", "buf.Write(b)", "strconv.Itoa(n)", "slices.Sort(a)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in the fixed file:\n%s", want, got)
+		}
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
