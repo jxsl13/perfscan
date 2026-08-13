@@ -58,6 +58,57 @@ func TestFromExportLevelGating(t *testing.T) {
 	}
 }
 
+// TestFromExportLevelGatingAllTiers pins the MIDDLE tier of the level gate, which
+// sampleExport (L1 + L2 only) leaves untested: -level 2 must include L1 and L2 but
+// EXCLUDE L3, and -level 3 must include an L3 finding. The existing test brackets
+// the gate from the ends (all-at-L3, only-L1-at-L1); a regression that mishandled
+// the L2 selection specifically (e.g. an off-by-one in the level comparison) would
+// slip past it. Uses one real check per tier: PX1001 (L1), PX2001 (L2),
+// PX3021 (L3, performance-no-int-to-ptr).
+func TestFromExportLevelGatingAllTiers(t *testing.T) {
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+	ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+
+	mk := func(name string, off int) fixes.Diagnostic {
+		return fixes.Diagnostic{
+			DiagnosticName: name,
+			DiagnosticMessage: fixes.DiagnosticMessage{
+				Message: "m", FilePath: "/src/demo.cpp", FileOffset: off,
+			},
+		}
+	}
+	ef := &fixes.ExportFile{
+		MainSourceFile: "/src/demo.cpp",
+		Diagnostics: []fixes.Diagnostic{
+			mk("performance-for-range-copy", 10),               // PX1001, L1
+			mk("performance-inefficient-vector-operation", 40), // PX2001, L2
+			mk("performance-no-int-to-ptr", 70),                // PX3021, L3
+		},
+	}
+
+	ids := func(fs []Finding) map[string]bool {
+		m := map[string]bool{}
+		for _, f := range fs {
+			m[f.ID] = true
+		}
+		return m
+	}
+
+	l1 := ids(FromExport(ef, catalog.LevelIdiomatic))
+	if len(l1) != 1 || !l1["PX1001"] {
+		t.Errorf("-level 1 = %v, want only PX1001", l1)
+	}
+	l2 := ids(FromExport(ef, catalog.LevelStructured))
+	if len(l2) != 2 || !l2["PX1001"] || !l2["PX2001"] || l2["PX3021"] {
+		t.Errorf("-level 2 = %v, want PX1001+PX2001 (NOT the L3 PX3021)", l2)
+	}
+	l3 := ids(FromExport(ef, catalog.LevelAggressive))
+	if len(l3) != 3 || !l3["PX3021"] {
+		t.Errorf("-level 3 = %v, want all three including the L3 PX3021", l3)
+	}
+}
+
 // TestFromExportDeduplicatesRepeatedDiagnostics pins the report-layer guarantee
 // that an identical diagnostic (same file + byte offset + check name) is reported
 // ONCE, even if the --export-fixes document lists it more than once. When
