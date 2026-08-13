@@ -99,6 +99,21 @@ func reassignedAfter(items []string) string {
 	return acc
 }
 
+// NEGATIVE: acc is written by a RANGE binding after the loop (not the plain
+// acc = ... assignment above), so it is not read-only. This hits the RangeStmt
+// Key/Value branch of ps2128PlainRead — a distinct write shape from addressTaken
+// (&acc) and reassignedAfter (acc = ...). A strings.Builder has no assignable
+// string value, so the rewrite would break here; silent.
+func rangeReassignedAfter(items, more []string) string {
+	acc := ""
+	for _, it := range items {
+		acc += it
+	}
+	for _, acc = range more {
+	}
+	return acc
+}
+
 // NEGATIVE: a statement sits between the declaration and the loop; silent.
 func statementBetween(items []string) string {
 	acc := ""
