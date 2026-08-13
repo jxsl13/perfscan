@@ -93,6 +93,52 @@ func TestHasFixChecksActuallyApply(t *testing.T) {
 	}
 }
 
+// TestPX3026DoesNotFireOnNonTrivialMember pins the SAFETY BOUNDARY of the
+// trivially-destructible fix (PX3026): it must fire ONLY on a type that can
+// actually be made trivially destructible. A class with a non-trivial member
+// (std::string here) is NOT trivially destructible even with a defaulted
+// destructor, so clang-tidy must leave the out-of-line `= default` alone —
+// removing it would neither help nor be what the check claims. If a future
+// clang-tidy broadened the check to such types, applying the "fix" would be
+// misleading, so this locks the boundary against the LIVE toolchain.
+//
+// The fixture is the exact positive shape (out-of-line defaulted destructor)
+// EXCEPT for the non-trivial member, isolating that single dimension.
+func TestPX3026DoesNotFireOnNonTrivialMember(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	const src = "#include <string>\nstruct S { std::string s; ~S(); };\nS::~S() = default;\n"
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "s.cpp")
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile, ok := cppCompileCmdForTest("s.cpp")
+	if !ok {
+		t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, _ := runCLI("-tidy", bin, "-fix", "-checks", "PX3026", "-p", dir, cpp)
+	if strings.Contains(stderr, "file not found") || strings.Contains(stderr, "fatal error") {
+		t.Skipf("toolchain could not parse the fixture headers; skipping. stderr:\n%s", stderr)
+	}
+	gotB, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotB) != src {
+		t.Errorf("PX3026 rewrote a type with a non-trivial member (std::string) — the fix must only touch types that CAN be made trivially destructible:\n%s", string(gotB))
+	}
+	if strings.Contains(out, "PX3026") {
+		t.Errorf("PX3026 reported on a non-trivially-destructible type; it must stay silent:\n%s", out)
+	}
+}
+
 // hasFixCase is one HasFix:true built-in fixture: src triggers check id, and
 // after `perfscanxx -fix` want must appear and unwant must be gone (either "" to
 // skip that assertion).
