@@ -43,7 +43,11 @@ type sarifText struct {
 }
 
 type sarifResult struct {
-	RuleID    string          `json:"ruleId"`
+	RuleID string `json:"ruleId"`
+	// RuleIndex is the 0-based position of RuleID in the run's tool.driver.rules
+	// array — the SARIF-recommended way to resolve a result to its rule, robust
+	// when a ruleId string is ambiguous. GitHub Code Scanning honors it.
+	RuleIndex int             `json:"ruleIndex"`
 	Level     string          `json:"level"`
 	Message   sarifText       `json:"message"`
 	Locations []sarifLocation `json:"locations"`
@@ -73,12 +77,12 @@ type sarifRegion struct {
 var Version = "dev"
 
 func emitSARIF(w io.Writer, findings []Finding) {
-	seenRule := make(map[string]bool, len(findings))
+	ruleIndex := make(map[string]int, len(findings))
 	rules := make([]sarifRule, 0, len(findings))
 	results := make([]sarifResult, 0, len(findings))
 	for _, f := range findings {
-		if !seenRule[f.Check.ID] {
-			seenRule[f.Check.ID] = true
+		if _, ok := ruleIndex[f.Check.ID]; !ok {
+			ruleIndex[f.Check.ID] = len(rules)
 			rules = append(rules, sarifRule{
 				ID:               f.Check.ID,
 				ShortDescription: sarifText{Text: f.Check.Doc.Title},
@@ -90,9 +94,10 @@ func emitSARIF(w io.Writer, findings []Finding) {
 			})
 		}
 		results = append(results, sarifResult{
-			RuleID:  f.Check.ID,
-			Level:   sarifLevel(f.Check.Level),
-			Message: sarifText{Text: f.Message},
+			RuleID:    f.Check.ID,
+			RuleIndex: ruleIndex[f.Check.ID],
+			Level:     sarifLevel(f.Check.Level),
+			Message:   sarifText{Text: f.Message},
 			Locations: []sarifLocation{{
 				PhysicalLocation: sarifPhysical{
 					ArtifactLocation: sarifArtifact{URI: relPath(f.Pos.Filename)},
