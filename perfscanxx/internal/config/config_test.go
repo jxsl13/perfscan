@@ -156,3 +156,17 @@ func TestDiscoverYAMLAndPrecedence(t *testing.T) {
 		t.Errorf("Discover(dir named .yml) = (%q, %v), want the .yaml file (dir skipped)", p, ok)
 	}
 }
+
+// TestLoadMissingFile pins that Load surfaces the os.ReadFile error for a
+// nonexistent path (rather than silently returning an empty config) so a
+// mistyped -config path fails loudly.
+func TestLoadMissingFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist.yml")
+	f, err := Load(missing)
+	if err == nil {
+		t.Fatalf("Load(%q) = %+v, nil; want an error for a missing file", missing, f)
+	}
+	if f != nil {
+		t.Errorf("Load returned a non-nil config on error: %+v", f)
+	}
+}
