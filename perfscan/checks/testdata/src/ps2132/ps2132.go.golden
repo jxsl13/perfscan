@@ -4,19 +4,25 @@ import "strings"
 
 const amp = "&amp;"
 
+var psReplacerL8 = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
 // Inline NewReplacer with constant pairs, chained to Replace: flagged.
 func escape(s string) string {
-	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s) // want `strings\.NewReplacer with constant pairs rebuilds its lookup structure on every call`
+	return psReplacerL8.Replace(s) // want `strings\.NewReplacer with constant pairs rebuilds its lookup structure on every call`
 }
+
+var psReplacerL13 = strings.NewReplacer("&", amp)
 
 // Const-ident args also count as constant: flagged.
 func escapeConst(s string) string {
-	return strings.NewReplacer("&", amp).Replace(s) // want `strings\.NewReplacer with constant pairs rebuilds its lookup structure on every call`
+	return psReplacerL13.Replace(s) // want `strings\.NewReplacer with constant pairs rebuilds its lookup structure on every call`
 }
+
+var psReplacerL18 = strings.NewReplacer("a", "b")
 
 // Chained to WriteString: flagged (message names the method).
 func writeEscaped(w interface{ WriteString(string) (int, error) }, s string) {
-	_, _ = strings.NewReplacer("a", "b").WriteString(nil, s) // want `strings\.NewReplacer with constant pairs rebuilds its lookup structure on every call`
+	_, _ = psReplacerL18.WriteString(nil, s) // want `strings\.NewReplacer with constant pairs rebuilds its lookup structure on every call`
 	_ = w
 }
 
@@ -54,9 +60,11 @@ func shadowed(s string) string {
 	return strings.NewReplacer("a", "b").Replace(s)
 }
 
+var psReplacerL60 = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+
 // Escape-sequence constant pairs (CRLF normalizer) chained to Replace: flagged.
 // This is the exact shape found in the wild on gitea's ssh_key_parse.go, where
 // it rebuilds the replacer once per parsed SSH key.
 func normalizeNewlines(content string) string {
-	return strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(content) // want `strings\.NewReplacer with constant pairs rebuilds its lookup structure on every call`
+	return psReplacerL60.Replace(content) // want `strings\.NewReplacer with constant pairs rebuilds its lookup structure on every call`
 }
