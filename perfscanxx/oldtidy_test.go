@@ -137,3 +137,60 @@ func TestExperimentalFlagGatedByCustomSelection(t *testing.T) {
 		t.Errorf("builtin-only PX1001 selected but --experimental-custom-checks was passed:\n%v", argv)
 	}
 }
+
+// TestBoundaryClangTidyKeepsCustomChecks pins the INCLUSIVE boundary of the
+// experimental-custom-checks version gate. The gate drops custom checks only when
+// major < MinExperimentalMajor (20), so LLVM 20 — the FIRST version that supports
+// --experimental-custom-checks — must KEEP them. TestOldClangTidySkipsCustomChecks
+// covers the drop below the boundary (LLVM 18) and TestExperimentalFlagGatedBy...
+// covers well above it (LLVM 22), but exactly-20 was untested: a regression to a
+// `<= MinExperimentalMajor` gate would wrongly disable custom checks on the very
+// version they debut, and both existing tests (18 still drops, 22 still keeps)
+// would stay green.
+func TestBoundaryClangTidyKeepsCustomChecks(t *testing.T) {
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+
+	var runArgv []string
+	tidy.Executor = func(_ context.Context, argv []string, stdout, _ *bytes.Buffer) (int, error) {
+		if len(argv) >= 2 && argv[1] == "--version" {
+			stdout.WriteString("LLVM version 20.1.0\n") // exactly the boundary
+			return 0, nil
+		}
+		runArgv = argv
+		for _, a := range argv {
+			if strings.HasPrefix(a, "--export-fixes=") {
+				_ = os.WriteFile(strings.TrimPrefix(a, "--export-fixes="), []byte(""), 0o644)
+			}
+		}
+		return 0, nil
+	}
+
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "t.cpp")
+	if err := os.WriteFile(cpp, []byte("int main(){return 0;}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"clang++ -std=c++17 -c t.cpp"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, code := runCLI("-checks", "PX2101", "-p", dir, dir)
+	if code != 0 {
+		t.Fatalf("exit %d, want 0; stderr:\n%s", code, stderr)
+	}
+	if strings.Contains(stderr, "skipping the query-based custom checks") {
+		t.Errorf("LLVM 20 is the FIRST supported version — custom checks must NOT be skipped; stderr:\n%s", stderr)
+	}
+	found := false
+	for _, a := range runArgv {
+		if a == "--experimental-custom-checks" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("LLVM 20 must keep custom checks and pass --experimental-custom-checks; argv:\n%v", runArgv)
+	}
+}
