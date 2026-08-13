@@ -147,6 +147,48 @@ func TestUnifiedIsValidPatch(t *testing.T) {
 	}
 }
 
+// TestUnifiedMidFileDeletionIsValidPatch pins a mid-file PURE DELETION — lines
+// removed from the middle, none added, surrounding lines kept. This is the shape
+// a real perfscanxx fix produces (PX3026 removes an out-of-line
+// `T::~T() = default;` definition from a .cc, keeping the code around it), and it
+// is distinct from the covered mid-file cases (single-line replace, insertion):
+// the hunk carries only '-' lines in the changed region. It must render a valid
+// patch that the real `patch` binary applies to reproduce the shortened file.
+func TestUnifiedMidFileDeletionIsValidPatch(t *testing.T) {
+	patchBin, err := exec.LookPath("patch")
+	if err != nil {
+		t.Skip("patch not available")
+	}
+	orig := "keep1\ndrop1\ndrop2\nkeep2\n"
+	patched := "keep1\nkeep2\n"
+	diff := Unified("s.txt", "s.txt", []byte(orig), []byte(patched))
+
+	if !strings.Contains(diff, "-drop1\n") || !strings.Contains(diff, "-drop2\n") {
+		t.Errorf("deletion hunk missing the removed lines:\n%s", diff)
+	}
+	if strings.Contains(diff, "+drop") {
+		t.Errorf("a pure deletion must not re-add the dropped lines:\n%s", diff)
+	}
+
+	dir := t.TempDir()
+	src := dir + "/s.txt"
+	if err := os.WriteFile(src, []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(patchBin, "-p1", "-d", dir)
+	cmd.Stdin = strings.NewReader(diff)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("patch rejected the deletion diff: %v\n%s\ndiff:\n%s", err, out, diff)
+	}
+	got, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != patched {
+		t.Errorf("patched file = %q, want %q", got, patched)
+	}
+}
+
 // TestUnifiedContextLineNoFinalNewline pins the "\ No newline at end of file"
 // marker on a CONTEXT line (the change is on an earlier line, so the newline-less
 // last line appears unchanged in the hunk) — the writeHunk ' ' branch that the
