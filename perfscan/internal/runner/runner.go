@@ -1000,6 +1000,21 @@ func missingFixableImports(f *ast.File) []string {
 	return missing
 }
 
+// isVersionSegment reports whether s is a Go module major-version path segment
+// (v2, v3, …). Such a segment is never the package's actual name, so the
+// path-based import-usage heuristic cannot be trusted for these imports.
+func isVersionSegment(s string) bool {
+	if len(s) < 2 || s[0] != 'v' {
+		return false
+	}
+	for _, r := range s[1:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func pruneOrphanedImports(src []byte) []byte {
 	if bytes.Contains(src, []byte("//line ")) || bytes.Contains(src, []byte("/*line ")) {
 		return src
@@ -1030,6 +1045,18 @@ func pruneOrphanedImports(src []byte) []byte {
 		}
 		path, uerr := strconv.Unquote(imp.Path.Value)
 		if uerr != nil {
+			continue
+		}
+		// A trailing version segment (…/v2) means the package name is NOT the
+		// last path segment: math/rand/v2 is package "rand", k8s.io/klog/v2 is
+		// "klog". astutil.UsesImport infers the name from the last segment ("v2")
+		// and would wrongly report the import unused, pruning a LIVE import — the
+		// "undefined: rand" break observed on gonum's stat/distmv after a
+		// sort.Ints -> slices.Sort rewrite orphaned "sort" next to "math/rand/v2".
+		// Leaving a (rarely) genuinely-orphaned versioned import is far safer than
+		// deleting a live one; this runs BEFORE the stdlib-only gate below so it
+		// also covers stdlib /vN paths, which that gate (dot-in-path) misses.
+		if isVersionSegment(path[strings.LastIndex(path, "/")+1:]) {
 			continue
 		}
 		// Only STANDARD-LIBRARY imports (no dot in the path). For those the
