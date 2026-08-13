@@ -282,3 +282,56 @@ func f(names []string, s string) (int, []string) {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixCaddyThreeCheckImportChurn pins a rich composition observed during
+// corpus -fix validation on caddyserver/caddy (a strings.Builder helper that
+// sorts, writes single-byte runes, and hex-encodes a key): THREE checks fire in
+// one file with a two-add / two-prune import result — PS3104 (sort.Strings ->
+// slices.Sort: add slices, orphan sort), PS2107 %x (fmt.Sprintf("%x", b) ->
+// hex.EncodeToString: add encoding/hex, orphan fmt), and PS5102 (WriteRune ->
+// WriteByte, import-neutral) — while "strings" (still used by the Builder) stays.
+// The runner must, in one pass, add both new imports, prune both orphans, keep
+// the live one, and produce a file that parses. On the real caddy this was part
+// of 18 bit-identical fixes across 12 files; the tree built, vetted, and all
+// changed packages' tests passed.
+func TestFixCaddyThreeCheckImportChurn(t *testing.T) {
+	const src = `package p
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+func render(names []string, key []byte) string {
+	sort.Strings(names)
+	var sb strings.Builder
+	sb.WriteRune('"')
+	sb.WriteRune('-')
+	return sb.String() + fmt.Sprintf("%x", key)
+}
+`
+	got := string(runFixMode(t, src))
+
+	for _, want := range []string{
+		"slices.Sort(names)",
+		`sb.WriteByte('"')`,
+		"sb.WriteByte('-')",
+		"hex.EncodeToString(key)",
+		`"slices"`,
+		`"encoding/hex"`,
+		`"strings"`, // still used by strings.Builder — must survive
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in the composed fix:\n%s", want, got)
+		}
+	}
+	for _, gone := range []string{`"sort"`, `"fmt"`} {
+		if strings.Contains(got, gone) {
+			t.Errorf("import %s should have been pruned as an orphan:\n%s", gone, got)
+		}
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
