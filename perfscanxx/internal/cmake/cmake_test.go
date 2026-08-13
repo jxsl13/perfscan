@@ -22,6 +22,13 @@ func TestFindProject(t *testing.T) {
 	if _, ok := FindProject(t.TempDir()); ok {
 		t.Error("expected no project in an empty dir")
 	}
+	// An empty start defaults to "." (the current directory) — it must behave
+	// exactly like passing "." explicitly, whatever the test's cwd resolves to.
+	gotEmpty, okEmpty := FindProject("")
+	gotDot, okDot := FindProject(".")
+	if gotEmpty != gotDot || okEmpty != okDot {
+		t.Errorf("FindProject(\"\")=%q,%v != FindProject(\".\")=%q,%v (empty must default to \".\")", gotEmpty, okEmpty, gotDot, okDot)
+	}
 }
 
 func TestConfigureBuildArgs(t *testing.T) {
