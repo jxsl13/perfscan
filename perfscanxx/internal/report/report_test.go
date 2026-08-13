@@ -111,6 +111,44 @@ func TestFromExportDeduplicatesRepeatedDiagnostics(t *testing.T) {
 	}
 }
 
+// TestFromExportKeepsSameCheckAtDifferentOffsets pins the OFFSET component of the
+// dedup key: the same check firing at two DIFFERENT byte offsets in one file (two
+// trivially-destructible classes in a single header, say) is two genuine findings,
+// not one. TestFromExportDeduplicatesRepeatedDiagnostics varies the check name at a
+// fixed offset and TestFromExportDedupResolvesPathBeforeKeying varies the path form
+// at a fixed offset — neither exercises the offset field, so a regression that
+// dropped offset from the key (collapsing distinct occurrences to one) would slip
+// past both.
+func TestFromExportKeepsSameCheckAtDifferentOffsets(t *testing.T) {
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+	ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+
+	mk := func(off int) fixes.Diagnostic {
+		return fixes.Diagnostic{
+			DiagnosticName: "performance-trivially-destructible", // PX3026
+			DiagnosticMessage: fixes.DiagnosticMessage{
+				Message: "class can be made trivially destructible", FilePath: "/inc/shared.h", FileOffset: off,
+			},
+		}
+	}
+	ef := &fixes.ExportFile{
+		MainSourceFile: "/src/a.cpp",
+		Diagnostics:    []fixes.Diagnostic{mk(100), mk(240)}, // same check, same file, two classes
+	}
+	got := FromExport(ef, catalog.LevelAggressive)
+	if len(got) != 2 {
+		t.Fatalf("same check at two offsets must stay two findings, got %d:\n%+v", len(got), got)
+	}
+	offs := map[int]bool{}
+	for _, f := range got {
+		offs[f.Offset] = true
+	}
+	if !offs[100] || !offs[240] {
+		t.Errorf("both offsets must survive dedup; got offsets %v", offs)
+	}
+}
+
 // TestFromExportDedupResolvesPathBeforeKeying pins that the cross-TU dedup keys
 // on the RESOLVED absolute path, not the raw FilePath: the same shared-header
 // finding can reach --export-fixes via different path forms across TUs — an
