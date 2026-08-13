@@ -42,6 +42,21 @@ func reversedNeg(s, sub string) bool {
 	return !strings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) < 1 tests membership only; !strings\.Contains\(s, sub\) is faster and stops at the first match`
 }
 
+// Mirrored membership beyond the two above: `1 <= Count` normalizes to
+// `Count >= 1` (the GEQ mirror entry, which the `0 <`/`1 >` cases never
+// exercise) — a membership shape that still fires.
+func reversedGE(s, sub string) bool {
+	return strings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) >= 1 tests membership only; strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+// Mirrored NON-membership: `1 < Count` normalizes to `Count > 1`, which
+// genuinely needs the tally — silent, exactly like its call-on-left twin
+// `Count > 1`. Pins that the literal-on-left path declines through the same
+// membership gate rather than mis-firing after the mirror.
+func reversedNonMembership(s, sub string) bool {
+	return 1 < strings.Count(s, sub)
+}
+
 // An aliased import keeps its qualifier: only the selected name changes.
 func aliased(s, sub string) bool {
 	return stdstrings.Contains(s, sub) // want `strings\.Count\(\.\.\.\) > 0 tests membership only; strings\.Contains\(s, sub\) is faster and stops at the first match`
