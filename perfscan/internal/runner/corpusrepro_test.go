@@ -751,3 +751,47 @@ func GroupByMap[T any, K comparable, V any](collection []T, transform func(T) (K
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixPocketbasePointerSliceSortByField pins a PS3002 rewrite observed in the
+// wild during corpus -fix validation on pocketbase (a []*Collection sorted by a
+// string field). Two real-world details it locks: the SortFunc closure params
+// must be typed with the slice's ELEMENT type when that element is a POINTER
+// (func(a, b *Collection), not a value type), and a comparator that indexes then
+// selects a field (sorted[i].Name < sorted[j].Name) becomes cmp.Compare(a.Name,
+// b.Name). The field is a string (Ordered, non-float) so cmp.Compare is
+// bit-identical to <. On the real repo this rewrote cleanly and pocketbase built
+// + its tools tests passed.
+func TestFixPocketbasePointerSliceSortByField(t *testing.T) {
+	const src = `package p
+
+import "sort"
+
+type Collection struct{ Name string }
+
+func sortRefs(keys []*Collection) []*Collection {
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i].Name < keys[j].Name
+	})
+	return keys
+}
+`
+	got := string(runFixMode(t, src))
+
+	if !strings.Contains(got, "slices.SortFunc(keys, func(a, b *Collection) int { return cmp.Compare(a.Name, b.Name) })") {
+		t.Errorf("pointer-element sort should become SortFunc with *Collection params and cmp.Compare(a.Name, b.Name):\n%s", got)
+	}
+	if strings.Contains(got, "sort.Slice(") {
+		t.Errorf("the sort.Slice call should have been rewritten:\n%s", got)
+	}
+	for _, want := range []string{`"cmp"`, `"slices"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("import %s must be present:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `"sort"`) {
+		t.Errorf(`orphaned "sort" should have been pruned:\n%s`, got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
