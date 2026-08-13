@@ -90,6 +90,40 @@ func TestFindWalkNotFound(t *testing.T) {
 	}
 }
 
+// TestFindDefaultStart pins the start=="" default: with no -p and no explicit
+// start, Find walks upward from the process CWD (start defaults to "."). Chdir
+// into a temp dir holding compile_commands.json and assert Find("","") locates
+// it — the auto-discovery entry point the CLI uses when invoked as
+// `perfscanxx ./...` from a build root.
+func TestFindDefaultStart(t *testing.T) {
+	dir := t.TempDir()
+	db := writeDB(t, dir, []map[string]string{{"directory": dir, "file": "x.cpp"}})
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(wd) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Find("", "")
+	if err != nil {
+		t.Fatalf("Find(\"\",\"\") = %v, want it to find the db in CWD", err)
+	}
+	// t.TempDir may sit under a symlinked path (e.g. /var -> /private/var on
+	// macOS); compare by resolved basename+dir rather than exact string.
+	if filepath.Base(got) != Name {
+		t.Errorf("Find(\"\",\"\") = %q, want a %s path", got, Name)
+	}
+	if gotAbs, _ := filepath.EvalSymlinks(got); gotAbs != "" {
+		if wantAbs, _ := filepath.EvalSymlinks(db); wantAbs != gotAbs {
+			t.Errorf("Find(\"\",\"\") = %q (resolved %q), want %q (resolved %q)", got, gotAbs, db, wantAbs)
+		}
+	}
+}
+
 // TestLoadParseErrors pins the actionable diagnosis for a malformed database:
 // each case must name the likely cause and how to fix it, and must never leak
 // the internal Go type name from encoding/json.
