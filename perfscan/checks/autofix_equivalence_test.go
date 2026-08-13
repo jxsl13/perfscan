@@ -1221,3 +1221,80 @@ func TestEquiv_PS5002SymmetricMirror(t *testing.T) {
 		t.Fatalf("divergence shape changed: full m[0][1]=%v (want 11), mirrored m[0][1]=%v (want 21)", a[0][1], b[0][1])
 	}
 }
+
+// TestEquiv_PS4008Matmul pins PS4008's bit-identity claim: the ikj/axpy rewrite
+// (zero c[i][j], then for k { for j { c[i][j] += a[i][k]*b[k][j] } }) sums each
+// output cell over k in ASCENDING order — exactly the order the serial ijk dot
+// accumulator uses — so the two are bitwise identical (Go float64 arithmetic is
+// pure IEEE-754 double, no extended-precision spills that would depend on
+// evaluation shape). Floating-point addition is non-associative, so a rewrite
+// that reordered the accumulation (e.g. cache blocking, or swapping to sum over
+// j) would NOT be bit-identical; this asserts the shipped ikj order is. Random
+// matrices whose entries mix large/small magnitudes and specials (±0, extremes)
+// stress rounding; any single-ULP divergence fails CI.
+func TestEquiv_PS4008Matmul(t *testing.T) {
+	ijk := func(a, b [][]float64) [][]float64 {
+		c := make([][]float64, len(a))
+		for i := range a {
+			c[i] = make([]float64, len(b[0]))
+			for j := range b[0] {
+				sum := 0.0
+				for k := range b {
+					sum += a[i][k] * b[k][j]
+				}
+				c[i][j] = sum
+			}
+		}
+		return c
+	}
+	ikj := func(a, b [][]float64) [][]float64 {
+		c := make([][]float64, len(a))
+		for i := range a {
+			c[i] = make([]float64, len(b[0]))
+			for j := range b[0] {
+				c[i][j] = 0
+			}
+			for k := range b {
+				for j := range b[0] {
+					c[i][j] += a[i][k] * b[k][j]
+				}
+			}
+		}
+		return c
+	}
+	rng := rand.New(rand.NewSource(0x4008))
+	vals := []float64{1, -1, 1e300, 1e-300, math.Pi, -math.Pi, 0, math.Copysign(0, -1),
+		1e16, 1e-16, math.SmallestNonzeroFloat64}
+	pick := func() float64 {
+		if rng.Intn(3) == 0 {
+			return vals[rng.Intn(len(vals))]
+		}
+		return (rng.Float64() - 0.5) * rng.Float64() * 1e8
+	}
+	for trial := 0; trial < 1500; trial++ {
+		I, K, J := rng.Intn(6)+1, rng.Intn(6)+1, rng.Intn(6)+1
+		a := make([][]float64, I)
+		for i := range a {
+			a[i] = make([]float64, K)
+			for k := range a[i] {
+				a[i][k] = pick()
+			}
+		}
+		b := make([][]float64, K)
+		for k := range b {
+			b[k] = make([]float64, J)
+			for j := range b[k] {
+				b[k][j] = pick()
+			}
+		}
+		c1, c2 := ijk(a, b), ikj(a, b)
+		for i := range c1 {
+			for j := range c1[i] {
+				if math.Float64bits(c1[i][j]) != math.Float64bits(c2[i][j]) {
+					t.Fatalf("trial %d cell [%d][%d]: ijk=%x ikj=%x", trial, i, j,
+						math.Float64bits(c1[i][j]), math.Float64bits(c2[i][j]))
+				}
+			}
+		}
+	}
+}
