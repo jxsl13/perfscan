@@ -191,6 +191,43 @@ func TestLoadRelativeDirectoryResolvesAgainstDBDir(t *testing.T) {
 	}
 }
 
+// TestLoadArgumentsFormEntry pins that Load enumerates a translation unit from
+// an entry that uses the "arguments" ARRAY form instead of the "command" STRING
+// form. The JSON Compilation Database spec allows either, and real generators
+// (Bazel, and CMake with some generators) emit "arguments". perfscanxx parses
+// only directory+file to enumerate TUs — the compile invocation is clang-tidy's
+// concern — so the array-valued "arguments" field must be tolerated (ignored) by
+// the parser rather than tripping the unmarshal. Mixed forms in one database
+// must both enumerate.
+func TestLoadArgumentsFormEntry(t *testing.T) {
+	dir := t.TempDir()
+	// Written by hand because writeDB only models string fields; "arguments" is
+	// an array. One arguments-form entry and one command-form entry.
+	raw := `[
+	{"directory": ` + jsonStr(dir) + `, "file": "a.cpp", "arguments": ["clang++", "-std=c++17", "-c", "a.cpp"]},
+	{"directory": ` + jsonStr(dir) + `, "file": "b.cpp", "command": "clang++ -std=c++17 -c b.cpp"}
+]`
+	p := filepath.Join(dir, Name)
+	if err := os.WriteFile(p, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tus, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load with an arguments-form entry: %v", err)
+	}
+	want := []string{filepath.Join(dir, "a.cpp"), filepath.Join(dir, "b.cpp")}
+	if len(tus) != 2 || tus[0] != want[0] || tus[1] != want[1] {
+		t.Errorf("Load = %v, want %v (arguments-form and command-form entries must both enumerate)", tus, want)
+	}
+}
+
+// jsonStr renders s as a JSON string literal (quoted, backslash-escaped) so a
+// Windows-style path in a hand-written database fixture stays valid JSON.
+func jsonStr(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
 // TestPlural pins the singular/plural suffix used in the "loaded N director(y/ies)"
 // message so a count of 1 reads correctly and any other count pluralizes.
 func TestPlural(t *testing.T) {
