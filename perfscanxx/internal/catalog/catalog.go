@@ -288,6 +288,21 @@ var entries = []Entry{
 		Title:  "an enum's underlying type is wider than its value set needs; a narrower base type shrinks every instance",
 		HasFix: false,
 	},
+	{
+		// Advisory (clang-tidy emits no fix-it): a const local or const value
+		// parameter that is returned (or thrown) can't be moved — its constness
+		// defeats the implicit move, forcing a copy. The mechanical fix (drop
+		// the const) is unsafe: the const may be load-bearing elsewhere in the
+		// body, so it stays advisory. clang-tidy only fires where NRVO can't
+		// already elide the copy (a const value parameter, or a const local
+		// returned from a branch), so it flags REAL pessimizations, not copies
+		// the compiler already elides. L2 (review): a deliberate const is
+		// common, so this must never surface at the default level.
+		ID: "PX3025", TidyName: "performance-no-automatic-move",
+		Level: LevelStructured, Category: "moves",
+		Title:  "a const local or value parameter that is returned can't be moved — its constness forces a copy where a move was possible",
+		HasFix: false,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
