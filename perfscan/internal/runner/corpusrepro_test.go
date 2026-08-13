@@ -398,3 +398,74 @@ func render(names []string, buckets []float64, it item) (string, []string) {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixHoistFamilyComposesInOneFunc pins the interaction of the three
+// hoist-family AutoFixes — PS2127 (regexp.MustCompile), PS2132
+// (strings.NewReplacer), PS2134 (template.Must(New().Parse)) — when they all
+// fire inside the SAME function. Each inserts a fresh package-level var at the
+// same insertion point (immediately before the enclosing function, ahead of its
+// doc comment) and rewrites its own call site. The runner must apply all three
+// same-position insertions without collision, keep every import still used by
+// the hoisted vars (regexp, strings, text/template) intact, leave the call sites
+// referring to the new vars, and produce a file that parses. Each check seeds its
+// var name from the function's source line, so the three names share that line
+// number but differ by prefix (psRegexpL / psReplacerL / psTemplateL) — this pins
+// that the distinct prefixes prevent a name clash. Verified end-to-end (compiles,
+// bit-identical output) before pinning here.
+func TestFixHoistFamilyComposesInOneFunc(t *testing.T) {
+	const src = `package p
+
+import (
+	"io"
+	"regexp"
+	"strings"
+	"text/template"
+)
+
+const tmplText = "Hi {{.}}"
+
+// process is the doc comment: the hoisted vars must land ABOVE this line.
+func process(w io.Writer, s string) string {
+	if regexp.MustCompile("^a+$").MatchString(s) {
+		s = strings.NewReplacer("a", "b").Replace(s)
+	}
+	t := template.Must(template.New("t").Parse(tmplText))
+	_ = t.Execute(w, s)
+	return s
+}
+`
+	got := string(runFixMode(t, src))
+
+	// All three call sites rewritten to the hoisted vars.
+	for _, want := range []string{
+		"psRegexpL", "psReplacerL", "psTemplateL",
+		".MatchString(s)", ".Replace(s)", "t.Execute(w, s)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in the composed fix:\n%s", want, got)
+		}
+	}
+	// The original inline forms are gone from the function body.
+	for _, gone := range []string{
+		`regexp.MustCompile("^a+$").MatchString`,
+		`strings.NewReplacer("a", "b").Replace`,
+	} {
+		if strings.Contains(got, gone) {
+			t.Errorf("inline form %q should have been hoisted away:\n%s", gone, got)
+		}
+	}
+	// Every import is still used by a hoisted var (or the params) — none pruned.
+	for _, want := range []string{`"io"`, `"regexp"`, `"strings"`, `"text/template"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("import %s must remain (still used by a hoisted var):\n%s", want, got)
+		}
+	}
+	// The doc comment must not be wedged between a hoisted var and the func: the
+	// comment stays immediately above `func process`.
+	if !strings.Contains(got, "// process is the doc comment: the hoisted vars must land ABOVE this line.\nfunc process(") {
+		t.Errorf("doc comment must stay directly above func process:\n%s", got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
