@@ -192,6 +192,42 @@ func TestUnifiedDiffMergesNearbyChangesAndMarksNoNewline(t *testing.T) {
 	}
 }
 
+// TestUnifiedDiffSplitsFarApartChangesIntoSeparateHunks pins the multi-hunk path:
+// two changes separated by more than 2*diffContext (6) equal lines must render as
+// TWO independent @@ hunks, each with its own correct start line and count. This
+// is the offset-computation the single-hunk (TestUnifiedDiffRendering) and
+// merge-nearby (TestUnifiedDiffMergesNearbyChangesAndMarksNoNewline) cases do not
+// exercise: the SECOND hunk's `-12` start comes from aOff/bOff accumulated across
+// the first change and the intervening context, so an off-by-one there would make
+// the diff misapply (git apply / patch reject it) while the +/- lines still look
+// right. 13 equal lines between the two edits forces the split.
+func TestUnifiedDiffSplitsFarApartChangesIntoSeparateHunks(t *testing.T) {
+	a := []byte("chg-A-old\n" + strings.Repeat("eq\n", 13) + "chg-B-old\n")
+	b := []byte("chg-A-new\n" + strings.Repeat("eq\n", 13) + "chg-B-new\n")
+	got := unifiedDiff("f.txt", a, b)
+	want := `--- a/f.txt
++++ b/f.txt
+@@ -1,4 +1,4 @@
+-chg-A-old
++chg-A-new
+ eq
+ eq
+ eq
+@@ -12,4 +12,4 @@
+ eq
+ eq
+ eq
+-chg-B-old
++chg-B-new
+`
+	if got != want {
+		t.Errorf("multi-hunk diff mismatch\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	if n := strings.Count(got, "@@ -"); n != 2 {
+		t.Errorf("expected exactly 2 hunks, got %d:\n%s", n, got)
+	}
+}
+
 func TestUnifiedDiffInsertionAtStart(t *testing.T) {
 	a := []byte("x\ny\n")
 	b := []byte("new\nx\ny\n")
