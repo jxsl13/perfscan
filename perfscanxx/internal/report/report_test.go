@@ -552,6 +552,15 @@ func TestLineColBounds(t *testing.T) {
 	if l, c := lineCol("x.cpp", 4); l != 2 || c != 2 {
 		t.Errorf("lineCol(off=4) = %d,%d, want 2,2", l, c)
 	}
+	// The INCLUSIVE boundary offset == len(data) is a VALID position (a finding
+	// at end-of-file), not out of range: only offset > len is rejected. Here the
+	// data ends with a newline, so offset 6 sits at the start of a hypothetical
+	// line 3 → line 3, col 1. The out-of-range list above starts at 7, so a
+	// regression tightening the guard to `>= len` (dropping this position to 0,0)
+	// would slip past every other case.
+	if l, c := lineCol("x.cpp", 6); l != 3 || c != 1 {
+		t.Errorf("lineCol(off=6==len) = %d,%d, want 3,1 (EOF position, not out of range)", l, c)
+	}
 }
 
 // TestFromExportSortsAcrossFiles pins the primary sort key: findings from
