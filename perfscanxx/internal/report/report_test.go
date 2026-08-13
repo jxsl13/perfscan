@@ -111,6 +111,43 @@ func TestFromExportDeduplicatesRepeatedDiagnostics(t *testing.T) {
 	}
 }
 
+// TestFromExportDedupResolvesPathBeforeKeying pins that the cross-TU dedup keys
+// on the RESOLVED absolute path, not the raw FilePath: the same shared-header
+// finding can reach --export-fixes via different path forms across TUs — an
+// absolute FilePath from one TU and a relative FilePath + BuildDirectory from
+// another (a project with per-subdirectory build dirs). Both resolve to the same
+// file, so they are one finding. Motivated by abseil-scale scanning (159 TUs)
+// where header findings recur widely; a naive raw-FilePath key would not collapse
+// these.
+func TestFromExportDedupResolvesPathBeforeKeying(t *testing.T) {
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+	ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+
+	ef := &fixes.ExportFile{
+		MainSourceFile: "/proj/build/a.cpp",
+		Diagnostics: []fixes.Diagnostic{
+			{ // absolute FilePath
+				DiagnosticName: "performance-trivially-destructible",
+				DiagnosticMessage: fixes.DiagnosticMessage{
+					Message: "m", FilePath: "/proj/inc/shared.h", FileOffset: 20,
+				},
+			},
+			{ // relative FilePath + BuildDirectory -> resolves to the SAME abs file
+				DiagnosticName: "performance-trivially-destructible",
+				BuildDirectory: "/proj",
+				DiagnosticMessage: fixes.DiagnosticMessage{
+					Message: "m", FilePath: "inc/shared.h", FileOffset: 20,
+				},
+			},
+		},
+	}
+	got := FromExport(ef, catalog.LevelAggressive)
+	if len(got) != 1 {
+		t.Fatalf("mixed abs/relative references to the same header must dedup to 1, got %d:\n%+v", len(got), got)
+	}
+}
+
 func TestFromExportPassThrough(t *testing.T) {
 	origRead := ReadFile
 	defer func() { ReadFile = origRead }()
