@@ -13,6 +13,7 @@ import (
 	"cmp"
 	"encoding/hex"
 	"fmt"
+	htmltemplate "html/template"
 	"math"
 	"math/rand"
 	"regexp"
@@ -2171,6 +2172,28 @@ func TestEquiv_PS2134TemplateReuseEquivalent(t *testing.T) {
 		}
 		if a.String() != b.String() {
 			t.Errorf("data=%v: fresh=%q != cached=%q", d, a.String(), b.String())
+		}
+	}
+
+	// html/template is covered by the fix too: its contextual auto-escaping is
+	// deterministic for a fixed template text, so a shared parsed template renders
+	// byte-identically to a fresh per-call parse (including escaped fields).
+	const hsrc = "<p>{{.Name}}</p><a href=\"{{.URL}}\">link</a>"
+	hcached := htmltemplate.Must(htmltemplate.New("h").Parse(hsrc))
+	for _, d := range []map[string]any{
+		{"Name": "<b>Ann</b>", "URL": "https://ex.com/?q=1&x=2"},
+		{"Name": "plain", "URL": "javascript:alert(1)"},
+	} {
+		hfresh := htmltemplate.Must(htmltemplate.New("h").Parse(hsrc))
+		var a, b strings.Builder
+		if err := hfresh.Execute(&a, d); err != nil {
+			t.Fatalf("hfresh.Execute: %v", err)
+		}
+		if err := hcached.Execute(&b, d); err != nil {
+			t.Fatalf("hcached.Execute: %v", err)
+		}
+		if a.String() != b.String() {
+			t.Errorf("html data=%v: fresh=%q != cached=%q", d, a.String(), b.String())
 		}
 	}
 }

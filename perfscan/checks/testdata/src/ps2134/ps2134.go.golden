@@ -8,15 +8,19 @@ import (
 
 const pageTmpl = "Hello {{.Name}}"
 
+var psTemplateL12 = template.Must(template.New("page").Parse(pageTmpl))
+
 // Inline text/template New().Parse(const) inside a function: flagged.
 func render(w io.Writer, data any) {
-	t := template.Must(template.New("page").Parse(pageTmpl)) // want `text/template: New\(\.\.\.\)\.Parse of a constant template inline re-parses it on every call`
+	t := psTemplateL12 // want `text/template: New\(\.\.\.\)\.Parse of a constant template inline re-parses it on every call`
 	_ = t.Execute(w, data)
 }
 
+var psTemplateL18 = htmltmpl.Must(htmltmpl.New("page").Parse(pageTmpl))
+
 // Inline html/template New().Parse(const) inside a function: flagged (html pkg).
 func renderHTML(w io.Writer, data any) {
-	t := htmltmpl.Must(htmltmpl.New("page").Parse(pageTmpl)) // want `html/template: New\(\.\.\.\)\.Parse of a constant template inline re-parses it on every call`
+	t := psTemplateL18 // want `html/template: New\(\.\.\.\)\.Parse of a constant template inline re-parses it on every call`
 	_ = t.Execute(w, data)
 }
 
@@ -66,3 +70,4 @@ var base = template.New("base")
 func addTo(data any) {
 	_, _ = base.Parse(pageTmpl)
 }
+

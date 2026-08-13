@@ -74,7 +74,7 @@ func TestPS2133(t *testing.T) {
 }
 
 func TestPS2134(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS2134.Analyzer, "ps2134")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2134.Analyzer, "ps2134")
 }
 
 func TestPS5008(t *testing.T) {
