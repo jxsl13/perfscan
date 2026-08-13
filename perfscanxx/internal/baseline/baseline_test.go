@@ -129,3 +129,61 @@ func TestFilterErrorAndEdgePaths(t *testing.T) {
 		}
 	})
 }
+
+// TestWriteIsDeterministicallySorted pins that Write emits byte-identical,
+// stably-sorted output regardless of input order (by file, then id, then
+// message) — so a re-generated baseline never churns in version control and its
+// diffs stay reviewable.
+func TestWriteIsDeterministicallySorted(t *testing.T) {
+	dir := t.TempDir()
+	// Same finding set, two different input orders (including two entries that
+	// differ ONLY in message, to exercise the third sort key).
+	setA := []report.Finding{
+		f("b.cpp", "PX2", "zed"),
+		f("a.cpp", "PX1", "beta"),
+		f("a.cpp", "PX1", "alpha"),
+		f("a.cpp", "PX2", "gamma"),
+	}
+	setB := []report.Finding{
+		f("a.cpp", "PX2", "gamma"),
+		f("a.cpp", "PX1", "alpha"),
+		f("b.cpp", "PX2", "zed"),
+		f("a.cpp", "PX1", "beta"),
+	}
+	pA := filepath.Join(dir, "a.yaml")
+	pB := filepath.Join(dir, "b.yaml")
+	if _, err := Write(pA, setA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Write(pB, setB); err != nil {
+		t.Fatal(err)
+	}
+	dA, _ := os.ReadFile(pA)
+	dB, _ := os.ReadFile(pB)
+	if string(dA) != string(dB) {
+		t.Errorf("Write is not order-independent:\n--- A ---\n%s\n--- B ---\n%s", dA, dB)
+	}
+	// The three sort keys must appear in ascending order in the serialized form.
+	body := string(dA)
+	order := []string{"alpha", "beta", "gamma", "zed"}
+	last := -1
+	for _, tok := range order {
+		i := indexOf(body, tok)
+		if i < 0 {
+			t.Fatalf("message %q missing from baseline:\n%s", tok, body)
+		}
+		if i < last {
+			t.Errorf("messages not in (file,id,message) sorted order (%q at %d before %d):\n%s", tok, i, last, body)
+		}
+		last = i
+	}
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
