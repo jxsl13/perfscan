@@ -1664,3 +1664,43 @@ func TestEquiv_PS2005InvalidPatternPanicRelocation(t *testing.T) {
 		t.Fatal("hoisted form must panic: MustCompile of an invalid pattern runs before the loop")
 	}
 }
+
+// PS2003: hoisting strings.Repeat(s, n) out of a loop is NOT bit-identical
+// when n can be negative — strings.Repeat panics on count < 0, and for a
+// zero-iteration loop the original never evaluates the call (no panic) while
+// the hoisted binding evaluates it before the loop (panic). This is the
+// regression alarm for the Repeat gate: the hoist must be withheld (advisory
+// only) unless the count is a provably non-negative integer constant.
+func TestEquiv_PS2003RepeatNegativeCountPanicRelocation(t *testing.T) {
+	orig := func(lines []string, s string, n int) {
+		for range lines {
+			_ = strings.Repeat(s, n)
+		}
+	}
+	hoisted := func(lines []string, s string, n int) {
+		psStr := strings.Repeat(s, n)
+		for range lines {
+			_ = psStr
+		}
+	}
+	panics := func(f func([]string, string, int), lines []string, s string, n int) (panicked bool) {
+		defer func() {
+			if recover() != nil {
+				panicked = true
+			}
+		}()
+		f(lines, s, n)
+		return false
+	}
+	if panics(orig, nil, "x", -1) {
+		t.Fatal("original with zero-iteration loop must NOT panic: strings.Repeat never runs")
+	}
+	if !panics(hoisted, nil, "x", -1) {
+		t.Fatal("hoisted form must panic: strings.Repeat with a negative count runs before the loop")
+	}
+	// Sanity: with a non-negative constant count both forms are panic-free —
+	// exactly the case the gate keeps hoistable.
+	if panics(orig, nil, "x", 3) || panics(hoisted, nil, "x", 3) {
+		t.Fatal("non-negative count must not panic in either form")
+	}
+}
