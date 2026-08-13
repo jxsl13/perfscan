@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -288,6 +289,87 @@ func g(s string) int {
 	}
 	if !strings.Contains(got, "len([]rune(s)) //perfscan:ignore") {
 		t.Errorf("the ignored finding must remain unfixed:\n%s", got)
+	}
+	assertFixedCompiles(t, []byte(got))
+}
+
+// TestAllowlistCoversEveryFixAddedImport is a drift guard for the
+// addReferencedStdlibImports allowlist: EVERY stdlib import that any check's
+// golden fixture adds must be in fixableStdlibImports, so that if that check's
+// import-carrying finding is later suppressed (//perfscan:ignore, -exclude,
+// baseline) while a sibling survives, the runner can still re-add the import and
+// the fixed file compiles. A new fixable check that introduces an import not in
+// the allowlist would be silently vulnerable to that build-breaking bug — this
+// fails instead. (This exact guard catches the encoding/hex gap that PS2107 had.)
+func TestAllowlistCoversEveryFixAddedImport(t *testing.T) {
+	glob := filepath.Join("..", "..", "checks", "testdata", "src", "*", "*.go.golden")
+	goldens, err := filepath.Glob(glob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(goldens) == 0 {
+		t.Fatalf("no goldens matched %s", glob)
+	}
+	allowed := map[string]bool{}
+	for _, path := range fixableStdlibImports {
+		allowed[path] = true
+	}
+	stdlibImports := func(src []byte) map[string]bool {
+		out := map[string]bool{}
+		f, perr := parser.ParseFile(token.NewFileSet(), "", src, parser.ImportsOnly)
+		if perr != nil {
+			return out
+		}
+		for _, imp := range f.Imports {
+			p, uerr := strconv.Unquote(imp.Path.Value)
+			if uerr != nil || strings.Contains(p, ".") { // third-party paths are never added by the pass
+				continue
+			}
+			out[p] = true
+		}
+		return out
+	}
+	for _, g := range goldens {
+		origSrc, oerr := os.ReadFile(strings.TrimSuffix(g, ".golden"))
+		if oerr != nil {
+			continue
+		}
+		goldSrc, gerr := os.ReadFile(g)
+		if gerr != nil {
+			t.Fatal(gerr)
+		}
+		before := stdlibImports(origSrc)
+		for p := range stdlibImports(goldSrc) {
+			if !before[p] && !allowed[p] {
+				t.Errorf("%s adds stdlib import %q not in fixableStdlibImports — a suppressed finding of this check would leave the import missing and break the build; add it to the allowlist", g, p)
+			}
+		}
+	}
+}
+
+// TestFixAddsEncodingHexWhenCarrierFiltered pins the specific encoding/hex case
+// (PS2107's fmt.Sprintf("%x", b) -> hex.EncodeToString(b)) that the allowlist
+// initially missed: with the first finding suppressed by //perfscan:ignore, the
+// surviving rewrite must add `import "encoding/hex"` and compile.
+func TestFixAddsEncodingHexWhenCarrierFiltered(t *testing.T) {
+	const src = `package p
+
+import "fmt"
+
+func f(b []byte) string {
+	return fmt.Sprintf("%x", b) //perfscan:ignore PS2107
+}
+
+func g(b []byte) string {
+	return fmt.Sprintf("%x", b)
+}
+`
+	got := string(runFixMode(t, src))
+	if !strings.Contains(got, "hex.EncodeToString(b)") {
+		t.Errorf("surviving Sprintf(%%x) should be rewritten to hex.EncodeToString:\n%s", got)
+	}
+	if !strings.Contains(got, `"encoding/hex"`) {
+		t.Errorf("expected import \"encoding/hex\" added:\n%s", got)
 	}
 	assertFixedCompiles(t, []byte(got))
 }
