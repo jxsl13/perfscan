@@ -105,3 +105,59 @@ func log(out io.Writer, s string) {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixPromClientSortAndWriteRuneComposition pins a composition observed
+// during corpus -fix validation on prometheus/client_golang (internal/metric.go):
+// one file where PS3104 (sort.Strings -> slices.Sort) fires alongside PS5102
+// (bytes.Buffer.WriteRune('x') -> WriteByte('x') for single-byte ASCII runes).
+// PS3104 must ADD "slices" and PRUNE the now-orphaned "sort", while PS5102's two
+// import-NEUTRAL rune->byte rewrites happen in the same pass without disturbing
+// that import edit. This locks the interaction of an add+prune import check with
+// an import-neutral one — PS5102's first runner-level composition pin.
+//
+// Bit-identical: WriteRune(r) for r < utf8.RuneSelf writes exactly the one byte
+// WriteByte(byte(r)) writes; slices.Sort is bit-identical to sort.Strings for
+// strings. On the real client_golang this rewrote cleanly across 8 files (17
+// fixes); it built and its entire test suite passed. Lock the metric.go shape.
+func TestFixPromClientSortAndWriteRuneComposition(t *testing.T) {
+	const src = `package p
+
+import (
+	"bytes"
+	"sort"
+)
+
+func render(buf *bytes.Buffer, names []string) {
+	sort.Strings(names)
+	for _, n := range names {
+		buf.WriteString(n)
+		buf.WriteRune(';')
+		buf.WriteRune('=')
+	}
+}
+`
+	got := string(runFixMode(t, src))
+
+	// Both idioms rewritten.
+	for _, want := range []string{"slices.Sort(names)", "buf.WriteByte(';')", "buf.WriteByte('=')"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in the fixed file:\n%s", want, got)
+		}
+	}
+	// PS3104 added slices and orphaned sort; bytes stays (still used).
+	for _, want := range []string{`"bytes"`, `"slices"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected import %q to be present:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `"sort"`) {
+		t.Errorf("import \"sort\" should have been pruned as an orphan:\n%s", got)
+	}
+	// No stray WriteRune left, and the result compiles.
+	if strings.Contains(got, "WriteRune") {
+		t.Errorf("all single-byte WriteRune calls should be rewritten:\n%s", got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
