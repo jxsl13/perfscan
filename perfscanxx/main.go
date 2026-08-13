@@ -1046,9 +1046,9 @@ func explainDocLine(e catalog.Entry) string {
 	if e.Custom {
 		return "perfscanxx-defined query-based check (clang-tidy --experimental-custom-checks); no upstream clang-tidy page."
 	}
-	family, name, ok := strings.Cut(e.TidyName, "-")
+	url, ok := catalog.DocURL(e)
 	if !ok {
 		return "Full upstream documentation: https://clang.llvm.org/extra/clang-tidy/checks/list.html"
 	}
-	return "Full upstream documentation:\n  https://clang.llvm.org/extra/clang-tidy/checks/" + family + "/" + name + ".html"
+	return "Full upstream documentation:\n  " + url
 }

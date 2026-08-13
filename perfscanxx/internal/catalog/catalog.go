@@ -412,6 +412,21 @@ func ByTidyName(name string) (Entry, bool) {
 	return Entry{}, false
 }
 
+// DocURL returns the upstream clang-tidy documentation URL for a catalog entry,
+// namespaced by check family (checks/<family>/<name>.html). ok is false for
+// query-based custom checks, which are perfscanxx-defined and have no upstream
+// page. Shared by `-explain` and the SARIF helpUri so the two never drift.
+func DocURL(e Entry) (url string, ok bool) {
+	if e.Custom {
+		return "", false
+	}
+	family, name, found := strings.Cut(e.TidyName, "-")
+	if !found {
+		return "", false
+	}
+	return "https://clang.llvm.org/extra/clang-tidy/checks/" + family + "/" + name + ".html", true
+}
+
 // ByID resolves a PX id (case-insensitive) to its catalog entry.
 func ByID(id string) (Entry, bool) {
 	id = strings.ToUpper(id)
