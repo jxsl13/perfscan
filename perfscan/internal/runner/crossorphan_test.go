@@ -480,3 +480,44 @@ func TestFixTransformChecksReuseAliasedQualifier(t *testing.T) {
 		})
 	}
 }
+
+// TestFixPreservesBuildTagWhenAddingImport pins that a fix which ADDS an import
+// to a file carrying a //go:build constraint inserts the import AFTER the package
+// clause and leaves the build tag attached. A build tag is only a constraint
+// while it is the file's leading comment separated from `package` by a blank
+// line; an import inserted above it (or that closes the blank-line gap) would
+// demote the tag to an ordinary comment, silently dropping the file's platform/
+// version restriction — a subtle correctness bug the compiler does not flag. Uses
+// //go:build go1.20, which is always satisfied (the test module is newer), so the
+// file is analyzed on any OS. PS2125 (len([]rune(s)) -> utf8.RuneCountInString)
+// adds "unicode/utf8" from an otherwise import-free file.
+func TestFixPreservesBuildTagWhenAddingImport(t *testing.T) {
+	const src = "//go:build go1.20\n" +
+		"\n" +
+		"package p\n" +
+		"\n" +
+		"func f(s string) int { return len([]rune(s)) }\n"
+	got := string(runFixMode(t, src))
+
+	if !strings.HasPrefix(got, "//go:build go1.20\n") {
+		t.Errorf("the //go:build tag must remain the file's leading line:\n%s", got)
+	}
+	// The tag must still be separated from `package` by a blank line (else it is
+	// no longer a constraint).
+	if !strings.Contains(got, "//go:build go1.20\n\npackage p\n") {
+		t.Errorf("the build tag must stay separated from the package clause by a blank line:\n%s", got)
+	}
+	if !strings.Contains(got, "utf8.RuneCountInString(s)") {
+		t.Errorf("the PS2125 rewrite must have applied:\n%s", got)
+	}
+	if !strings.Contains(got, `import "unicode/utf8"`) {
+		t.Errorf("the unicode/utf8 import must have been added:\n%s", got)
+	}
+	// The import must sit AFTER the package clause, not before the build tag.
+	if idxPkg, idxImp := strings.Index(got, "package p"), strings.Index(got, "import "); idxImp < idxPkg {
+		t.Errorf("the import must be inserted after the package clause, not above the build tag:\n%s", got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, parser.ParseComments); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
