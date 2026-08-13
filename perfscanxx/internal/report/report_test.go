@@ -346,3 +346,34 @@ func TestJSONEmptyIsArray(t *testing.T) {
 		}
 	}
 }
+
+// TestLineColBounds pins lineCol's guard: an empty path, an unreadable file, and
+// an out-of-range byte offset (negative or past EOF — e.g. a stale export whose
+// offsets no longer match the file) all yield (0,0) rather than slicing out of
+// range, while a valid offset maps to a 1-based line:col.
+func TestLineColBounds(t *testing.T) {
+	if l, c := lineCol("", 5); l != 0 || c != 0 {
+		t.Errorf("lineCol(\"\", 5) = %d,%d, want 0,0", l, c)
+	}
+
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+
+	// Unreadable file -> 0,0.
+	ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	if l, c := lineCol("x.cpp", 3); l != 0 || c != 0 {
+		t.Errorf("lineCol(unreadable) = %d,%d, want 0,0", l, c)
+	}
+
+	// Offsets out of range -> 0,0; a valid offset maps to line:col.
+	ReadFile = func(string) ([]byte, error) { return []byte("ab\ncd\n"), nil } // len 6
+	for _, off := range []int{-1, 7, 100} {
+		if l, c := lineCol("x.cpp", off); l != 0 || c != 0 {
+			t.Errorf("lineCol(off=%d) = %d,%d, want 0,0 (out of range)", off, l, c)
+		}
+	}
+	// offset 4 is 'd' on line 2 (after "ab\ncd"): line 2, col 2.
+	if l, c := lineCol("x.cpp", 4); l != 2 || c != 2 {
+		t.Errorf("lineCol(off=4) = %d,%d, want 2,2", l, c)
+	}
+}
