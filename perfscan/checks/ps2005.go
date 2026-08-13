@@ -181,7 +181,13 @@ func hoistRegexpFix(fset *token.FileSet, stack []ast.Node, call *ast.CallExpr) *
 	// Assume gofmt indentation (tabs): the loop starts at column loopPos.Column,
 	// i.e. loopPos.Column-1 tabs of indentation.
 	indent := strings.Repeat("\t", loopPos.Column-1)
-	binding := fmt.Sprintf("%s := regexp.%s(%s)\n%s", name, sel.Sel.Name, lit.Value, indent)
+	// Render the qualifier from the SOURCE selector rather than hardcoding
+	// "regexp": today PkgFuncCall matches the regexp package by its canonical
+	// name so sel.X is always the ident "regexp" (byte-identical output), but if
+	// detection is ever broadened to aliased imports (import rx "regexp") a
+	// hardcoded "regexp" would hoist to uncompilable code — the aliased-import
+	// bug fixed in PS2127/PS2132. exprTextRendered keeps this robust regardless.
+	binding := fmt.Sprintf("%s := %s.%s(%s)\n%s", name, exprTextRendered(sel.X), sel.Sel.Name, lit.Value, indent)
 	return &analysis.SuggestedFix{
 		Message: fmt.Sprintf("hoist regexp.%s out of the loop", sel.Sel.Name),
 		TextEdits: []analysis.TextEdit{
