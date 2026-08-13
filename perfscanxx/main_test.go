@@ -955,3 +955,32 @@ func TestExpandInputsNoDBPaths(t *testing.T) {
 		t.Error("a ./... pattern with no compilation database should error")
 	}
 }
+
+// TestFlagValidationErrors pins the CLI-contract guards in run() that reject
+// incoherent flag combinations before any clang-tidy work: each must print a
+// specific diagnostic to stderr and exit 2 (a usage/config fatal). The -diff+-fix
+// conflict is covered elsewhere (TestDiffFixMutuallyExclusive); this closes the
+// remaining three, which were unexercised.
+func TestFlagValidationErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"level too low", []string{"-level", "0", "x.cpp"}, "-level must be 1, 2 or 3"},
+		{"level too high", []string{"-level", "4", "x.cpp"}, "-level must be 1, 2 or 3"},
+		{"fix-sequential without fix", []string{"-fix-sequential", "x.cpp"}, "-fix-sequential has no effect without -fix"},
+		{"fix-errors without fix", []string{"-fix-errors", "x.cpp"}, "-fix-errors has no effect without -fix"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errOut, code := runCLI(tc.args...)
+			if code != 2 {
+				t.Errorf("exit = %d, want 2 (usage fatal)", code)
+			}
+			if !strings.Contains(errOut, tc.want) {
+				t.Errorf("stderr = %q, want it to contain %q", errOut, tc.want)
+			}
+		})
+	}
+}
