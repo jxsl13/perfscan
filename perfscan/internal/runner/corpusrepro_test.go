@@ -571,3 +571,56 @@ func order(result []TableInfo, splits []string) []string {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixGoreleaserTemplateHoist pins a PS2134 hoist observed in the wild during
+// corpus -fix validation on goreleaser/goreleaser (internal/pipe/release/body.go,
+// describeBody): a bound local `bodyTemplate := template.Must(template.New(
+// "release").Parse(bodyTemplateText))` whose template text is a package-level
+// const IDENTIFIER (a multi-line raw string), used read-only via a single
+// .Execute. The fix hoists the whole template.Must(...) to a package var — the
+// const-ident text is preserved verbatim (NOT inlined) and the call site becomes
+// an alias assignment. On the real repo this rewrote cleanly and the release
+// package's body-template tests passed (byte-identical output).
+func TestFixGoreleaserTemplateHoist(t *testing.T) {
+	const src = "package p\n" +
+		"\n" +
+		"import (\n" +
+		"\t\"bytes\"\n" +
+		"\t\"text/template\"\n" +
+		")\n" +
+		"\n" +
+		"const bodyTemplateText = `{{ with .Header }}{{ . }}{{ end }}{{ .ReleaseNotes }}`\n" +
+		"\n" +
+		"func describeBody(header, notes string) (bytes.Buffer, error) {\n" +
+		"\tvar out bytes.Buffer\n" +
+		"\tbodyTemplate := template.Must(template.New(\"release\").Parse(bodyTemplateText))\n" +
+		"\terr := bodyTemplate.Execute(&out, struct{ Header, ReleaseNotes string }{header, notes})\n" +
+		"\treturn out, err\n" +
+		"}\n"
+	got := string(runFixMode(t, src))
+
+	// Hoisted to a package var; the const-ident text is preserved (not inlined).
+	if !strings.Contains(got, "= template.Must(template.New(\"release\").Parse(bodyTemplateText))") {
+		t.Errorf("template.Must should be hoisted with the const-ident text preserved verbatim:\n%s", got)
+	}
+	if !strings.Contains(got, "psTemplateL") {
+		t.Errorf("expected a psTemplateL<line> package var:\n%s", got)
+	}
+	// The call site keeps the Execute on the (now aliased) local.
+	if !strings.Contains(got, "bodyTemplate.Execute(&out,") {
+		t.Errorf("call site must keep bodyTemplate.Execute:\n%s", got)
+	}
+	// The inline create-and-parse is gone from the function body.
+	if strings.Contains(got, "bodyTemplate := template.Must(template.New(\"release\").Parse(bodyTemplateText))") {
+		t.Errorf("inline template.Must should have been hoisted away:\n%s", got)
+	}
+	// Both imports remain (template via the hoisted var, bytes via the local).
+	for _, want := range []string{`"bytes"`, `"text/template"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("import %s must remain:\n%s", want, got)
+		}
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
