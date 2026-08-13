@@ -265,3 +265,19 @@ func sortGuardMismatchDescending(xs []gvk) {
 		return xs[i].kind < xs[j].kind
 	})
 }
+
+// A whole-element compare inside a GUARD body (empty field chain) is declined:
+// the tie-break machinery expects a guard to test the very field it then
+// orders, so an `xs[i] != xs[j]` guard whose body orders the whole element
+// (cmpSuffix == "") hits the distinct empty-chain clause of the line-363 guard
+// and stays advisory — the check never emits a fix for this degenerate shape.
+// (Sibling of sortGuardMismatchDescending, which exercises the cmpSuffix !=
+// condSuffix clause of the same guard.)
+func sortWholeElemGuard(xs []int) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if xs[i] != xs[j] {
+			return xs[i] < xs[j]
+		}
+		return false
+	})
+}
