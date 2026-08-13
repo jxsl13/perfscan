@@ -85,3 +85,13 @@ func boundResult(s string) bool {
 func longestUse() {
 	regexp.MustCompile("a|ab").Longest()
 }
+
+// TWO hoistable MustCompile in ONE function: ps2127FreshName must mint distinct
+// package-level names (the second gets a _2 suffix since both seed from the same
+// function line), and both var bindings insert before the function without a
+// redeclaration (regression: multi-site name collision).
+func twoHoist(s string) bool {
+	a := regexp.MustCompile("^x+$").MatchString(s) // want `regexp\.MustCompile of a constant pattern inside function twoHoist recompiles the same matcher on every call; hoist it to a package-level var compiled once at init`
+	b := regexp.MustCompile("^y+$").MatchString(s) // want `regexp\.MustCompile of a constant pattern inside function twoHoist recompiles the same matcher on every call; hoist it to a package-level var compiled once at init`
+	return a && b
+}
