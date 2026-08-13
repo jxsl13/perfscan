@@ -196,3 +196,47 @@ func group(events []ev) map[string][]ev {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixStdlibSprintfBuilderCompose pins a two-check composition surfaced by a
+// robustness sweep of the Go standard library (a `str := ""` accumulator built
+// with `str += fmt.Sprintf("%s %s; ", a, b)` in a loop, as in encoding/gob):
+// PS2128 converts the string accumulator to a strings.Builder AND PS2103
+// rewrites the inner Sprintf %s-splice to concatenation — ON THE SAME statement
+// — yielding `str.WriteString(a + " " + b + "; ")`, with "strings" added and
+// "fmt" pruned. Both transforms are independently proven byte-identical
+// (TestEquiv_PS2128BuilderAccumulator, TestEquiv_PS2103SprintfSpliceToConcat);
+// this locks that they COMPOSE correctly on one node. On the real stdlib the
+// full report AND -diff ran crash-free across ~17 package trees, and every -diff
+// proposal was bit-identical.
+func TestFixStdlibSprintfBuilderCompose(t *testing.T) {
+	const src = `package p
+
+import "fmt"
+
+func render(fields []struct{ Name, Type string }) string {
+	str := ""
+	for _, f := range fields {
+		str += fmt.Sprintf("%s %s; ", f.Name, f.Type)
+	}
+	return str
+}
+`
+	got := string(runFixMode(t, src))
+
+	for _, want := range []string{
+		"var str strings.Builder",
+		`str.WriteString(f.Name + " " + f.Type + "; ")`,
+		"return str.String()",
+		`"strings"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in the composed fix:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "fmt.Sprintf") || strings.Contains(got, `"fmt"`) {
+		t.Errorf("fmt (and its import) should be gone once the only Sprintf is rewritten:\n%s", got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
