@@ -325,10 +325,20 @@ func TestCaveatsAreWellFormed(t *testing.T) {
 // DELIBERATE exclusions so a future audit does not re-add them without the
 // rationale. Empirically (clang-tidy --fix on a crafted fixture):
 //
-//   - performance-move-constructor-init, performance-noexcept-destructor,
-//     performance-type-promotion-in-math-fn: these are genuine perf checks but
-//     apply NO fix-it on this toolchain (macOS/libc++) — HasFix would be false,
-//     so they offer no auto-fix value over the advisory set already documented.
+//   - performance-noexcept-destructor, performance-type-promotion-in-math-fn:
+//     re-probed with precise trigger shapes (post-PX3026 lesson) and they do NOT
+//     even DIAGNOSE on this toolchain (macOS/libc++): a throwing-member class
+//     leaves the destructor implicitly-noexcept, and sqrt(float) resolves to the
+//     float overload libc++'s <math.h>/<cmath> provide, so no promotion. Nothing
+//     to surface, fixable or advisory.
+//   - performance-move-constructor-init: this one DOES diagnose (a move ctor that
+//     copies a member, `S(S&& o) : m(o.m)`, is flagged — re-verified, 2 warnings)
+//     but ships NO fix-it (inserting std::move needs liveness the check will not
+//     assume). It was excluded as advisory-only with no NEW pattern beyond the
+//     documented advisory set; adding it would be a fresh curation decision, not a
+//     bug fix (unlike PX3026's false negative), so it stays out absent a
+//     maintainer call. NOTE: earlier this comment lumped it with the "no
+//     diagnostic" checks above — corrected: it fires, it just has no fix.
 //
 // CORRECTION (later audit): performance-trivially-destructible was previously
 // listed here as "no fix-it", but that was a false negative — the earlier probe
