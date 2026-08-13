@@ -186,6 +186,64 @@ func TestFixWithArgumentsFormCompdb(t *testing.T) {
 	}
 }
 
+// TestPX3026FiresWithDeletedCopyOps pins PX3026 against a production-realistic
+// class shape found during corpus -fix validation on google/leveldb
+// (db/log_writer.h, class Writer): a non-copyable class (deleted copy ctor and
+// copy-assignment) with an OUT-OF-LINE defaulted destructor. On the real repo the
+// fix rewrote header + source and the translation unit recompiled cleanly; the
+// deleted copy operations must not block the trivially-destructible rewrite. This
+// single-TU condensation of that shape asserts the fix still applies (defaults
+// the destructor on the first declaration and deletes the out-of-line def).
+// Complements the plain-struct positive (hasFixFixtures/PX3026) and the
+// non-trivial-member boundary (TestPX3026DoesNotFireOnNonTrivialMember).
+func TestPX3026FiresWithDeletedCopyOps(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	const src = "class Writer {\n" +
+		" public:\n" +
+		"  Writer() {}\n" +
+		"  Writer(const Writer&) = delete;\n" +
+		"  Writer& operator=(const Writer&) = delete;\n" +
+		"  ~Writer();\n" +
+		" private:\n" +
+		"  int crc_;\n" +
+		"};\n" +
+		"Writer::~Writer() = default;\n"
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "w.cpp")
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile, ok := cppCompileCmdForTest("w.cpp")
+	if !ok {
+		t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, _ := runCLI("-tidy", bin, "-fix", "-checks", "PX3026", "-p", dir, cpp)
+	gotB, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(gotB)
+	if got == src {
+		if strings.Contains(stderr, "file not found") || strings.Contains(stderr, "fatal error") {
+			t.Skipf("toolchain could not parse the fixture; skipping. stderr:\n%s", stderr)
+		}
+		t.Fatalf("PX3026 did not fire on a non-copyable class with an out-of-line defaulted dtor (deleted copy ops must not block it):\n%s", got)
+	}
+	if !strings.Contains(got, "~Writer() = default") {
+		t.Errorf("destructor should be defaulted on its first (in-class) declaration:\n%s", got)
+	}
+	if strings.Contains(got, "Writer::~Writer()") {
+		t.Errorf("the out-of-line destructor definition should have been removed:\n%s", got)
+	}
+}
+
 // hasFixCase is one HasFix:true built-in fixture: src triggers check id, and
 // after `perfscanxx -fix` want must appear and unwant must be gone (either "" to
 // skip that assertion).
