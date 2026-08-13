@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // PS2119: `for _, v := range strings.Split(s, sep)` -> `for v := range
@@ -142,6 +143,145 @@ func TestEquiv_Clear(t *testing.T) {
 		clear(m2)
 		if len(m1) != 0 || len(m2) != 0 {
 			t.Fatal("delete loop != clear(map)")
+		}
+	}
+}
+
+// PS2121: len(strings.Split(s, sep)) -> strings.Count(s, sep)+1 (and the bytes
+// analog). The identity holds for every NON-EMPTY separator — the only case the
+// check ever rewrites — across all inputs including "". The test also pins the
+// DIVERGENCE at sep=="", which is exactly why ps2121SepNonEmpty is load-bearing:
+// were the guard ever widened to admit a variable or empty separator, this fails
+// rather than shipping a fix that changes the counted value.
+func TestEquiv_CountPlusOne(t *testing.T) {
+	inputs := []string{"", "a", "a,b,c", ",", ",,", "a,", ",a", "a,,b", "héllo", "日本,語", "x,y,z,", "abcabc"}
+	seps := []string{",", "a", ",,", "abc", "日", "\x00", "bc"} // all provably non-empty
+	for _, s := range inputs {
+		for _, sep := range seps {
+			if got, want := strings.Count(s, sep)+1, len(strings.Split(s, sep)); got != want {
+				t.Errorf("strings: Count(%q,%q)+1=%d != len(Split)=%d", s, sep, got, want)
+			}
+			bs, bsep := []byte(s), []byte(sep)
+			if got, want := bytes.Count(bs, bsep)+1, len(bytes.Split(bs, bsep)); got != want {
+				t.Errorf("bytes: Count(%q,%q)+1=%d != len(Split)=%d", s, sep, got, want)
+			}
+		}
+	}
+	// The empty separator is exactly where the identity breaks: Count(s,"") is
+	// runes+1 while Split(s,"") is one piece per rune. If this ever stops
+	// diverging the guard could be relaxed; until then it must stay.
+	if strings.Count("abc", "")+1 == len(strings.Split("abc", "")) {
+		t.Fatal("expected len(Split)!=Count+1 for the empty separator (guard would be unnecessary)")
+	}
+}
+
+// PS2110: the nil/empty truth table behind append([]T(nil), s...) and
+// append([]T{}, s...) -> slices.Clone(s) (bytes.Clone for []byte). The rewrite
+// is bit-identical only when the divergent input is provably impossible, which
+// is precisely what ps2110SliceFacts proves: neverEmpty for the []T(nil) form,
+// neverNil for the []T{} form. This pins both the safe matches and the two
+// nil-ness divergences the guards exist to avoid.
+func TestEquiv_CloneNilEmpty(t *testing.T) {
+	var nilS []int
+	emptyS := []int{}
+
+	// []T(nil) form == Clone whenever s is non-empty (the neverEmpty case)...
+	for _, s := range [][]int{{1, 2, 3}, {0}} {
+		got, want := append([]int(nil), s...), slices.Clone(s)
+		if (got == nil) != (want == nil) || !slices.Equal(got, want) {
+			t.Errorf("append([]int(nil), %v...) != slices.Clone (nil form, non-empty)", s)
+		}
+	}
+	// ...but diverges on an empty non-nil s: append yields nil, Clone non-nil.
+	if (append([]int(nil), emptyS...) == nil) == (slices.Clone(emptyS) == nil) {
+		t.Fatal("expected append([]int(nil), emptyNonNil...) to diverge from slices.Clone in nil-ness")
+	}
+
+	// []T{} form == Clone whenever s is non-nil (the neverNil case)...
+	for _, s := range [][]int{{1, 2, 3}, emptyS} {
+		got, want := append([]int{}, s...), slices.Clone(s)
+		if (got == nil) != (want == nil) || !slices.Equal(got, want) {
+			t.Errorf("append([]int{}, %v...) != slices.Clone (empty form, non-nil)", s)
+		}
+	}
+	// ...but diverges on a nil s: append yields non-nil empty, Clone nil.
+	if (append([]int{}, nilS...) == nil) == (slices.Clone(nilS) == nil) {
+		t.Fatal("expected append([]int{}, nil...) to diverge from slices.Clone in nil-ness")
+	}
+
+	// bytes.Clone shares the exact contract for the []byte element case.
+	if (append([]byte(nil), []byte{}...) == nil) == (bytes.Clone([]byte{}) == nil) {
+		t.Fatal("expected append([]byte(nil), emptyNonNil...) to diverge from bytes.Clone")
+	}
+	if !bytes.Equal(append([]byte(nil), []byte("xy")...), bytes.Clone([]byte("xy"))) {
+		t.Fatal("append([]byte(nil), nonempty...) != bytes.Clone")
+	}
+}
+
+// PS5101: bytes.Compare(a,b)==0 <-> bytes.Equal(a,b).
+// PS5104: (strings/bytes.Count(s,sub)>0) <-> Contains(s,sub).
+// PS5105: (strings/bytes.Index(s,sub)==0) <-> HasPrefix(s,sub).
+// All three are blind (no per-call-site guard), so the equivalence must hold for
+// EVERY input — including "", invalid UTF-8, and sub longer than s.
+func TestEquiv_CompareContainsPrefix(t *testing.T) {
+	strs := []string{"", "a", "ab", "abc", "abcabc", "héllo", "日本語", "\x00", "bca", "\xff\xfe"}
+	subs := []string{"", "a", "ab", "abc", "bc", "x", "日", "abcabc", "\x00", "\xff"}
+	for _, a := range strs {
+		for _, b := range strs {
+			// Comparing bytes.Compare==0 against bytes.Equal IS the point here
+			// (that is exactly the PS5101 rewrite); staticcheck's S1004 would
+			// have us delete one side of the equivalence.
+			//lint:ignore S1004 pinning the PS5101 rewrite requires both spellings
+			if (bytes.Compare([]byte(a), []byte(b)) == 0) != bytes.Equal([]byte(a), []byte(b)) {
+				t.Errorf("bytes.Compare==0 != bytes.Equal on %q,%q", a, b)
+			}
+		}
+		for _, sub := range subs {
+			if (strings.Count(a, sub) > 0) != strings.Contains(a, sub) {
+				t.Errorf("strings.Count>0 != Contains on %q,%q", a, sub)
+			}
+			if (bytes.Count([]byte(a), []byte(sub)) > 0) != bytes.Contains([]byte(a), []byte(sub)) {
+				t.Errorf("bytes.Count>0 != Contains on %q,%q", a, sub)
+			}
+			if (strings.Index(a, sub) == 0) != strings.HasPrefix(a, sub) {
+				t.Errorf("strings.Index==0 != HasPrefix on %q,%q", a, sub)
+			}
+			if (bytes.Index([]byte(a), []byte(sub)) == 0) != bytes.HasPrefix([]byte(a), []byte(sub)) {
+				t.Errorf("bytes.Index==0 != HasPrefix on %q,%q", a, sub)
+			}
+		}
+	}
+}
+
+// PS2124: strings.Join([]string{a, b, ...}, sep) -> interleaved concatenation.
+// The check only fires on an inline literal, so the element count is known; pin
+// the boundary lengths (0, 1, 2) the interleaving edit special-cases.
+func TestEquiv_JoinLiteral(t *testing.T) {
+	sep := "-"
+	if strings.Join([]string{"a", "b", "c"}, sep) != "a"+sep+"b"+sep+"c" {
+		t.Error("Join 3-elem != interleaved concat")
+	}
+	if strings.Join([]string{"x"}, sep) != "x" {
+		t.Error("Join 1-elem != the element (no separator)")
+	}
+	if strings.Join([]string{}, sep) != "" {
+		t.Error("Join empty literal != empty string")
+	}
+	if strings.Join([]string{"", ""}, sep) != ""+sep+"" {
+		t.Error("Join two empties != a single separator")
+	}
+}
+
+// PS2125: len([]rune(s)) -> utf8.RuneCountInString(s); len([]byte(s)) -> len(s).
+// Invalid UTF-8 is included: []rune decodes each bad byte to U+FFFD and
+// RuneCountInString counts it identically, so the identity must still hold.
+func TestEquiv_LenConversions(t *testing.T) {
+	for _, s := range []string{"", "a", "abc", "héllo", "日本語", "a\x00b", "\xff\xfe", "é"} {
+		if len([]rune(s)) != utf8.RuneCountInString(s) {
+			t.Errorf("len([]rune(%q))=%d != RuneCountInString=%d", s, len([]rune(s)), utf8.RuneCountInString(s))
+		}
+		if len([]byte(s)) != len(s) {
+			t.Errorf("len([]byte(%q)) != len(s)", s)
 		}
 	}
 }
