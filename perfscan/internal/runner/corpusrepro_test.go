@@ -469,3 +469,47 @@ func process(w io.Writer, s string) string {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixBboltRegexpHoistRawStringPattern pins a PS2127 hoist observed in the
+// wild during corpus -fix validation on etcd-io/bbolt (internal/btesting/
+// btesting.go, truncDuration): an inline regexp.MustCompile of a RAW-STRING
+// (backtick) pattern containing backslash escapes, chained to ReplaceAllString.
+// The existing ps2127 golden uses an interpreted-string pattern ("^a+$"); this
+// locks the raw-string case, where the hoisted var must reproduce the pattern
+// literal byte-for-byte (backticks + `\d` intact — an interpreted-string
+// rewrite would mangle the escapes). On the real file this rewrote cleanly and
+// bbolt built + its changed-package tests passed; lock that outcome here.
+func TestFixBboltRegexpHoistRawStringPattern(t *testing.T) {
+	const src = "package p\n" +
+		"\n" +
+		"import (\n" +
+		"\t\"regexp\"\n" +
+		"\t\"time\"\n" +
+		")\n" +
+		"\n" +
+		"func truncDuration(d time.Duration) string {\n" +
+		"\treturn regexp.MustCompile(`^(\\d+)(\\.\\d+)`).ReplaceAllString(d.String(), \"$1\")\n" +
+		"}\n"
+	got := string(runFixMode(t, src))
+
+	// The pattern literal must survive verbatim as a raw string in the hoisted var.
+	if !strings.Contains(got, "= regexp.MustCompile(`^(\\d+)(\\.\\d+)`)") {
+		t.Errorf("raw-string pattern must be hoisted byte-for-byte (backticks + escapes intact):\n%s", got)
+	}
+	// The call site now uses the hoisted var and keeps the read-only method.
+	if !strings.Contains(got, ".ReplaceAllString(d.String(), \"$1\")") {
+		t.Errorf("call site must keep ReplaceAllString on the hoisted var:\n%s", got)
+	}
+	if strings.Contains(got, "regexp.MustCompile(`^(\\d+)(\\.\\d+)`).ReplaceAllString") {
+		t.Errorf("inline compile-and-use should have been hoisted away:\n%s", got)
+	}
+	// Both imports remain (regexp via the hoisted var, time via the param).
+	for _, want := range []string{`"regexp"`, `"time"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("import %s must remain:\n%s", want, got)
+		}
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
