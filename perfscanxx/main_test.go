@@ -832,3 +832,22 @@ func TestUnderDir(t *testing.T) {
 		}
 	}
 }
+
+// TestRelPathCwd pins the display-path helper: a path under the working dir is
+// shown relative, but a path OUTSIDE it (whose relative form would climb via
+// "..") is left absolute rather than printed as a confusing "../.." string.
+func TestRelPathCwd(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Skip("cannot determine cwd")
+	}
+	inside := filepath.Join(wd, "a", "b.cpp")
+	if got, want := relPathCwd(inside), filepath.Join("a", "b.cpp"); got != want {
+		t.Errorf("relPathCwd(inside) = %q, want %q", got, want)
+	}
+	// A sibling of the working dir climbs via ".." -> kept absolute (fallback).
+	outside := filepath.Join(filepath.Dir(wd), "some-sibling-dir", "c.cpp")
+	if got := relPathCwd(outside); got != outside {
+		t.Errorf("relPathCwd(outside) = %q, want it unchanged %q", got, outside)
+	}
+}
