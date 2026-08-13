@@ -373,3 +373,38 @@ func g(b []byte) string {
 	}
 	assertFixedCompiles(t, []byte(got))
 }
+
+// TestFixAddsMultipleMissingImportsWhenCarriersFiltered pins that the add-missing
+// pass handles MORE THAN ONE dropped import in one file: two different import-
+// adding checks (PS3104 -> slices, PS2107 %x -> encoding/hex) each have their
+// import-carrying finding suppressed by //perfscan:ignore while a sibling of each
+// survives; both slices AND encoding/hex must be re-added and the file compiles.
+func TestFixAddsMultipleMissingImportsWhenCarriersFiltered(t *testing.T) {
+	const src = `package p
+
+import (
+	"fmt"
+	"sort"
+)
+
+func f(a []int) string {
+	sort.Ints(a)                //perfscan:ignore PS3104
+	return fmt.Sprintf("%x", a) //perfscan:ignore PS2107
+}
+
+func g(b []int) {
+	sort.Ints(b)
+}
+
+func h(x []byte) string {
+	return fmt.Sprintf("%x", x)
+}
+`
+	got := string(runFixMode(t, src))
+	for _, want := range []string{"slices.Sort(b)", "hex.EncodeToString(x)", `"slices"`, `"encoding/hex"`, `"sort"`, `"fmt"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in the fixed file:\n%s", want, got)
+		}
+	}
+	assertFixedCompiles(t, []byte(got))
+}
