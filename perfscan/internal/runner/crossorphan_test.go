@@ -344,3 +344,43 @@ func f(xs []int, v any) ([]byte, error) {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixPS2107ReusesAliasedImport pins that PS2107 REUSES an existing import of
+// its target package when that package is imported under an ALIAS, instead of
+// adding a second import of the same path. Before the fix, `sc "strconv"` already
+// imported + fmt.Sprintf("%d", n) produced `import ( "strconv"; sc "strconv" )` —
+// a redundant duplicate import of "strconv" that (though it compiles) is rejected
+// by strict import linters. Now the rewrite reuses the alias: sc.Itoa(n), the
+// import block is untouched, and fmt is pruned. This matches PS3104's slices
+// alias-reuse behavior. Found via hermetic import-shadowing probing.
+func TestFixPS2107ReusesAliasedImport(t *testing.T) {
+	const src = `package p
+
+import (
+	"fmt"
+	sc "strconv"
+)
+
+func f(n, m int) (string, string) {
+	return sc.Itoa(m), fmt.Sprintf("%d", n)
+}
+`
+	got := string(runFixMode(t, src))
+
+	if !strings.Contains(got, "sc.Itoa(n)") {
+		t.Errorf("PS2107 must reuse the sc alias (sc.Itoa(n)), not add a new strconv import:\n%s", got)
+	}
+	// Exactly ONE import of "strconv" — no duplicate.
+	if n := strings.Count(got, `"strconv"`); n != 1 {
+		t.Errorf(`"strconv" must be imported exactly once (no duplicate), got %d:\n%s`, n, got)
+	}
+	if strings.Contains(got, `fmt.Sprintf("%d", n)`) {
+		t.Errorf("the fmt.Sprintf should have been rewritten:\n%s", got)
+	}
+	if strings.Contains(got, `"fmt"`) {
+		t.Errorf(`orphaned "fmt" should have been pruned:\n%s`, got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
