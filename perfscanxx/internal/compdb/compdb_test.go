@@ -102,6 +102,10 @@ func TestLoadParseErrors(t *testing.T) {
 		{"lfs-pointer", "version https://git-lfs.github.com/spec/v1\noid sha256:deadbeef", "does not look like JSON"},
 		{"empty-file", "", "file is empty"},
 		{"bom-then-object", "\xEF\xBB\xBF{}", "single JSON object"},
+		// Leading whitespace/newlines before the first real byte must be skipped
+		// so the diagnosis keys off the actual content, not the blank prefix.
+		{"whitespace-then-object", "\n\n\t  {\"file\":\"a.cpp\"}", "single JSON object"},
+		{"whitespace-only", "  \t\r\n  ", "file is empty"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -150,5 +154,18 @@ func TestLoadRelativeDirectoryResolvesAgainstDBDir(t *testing.T) {
 	want := []string{filepath.Join(build, "a.cpp"), filepath.Join(build, "sub", "b.cpp")}
 	if len(tus) != 2 || tus[0] != want[0] || tus[1] != want[1] {
 		t.Errorf("Load = %v, want %v (relative/empty directory must resolve against the db dir)", tus, want)
+	}
+}
+
+// TestPlural pins the singular/plural suffix used in the "loaded N director(y/ies)"
+// message so a count of 1 reads correctly and any other count pluralizes.
+func TestPlural(t *testing.T) {
+	if got := plural(1); got != "y" {
+		t.Errorf("plural(1) = %q, want y", got)
+	}
+	for _, n := range []int{0, 2, 5} {
+		if got := plural(n); got != "ies" {
+			t.Errorf("plural(%d) = %q, want ies", n, got)
+		}
 	}
 }
