@@ -1,9 +1,5 @@
 version: 1
 entries:
-    - file: checks/ps2117.go
-      id: PS3101
-      message: '[]byte(repl) copies its operand on every iteration but repl is loop-invariant; hoist the conversion above the loop'
-      count: 1
     - file: config/config.go
       id: PS3106
       message: parameter c of type Config is 264 bytes; passing it by value copies 264 bytes on every call — take a *Config for large values (advisory)

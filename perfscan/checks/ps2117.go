@@ -375,9 +375,15 @@ func ps2117Fix(pass *analysis.Pass, f *ast.File, declStack []ast.Node, as *ast.A
 	}
 
 	repl := "string(" + b.Name + ")"
+	// The replacement text is identical at every key-use site, so build the
+	// []byte once above the loop instead of re-converting per iteration — the
+	// loop-invariant hoist PS3101 flags, dogfooded here. The analysis framework
+	// treats a TextEdit's NewText as read-only, so sharing one slice across the
+	// edits is safe.
+	replBytes := []byte(repl)
 	edits := []analysis.TextEdit{{Pos: lineStart, End: nextStart}}
 	for _, u := range uses {
-		edits = append(edits, analysis.TextEdit{Pos: u.id.Pos(), End: u.id.End(), NewText: []byte(repl)})
+		edits = append(edits, analysis.TextEdit{Pos: u.id.Pos(), End: u.id.End(), NewText: replBytes})
 	}
 	return &analysis.SuggestedFix{
 		Message:   "inline the conversion at each map index: " + repl,
