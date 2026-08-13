@@ -394,3 +394,66 @@ func pgGenericPair[T pgOrd](xs []pgBox[T]) {
 		return xs[i].rank < xs[j].rank
 	})
 }
+
+// --- Real-world near-miss shapes from kubernetes corpus (-fix validation,
+// 2026-08-13). Each looks pair-like but must stay ADVISORY: the two-return
+// pair matcher requires xs[i]<CHAIN> index-selector operands over an ordered
+// basic field and a body of only if-guards + a final return. These pin that
+// the new pair path does NOT false-positive on the trickiest real code. ---
+
+type pgCPUSet struct{ n int }
+
+func (c pgCPUSet) Size() int { return c.n }
+
+func pgGetCPUs(id int) pgCPUSet { return pgCPUSet{id} }
+
+// kubernetes pkg/kubelet/cm/cpumanager/cpu_assignment.go: the pair operands
+// are METHOD CALLS on locals declared inside the comparator, not xs[i].field
+// index chains — and leading `:=` statements are not guards. Advisory.
+func pgMethodCallOperands(ids []int) {
+	sort.Slice(ids, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		iCPUs := pgGetCPUs(ids[i])
+		jCPUs := pgGetCPUs(ids[j])
+		if iCPUs.Size() < jCPUs.Size() {
+			return true
+		}
+		if iCPUs.Size() > jCPUs.Size() {
+			return false
+		}
+		return ids[i] < ids[j]
+	})
+}
+
+type pgNode int
+
+func pgIsSet(n pgNode) bool { return n != 0 }
+
+// kubernetes pkg/kubelet/cm/devicemanager/manager.go: a boolean-PREDICATE
+// guard `if pred(xs[i]) { return true }` — the condition is not an ordering
+// comparison, so it is neither a `!=` guard nor a pair half. Advisory.
+func pgBoolPredicateGuard(nodes []pgNode) {
+	sort.Slice(nodes, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if pgIsSet(nodes[i]) {
+			return true
+		}
+		if pgIsSet(nodes[j]) {
+			return false
+		}
+		return nodes[i] < nodes[j]
+	})
+}
+
+// kubernetes test/e2e/framework/bugs.go: a SWITCH leads the comparator body
+// (there it was switch strings.Compare(...)); the walk accepts only if-guards
+// and a final return, so a leading switch keeps it advisory.
+func pgSwitchComparator(xs []pgRec) {
+	sort.Slice(xs, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		switch {
+		case xs[i].key < xs[j].key:
+			return true
+		case xs[i].key > xs[j].key:
+			return false
+		}
+		return xs[i].rank < xs[j].rank
+	})
+}
