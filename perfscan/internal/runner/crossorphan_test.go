@@ -88,3 +88,34 @@ func f(buf *bytes.Buffer, s string, n int) {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixDedupesCrossCheckImportAdd pins that two DIFFERENT checks each ADDING
+// the same import do not leave a duplicate declaration. PS3104 (sort.Ints ->
+// slices.Sort) and PS3105 (sort.Sort(sort.StringSlice) -> slices.Sort) both add
+// "slices"; without the runner's dedupe the file has two `import "slices"` and
+// fails with "slices redeclared in this block".
+func TestFixDedupesCrossCheckImportAdd(t *testing.T) {
+	const src = `package p
+
+import "sort"
+
+func f(a []int, b []string) {
+	sort.Ints(a)
+	sort.Sort(sort.StringSlice(b))
+}
+`
+	got := string(runFixMode(t, src))
+
+	if n := strings.Count(got, `"slices"`); n != 1 {
+		t.Errorf("expected exactly one \"slices\" import, got %d:\n%s", n, got)
+	}
+	if strings.Contains(got, `"sort"`) {
+		t.Errorf("sort should have been pruned after both rewrites:\n%s", got)
+	}
+	if !strings.Contains(got, "slices.Sort(a)") || !strings.Contains(got, "slices.Sort(b)") {
+		t.Errorf("both sorts should be rewritten to slices.Sort:\n%s", got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse (duplicate import?): %v\n%s", err, got)
+	}
+}
