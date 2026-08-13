@@ -49,12 +49,26 @@ var ReadFile = os.ReadFile
 // silent.
 func FromExport(ef *fixes.ExportFile, maxLevel catalog.Level) []Finding {
 	var out []Finding
+	// Deduplicate diagnostics that repeat across translation units. When
+	// clang-tidy runs over several TUs, a diagnostic anchored in a SHARED HEADER
+	// is written to --export-fixes once per TU that includes that header — so a
+	// header-heavy C++ project (e.g. fmt, where format.h is compiled into several
+	// .cc TUs) would otherwise report the same finding N times and inflate the
+	// count. clang-tidy's own console output collapses these; we match that by
+	// keying on the diagnostic's identity (resolved file + byte offset + check
+	// name). Two DIFFERENT checks at one offset have different names and are kept.
+	seen := map[string]bool{}
 	for _, d := range ef.Diagnostics {
 		// clang-tidy writes the diagnostic FilePath RELATIVE to its
 		// BuildDirectory (the -p build dir); MainSourceFile is absolute.
 		// Resolve to an absolute path for reading, and display it relative
 		// to the current working directory (perfscan-style).
 		abs := resolvePath(d.DiagnosticMessage.FilePath, d.BuildDirectory, ef.MainSourceFile)
+		key := abs + "\x00" + strconv.Itoa(d.DiagnosticMessage.FileOffset) + "\x00" + d.DiagnosticName
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		f := Finding{
 			ID:       d.DiagnosticName,
 			TidyName: d.DiagnosticName,
