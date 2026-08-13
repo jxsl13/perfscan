@@ -75,3 +75,43 @@ func labeled(i int) string {
 func hexString(s string) string {
 	return fmt.Sprintf("%x", s)
 }
+
+// %g over a plain float64: fixed to strconv.FormatFloat with bitSize 64.
+func fg(f float64) string {
+	return strconv.FormatFloat(f, 'g', -1, 64) // want `fmt\.Sprintf of a single %g float value boxes the argument and walks fmt's formatter state machine; strconv\.FormatFloat converts it directly`
+}
+
+// %g over a plain float32: fixed to strconv.FormatFloat with a float64
+// widening and bitSize 32.
+func fg32(f float32) string {
+	return strconv.FormatFloat(float64(f), 'g', -1, 32) // want `fmt\.Sprintf of a single %g float value boxes the argument and walks fmt's formatter state machine; strconv\.FormatFloat converts it directly`
+}
+
+type Celsius float64
+
+// Named float type: it could implement fmt.Formatter, which fmt honors for
+// %g and strconv.FormatFloat would not — reported, no fix.
+func fgn(c Celsius) string {
+	return fmt.Sprintf("%g", c) // want `fmt\.Sprintf of a single %g float value boxes the argument and walks fmt's formatter state machine; strconv\.FormatFloat converts it directly`
+}
+
+// %e defaults to 6 digits, not the shortest form FormatFloat(-1) prints:
+// silent.
+func fe(f float64) string {
+	return fmt.Sprintf("%e", f)
+}
+
+// A precision makes %g no longer a bare verb: silent.
+func fgPrec(f float64) string {
+	return fmt.Sprintf("%.3g", f)
+}
+
+// %g over a non-float argument is out of scope: silent.
+func fgInt() string {
+	return fmt.Sprintf("%g", 42)
+}
+
+// Literal text around the verb is not a bare conversion: silent.
+func fgLabeled(f float64) string {
+	return fmt.Sprintf("x=%g", f)
+}
