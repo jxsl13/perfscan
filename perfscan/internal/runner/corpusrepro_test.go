@@ -161,3 +161,38 @@ func render(buf *bytes.Buffer, names []string) {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixConsulGroupingMapPrealloc pins the PS2104 grouping-map shape observed
+// during corpus -fix validation on hashicorp/consul (stream/event_publisher.go:
+// `groupedEvents := make(map[topicSubject][]Event, len(events))`). The map is
+// filled by ranging `events` but keyed by a DERIVED value (the subject), so it
+// holds AT MOST len(events) entries and usually FEWER. PS2104 still hints it to
+// len(events): a map capacity hint is a pure pre-allocation reservation that
+// NEVER changes behavior or iteration — an upper-bound hint is bit-identical by
+// construction, so grouping maps (entries <= len(src)) are a safe, intended
+// target, not a miss. Locks that PS2104 fires here and sizes to len(src).
+//
+// On the real consul this was 1 of 72 bit-identical fixes across 34 files; the
+// tree built, vetted, and the state + stream package tests passed.
+func TestFixConsulGroupingMapPrealloc(t *testing.T) {
+	const src = `package p
+
+type ev struct{ subject string }
+
+func group(events []ev) map[string][]ev {
+	grouped := map[string][]ev{}
+	for _, e := range events {
+		grouped[e.subject] = append(grouped[e.subject], e)
+	}
+	return grouped
+}
+`
+	got := string(runFixMode(t, src))
+
+	if !strings.Contains(got, "make(map[string][]ev, len(events))") {
+		t.Errorf("expected grouping map hinted to len(events):\n%s", got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
