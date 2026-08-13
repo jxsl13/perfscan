@@ -40,3 +40,24 @@ func TestMajorVersion(t *testing.T) {
 		})
 	}
 }
+
+// TestMajorVersionEmptyBinaryDefaults pins that an empty binary name falls back
+// to "clang-tidy" — the argv the Executor receives must start with it.
+func TestMajorVersionEmptyBinaryDefaults(t *testing.T) {
+	orig := Executor
+	defer func() { Executor = orig }()
+
+	var gotArgv []string
+	Executor = func(_ context.Context, argv []string, stdout, _ *bytes.Buffer) (int, error) {
+		gotArgv = argv
+		stdout.WriteString("LLVM version 22.0.0\n")
+		return 0, nil
+	}
+	major, ok := MajorVersion(context.Background(), "")
+	if !ok || major != 22 {
+		t.Fatalf("MajorVersion(\"\") = (%d, %v), want (22, true)", major, ok)
+	}
+	if len(gotArgv) == 0 || gotArgv[0] != "clang-tidy" {
+		t.Errorf("empty binary must default to clang-tidy; argv = %v", gotArgv)
+	}
+}
