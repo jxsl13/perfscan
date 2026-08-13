@@ -33,7 +33,12 @@ The win SCALES WITH stride × working-set: big when it exceeds L2, ~noise
 when L1-resident — rank candidates by the strided dimension's size. When
 the strided access sits inside a fused scan that cannot be interchanged,
 the remedy is GATHER/SCATTER: copy the column into contiguous scratch
-once, scan the scratch, scatter back once — same bit-exact remedy.`,
+once, scan the scratch, scatter back once — same bit-exact remedy.
+
+The final write-back is an indexed loop, NOT copy(out[:cols], sums):
+out[:cols] reslices up to cap(out), so copy would silently succeed when
+len(out) < cols <= cap(out) — the indexed loop preserves the original's
+out-length panic exactly.`,
 		Before: `for c := 0; c < cols; c++ {
 	s := 0.0
 	for r := 0; r < rows; r++ {
@@ -48,7 +53,9 @@ for r := 0; r < rows; r++ { // contiguous walk
 		sums[c] += a[base+c]
 	}
 }
-copy(out, sums)`,
+for c := 0; c < cols; c++ {
+	out[c] = sums[c] // indexed, not copy: keeps out's length-bound panic
+}`,
 		MeasuredWin: "reference corpus: MLA value-mix 1.13x/1.27x, spectral-norm power-iter 2.57x; WKV backward 2.2–2.9x via the gather/scatter form",
 	},
 	Analyzer: &analysis.Analyzer{
@@ -168,7 +175,16 @@ func stridedByInner(e ast.Expr, iv, ov string) bool {
 //			psSumsN[C] += A[psBase+C]
 //		}
 //	}
-//	copy(OUT[:COLS], psSumsN)
+//	for C := 0; C < COLS; C++ {
+//		OUT[C] = psSumsN[C]
+//	}
+//
+// The write-back is an INDEXED loop, not copy(OUT[:COLS], psSumsN): the
+// original indexes OUT by its LENGTH and panics at C == len(OUT) when
+// len(OUT) < COLS (after the partial writes before it), whereas OUT[:COLS]
+// reslices up to cap(OUT) — when len(OUT) < COLS <= cap(OUT) the copy would
+// silently write into spare capacity and eliminate the panic. The indexed
+// loop reproduces the original's partial-write-then-panic exactly.
 //
 // Extra statements, non-zero seeds, range loops, or non-ident arrays keep
 // the plain advisory report.
@@ -296,7 +312,9 @@ func ps1006InterchangeFix(pass *analysis.Pass, file *ast.File, outerNode, innerN
 	fmt.Fprintf(&b, "%s\t\t%s[%s] += %s[psBase+%s]\n", ind, sums, cVar, arrID.Name, cVar)
 	fmt.Fprintf(&b, "%s\t}\n", ind)
 	fmt.Fprintf(&b, "%s}\n", ind)
-	fmt.Fprintf(&b, "%scopy(%s[:%s], %s)", ind, outID.Name, cols, sums)
+	fmt.Fprintf(&b, "%sfor %s := 0; %s < %s; %s++ {\n", ind, cVar, cVar, cols, cVar)
+	fmt.Fprintf(&b, "%s\t%s[%s] = %s[%s]\n", ind, outID.Name, cVar, sums, cVar)
+	fmt.Fprintf(&b, "%s}", ind)
 	return &analysis.SuggestedFix{
 		Message: fmt.Sprintf("interchange the loops so %s is walked contiguously", arrID.Name),
 		TextEdits: []analysis.TextEdit{

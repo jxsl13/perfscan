@@ -8,7 +8,9 @@ func columnSums(a []float64, rows, cols int, out []float64) {
 			psSums4[c] += a[psBase+c]
 		}
 	}
-	copy(out[:cols], psSums4)
+	for c := 0; c < cols; c++ {
+		out[c] = psSums4[c]
+	}
 }
 
 // An int accumulator: the fix reuses its type for the scratch slice.
@@ -20,7 +22,9 @@ func columnCounts(a []int, rows, cols int, out []int) {
 			psSums15[c] += a[psBase+c]
 		}
 	}
-	copy(out[:cols], psSums15)
+	for c := 0; c < cols; c++ {
+		out[c] = psSums15[c]
+	}
 }
 
 // Reported but NOT auto-fixed: the final write is not `out[c] = s`, so the

@@ -1359,3 +1359,121 @@ func TestEquiv_PS2008Slab(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS1006ColReduce pins PS1006's bit-identity claim AND its panic
+// parity. The interchange (scratch sums walked row-major) accumulates each
+// output column over r in ASCENDING order — exactly the order the original
+// strided reduction uses — so the values are bitwise identical. The
+// write-back must be an INDEXED loop (out[c] = sums[c]), not
+// copy(out[:cols], sums): the original indexes out by its LENGTH and panics
+// at c == len(out) when len(out) < cols, whereas out[:cols] reslices up to
+// cap(out) — for len(out) < cols <= cap(out) the copy form silently writes
+// into spare capacity and ELIMINATES the panic. This test pins both: bitwise
+// value identity on valid inputs, and orig-panics == indexed-panics !=
+// copy-panics on a short-but-roomy out.
+func TestEquiv_PS1006ColReduce(t *testing.T) {
+	orig := func(a []float64, rows, cols int, out []float64) {
+		for c := 0; c < cols; c++ {
+			s := 0.0
+			for r := 0; r < rows; r++ {
+				s += a[r*cols+c]
+			}
+			out[c] = s
+		}
+	}
+	indexed := func(a []float64, rows, cols int, out []float64) {
+		psSums := make([]float64, cols)
+		for r := 0; r < rows; r++ {
+			psBase := r * cols
+			for c := 0; c < cols; c++ {
+				psSums[c] += a[psBase+c]
+			}
+		}
+		for c := 0; c < cols; c++ {
+			out[c] = psSums[c]
+		}
+	}
+	copyForm := func(a []float64, rows, cols int, out []float64) {
+		psSums := make([]float64, cols)
+		for r := 0; r < rows; r++ {
+			psBase := r * cols
+			for c := 0; c < cols; c++ {
+				psSums[c] += a[psBase+c]
+			}
+		}
+		copy(out[:cols], psSums)
+	}
+
+	// 1. CORRECTNESS: bitwise-identical out for random rounding-stressing
+	// matrices across varied dims.
+	rng := rand.New(rand.NewSource(0x1006))
+	vals := []float64{1, -1, 1e300, 1e-300, math.Pi, -math.Pi, 0, math.Copysign(0, -1),
+		1e16, 1e-16, math.SmallestNonzeroFloat64}
+	pick := func() float64 {
+		if rng.Intn(3) == 0 {
+			return vals[rng.Intn(len(vals))]
+		}
+		return (rng.Float64() - 0.5) * rng.Float64() * 1e8
+	}
+	for trial := 0; trial < 1500; trial++ {
+		rows, cols := rng.Intn(7)+1, rng.Intn(7)+1
+		a := make([]float64, rows*cols)
+		for i := range a {
+			a[i] = pick()
+		}
+		o1, o2 := make([]float64, cols), make([]float64, cols)
+		orig(a, rows, cols, o1)
+		indexed(a, rows, cols, o2)
+		for c := 0; c < cols; c++ {
+			if math.Float64bits(o1[c]) != math.Float64bits(o2[c]) {
+				t.Fatalf("trial %d rows=%d cols=%d col %d: orig=%x indexed=%x",
+					trial, rows, cols, c, math.Float64bits(o1[c]), math.Float64bits(o2[c]))
+			}
+		}
+	}
+
+	// 2. PANIC PARITY (the regression alarm). panics runs f and reports
+	// whether it panicked.
+	panics := func(f func()) (p bool) {
+		defer func() {
+			if recover() != nil {
+				p = true
+			}
+		}()
+		f()
+		return false
+	}
+	const rows, cols = 3, 4
+	a := make([]float64, rows*cols)
+	for i := range a {
+		a[i] = float64(i + 1)
+	}
+	// len(out) < cols <= cap(out): the case copy() gets wrong.
+	mk := func() []float64 { return make([]float64, 2, 8) }
+	origPanics := panics(func() { orig(a, rows, cols, mk()) })
+	indexedPanics := panics(func() { indexed(a, rows, cols, mk()) })
+	copyPanics := panics(func() { copyForm(a, rows, cols, mk()) })
+	if !origPanics || !indexedPanics {
+		t.Fatalf("len<cols<=cap: orig-panics=%v indexed-panics=%v, want both true", origPanics, indexedPanics)
+	}
+	if copyPanics {
+		t.Fatalf("len<cols<=cap: copy(out[:cols],...) panicked — the divergence this test pins has vanished; re-audit PS1006's write-back rationale")
+	}
+	// len(out) < cols with NO spare capacity: everything must panic.
+	short := func() []float64 { return make([]float64, 2) }
+	if !panics(func() { orig(a, rows, cols, short()) }) ||
+		!panics(func() { indexed(a, rows, cols, short()) }) ||
+		!panics(func() { copyForm(a, rows, cols, short()) }) {
+		t.Fatal("len<cols, cap<cols: all three forms must panic")
+	}
+	// Partial-write parity: both orig and indexed write out[0],out[1] before
+	// panicking at c==2.
+	o1, o2 := mk(), mk()
+	panics(func() { orig(a, rows, cols, o1) })
+	panics(func() { indexed(a, rows, cols, o2) })
+	for c := 0; c < 2; c++ {
+		if math.Float64bits(o1[c]) != math.Float64bits(o2[c]) {
+			t.Fatalf("partial write before panic diverges at %d: orig=%v indexed=%v", c, o1[c], o2[c])
+		}
+	}
+}
