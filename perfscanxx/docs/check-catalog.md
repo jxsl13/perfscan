@@ -108,10 +108,11 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   **PX2104** regex-in-loop (`std::regex` constructed each iteration),
   **PX2105** dynamic-cast-in-loop (an RTTI type-check every iteration),
   **PX2106** stringstream-in-loop (`std::ostringstream` reallocates its buffer each iteration),
-  **PX2107** pow-const-exponent (`std::pow(x, 2)` / `std::pow(x, 0.5)` — a full libm
-  call where a couple of multiplies or `std::sqrt` would do; clang-tidy ships no
-  equivalent). No auto-fix on purpose: `x*x` evaluates the base twice (unsafe if it
-  has side effects) and the right form depends on the exponent.
+  **PX2107** pow-const-exponent (`std::pow(x, 2)` / `std::pow(x, 0.5)`, plus the
+  `powf`/`powl` variants — a full libm call where a couple of multiplies or
+  `std::sqrt` would do; clang-tidy ships no equivalent). No auto-fix on purpose:
+  `x*x` evaluates the base twice (unsafe if it has side effects) and the right
+  form depends on the exponent.
 
   Every custom matcher is gated with `isExpansionInMainFile()` so it fires only on
   the project's own translation unit, never on `catch`/`return`/loop constructs
