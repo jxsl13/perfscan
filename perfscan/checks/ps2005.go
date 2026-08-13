@@ -5,6 +5,8 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -31,8 +33,11 @@ to package level).
 The automatic fix rewrites a MustCompile with a literal pattern by binding it
 to a variable immediately before the outermost enclosing loop. The rewrite is
 mechanical and bit-identical: the same pattern compiles to the same matcher.
-Calls to Compile (two return values, error handling) are reported but left to
-the reader.`,
+The fix is attached only when the literal pattern actually compiles — an
+invalid pattern keeps the advisory report, because hoisting a MustCompile of
+an invalid pattern out of a loop would move (or, for a zero-iteration loop,
+introduce) the panic. Calls to Compile (two return values, error handling)
+are reported but left to the reader.`,
 		Before: `for _, s := range lines {
 	if regexp.MustCompile("^a+$").MatchString(s) { hits++ }
 }`,
@@ -130,6 +135,23 @@ func ps2005LoopInvariant(info *types.Info, loop ast.Node, arg ast.Expr) bool {
 	return invariant
 }
 
+// ps2005PatternCompiles reports whether the literal pattern actually compiles
+// under the same engine the call uses. A pattern that does not compile makes
+// MustCompile panic; hoisting it would move (or introduce) that panic, so the
+// finding must stay advisory.
+func ps2005PatternCompiles(fnName string, lit *ast.BasicLit) bool {
+	pat, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return false
+	}
+	if fnName == "MustCompilePOSIX" {
+		_, err = regexp.CompilePOSIX(pat)
+	} else {
+		_, err = regexp.Compile(pat)
+	}
+	return err == nil
+}
+
 // hoistRegexpFix builds the two-edit hoist: insert a binding before the
 // outermost enclosing loop and replace the in-loop call with the variable.
 // Only literal patterns are hoisted — a pattern built from loop state is not
@@ -142,11 +164,17 @@ func hoistRegexpFix(fset *token.FileSet, stack []ast.Node, call *ast.CallExpr) *
 	if !ok || lit.Kind != token.STRING {
 		return nil
 	}
+	sel := call.Fun.(*ast.SelectorExpr)
+	// An invalid pattern makes MustCompile panic whenever it runs. Hoisting
+	// relocates that panic before the loop — and for a zero-iteration loop
+	// introduces a panic the original never had. Leave those advisory.
+	if !ps2005PatternCompiles(sel.Sel.Name, lit) {
+		return nil
+	}
 	loop, ok := astutil.OutermostLoop(stack)
 	if !ok {
 		return nil
 	}
-	sel := call.Fun.(*ast.SelectorExpr)
 	pos := fset.Position(call.Pos())
 	name := fmt.Sprintf("psRe%d", pos.Line)
 	loopPos := fset.Position(loop.Pos())

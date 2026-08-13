@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -1618,5 +1619,48 @@ func TestEquiv_PS1007OuterUnroll(t *testing.T) {
 				t.Fatalf("trial %d n=%d dim=%d out[%d]: serial=%x unrolled=%x", trial, n, dim, d, math.Float64bits(o1[d]), math.Float64bits(o2[d]))
 			}
 		}
+	}
+}
+
+// PS2005 (invalid-pattern guard): hoisting a MustCompile of an INVALID literal
+// pattern out of a loop is NOT bit-identical — MustCompile panics whenever it
+// runs, so the hoisted form panics before the loop even when the loop would
+// have executed zero iterations and the original never panicked. This is the
+// regression alarm for the ps2005PatternCompiles guard: the fix must be
+// withheld (advisory only) for patterns that do not compile.
+func TestEquiv_PS2005InvalidPatternPanicRelocation(t *testing.T) {
+	orig := func(lines []string) (n int) {
+		for _, s := range lines {
+			//lint:ignore SA1000 the invalid pattern is the point: it proves MustCompile panics, and the loop-form only panics if it runs
+			if regexp.MustCompile("(").MatchString(s) {
+				n++
+			}
+		}
+		return n
+	}
+	hoisted := func(lines []string) (n int) {
+		//lint:ignore SA1000 intentionally-invalid pattern: hoisted MustCompile panics before a zero-iteration loop
+		psRe := regexp.MustCompile("(")
+		for _, s := range lines {
+			if psRe.MatchString(s) {
+				n++
+			}
+		}
+		return n
+	}
+	panics := func(f func([]string) int, lines []string) (panicked bool) {
+		defer func() {
+			if recover() != nil {
+				panicked = true
+			}
+		}()
+		f(lines)
+		return false
+	}
+	if panics(orig, nil) {
+		t.Fatal("original with zero-iteration loop must NOT panic: MustCompile never runs")
+	}
+	if !panics(hoisted, nil) {
+		t.Fatal("hoisted form must panic: MustCompile of an invalid pattern runs before the loop")
 	}
 }
