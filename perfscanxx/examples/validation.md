@@ -33,6 +33,25 @@ Four checks stay advisory by design: PX2002 (clang-tidy emits no fix-it) and the
 query-based custom checks PX2101 (reserve-before-loop), PX2102 (pessimizing-move) and
 PX2103 (catch-by-value), which `--experimental-custom-checks` can only diagnose.
 
+### spdlog — a supplementary corpus that stresses the advisory L3 tier (2026-08-13, clang-tidy 22.1.8)
+
+`perfscanxx -p build -level 3` on **spdlog** (7 `src/*.cpp` TUs, headers analyzed
+transitively) reports **44 findings across 13 files**:
+
+```
+PX3022:24  PX3020:10  PX3013:7  PX3015:1  PX3004:1  PX1002:1
+```
+
+Unlike the four codebases above — whose findings are dominated by fixable L1/L2
+checks (PX3013/PX3007/PX3015/PX2101) — spdlog is dominated by the two **advisory
+L3** checks the others barely exercise: **PX3022** (enum-size, 24 — spdlog's many
+small `enum`s for log levels/patterns) and **PX3020** (rvalue-reference-param-not-moved,
+10). So it is the corpus that best validates the advisory tier is neither noisy
+nor silent on real code. `-fix` on spdlog needs `-cmake-build` first: 4 TUs only
+partially parse until spdlog's build-time-generated version header exists, and
+clang-tidy applies no fix to a TU that does not fully parse (perfscanxx prints the
+`re-run with -cmake-build` hint).
+
 ## End-to-end `-fix` integrity on real code (full 29-check catalog)
 
 `perfscanxx -fix -level 3` applied with the FULL catalog to leveldb, then the tree
