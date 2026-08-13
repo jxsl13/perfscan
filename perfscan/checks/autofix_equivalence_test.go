@@ -1895,3 +1895,35 @@ func TestEquiv_PS2120WriteStringSprintfToFprintf(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS2109SprintfBytesToAppendf pins that PS2109's rewrite of
+// []byte(fmt.Sprintf(f, a...)) to fmt.Appendf(nil, f, a...) is byte-identical.
+// fmt.Appendf(nil, f, a...) formats into a fresh []byte exactly as Sprintf
+// formats into a string, so converting that string to []byte yields the same
+// bytes — Appendf just skips the intermediate string allocation. Verified over
+// several formats/args (incl. arg-% not re-parsed, %x []byte, unicode, multiple
+// verbs). Observed applying ~13x during corpus validation on grpc-go
+// (e.g. []byte(fmt.Sprintf("%s:%s:%s", ...)) -> fmt.Appendf(nil, ...)).
+func TestEquiv_PS2109SprintfBytesToAppendf(t *testing.T) {
+	type tc struct {
+		format string
+		args   []any
+	}
+	cases := []tc{
+		{"%d", []any{42}},
+		{"%s:%s:%s", []any{"a", "b", "c"}},
+		{"%s", []any{"100%"}},
+		{"\"%ss\"", []any{"x"}},
+		{"%x", []any{[]byte{0x00, 0xff, 0x10}}},
+		{"%q %v %d", []any{"a\tb", 3.5, -7}},
+		{"日本%d語", []any{9}},
+		{"no verbs", nil},
+	}
+	for _, c := range cases {
+		orig := []byte(fmt.Sprintf(c.format, c.args...)) // original
+		got := fmt.Appendf(nil, c.format, c.args...)     // rewritten
+		if !bytes.Equal(orig, got) {
+			t.Errorf("format %q: []byte(Sprintf)=%q != Appendf(nil)=%q", c.format, orig, got)
+		}
+	}
+}
