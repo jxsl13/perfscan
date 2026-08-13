@@ -177,3 +177,21 @@ func TestUnifiedTrailingNewlineOnly(t *testing.T) {
 		t.Errorf(`Unified("abc\n","abc") = %q, want ""`, got)
 	}
 }
+
+// TestUnifiedContextLineNoNewlineOnBSide pins the writeHunk branch where the
+// "\ No newline at end of file" marker attaches to a CONTEXT line for the
+// PATCHED (B) side: the patched file's last line is unchanged but lacks a
+// trailing newline, while the original DOES have one (so the a-side condition is
+// false and rendering falls to the b-side else-if). The marker must follow the
+// context line, not a +/- line.
+func TestUnifiedContextLineNoNewlineOnBSide(t *testing.T) {
+	got := Unified("f", "f", []byte("aaa\nkeep\n"), []byte("bbb\nkeep"))
+	if !strings.Contains(got, " keep\n\\ No newline at end of file\n") {
+		t.Errorf("expected the no-newline marker on the b-side context line:\n%s", got)
+	}
+	// The change line itself must not carry the marker (its a-side "aaa" line had
+	// a trailing newline).
+	if strings.Contains(got, "-aaa\n\\ No newline") {
+		t.Errorf("no-newline marker wrongly attached to the -aaa line:\n%s", got)
+	}
+}
