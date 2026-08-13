@@ -155,3 +155,21 @@ func fqb(b []byte) string {
 func foFlag(i int) string {
 	return fmt.Sprintf("%#o", i)
 }
+
+// %c over a rune: string(r).
+func fc(r rune) string {
+	return fmt.Sprintf("%c", r) // want `fmt\.Sprintf\("%c", r\) boxes the argument and walks fmt's formatter state machine; string\(r\) converts the rune directly`
+}
+
+type Glyph rune
+
+// Named rune type could implement fmt.Formatter: advisory, no fix.
+func fcn(g Glyph) string {
+	return fmt.Sprintf("%c", g) // want `fmt\.Sprintf\("%c", r\) boxes the argument and walks fmt's formatter state machine; string\(r\) converts the rune directly`
+}
+
+// %c over a plain int is out of scope (a value beyond the rune range would be
+// truncated by rune(), diverging from %c's U+FFFD): silent.
+func fcInt(i int) string {
+	return fmt.Sprintf("%c", i)
+}

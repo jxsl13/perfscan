@@ -39,6 +39,7 @@ direct conversion for each such shape:
   fmt.Sprintf("%o", i)  -> strconv.FormatInt/FormatUint(i, 8)  (base 8)
   fmt.Sprintf("%q", s)  -> strconv.Quote(s)                    (s is a string)
   fmt.Sprintf("%q", r)  -> strconv.QuoteRune(r)                (r is a rune)
+  fmt.Sprintf("%c", r)  -> string(r)                           (r is a rune)
 
 Only formats that are EXACTLY one of these verbs and nothing else are
 reported, with a single non-variadic argument of the matching type.
@@ -314,6 +315,29 @@ func ps2107Classify(pass *analysis.Pass, verb string, arg ast.Expr) *ps2107Case 
 			c.replName = "strconv.QuoteRune"
 		}
 		c.pkgName, c.pkgPath = "strconv", "strconv"
+		return c
+	case "%c":
+		// %c prints the character for the code point; for a rune operand,
+		// string(r) yields exactly those UTF-8 bytes (U+FFFD for an
+		// out-of-range or negative rune, matching fmt). Restricted to rune
+		// (Int32): a WIDER integer (int/int64/uint32...) whose value exceeds
+		// the rune range would be silently truncated by the rune() conversion
+		// while %c still renders U+FFFD, so only int32/rune is provably
+		// bit-identical without a range guard. string() is a builtin
+		// conversion, so no import is added.
+		if !underBasic || under.Kind() != types.Int32 {
+			return nil
+		}
+		c := &ps2107Case{msg: "fmt.Sprintf(\"%c\", r)" + boxes + "string(r) converts the rune directly"}
+		if !tIsBasic {
+			return c
+		}
+		argText, ok := ps2107ExprText(arg)
+		if !ok {
+			return c
+		}
+		c.repl = "string(" + argText + ")"
+		c.replName = "string(rune)"
 		return c
 	case "%x":
 		// Only byte slices: %x over strings or integers is out of scope.
