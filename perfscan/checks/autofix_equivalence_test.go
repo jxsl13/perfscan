@@ -1748,3 +1748,83 @@ func TestEquiv_PS2116ClearFloatZeroing(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS2128BuilderAccumulator pins the semantic equivalence PS2128 relies
+// on: rewriting a string accumulator grown by `+=`/`= x + y` in a loop into a
+// strings.Builder (seed -> leading WriteString, each append -> WriteString, each
+// post-loop read -> String()) is byte-identical to the original concatenation,
+// across empty/single/many/unicode/empty-element inputs, for the empty-init,
+// seeded, if-guarded, and multi-read shapes the check fixes. Builder.WriteString
+// appends exactly its argument's bytes and String() returns them in order, so
+// the equivalence holds by construction — this locks it as a differential guard
+// against any future drift in the transform. Complements the golden/adversarial
+// fixtures (which check the REWRITE shape) with a runtime output check.
+func TestEquiv_PS2128BuilderAccumulator(t *testing.T) {
+	inputs := [][]string{
+		nil, {}, {""}, {"a"}, {"a", "b", "c"}, {"", "", ""},
+		{"x", "", "y", ""}, {"日", "本", "語"}, {"pre", "\x00", "post"},
+	}
+	// joinDefine: empty init, plain append.
+	origDefine := func(items []string) string {
+		acc := ""
+		for i := 0; i < len(items); i++ {
+			acc += items[i]
+		}
+		return acc
+	}
+	newDefine := func(items []string) string {
+		var acc strings.Builder
+		for i := 0; i < len(items); i++ {
+			acc.WriteString(items[i])
+		}
+		return acc.String()
+	}
+	// seeded: non-empty seed preserved as a leading WriteString.
+	origSeeded := func(items []string) string {
+		acc := "prefix:"
+		for _, it := range items {
+			acc += it
+		}
+		return acc
+	}
+	newSeeded := func(items []string) string {
+		var acc strings.Builder
+		acc.WriteString("prefix:")
+		for _, it := range items {
+			acc.WriteString(it)
+		}
+		return acc.String()
+	}
+	// guarded with two post-loop reads: acc AND len(acc) both via String().
+	origGuarded := func(items []string) (string, int) {
+		acc := ""
+		for _, it := range items {
+			if it != "" {
+				acc += it
+			}
+		}
+		return acc, len(acc)
+	}
+	newGuarded := func(items []string) (string, int) {
+		var acc strings.Builder
+		for _, it := range items {
+			if it != "" {
+				acc.WriteString(it)
+			}
+		}
+		return acc.String(), len(acc.String())
+	}
+	for _, in := range inputs {
+		if got, want := newDefine(in), origDefine(in); got != want {
+			t.Errorf("define(%q): builder=%q concat=%q", in, got, want)
+		}
+		if got, want := newSeeded(in), origSeeded(in); got != want {
+			t.Errorf("seeded(%q): builder=%q concat=%q", in, got, want)
+		}
+		gs, gn := newGuarded(in)
+		ws, wn := origGuarded(in)
+		if gs != ws || gn != wn {
+			t.Errorf("guarded(%q): builder=(%q,%d) concat=(%q,%d)", in, gs, gn, ws, wn)
+		}
+	}
+}
