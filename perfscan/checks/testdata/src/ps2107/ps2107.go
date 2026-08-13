@@ -113,3 +113,45 @@ func fgInt() string {
 func fgLabeled(f float64) string {
 	return fmt.Sprintf("x=%g", f)
 }
+
+// %b over an int: base-2 via FormatInt.
+func fb(i int) string {
+	return fmt.Sprintf("%b", i) // want `fmt\.Sprintf of a single %b value boxes the argument and walks fmt's formatter state machine; strconv\.FormatInt/FormatUint with base 2 converts it directly`
+}
+
+// %b over a uint64: base-2 via FormatUint.
+func fbu(u uint64) string {
+	return fmt.Sprintf("%b", u) // want `fmt\.Sprintf of a single %b value boxes the argument and walks fmt's formatter state machine; strconv\.FormatInt/FormatUint with base 2 converts it directly`
+}
+
+// %o over an int: base-8 via FormatInt.
+func fo(i int) string {
+	return fmt.Sprintf("%o", i) // want `fmt\.Sprintf of a single %o value boxes the argument and walks fmt's formatter state machine; strconv\.FormatInt/FormatUint with base 8 converts it directly`
+}
+
+// %q over a string: strconv.Quote.
+func fq(s string) string {
+	return fmt.Sprintf("%q", s) // want `fmt\.Sprintf\("%q", s\) on a string boxes the argument and walks fmt's formatter state machine; strconv\.Quote converts it directly`
+}
+
+// %q over a rune: strconv.QuoteRune.
+func fqr(r rune) string {
+	return fmt.Sprintf("%q", r) // want `fmt\.Sprintf\("%q", r\) on a rune boxes the argument and walks fmt's formatter state machine; strconv\.QuoteRune converts it directly`
+}
+
+type Mode int
+
+// Named integer type could implement fmt.Formatter: advisory, no fix.
+func fbn(m Mode) string {
+	return fmt.Sprintf("%b", m) // want `fmt\.Sprintf of a single %b value boxes the argument and walks fmt's formatter state machine; strconv\.FormatInt/FormatUint with base 2 converts it directly`
+}
+
+// %q over a []byte is out of scope: silent.
+func fqb(b []byte) string {
+	return fmt.Sprintf("%q", b)
+}
+
+// %#o has a flag, not a bare verb: silent.
+func foFlag(i int) string {
+	return fmt.Sprintf("%#o", i)
+}

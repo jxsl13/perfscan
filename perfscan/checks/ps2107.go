@@ -35,6 +35,10 @@ direct conversion for each such shape:
   fmt.Sprintf("%x", bs) -> hex.EncodeToString(bs)     (bs is []byte)
   fmt.Sprintf("%g", f)  -> strconv.FormatFloat(f, 'g', -1, 64)          (f is float64)
                         -> strconv.FormatFloat(float64(f), 'g', -1, 32) (f is float32)
+  fmt.Sprintf("%b", i)  -> strconv.FormatInt/FormatUint(i, 2)  (base 2)
+  fmt.Sprintf("%o", i)  -> strconv.FormatInt/FormatUint(i, 8)  (base 8)
+  fmt.Sprintf("%q", s)  -> strconv.Quote(s)                    (s is a string)
+  fmt.Sprintf("%q", r)  -> strconv.QuoteRune(r)                (r is a rune)
 
 Only formats that are EXACTLY one of these verbs and nothing else are
 reported, with a single non-variadic argument of the matching type.
@@ -245,6 +249,70 @@ func ps2107Classify(pass *analysis.Pass, verb string, arg ast.Expr) *ps2107Case 
 			return c
 		}
 		c.replName = "strconv.FormatFloat"
+		c.pkgName, c.pkgPath = "strconv", "strconv"
+		return c
+	case "%b", "%o":
+		// Base-2 / base-8 integer formatting. Itoa is base-10 only, so unlike
+		// %d these always go through FormatInt/FormatUint. Bit-identical: %b/%o
+		// print exactly the base-2/8 digits FormatInt/FormatUint produce,
+		// including the leading '-' for negatives. Only a bare %b/%o (no flags:
+		// %#o's leading 0, %+b's sign, width/precision all differ) reaches here.
+		if !underBasic || under.Info()&types.IsInteger == 0 {
+			return nil
+		}
+		base, baseName := "2", "base 2"
+		if verb == "%o" {
+			base, baseName = "8", "base 8"
+		}
+		c := &ps2107Case{msg: "fmt.Sprintf of a single " + verb + " value" + boxes + "strconv.FormatInt/FormatUint with " + baseName + " converts it directly"}
+		if !tIsBasic {
+			return c
+		}
+		argText, ok := ps2107ExprText(arg)
+		if !ok {
+			return c
+		}
+		if basic.Info()&types.IsUnsigned != 0 {
+			c.repl = "strconv.FormatUint(uint64(" + argText + "), " + base + ")"
+			c.replName = "strconv.FormatUint"
+		} else {
+			c.repl = "strconv.FormatInt(int64(" + argText + "), " + base + ")"
+			c.replName = "strconv.FormatInt"
+		}
+		c.pkgName, c.pkgPath = "strconv", "strconv"
+		return c
+	case "%q":
+		// %q over a string is strconv.Quote; over a rune (int32) it is
+		// strconv.QuoteRune. Both are bit-identical to fmt's %q (fmt implements
+		// %q via exactly these). A []byte or any other kind under %q is out of
+		// scope. Only a bare %q (no + / space / # flags, which change quoting).
+		if !underBasic {
+			return nil
+		}
+		isString := under.Info()&types.IsString != 0
+		isRune := under.Kind() == types.Int32
+		if !isString && !isRune {
+			return nil
+		}
+		msg := "fmt.Sprintf(\"%q\", r) on a rune" + boxes + "strconv.QuoteRune converts it directly"
+		if isString {
+			msg = "fmt.Sprintf(\"%q\", s) on a string" + boxes + "strconv.Quote converts it directly"
+		}
+		c := &ps2107Case{msg: msg}
+		if !tIsBasic {
+			return c
+		}
+		argText, ok := ps2107ExprText(arg)
+		if !ok {
+			return c
+		}
+		if isString {
+			c.repl = "strconv.Quote(" + argText + ")"
+			c.replName = "strconv.Quote"
+		} else {
+			c.repl = "strconv.QuoteRune(" + argText + ")"
+			c.replName = "strconv.QuoteRune"
+		}
 		c.pkgName, c.pkgPath = "strconv", "strconv"
 		return c
 	case "%x":
