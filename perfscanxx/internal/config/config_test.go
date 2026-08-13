@@ -90,3 +90,17 @@ func TestDiscover(t *testing.T) {
 		t.Errorf("Discover = (%q, %v), want the .perfscanxx.yml", p, ok)
 	}
 }
+
+func TestLoadTidyAndExtraArgs(t *testing.T) {
+	p := write(t, t.TempDir(), "c.yml", "tidy: /opt/homebrew/opt/llvm/bin/clang-tidy\nextra-args:\n  - -isysroot\n  - /sdk/path\n")
+	f, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Tidy == nil || *f.Tidy != "/opt/homebrew/opt/llvm/bin/clang-tidy" {
+		t.Errorf("Tidy = %v", f.Tidy)
+	}
+	if len(f.ExtraArgs) != 2 || f.ExtraArgs[0] != "-isysroot" || f.ExtraArgs[1] != "/sdk/path" {
+		t.Errorf("ExtraArgs = %v, want [-isysroot /sdk/path]", f.ExtraArgs)
+	}
+}

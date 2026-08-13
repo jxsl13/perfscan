@@ -149,6 +149,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if cf.Exclude != nil && !set["exclude"] {
 			excludeArg = stringSlice(cf.Exclude)
 		}
+		if cf.Tidy != nil && !set["tidy"] {
+			*tidyBin = *cf.Tidy
+		}
+		if cf.ExtraArgs != nil && !set["extra-arg"] {
+			extra = stringSlice(cf.ExtraArgs)
+		}
 		fmt.Fprintf(stderr, "perfscanxx: using config %s\n", cfgPath)
 	}
 
@@ -895,11 +901,14 @@ Examples:
 	perfscanxx -explain PX1001           one check's documentation
 
 A .perfscanxx.yml in the working directory supplies project defaults
-(level, checks, exclude) that command-line flags override, e.g.:
+(level, checks, exclude, tidy, extra-args) that command-line flags override,
+e.g.:
 
 	level: 2
 	checks: performance-*,PX21*
 	exclude: [vendor/, third_party/]
+	tidy: /opt/homebrew/opt/llvm/bin/clang-tidy
+	extra-args: [-isysroot, /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk]
 
 Fix levels (the maintainability cost of a check's remedy):
 
