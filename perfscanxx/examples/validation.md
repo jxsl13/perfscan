@@ -1,7 +1,7 @@
 # perfscanxx validation on real complex C++ codebases
 
 perfscanxx (Go orchestrator over clang-tidy, zero of our own C++) run against
-complex real-world C++ as test data, with the **full 29-check catalog** (`-level 3`).
+complex real-world C++ as test data, with the **full 38-check catalog** (`-level 3`).
 All corpora are configured with the brew clang++ toolchain (so headers match
 clang-tidy), each producing a `build/compile_commands.json`. Reproduce the whole
 set with `examples/fetch-corpus.sh` (corpora live under `corpus/`, gitignored).
@@ -10,17 +10,21 @@ set with `examples/fetch-corpus.sh` (corpora live under `corpus/`, gitignored).
 
 Numbers below are after the removal of the former PX3017
 (modernize-use-default-member-init) — see the `-fix` integrity section for why.
-The leveldb row is re-verified on clang-tidy 22.1.8; the other three rows are the
-prior run with the PX3017 findings subtracted (removing a check removes exactly
-its findings, nothing else).
+The **leveldb row is re-verified on the current 38-check catalog** (2026-08-13,
+clang-tidy 22.1.8, git-clean corpus at 7ee830d). The other three rows are an
+earlier run (catalog ~30 checks): they PREDATE the PX3021 (no-int-to-ptr),
+PX3022 (enum-size), PX3023 (shrink-to-fit) and PX3025 (no-automatic-move)
+additions, so they undercount the two advisory L3 diagnostics (PX3021/PX3022)
+that the refreshed leveldb row now surfaces — re-running them on the full
+catalog only ADDS findings for those checks, never removes any.
 
 | Codebase | TUs / files | PX findings | Top checks |
 |----------|------------:|------------:|-----------|
-| leveldb  |  78 |  35 | PX2101:13 PX3013:6 PX3007:6 PX3015:5 PX2003:4 PX1002:1 |
+| leveldb  |  78 |  58 | PX2101:20 PX3022:15 PX3013:6 PX3007:6 PX3015:5 PX2003:4 PX3021:1 PX1002:1 |
 | fmt      |  48 | 215 | PX3013:63 PX3007:27 PX3015:23 PX2101:20 PX3008:16 PX1002:15 PX3018:9 PX3009:8 PX3004:8 |
 | abseil   | 492 |  78 | PX3013:20 PX3004:18 PX2101:10 PX3015:9 PX3006:7 PX3018:2 PX3008:2 |
 | **DDNet**| 420 TUs | **595** | PX3015:495 PX2101:89 PX3001:9 PX3007:1 PX1002:1 |
-| **total**|     | **923** | across the four complex codebases |
+| **total**|     | **946** | across the four complex codebases |
 
 **DDNet** — a full C++ game/engine (420 translation units; it needs its codegen
 targets built for `generated/*.h`, all present here) — is the most complex corpus and
@@ -29,9 +33,14 @@ findings are dominated by **PX3015** (prefer-member-initializer, 495) — strong
 validation of that check on a large real codebase — plus 89 PX2101
 reserve-before-loop opportunities.
 
-Four checks stay advisory by design: PX2002 (clang-tidy emits no fix-it) and the three
-query-based custom checks PX2101 (reserve-before-loop), PX2102 (pessimizing-move) and
-PX2103 (catch-by-value), which `--experimental-custom-checks` can only diagnose.
+Several of these findings are advisory by design (no auto-fix). Among those
+appearing above: PX2002 (clang-tidy emits no fix-it); the two advisory L3
+built-ins the refreshed leveldb row surfaces, PX3021 (no-int-to-ptr) and
+PX3022 (enum-size, 15 — leveldb's `enum FileType`-style enums use a 4-byte base
+where 1 byte suffices), whose remedy is context-dependent and not a safe
+mechanical rewrite; and the query-based custom checks PX2101 (reserve-before-loop),
+PX2102 (pessimizing-move) and PX2103 (catch-by-value), which
+`--experimental-custom-checks` can only diagnose.
 
 ### spdlog — a supplementary corpus that stresses the advisory L3 tier (2026-08-13, clang-tidy 22.1.8)
 
@@ -52,7 +61,7 @@ partially parse until spdlog's build-time-generated version header exists, and
 clang-tidy applies no fix to a TU that does not fully parse (perfscanxx prints the
 `re-run with -cmake-build` hint).
 
-## End-to-end `-fix` integrity on real code (full 29-check catalog)
+## End-to-end `-fix` integrity on real code (full 38-check catalog)
 
 `perfscanxx -fix -level 3` applied with the FULL catalog to leveldb, then the tree
 **recompiled**:
