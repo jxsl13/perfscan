@@ -184,3 +184,65 @@ func TestPX2101FiresAcrossLoopKinds(t *testing.T) {
 		t.Errorf("PX2101 fired %d time(s) on a range-for + while fixture, want >= 2 (loop-kind breadth regressed?):\n%s", n, output)
 	}
 }
+
+// px2107TrivialSrc exercises PX2107's exponent scoping: the NON-actionable
+// integer exponents 0 (pow(x,0)==1) and 1 (pow(x,1)==x) must NOT fire — for
+// those "multiply directly" is wrong advice — while an actionable constant
+// exponent (2) must. Motivated by corpus validation on abseil, where the broad
+// matcher would have flagged trivial exponents.
+const px2107TrivialSrc = `#include <cmath>
+double zero(double x)  { return std::pow(x, 0); } // NOT flagged
+double one(double x)   { return std::pow(x, 1); } // NOT flagged
+double two(double x)   { return std::pow(x, 2); } // flagged
+`
+
+// TestPX2107ExcludesTrivialExponents pins that PX2107 fires on pow(x, 2) but not
+// on pow(x, 0) or pow(x, 1), through the real --experimental-custom-checks
+// engine — exactly one diagnostic on the three-call fixture.
+func TestPX2107ExcludesTrivialExponents(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	e, ok := catalog.ByID("PX2107")
+	if !ok || !e.Custom {
+		t.Fatal("PX2107 missing or not a custom check")
+	}
+	cfg := catalog.ClangTidyConfig([]catalog.Entry{e})
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".clang-tidy")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "pow.cpp")
+	if err := os.WriteFile(src, []byte(px2107TrivialSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--experimental-custom-checks", "--config-file=" + cfgPath, "--", "-std=c++17"}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+
+	if strings.Contains(output, "Unknown command line argument") && strings.Contains(output, "experimental-custom-checks") {
+		t.Skip("clang-tidy is too old for --experimental-custom-checks; skipping")
+	}
+	if strings.Contains(output, "[clang-tidy-config]") {
+		t.Fatalf("clang-tidy rejected the PX2107 query:\n%s", output)
+	}
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture headers; skipping:\n%s", output)
+	}
+
+	tag := "[" + e.TidyName + "]"
+	if n := strings.Count(output, tag); n != 1 {
+		t.Errorf("PX2107 fired %d time(s), want exactly 1 (only pow(x,2); pow(x,0)/pow(x,1) excluded):\n%s", n, output)
+	}
+}
