@@ -624,3 +624,41 @@ func TestFixGoreleaserTemplateHoist(t *testing.T) {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixBluemondayLenSplitToCount pins a PS2121 rewrite observed in the wild
+// during corpus -fix validation on microcosm-cc/bluemonday (css/handlers.go):
+// `len(strings.Split(i, "/")) == 2` inside an if-condition becomes
+// `(strings.Count(i, "/") + 1) == 2`. Two things this locks on a real comparison
+// context: the separator "/" is a provably NON-EMPTY constant (the guard PS2121
+// requires, since Split(s,"") and Count(s,"")+1 disagree), and the `Count(...) + 1`
+// replacement is PARENTHESIZED so it binds correctly as the left operand of ==
+// (without the parens, `strings.Count(i,"/") + 1 == 2` would parse as
+// `Count + (1 == 2)` and not compile). On the real file this rewrote cleanly and
+// bluemonday built + its tests passed.
+func TestFixBluemondayLenSplitToCount(t *testing.T) {
+	const src = `package p
+
+import "strings"
+
+func hasTwoParts(i string) bool {
+	if len(strings.Split(i, "/")) == 2 {
+		return true
+	}
+	return false
+}
+`
+	got := string(runFixMode(t, src))
+
+	if !strings.Contains(got, "if (strings.Count(i, \"/\") + 1) == 2 {") {
+		t.Errorf("expected the parenthesized Count(...)+1 rewrite as the == operand:\n%s", got)
+	}
+	if strings.Contains(got, "len(strings.Split(i, \"/\"))") {
+		t.Errorf("the len(Split()) form should have been rewritten:\n%s", got)
+	}
+	if !strings.Contains(got, `"strings"`) {
+		t.Errorf("strings import must remain (Count still uses it):\n%s", got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
