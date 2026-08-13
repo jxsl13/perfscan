@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -2114,6 +2115,33 @@ func TestEquiv_PS2132NewReplacerReuseEquivalent(t *testing.T) {
 			if fresh != reused.Replace(s) {
 				t.Errorf("pairs=%v input=%q: inline=%q reused=%q", ps, s, fresh, reused.Replace(s))
 			}
+		}
+	}
+}
+
+// TestEquiv_PS2133LoadLocationReuseEquivalent pins the equivalence PS2133's
+// advice relies on: for a fixed zone name, a per-call time.LoadLocation(name) and
+// a package-level one loaded once name the SAME location — hoisting the load to
+// package scope is behavior-preserving (it only removes the per-call tzdata read
+// and parse). Verified by name equality across several real zones plus the
+// fast-path names that PS2133 deliberately leaves alone.
+func TestEquiv_PS2133LoadLocationReuseEquivalent(t *testing.T) {
+	for _, name := range []string{"America/New_York", "Europe/Berlin", "Asia/Tokyo", "UTC", "Local"} {
+		cached, err := time.LoadLocation(name)
+		if err != nil {
+			t.Skipf("zone %q unavailable in this environment: %v", name, err)
+		}
+		fresh, err := time.LoadLocation(name)
+		if err != nil {
+			t.Fatalf("second LoadLocation(%q): %v", name, err)
+		}
+		if fresh.String() != cached.String() {
+			t.Errorf("LoadLocation(%q): fresh=%q != cached=%q", name, fresh.String(), cached.String())
+		}
+		// Both resolve the same instant to the same wall-clock representation.
+		ref := time.Unix(1700000000, 0)
+		if ref.In(fresh).Format(time.RFC3339) != ref.In(cached).Format(time.RFC3339) {
+			t.Errorf("LoadLocation(%q): In() disagrees between fresh and cached", name)
 		}
 	}
 }
