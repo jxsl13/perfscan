@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -893,5 +894,37 @@ func TestWarnVendoredFixesTruncates(t *testing.T) {
 	}
 	if n := strings.Count(out, "modified vendored file:"); n != 10 {
 		t.Errorf("expected exactly 10 listed files, got %d:\n%s", n, out)
+	}
+}
+
+// TestApplySequentialFixesVerboseAndError covers the two branches TestApplySequentialFixes
+// leaves out: the verbose per-check log line, and a failing tidy.Run being wrapped
+// with the check ID.
+func TestApplySequentialFixesVerboseAndError(t *testing.T) {
+	selected := []catalog.Entry{{ID: "PX1001", TidyName: "performance-for-range-copy", HasFix: true}}
+	fired := map[string]bool{"PX1001": true}
+	base := tidy.Options{Binary: "clang-tidy", Files: []string{"x.cpp"}}
+
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+
+	// verbose=true logs the per-check "applying" line.
+	tidy.Executor = func(_ context.Context, _ []string, _, _ *bytes.Buffer) (int, error) { return 0, nil }
+	var buf bytes.Buffer
+	if err := applySequentialFixes(context.Background(), &buf, base, selected, fired, true); err != nil {
+		t.Fatalf("applySequentialFixes: %v", err)
+	}
+	if !strings.Contains(buf.String(), "applying PX1001 (performance-for-range-copy)") {
+		t.Errorf("verbose output missing the per-check apply line:\n%s", buf.String())
+	}
+
+	// A failing tidy.Run is wrapped with the check ID.
+	tidy.Executor = func(_ context.Context, _ []string, _, _ *bytes.Buffer) (int, error) {
+		return -1, errors.New("boom")
+	}
+	err := applySequentialFixes(context.Background(), &bytes.Buffer{}, base, selected, fired, false)
+	if err == nil || !strings.Contains(err.Error(), "-fix-sequential applying PX1001") {
+		t.Fatalf("expected a wrapped -fix-sequential error, got %v", err)
 	}
 }
