@@ -464,6 +464,65 @@ func TestFixLevelGatesWhichFixesApply(t *testing.T) {
 	}
 }
 
+// TestDiffRespectsLevelGating pins that -diff (the no-write preview a user runs
+// before -fix) honors -level EXACTLY as -fix does: the previewed patch must show
+// only the changes -fix at that level would apply. If -diff ignored -level and
+// previewed an L2 change that `-fix -level 1` withholds, the preview would lie and
+// a user reviewing it would approve a fix that never lands (or vice versa). One TU
+// with a PX3008 (L1: v.size()==0 -> v.empty()) and a PX3013 (L2: ~S(){} ->
+// = default): -diff -level 1 previews ONLY the L1 line; -diff -level 2 previews
+// both. The file is never modified (dry run). Skipped when clang-tidy is absent.
+func TestDiffRespectsLevelGating(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	const src = "#include <vector>\n" +
+		"struct S { ~S() {} };\n" +
+		"bool e(const std::vector<int>& v) { S s; (void)s; return v.size() == 0; }\n"
+	setup := func() (dir, cpp string, ok bool) {
+		dir = t.TempDir()
+		cpp = filepath.Join(dir, "m.cpp")
+		if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		compile, okc := cppCompileCmdForTest("m.cpp")
+		if !okc {
+			return "", "", false
+		}
+		cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+		if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir, cpp, true
+	}
+
+	dir1, cpp1, ok := setup()
+	if !ok {
+		t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+	}
+	out1, stderr1, _ := runCLI("-tidy", bin, "-diff", "-level", "1", "-p", dir1, cpp1)
+	if strings.Contains(stderr1, "fatal error") || strings.Contains(stderr1, "file not found") {
+		t.Skipf("toolchain could not parse the fixture; skipping. stderr:\n%s", stderr1)
+	}
+	if !strings.Contains(out1, "empty()") {
+		t.Errorf("-diff -level 1 must preview the L1 PX3008 change (v.empty()):\n%s", out1)
+	}
+	if strings.Contains(out1, "= default") {
+		t.Errorf("-diff -level 1 must NOT preview the L2 PX3013 change (= default):\n%s", out1)
+	}
+	// Dry run: the file must be untouched.
+	if got, _ := os.ReadFile(cpp1); string(got) != src {
+		t.Errorf("-diff must not modify the file:\n%s", got)
+	}
+
+	dir2, cpp2, _ := setup()
+	out2, _, _ := runCLI("-tidy", bin, "-diff", "-level", "2", "-p", dir2, cpp2)
+	if !strings.Contains(out2, "empty()") || !strings.Contains(out2, "= default") {
+		t.Errorf("-diff -level 2 must preview BOTH the L1 and L2 changes:\n%s", out2)
+	}
+}
+
 // hasFixCase is one HasFix:true built-in fixture: src triggers check id, and
 // after `perfscanxx -fix` want must appear and unwant must be gone (either "" to
 // skip that assertion).
