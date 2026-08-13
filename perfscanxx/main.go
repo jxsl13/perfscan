@@ -89,7 +89,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		baseline   = fs.String("baseline", "", "ratchet file: if it does not exist, write the current findings as the accepted baseline; if it exists, report only NEW findings (line-independent) so CI fails on regressions while the backlog is burned down")
 		buildDir   = fs.String("p", "", "build directory containing compile_commands.json (default: found by walking up from the cwd)")
 		tidyBin    = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
-		configPath = fs.String("config", "", "path to a .perfscanxx.yml supplying default level/checks/exclude (default: auto-discovered in the current directory); command-line flags override it")
+		configPath = fs.String("config", "", "path to a .perfscanxx.yml supplying project defaults (level, checks, exclude, tidy, extra-args, baseline, fix-errors; auto-discovered in the current directory); command-line flags override it")
 		showVer    = fs.Bool("version", false, "print version and exit")
 		verbose    = fs.Bool("v", false, "verbose: list the translation units that did not fully parse (instead of only their count)")
 		cmakeCfg   = fs.Bool("cmake", false, "if no compile_commands.json is found, auto-configure a detected CMake project to generate one (runs cmake configure; only use on trusted code)")
@@ -155,6 +155,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		if cf.ExtraArgs != nil && !set["extra-arg"] {
 			extra = stringSlice(cf.ExtraArgs)
+		}
+		if cf.Baseline != nil && !set["baseline"] {
+			*baseline = *cf.Baseline
+		}
+		if cf.FixErrors != nil && !set["fix-errors"] {
+			*fixErrors = *cf.FixErrors
 		}
 		fmt.Fprintf(stderr, "perfscanxx: using config %s\n", cfgPath)
 	}
@@ -927,6 +933,8 @@ e.g.:
 	exclude: [vendor/, third_party/]
 	tidy: /opt/homebrew/opt/llvm/bin/clang-tidy
 	extra-args: [-isysroot, /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk]
+	baseline: .perfscanxx-baseline.yaml
+	fix-errors: false
 
 Fix levels (the maintainability cost of a check's remedy):
 

@@ -30,6 +30,11 @@ type File struct {
 	// macOS `-isysroot <sdk>` pair — the flags most painful to repeat in CI.
 	Tidy      *string  `yaml:"tidy"`
 	ExtraArgs []string `yaml:"extra-args"`
+	// Baseline is the -baseline ratchet file; FixErrors the -fix-errors toggle.
+	// Both let a CI config commit its ratchet path and (for a project with
+	// build-time-generated headers) its fix-errors policy once.
+	Baseline  *string `yaml:"baseline"`
+	FixErrors *bool   `yaml:"fix-errors"`
 }
 
 // Discover returns the path of the first config filename that exists in dir,
