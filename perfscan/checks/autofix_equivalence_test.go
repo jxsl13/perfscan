@@ -54,6 +54,37 @@ func TestEquiv_SplitSeq(t *testing.T) {
 	}
 }
 
+// PS2119 (Fields arm): `for _, v := range strings.Fields(s)` -> `for v := range
+// strings.FieldsSeq(s)` (Go 1.24). Bit-identical only if FieldsSeq yields
+// exactly the Fields slice's elements in order — across every whitespace shape
+// (leading/trailing/internal runs, tabs/newlines, Unicode spaces, all-space,
+// empty). Fields splits on unicode.IsSpace, which is why "" seps don't apply
+// here; this is the arm TestEquiv_SplitSeq does not exercise.
+func TestEquiv_FieldsSeq(t *testing.T) {
+	inputs := []string{
+		"", " ", "   ", "a", "a b c", "  a  b  ", "\tx\ny\r\nz\t",
+		"one", "  leading", "trailing  ", "日本 語  x", "a b", // NBSP is a space to IsSpace
+		"mix\t \n of  \t whitespace",
+	}
+	for _, s := range inputs {
+		var seq []string
+		for v := range strings.FieldsSeq(s) {
+			seq = append(seq, v)
+		}
+		if got := strings.Fields(s); !slices.Equal(seq, got) {
+			t.Errorf("strings.FieldsSeq(%q)=%q != range Fields=%q", s, seq, got)
+		}
+
+		var bseq [][]byte
+		for v := range bytes.FieldsSeq([]byte(s)) {
+			bseq = append(bseq, v)
+		}
+		if got := bytes.Fields([]byte(s)); !equalByteSlices(bseq, got) {
+			t.Errorf("bytes.FieldsSeq(%q) != range Fields", s)
+		}
+	}
+}
+
 // PS3104: sort.Ints/sort.Strings -> slices.Sort. Both must produce the identical
 // ordering (they share pdqsort since go1.21); pinned across random + tie-heavy
 // inputs so a divergence would be caught.
