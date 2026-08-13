@@ -2,26 +2,62 @@ package ps3077
 
 import "math"
 
+// VARIABLE bounds: reported but NEVER rewritten. psClamp diverges from the
+// math pair when a bound is -0 (math.Max(+0,-0) is +0; '+0 <= -0' takes the
+// branch) or NaN (propagates through math.Min/Max; falls out of a failed
+// comparison), and a variable can carry either at runtime.
 func clampAll(xs []float64, lo, hi float64) {
 	for i, v := range xs {
 		xs[i] = math.Min(math.Max(v, lo), hi) // want `a clamp written as math\.Min\(math\.Max\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
 	}
 }
 
+// VARIABLE bounds, reverse order: advisory only, same -0/NaN bound hazard.
 func clampReverse(xs []float64, lo, hi float64) {
 	for i, v := range xs {
 		xs[i] = math.Max(math.Min(v, hi), lo) // want `a clamp written as math\.Max\(math\.Min\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
 	}
 }
 
+// CONSTANT literal bounds: a constant can be neither -0 nor NaN, so the
+// branch form is provably bit-identical — rewritten.
 func clampLiteralBounds(xs []float64) {
 	for i, v := range xs {
 		xs[i] = math.Min(math.Max(v, 0), 1) // want `a clamp written as math\.Min\(math\.Max\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
 	}
 }
 
+// CONSTANT bounds in the reverse order: rewritten to the same psClamp shape.
+func clampConstReverse(xs []float64) {
+	for i, v := range xs {
+		xs[i] = math.Max(math.Min(v, 1.0), 0.0) // want `a clamp written as math\.Max\(math\.Min\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
+	}
+}
+
+const (
+	loK = 0.25
+	hiK = 0.75
+)
+
+// NAMED constant bounds: the gate is on constant-ness, not literal spelling.
+func clampNamedConstBounds(xs []float64) {
+	for i, v := range xs {
+		xs[i] = math.Min(math.Max(v, loK), hiK) // want `a clamp written as math\.Min\(math\.Max\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
+	}
+}
+
+// MIXED bounds — constant lo, variable hi: BOTH bounds must be constant, so
+// this stays advisory.
+func clampMixedBounds(xs []float64, hi float64) {
+	for i, v := range xs {
+		xs[i] = math.Min(math.Max(v, 0.0), hi) // want `a clamp written as math\.Min\(math\.Max\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`
+	}
+}
+
 type bounds struct{ lo, hi float64 }
 
+// Selector bounds are side-effect-free but VARIABLE: advisory only. (v as an
+// ident[ident] index stays fine — only the bounds carry the -0/NaN hazard.)
 func clampIndexed(xs []float64, b bounds) {
 	for i := range xs {
 		xs[i] = math.Min(math.Max(xs[i], b.lo), b.hi) // want `a clamp written as math\.Min\(math\.Max\(…\)\) pays two calls with the full NaN/signed-zero contract per iteration; a comparison chain is far cheaper but must be gated on -0/NaN/Inf edge cases`

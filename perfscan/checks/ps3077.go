@@ -36,11 +36,17 @@ wrong.
 The automatic fix covers exactly math.Min(math.Max(v, lo), hi) and
 math.Max(math.Min(v, hi), lo) whose three operands are side-effect-free
 (identifiers, selector chains, basic literals, ident[ident] indexing) and
-float64-typed: the call becomes psClamp(v, lo, hi), a branch-form helper
-appended once to the package that keeps the <=/>= bounds and lets a NaN
-input fall through. Anything else — other argument orders, call operands,
-a file whose math import the rewrite would orphan, or a package that
-already declares a psClamp that is not this helper — stays advisory.`,
+float64-typed, and whose two BOUNDS lo and hi are compile-time constants:
+the call becomes psClamp(v, lo, hi), a branch-form helper appended once to
+the package that keeps the <=/>= bounds and lets a NaN input fall through.
+The constant requirement is load-bearing: a Go constant can never be
+negative zero or NaN, the only bound values on which the branch form
+diverges from math.Min/math.Max (a -0 bound loses math.Max's +0-over--0
+preference and a NaN bound propagates through the math pair but falls out
+of a failed comparison) — v itself may still be any runtime value.
+Anything else — a variable bound, other argument orders, call operands, a
+file whose math import the rewrite would orphan, or a package that already
+declares a psClamp that is not this helper — stays advisory.`,
 		Before: `for i, v := range xs {
 	xs[i] = math.Min(math.Max(v, lo), hi)
 }`,
@@ -199,6 +205,17 @@ func ps3077ClampReplacement(pass *analysis.Pass, outer string, outerCall *ast.Ca
 	if !ok {
 		return ""
 	}
+	// psClamp is bit-identical to the math pair for EVERY input v, but NOT
+	// for every bound: a -0 bound diverges (math.Max(+0, -0) is +0 while
+	// psClamp's '+0 <= -0' takes the branch and returns -0) and a NaN bound
+	// diverges (it propagates through math.Min/math.Max but falls out of
+	// psClamp's failed comparison). Both bounds must therefore be
+	// compile-time constants — a Go constant can be neither -0 (untyped
+	// -0.0 is exactly 0, converting to +0.0) nor NaN (no constant
+	// expression produces one). A variable bound stays advisory.
+	if !ps3077ConstBound(pass, innerCall.Args[1]) || !ps3077ConstBound(pass, outerCall.Args[1]) {
+		return ""
+	}
 	var lo, hi string
 	if outer == "Min" { // math.Min(math.Max(v, lo), hi)
 		lo, hi = innerBound, outerBound
@@ -206,6 +223,15 @@ func ps3077ClampReplacement(pass *analysis.Pass, outer string, outerCall *ast.Ca
 		hi, lo = innerBound, outerBound
 	}
 	return "psClamp(" + v + ", " + lo + ", " + hi + ")"
+}
+
+// ps3077ConstBound reports whether the clamp bound e is a compile-time
+// constant. Constants can never be negative zero or NaN — the only two
+// bound values on which the psClamp branch form diverges from
+// math.Min(math.Max(...)) — so constant bounds make the rewrite provably
+// bit-identical for every runtime v.
+func ps3077ConstBound(pass *analysis.Pass, e ast.Expr) bool {
+	return pass.TypesInfo.Types[e].Value != nil
 }
 
 // ps3077OperandText renders a side-effect-free float64 clamp operand — an
