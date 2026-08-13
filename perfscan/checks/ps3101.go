@@ -32,13 +32,18 @@ are reported, so every finding is a safe hoist.
 The automatic fix binds the conversion to a variable immediately before the
 OUTERMOST enclosing loop and replaces the call with that variable. It is only
 attached when the hoist is provably behavior-preserving: the operand is not
-an iteration variable of any enclosing loop, is not assigned, redeclared, or
-address-taken anywhere in the outermost loop's body, and the conversion is
-spelled with the canonical []byte/string type. A string result is immutable,
-so a string(b) hoist is always safe; a []byte result is a fresh mutable slice
-per iteration, so it is only shared across iterations when it is consumed
-directly by a read-only bytes.* predicate (Contains, Equal, HasPrefix, ...).
-Everything else keeps the plain advisory report.`,
+an iteration variable of any enclosing loop; is not assigned, redeclared, or
+address-taken anywhere in the outermost loop STATEMENT (a for-loop's
+init/cond/post included); is a constant or a variable declared inside the
+enclosing function whose address is never taken there and that no function
+literal assigns (so no callee can change it between iterations); and the
+conversion is spelled with the canonical []byte/string type. A []byte result
+is a fresh mutable slice per iteration, so it is only shared across
+iterations when it is consumed directly by a read-only stdlib bytes.*
+predicate (Contains, Equal, HasPrefix, ... — resolved by type, not by
+spelling). string(b) with a slice operand is never hoisted: the loop may
+mutate b's elements and a snapshot would freeze stale bytes. Everything else
+keeps the plain advisory report.`,
 		Before: `for _, line := range lines {
 	if bytes.Contains(line, []byte(sep)) { ... }
 }`,
@@ -74,7 +79,7 @@ func runPS3101(pass *analysis.Pass) (any, error) {
 				return true
 			}
 			body := astutil.LoopBody(loop)
-			if body == nil || reassigns(body, arg.Name) || isLoopVar(loop, arg.Name) {
+			if body == nil || reassignsInLoop(loop, arg.Name) || isLoopVar(loop, arg.Name) {
 				return true
 			}
 			diag := analysis.Diagnostic{
@@ -175,7 +180,7 @@ func hoistConvFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr, arg
 	// only when it is consumed directly by a read-only bytes.* predicate,
 	// where neither a write nor an alias can escape.
 	if convText == "[]byte" {
-		if len(stack) == 0 || !byteConvReadOnly(stack[len(stack)-1], call) {
+		if len(stack) == 0 || !byteConvReadOnly(pass, stack[len(stack)-1], call) {
 			return nil
 		}
 	}
@@ -217,9 +222,37 @@ func hoistConvFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr, arg
 		}
 	}
 	// ...and must not be assigned, redeclared, or address-taken anywhere in
-	// the outermost loop's body (which lexically contains all inner bodies).
-	outerBody := astutil.LoopBody(outer)
-	if outerBody == nil || mutatesOrShadows(outerBody, arg.Name) {
+	// the outermost loop STATEMENT. Scanning the whole statement — not just
+	// its body — also covers a ForStmt's init/cond/post: `for i := 0; ...;
+	// i, sep = i+1, next` reassigns sep on every iteration even though its
+	// body never mentions it (regression: post-statement mutation).
+	if mutatesOrShadows(outer, arg.Name) {
+		return nil
+	}
+	// The loop's own statement is still not enough: the operand can change
+	// between iterations through a closure or a pointer even when the loop
+	// text never assigns it — `g := func() { sep = "z" }` called from the
+	// body, `p := &sep` passed to a mutating callee, or a package-level
+	// operand reassigned by any function the loop calls. Require the operand
+	// to be a variable declared inside the enclosing function whose address
+	// is never taken there and that no function literal in it assigns; a
+	// constant is immutable and always safe (regressions: closure-, pointer-,
+	// and package-level-mediated mutation).
+	switch obj := pass.TypesInfo.ObjectOf(arg).(type) {
+	case *types.Const:
+		// immutable: nothing can change it between iterations
+	case *types.Var:
+		if obj.IsField() {
+			return nil
+		}
+		fn := enclosingFuncNode(stack, start)
+		if fn == nil || obj.Pos() < fn.Pos() || obj.Pos() >= fn.End() {
+			return nil // free variable or package-level: callees may mutate it
+		}
+		if addressTakenOrClosureMutated(pass, fn, obj) {
+			return nil
+		}
+	default:
 		return nil
 	}
 	pos := pass.Fset.Position(call.Pos())
@@ -261,13 +294,26 @@ func canonicalConvText(pass *analysis.Pass, fun ast.Expr) (string, bool) {
 }
 
 // byteConvReadOnly reports whether conv is a direct argument of a read-only
-// bytes.* predicate call.
-func byteConvReadOnly(parent ast.Node, conv *ast.CallExpr) bool {
+// bytes.* predicate call. The qualifier must RESOLVE (via go/types) to the
+// stdlib bytes package, not merely be spelled "bytes": a package-level
+// `var bytes ...` declared in ANOTHER file leaves the parser's Ident.Obj nil,
+// so a purely syntactic check would accept a method call whose implementation
+// may mutate or retain the argument (regression: cross-file bytes shadow).
+func byteConvReadOnly(pass *analysis.Pass, parent ast.Node, conv *ast.CallExpr) bool {
 	pc, ok := parent.(*ast.CallExpr)
 	if !ok {
 		return false
 	}
-	if _, ok := astutil.PkgFuncCall(pc.Fun, "bytes", bytesReadOnlyFuncs); !ok {
+	sel, ok := pc.Fun.(*ast.SelectorExpr)
+	if !ok || !bytesReadOnlyFuncs[sel.Sel.Name] {
+		return false
+	}
+	id, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	pn, ok := pass.TypesInfo.Uses[id].(*types.PkgName)
+	if !ok || pn.Imported().Path() != "bytes" {
 		return false
 	}
 	for _, a := range pc.Args {
@@ -278,12 +324,98 @@ func byteConvReadOnly(parent ast.Node, conv *ast.CallExpr) bool {
 	return false
 }
 
-// mutatesOrShadows reports whether body assigns to, increments, redeclares,
+// reassignsInLoop reports whether the loop STATEMENT — a ForStmt's
+// init/cond/post included, not just the body — directly assigns to or
+// increments name.
+func reassignsInLoop(loop ast.Node, name string) bool {
+	found := false
+	ast.Inspect(loop, func(n ast.Node) bool {
+		switch st := n.(type) {
+		case *ast.AssignStmt:
+			for _, lhs := range st.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok && id.Name == name {
+					found = true
+				}
+			}
+		case *ast.IncDecStmt:
+			if id, ok := st.X.(*ast.Ident); ok && id.Name == name {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
+}
+
+// enclosingFuncNode returns the innermost function declaration or literal on
+// the stack strictly above index i, or nil.
+func enclosingFuncNode(stack []ast.Node, i int) ast.Node {
+	for j := i - 1; j >= 0; j-- {
+		switch stack[j].(type) {
+		case *ast.FuncDecl, *ast.FuncLit:
+			return stack[j]
+		}
+	}
+	return nil
+}
+
+// addressTakenOrClosureMutated reports whether, anywhere in fn, the address
+// of v is taken or a function literal assigns/increments/range-binds v.
+// Either lets an opaque call — from the loop body, cond, or post — change v
+// between iterations, which a hoisted binding would not observe.
+func addressTakenOrClosureMutated(pass *analysis.Pass, fn ast.Node, v *types.Var) bool {
+	usesV := func(e ast.Expr) bool {
+		id, ok := e.(*ast.Ident)
+		return ok && pass.TypesInfo.Uses[id] == types.Object(v)
+	}
+	found := false
+	ast.Inspect(fn, func(n ast.Node) bool {
+		if ue, ok := n.(*ast.UnaryExpr); ok && ue.Op == token.AND && usesV(ue.X) {
+			found = true
+		}
+		return !found
+	})
+	if found {
+		return true
+	}
+	ast.Inspect(fn, func(n ast.Node) bool {
+		lit, ok := n.(*ast.FuncLit)
+		if !ok {
+			return !found
+		}
+		ast.Inspect(lit.Body, func(m ast.Node) bool {
+			switch st := m.(type) {
+			case *ast.AssignStmt:
+				for _, lhs := range st.Lhs {
+					if usesV(lhs) {
+						found = true
+					}
+				}
+			case *ast.IncDecStmt:
+				if usesV(st.X) {
+					found = true
+				}
+			case *ast.RangeStmt:
+				if st.Key != nil && usesV(st.Key) {
+					found = true
+				}
+				if st.Value != nil && usesV(st.Value) {
+					found = true
+				}
+			}
+			return !found
+		})
+		return false // lit.Body already scanned, nested literals included
+	})
+	return found
+}
+
+// mutatesOrShadows reports whether node assigns to, increments, redeclares,
 // range-binds, or takes the address of name anywhere within, including
 // inside nested closures.
-func mutatesOrShadows(body *ast.BlockStmt, name string) bool {
+func mutatesOrShadows(node ast.Node, name string) bool {
 	found := false
-	ast.Inspect(body, func(n ast.Node) bool {
+	ast.Inspect(node, func(n ast.Node) bool {
 		if found {
 			return false
 		}

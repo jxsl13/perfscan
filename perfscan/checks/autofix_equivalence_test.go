@@ -709,6 +709,65 @@ func TestEquiv_Sprintf2107(t *testing.T) {
 	}
 }
 
+// PS3101: `for ... { bytes.Contains(line, []byte(sep)) }` -> hoist
+// `bsep := []byte(sep)` above the loop. The hoist shares ONE []byte buffer
+// across every iteration instead of a fresh copy per iteration, so it is
+// bit-identical only if every function the check whitelists as "read-only"
+// (bytesReadOnlyFuncs in ps3101.go) neither mutates its []byte argument nor
+// aliases it into its result. Here every whitelisted func is run against a
+// shared hoisted buffer over many iterations: results must equal the
+// fresh-conversion results AND the shared buffer's bytes must be unchanged
+// after every call. A future widening of the whitelist (e.g. bytes.Split,
+// which ALIASES its argument into the result, or bytes.Replace) must extend
+// this table or fail review.
+func TestEquiv_PS3101HoistSharedReadOnly(t *testing.T) {
+	seps := []string{"", "a", ",", "ab", "日本", "\x00", "aba"}
+	lines := [][]byte{nil, {}, []byte("a"), []byte("abab"), []byte("日本語ab"), []byte("\x00a\x00"), []byte("zzz")}
+	pred := func(r rune) bool { return r == 'a' || r == '日' }
+	for _, sep := range seps {
+		hoisted := []byte(sep) // the shared buffer PS3101's fix introduces
+		snapshot := string(hoisted)
+		for iter := 0; iter < 3; iter++ { // sharing across iterations is the point
+			for _, line := range lines {
+				fresh := func() []byte { return []byte(sep) }
+				type res struct {
+					name string
+					a, b any
+				}
+				checks := []res{
+					{"Compare", bytes.Compare(line, hoisted), bytes.Compare(line, fresh())},
+					{"Contains", bytes.Contains(line, hoisted), bytes.Contains(line, fresh())},
+					{"ContainsAny", bytes.ContainsAny(hoisted, "ab日"), bytes.ContainsAny(fresh(), "ab日")},
+					{"ContainsFunc", bytes.ContainsFunc(hoisted, pred), bytes.ContainsFunc(fresh(), pred)},
+					{"ContainsRune", bytes.ContainsRune(hoisted, 'a'), bytes.ContainsRune(fresh(), 'a')},
+					{"Count", bytes.Count(line, hoisted), bytes.Count(line, fresh())},
+					{"Equal", bytes.Equal(line, hoisted), bytes.Equal(line, fresh())},
+					{"EqualFold", bytes.EqualFold(line, hoisted), bytes.EqualFold(line, fresh())},
+					{"HasPrefix", bytes.HasPrefix(line, hoisted), bytes.HasPrefix(line, fresh())},
+					{"HasSuffix", bytes.HasSuffix(line, hoisted), bytes.HasSuffix(line, fresh())},
+					{"Index", bytes.Index(line, hoisted), bytes.Index(line, fresh())},
+					{"IndexAny", bytes.IndexAny(hoisted, "ab日"), bytes.IndexAny(fresh(), "ab日")},
+					{"IndexByte", bytes.IndexByte(hoisted, 'a'), bytes.IndexByte(fresh(), 'a')},
+					{"IndexFunc", bytes.IndexFunc(hoisted, pred), bytes.IndexFunc(fresh(), pred)},
+					{"IndexRune", bytes.IndexRune(hoisted, 'a'), bytes.IndexRune(fresh(), 'a')},
+					{"LastIndex", bytes.LastIndex(line, hoisted), bytes.LastIndex(line, fresh())},
+					{"LastIndexAny", bytes.LastIndexAny(hoisted, "ab日"), bytes.LastIndexAny(fresh(), "ab日")},
+					{"LastIndexByte", bytes.LastIndexByte(hoisted, 'a'), bytes.LastIndexByte(fresh(), 'a')},
+					{"LastIndexFunc", bytes.LastIndexFunc(hoisted, pred), bytes.LastIndexFunc(fresh(), pred)},
+				}
+				for _, c := range checks {
+					if c.a != c.b {
+						t.Errorf("bytes.%s(sep=%q, line=%q): shared hoisted buffer=%v != fresh conversion=%v", c.name, sep, line, c.a, c.b)
+					}
+				}
+				if string(hoisted) != snapshot {
+					t.Fatalf("shared hoisted buffer MUTATED by a whitelisted read-only func: %q -> %q (sep=%q, line=%q)", snapshot, hoisted, sep, line)
+				}
+			}
+		}
+	}
+}
+
 func equalByteSlices(a, b [][]byte) bool {
 	if len(a) != len(b) {
 		return false
