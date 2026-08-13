@@ -3,6 +3,7 @@ package checks
 import (
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"strings"
 
@@ -34,7 +35,14 @@ redeclared, used as a range key/value, or address-taken) — by binding the
 result immediately before the outermost loop and replacing the call with
 the variable. Calls whose arguments mention loop state are reported
 without a fix; whether those inputs are invariant is a data question left
-to the reader.`,
+to the reader.
+
+strings.Repeat is hoisted only when its count argument is a provably
+non-negative integer constant: strings.Repeat panics when count is
+negative, and hoisting the call out of the loop would move that panic —
+or, for a loop that runs zero times, introduce a panic the original never
+raised. A variable count keeps the advisory report. strings.Replace,
+ReplaceAll and Map never panic and are unaffected.`,
 		Before: `for _, name := range names {
 	clean := strings.ReplaceAll(name, "-", "_")
 	emit(clean)
@@ -77,7 +85,7 @@ func runPS2003(pass *analysis.Pass) (any, error) {
 				End:     call.End(),
 				Message: fmt.Sprintf("strings.%s in a loop allocates a fresh string per iteration; hoist the transform, build a strings.Replacer once, or reuse a byte buffer", name),
 			}
-			if fix := hoistStringsFix(pass.Fset, stack, call, name); fix != nil {
+			if fix := hoistStringsFix(pass, stack, call, name); fix != nil {
 				diag.SuggestedFixes = []analysis.SuggestedFix{*fix}
 			}
 			pass.Report(diag)
@@ -94,13 +102,30 @@ func runPS2003(pass *analysis.Pass) (any, error) {
 // outermost enclosing loop (which covers iteration variables of every
 // enclosing loop — they are assigned in the loop clause or ranged over as
 // key/value). Anything else stays advisory.
-func hoistStringsFix(fset *token.FileSet, stack []ast.Node, call *ast.CallExpr, fnName string) *analysis.SuggestedFix {
+//
+// strings.Repeat additionally requires a provably non-negative constant
+// count: Repeat panics when count < 0, and hoisting the call out of the
+// loop relocates that panic — for a zero-iteration loop the original never
+// evaluates Repeat (no panic) while the hoisted binding panics before the
+// loop. A variable count cannot be proven non-negative, so it stays
+// advisory. Replace/ReplaceAll/Map never panic and need no such gate.
+func hoistStringsFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr, fnName string) *analysis.SuggestedFix {
+	fset := pass.Fset
 	if call.Ellipsis.IsValid() {
 		return nil
 	}
 	loop, ok := astutil.OutermostLoop(stack)
 	if !ok {
 		return nil
+	}
+	if fnName == "Repeat" {
+		if len(call.Args) != 2 {
+			return nil
+		}
+		cv := pass.TypesInfo.Types[call.Args[1]].Value
+		if cv == nil || cv.Kind() != constant.Int || constant.Sign(cv) < 0 {
+			return nil
+		}
 	}
 	args := make([]string, 0, len(call.Args))
 	for _, a := range call.Args {

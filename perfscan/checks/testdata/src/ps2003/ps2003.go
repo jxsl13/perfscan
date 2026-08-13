@@ -86,3 +86,22 @@ func argIndexExpr(names []string, m map[int]string) {
 }
 
 func swap(r rune) rune { return r }
+
+// strings.Repeat panics when count < 0; a variable count cannot be proven
+// non-negative, so hoisting would move (or, for a zero-iteration loop,
+// introduce) that panic. Reported without a fix.
+func repeatVarCount(lines []string, s string, n int) {
+	for range lines {
+		emit(strings.Repeat(s, n)) // want `strings\.Repeat in a loop allocates a fresh string per iteration; hoist the transform, build a strings\.Replacer once, or reuse a byte buffer`
+	}
+}
+
+const repeatWidth = 4
+
+// a non-negative constant count can never panic, so the hoist stays available
+// for const-ident counts (literal counts are covered by nested above).
+func repeatConstCount(lines []string) {
+	for range lines {
+		emit(strings.Repeat("y", repeatWidth)) // want `strings\.Repeat in a loop allocates a fresh string per iteration; hoist the transform, build a strings\.Replacer once, or reuse a byte buffer`
+	}
+}
