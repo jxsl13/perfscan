@@ -74,6 +74,34 @@ func TestFromExportPassThrough(t *testing.T) {
 	}
 }
 
+// TestTextOffsetFallbackAndNoFix pins the two human-facing Text branches that
+// TestLineColAndText does not: when the source file can't be read, lineCol
+// yields (0,0) and Text falls back to `file:#<offset>` instead of `file:line:col`;
+// and a finding with no fix-it omits the ", fix available" suffix.
+func TestTextOffsetFallbackAndNoFix(t *testing.T) {
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+	ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist } // unreadable
+
+	findings := FromExport(&fixes.ExportFile{Diagnostics: []fixes.Diagnostic{{
+		DiagnosticName: "performance-for-range-copy", // PX1001, level L1
+		DiagnosticMessage: fixes.DiagnosticMessage{
+			Message: "msg", FilePath: "/src/x.cpp", FileOffset: 42,
+			// no Replacements -> Fixes == 0 -> no ", fix available"
+		},
+	}}}, catalog.LevelAggressive)
+
+	if findings[0].Line != 0 {
+		t.Fatalf("unreadable file should yield Line 0, got %d", findings[0].Line)
+	}
+	var buf bytes.Buffer
+	Text(&buf, findings)
+	want := "/src/x.cpp:#42: msg (PX1001 L1)\n"
+	if got := buf.String(); got != want {
+		t.Errorf("Text (offset fallback, no fix) = %q, want %q", got, want)
+	}
+}
+
 func TestLineColAndText(t *testing.T) {
 	origRead := ReadFile
 	defer func() { ReadFile = origRead }()
