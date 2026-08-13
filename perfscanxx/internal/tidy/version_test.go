@@ -23,6 +23,10 @@ func TestMajorVersion(t *testing.T) {
 		{"plain", "LLVM version 20.0.0\n", nil, 20, true},
 		{"unrecognized", "clang version 15\n", nil, 0, false},
 		{"exec error", "", errors.New("not found"), 0, false},
+		// The version regex captures \d+, but an absurd run of digits overflows
+		// int64 so strconv.Atoi fails -- MajorVersion must degrade to (0,false)
+		// rather than propagate the parse error (pins the Atoi guard, line 48).
+		{"overflow digits", "LLVM version 99999999999999999999\n", nil, 0, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
