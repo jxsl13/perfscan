@@ -146,3 +146,19 @@ func TestUnifiedIsValidPatch(t *testing.T) {
 		t.Errorf("patched file = %q, want %q", got, patched)
 	}
 }
+
+// TestUnifiedContextLineNoFinalNewline pins the "\ No newline at end of file"
+// marker on a CONTEXT line (the change is on an earlier line, so the newline-less
+// last line appears unchanged in the hunk) — the writeHunk ' ' branch that the
+// last-line-changed cases don't reach.
+func TestUnifiedContextLineNoFinalNewline(t *testing.T) {
+	// "ccc" is unchanged context, and neither side ends in a newline.
+	got := Unified("f", "f", []byte("aaa\nbbb\nccc"), []byte("AAA\nbbb\nccc"))
+	if !strings.Contains(got, " ccc\n\\ No newline at end of file\n") {
+		t.Errorf("expected the context-line no-newline marker after \" ccc\":\n%s", got)
+	}
+	// Sanity: the change itself is rendered too.
+	if !strings.Contains(got, "-aaa\n") || !strings.Contains(got, "+AAA\n") {
+		t.Errorf("expected the -aaa/+AAA change lines:\n%s", got)
+	}
+}
