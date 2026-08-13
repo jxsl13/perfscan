@@ -425,15 +425,17 @@ var entries = []Entry{
 		HasFix: false,
 		Custom: true,
 		Bind:   "pow",
-		// std::pow(x, <literal>) — a compile-time-constant exponent. pow() is a
-		// general transcendental routine (tens of ns); for a small integer power
+		// pow/powf/powl(x, <literal>) — a compile-time-constant exponent. pow() is
+		// a general transcendental routine (tens of ns); for a small integer power
 		// x*x / x*x*x is a multiply or two, and pow(x, 0.5) is std::sqrt(x).
-		// clang-tidy ships no equivalent check. ignoringImpCasts sees through the
-		// int-literal -> double conversion so pow(x, 2) matches as well as
-		// pow(x, 2.0). NO auto-fix, deliberately: the rewrite x*x evaluates the
-		// base TWICE (unsafe if it has side effects, e.g. pow(f(), 2)), and the
-		// right form depends on the exponent (multiply vs sqrt) — a human call.
-		Query: `match callExpr(isExpansionInMainFile(), callee(functionDecl(hasName("pow"))), ` +
+		// clang-tidy ships no equivalent check. hasAnyName also catches the float
+		// and long-double variants (powf/powl) numeric C/C++ code uses.
+		// ignoringImpCasts sees through the int-literal -> double conversion so
+		// pow(x, 2) matches as well as pow(x, 2.0). NO auto-fix, deliberately: the
+		// rewrite x*x evaluates the base TWICE (unsafe if it has side effects,
+		// e.g. pow(f(), 2)), and the right form depends on the exponent (multiply
+		// vs sqrt) — a human call.
+		Query: `match callExpr(isExpansionInMainFile(), callee(functionDecl(hasAnyName("pow", "powf", "powl"))), ` +
 			`hasArgument(1, ignoringImpCasts(anyOf(integerLiteral(), floatLiteral())))).bind("pow")`,
 		Message: "std::pow with a constant exponent pays a full libm call; for a small integer power multiply directly (x*x, x*x*x) and for pow(x, 0.5) use std::sqrt(x) — mind that x*x evaluates the base twice, so hoist it first if it has side effects (query-based, no auto-fix)",
 	},

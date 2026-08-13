@@ -28,6 +28,7 @@ std::vector<int> pessimizing() {
   return std::move(v); // PX2102
 }
 double g(double x) { return std::pow(x, 2); } // PX2107 (constant exponent)
+float gf(float x) { return powf(x, 2.0f); }    // PX2107 (powf variant)
 void f(B* p) {
   std::vector<int> grow;
   for (int i = 0; i < 10; ++i) {
