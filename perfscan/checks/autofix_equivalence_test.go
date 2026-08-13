@@ -779,3 +779,39 @@ func equalByteSlices(a, b [][]byte) bool {
 	}
 	return true
 }
+
+// TestEquiv_Sincos pins PS5008's bit-identity claim: math.Sincos(x) returns
+// exactly the same (sin, cos) bits as separate math.Sin(x)/math.Cos(x). The
+// fusion is only bit-identical because Go's math.Sincos shares Sin/Cos's exact
+// argument reduction and polynomials — an implementation detail that a future
+// Go release could change, which would silently make the PS5008 rewrite
+// behavior-changing. This asserts bitwise identity over edge cases (NaN, ±Inf,
+// ±0, subnormal, huge magnitudes that stress argument reduction) plus dense and
+// large-magnitude deterministic sweeps; any single ULP divergence fails CI.
+func TestEquiv_Sincos(t *testing.T) {
+	check := func(x float64) {
+		s1, c1 := math.Sin(x), math.Cos(x)
+		s2, c2 := math.Sincos(x)
+		if math.Float64bits(s1) != math.Float64bits(s2) {
+			t.Errorf("sin divergence at x=%v: Sin=%#x Sincos.s=%#x", x, math.Float64bits(s1), math.Float64bits(s2))
+		}
+		if math.Float64bits(c1) != math.Float64bits(c2) {
+			t.Errorf("cos divergence at x=%v: Cos=%#x Sincos.c=%#x", x, math.Float64bits(c1), math.Float64bits(c2))
+		}
+	}
+	for _, x := range []float64{
+		0, math.Copysign(0, -1), 1, -1, math.Pi, math.Pi / 2, math.Pi / 4, 2 * math.Pi,
+		math.Inf(1), math.Inf(-1), math.NaN(), math.SmallestNonzeroFloat64, math.MaxFloat64,
+		1e-300, 1e300, 1 << 30, 1e18, -1e18,
+	} {
+		check(x)
+	}
+	// Dense sweep near the origin and a large-magnitude sweep (argument-reduction
+	// stress). Deterministic step, no rand — reproducible failures.
+	for i := -50000; i <= 50000; i++ {
+		check(float64(i) * 0.000313)
+	}
+	for i := 0; i < 50000; i++ {
+		check(float64(i) * 1234.5678)
+	}
+}
