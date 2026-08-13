@@ -3,6 +3,7 @@ package checks
 import (
 	"fmt"
 	"go/ast"
+	"go/types"
 
 	"golang.org/x/tools/go/analysis"
 
@@ -57,7 +58,10 @@ var binaryDecodeMethods = map[string]bool{
 }
 
 // isBinaryEndianCall matches binary.LittleEndian.X / binary.BigEndian.X.
-func isBinaryEndianCall(call *ast.CallExpr) (string, bool) {
+// The qualifier must type-resolve to the imported encoding/binary package:
+// an object named "binary" (even a package-level one declared in another
+// file, where Ident.Obj stays nil) does not match.
+func isBinaryEndianCall(info *types.Info, call *ast.CallExpr) (string, bool) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || !binaryDecodeMethods[sel.Sel.Name] {
 		return "", false
@@ -67,7 +71,11 @@ func isBinaryEndianCall(call *ast.CallExpr) (string, bool) {
 		return "", false
 	}
 	id, ok := inner.X.(*ast.Ident)
-	if !ok || id.Name != "binary" || id.Obj != nil {
+	if !ok || id.Name != "binary" {
+		return "", false
+	}
+	pn, ok := info.Uses[id].(*types.PkgName)
+	if !ok || pn.Imported().Path() != "encoding/binary" {
 		return "", false
 	}
 	if inner.Sel.Name != "LittleEndian" && inner.Sel.Name != "BigEndian" {
@@ -95,7 +103,7 @@ func runPS4001(pass *analysis.Pass) (any, error) {
 				if !ok {
 					return true
 				}
-				name, ok := isBinaryEndianCall(call)
+				name, ok := isBinaryEndianCall(pass.TypesInfo, call)
 				if !ok {
 					return true
 				}

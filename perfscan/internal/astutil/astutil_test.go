@@ -4,6 +4,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
+	"strings"
 	"testing"
 )
 
@@ -134,9 +136,67 @@ func f(xs []int) {
 	}
 }
 
+// stubImporter satisfies types.Importer with empty synthetic packages: the
+// checker still resolves `import "fmt"` qualifiers to a *types.PkgName, which
+// is all PkgFuncCall inspects. Selector resolution inside the stub package
+// fails, so type-checking runs with an error sink (see typeCheckSnippets).
+type stubImporter struct{}
+
+func (stubImporter) Import(path string) (*types.Package, error) {
+	name := path
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		name = path[i+1:]
+	}
+	pkg := types.NewPackage(path, name)
+	pkg.MarkComplete()
+	return pkg, nil
+}
+
+// typeCheckSnippets parses and type-checks srcs as one package, tolerating
+// type errors (the stub importer cannot resolve stdlib members), and returns
+// the files plus the populated Uses map that PkgFuncCall consumes.
+func typeCheckSnippets(t *testing.T, srcs ...string) ([]*ast.File, *types.Info) {
+	t.Helper()
+	fset := token.NewFileSet()
+	files := make([]*ast.File, 0, len(srcs))
+	for i, src := range srcs {
+		f, err := parser.ParseFile(fset, "x"+string(rune('0'+i))+".go", src, 0)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		files = append(files, f)
+	}
+	info := &types.Info{
+		Uses:  map[*ast.Ident]types.Object{},
+		Defs:  map[*ast.Ident]types.Object{},
+		Types: map[ast.Expr]types.TypeAndValue{},
+	}
+	conf := types.Config{Importer: stubImporter{}, Error: func(error) {}}
+	conf.Check("p", fset, files, info) //nolint:errcheck // errors expected with stub imports
+	return files, info
+}
+
+// selectorCalls returns every call whose callee is a selector, keyed by the
+// selector name (all distinct in the fixtures below).
+func selectorCalls(files ...*ast.File) map[string]*ast.CallExpr {
+	calls := map[string]*ast.CallExpr{}
+	for _, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			if call, ok := n.(*ast.CallExpr); ok {
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+					calls[sel.Sel.Name] = call
+				}
+			}
+			return true
+		})
+	}
+	return calls
+}
+
 // TestPkgFuncCall covers the qualifier resolution: a real pkg.Fn selector
-// matches, a method call on a value does not, a shadowed package name does not,
-// and the set filters by function name.
+// matches, a method call on a value does not, a shadowed package name does not
+// (local, package-level cross-file, or a same-named import of a different
+// path), and the set filters by function name.
 func TestPkgFuncCall(t *testing.T) {
 	src := `package p
 import "fmt"
@@ -148,51 +208,64 @@ func f(w writer) {
 type writer struct{}
 func (writer) Emit(string) {}
 `
-	f := parseSnippet(t, src)
-	calls := map[string]*ast.CallExpr{} // keyed by selector name (all distinct here)
-	ast.Inspect(f, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok {
-			if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
-				calls[sel.Sel.Name] = call
-			}
-		}
-		return true
-	})
+	files, info := typeCheckSnippets(t, src)
+	calls := selectorCalls(files...)
 
 	set := map[string]bool{"Println": true}
-	if name, ok := PkgFuncCall(calls["Println"].Fun, "fmt", set); !ok || name != "Println" {
+	if name, ok := PkgFuncCall(info, calls["Println"].Fun, "fmt", set); !ok || name != "Println" {
 		t.Errorf("PkgFuncCall(fmt.Println) = %q,%v want Println,true", name, ok)
 	}
 	// Sprintf is a real fmt call but not in the set -> not matched.
-	if _, ok := PkgFuncCall(calls["Sprintf"].Fun, "fmt", set); ok {
+	if _, ok := PkgFuncCall(info, calls["Sprintf"].Fun, "fmt", set); ok {
 		t.Error("PkgFuncCall must respect the name set (Sprintf not in it)")
 	}
 	// A nil set matches any name.
-	if _, ok := PkgFuncCall(calls["Sprintf"].Fun, "fmt", nil); !ok {
+	if _, ok := PkgFuncCall(info, calls["Sprintf"].Fun, "fmt", nil); !ok {
 		t.Error("PkgFuncCall with a nil set must match any fmt function")
 	}
 	// w.Emit is a method call on a value, not the fmt package qualifier.
-	if _, ok := PkgFuncCall(calls["Emit"].Fun, "fmt", nil); ok {
+	if _, ok := PkgFuncCall(info, calls["Emit"].Fun, "fmt", nil); ok {
 		t.Error("PkgFuncCall must not match a method call on a value (w.Emit)")
 	}
-	// A local variable named like the package shadows it (Ident.Obj != nil).
-	shadow := `package p
+
+	// A local variable named like the package shadows it.
+	localShadow := `package p
 func f() {
 	fmt := struct{ Println func(string) }{}
 	fmt.Println("x")
 }`
-	sf := parseSnippet(t, shadow)
-	var shadowed *ast.CallExpr
-	ast.Inspect(sf, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok {
-			if _, ok := call.Fun.(*ast.SelectorExpr); ok {
-				shadowed = call
-			}
-		}
-		return true
-	})
-	if _, ok := PkgFuncCall(shadowed.Fun, "fmt", nil); ok {
+	files, info = typeCheckSnippets(t, localShadow)
+	if _, ok := PkgFuncCall(info, selectorCalls(files...)["Println"].Fun, "fmt", nil); ok {
 		t.Error("PkgFuncCall must not match when fmt is a shadowing local variable")
+	}
+
+	// Regression: a PACKAGE-LEVEL shadow declared in ANOTHER FILE of the
+	// same package. The parser leaves Ident.Obj nil for cross-file
+	// references, so only type resolution rejects it.
+	declFile := `package p
+type myFmt struct{}
+func (myFmt) Sprintf(string, ...any) string { return "CUSTOM" }
+var fmt myFmt
+`
+	useFile := `package p
+func g(i int) string {
+	return fmt.Sprintf("%d", i)
+}`
+	files, info = typeCheckSnippets(t, declFile, useFile)
+	if _, ok := PkgFuncCall(info, selectorCalls(files...)["Sprintf"].Fun, "fmt", nil); ok {
+		t.Error("PkgFuncCall must not match a cross-file package-level shadow of fmt")
+	}
+
+	// A different package imported under the stdlib name must not match:
+	// the import path, not the local name, identifies the package.
+	aliasSrc := `package p
+import fmt "example.com/notfmt"
+func h() {
+	fmt.Sprintf("x")
+}`
+	files, info = typeCheckSnippets(t, aliasSrc)
+	if _, ok := PkgFuncCall(info, selectorCalls(files...)["Sprintf"].Fun, "fmt", nil); ok {
+		t.Error("PkgFuncCall must not match example.com/notfmt imported as fmt")
 	}
 }
 

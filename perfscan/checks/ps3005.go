@@ -211,7 +211,7 @@ func ps3005KeySide(e ast.Expr, idxName string) (ps3005Side, bool) {
 // return, and the element type is an ordered basic type (its universe name
 // needs no new import). Everything else stays advisory.
 func flatKeyFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr, lit *ast.FuncLit, params []string) *analysis.SuggestedFix {
-	fn, ok := astutil.PkgFuncCall(call.Fun, "sort", map[string]bool{"Slice": true, "SliceStable": true})
+	fn, ok := astutil.PkgFuncCall(pass.TypesInfo, call.Fun, "sort", map[string]bool{"Slice": true, "SliceStable": true})
 	if !ok || fn == "" {
 		return nil
 	}
