@@ -89,6 +89,97 @@ func f(buf *bytes.Buffer, s string, n int) {
 	}
 }
 
+// TestFixHoistCrossFileNameCollision pins a package-scope naming hazard of the
+// hoist family (PS2127/PS2132/PS2134): each seeds its fresh package-level var
+// name from the ENCLOSING FUNCTION'S SOURCE LINE, so two hoists in DIFFERENT
+// files of the same package whose functions start on the same line would both
+// want `psRegexpL<line>`. The check's per-run `used` set spans all files in one
+// Run, so the second is bumped (…_2) — without that, -fix would emit two
+// `var psRegexpL5` in one package and fail with "psRegexpL5 redeclared". This
+// exercises the real analyzer over a two-file package, the case single-file
+// golden tests cannot reach.
+func TestFixHoistCrossFileNameCollision(t *testing.T) {
+	// a.go and b.go each have an inline regexp.MustCompile whose enclosing func
+	// starts on the SAME line (5), forcing the name-collision path.
+	const aSrc = `package p
+
+import "regexp"
+
+func A(s string) bool {
+	return regexp.MustCompile("^a+$").MatchString(s)
+}
+`
+	const bSrc = `package p
+
+import "regexp"
+
+func B(s string) bool {
+	return regexp.MustCompile("^b+$").MatchString(s)
+}
+`
+	dir := t.TempDir()
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", diffGoMod)
+	write("a.go", aSrc)
+	write("b.go", bSrc)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(wd) }()
+
+	var out, errBuf bytes.Buffer
+	Run(checks.All(), Options{
+		Patterns: []string{"./..."},
+		MaxLevel: lint.LevelAggressive,
+		Fix:      true,
+		Stdout:   &out,
+		Stderr:   &errBuf,
+	})
+
+	aGot, err := os.ReadFile(filepath.Join(dir, "a.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bGot, err := os.ReadFile(filepath.Join(dir, "b.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	combined := string(aGot) + string(bGot)
+
+	// Both hoisted, and the two package-level var names must be DISTINCT.
+	names := map[string]int{}
+	for _, ln := range strings.Split(combined, "\n") {
+		ln = strings.TrimSpace(ln)
+		if strings.HasPrefix(ln, "var psRegexpL") {
+			name := strings.Fields(ln)[1]
+			names[name]++
+		}
+	}
+	if len(names) != 2 {
+		t.Errorf("expected 2 distinct hoisted var names, got %v\n--a--\n%s\n--b--\n%s", names, aGot, bGot)
+	}
+	for name, n := range names {
+		if n != 1 {
+			t.Errorf("var %s declared %d times — cross-file collision not disambiguated:\n%s", name, n, combined)
+		}
+	}
+	// Each file must still parse (a duplicate/broken decl would not compile).
+	for name, src := range map[string]string{"a.go": string(aGot), "b.go": string(bGot)} {
+		if _, err := parser.ParseFile(token.NewFileSet(), name, src, 0); err != nil {
+			t.Errorf("%s does not parse after fix: %v\n%s", name, err, src)
+		}
+	}
+}
+
 // TestFixDedupesCrossCheckImportAdd pins that two DIFFERENT checks each ADDING
 // the same import do not leave a duplicate declaration. PS3104 (sort.Ints ->
 // slices.Sort) and PS3105 (sort.Sort(sort.StringSlice) -> slices.Sort) both add
