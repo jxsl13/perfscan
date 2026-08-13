@@ -124,6 +124,32 @@ func TestEquiv_Concat(t *testing.T) {
 	}
 }
 
+// PS5102: buf.WriteRune('x') -> buf.WriteByte('x') when the rune is a single
+// UTF-8 byte (r < utf8.RuneSelf). For those runes WriteRune emits exactly the
+// one byte WriteByte does; for r >= RuneSelf it emits a multi-byte encoding, so
+// the rewrite's r < RuneSelf guard is load-bearing — pinned in both directions,
+// for strings.Builder and bytes.Buffer (the two writers PS5102 targets).
+func TestEquiv_WriteRuneByte(t *testing.T) {
+	for r := rune(0); r < utf8.RuneSelf; r++ {
+		var sb strings.Builder
+		sb.WriteRune(r)
+		var bb bytes.Buffer
+		bb.WriteByte(byte(r))
+		if sb.String() != bb.String() {
+			t.Fatalf("WriteRune(%#U)=%q != WriteByte(%#x)=%q", r, sb.String(), byte(r), bb.String())
+		}
+	}
+	// A multi-byte rune MUST differ — otherwise the single-byte guard would be
+	// unnecessary and a widened check would silently corrupt UTF-8.
+	var sb strings.Builder
+	sb.WriteRune('é') // U+00E9 -> 0xC3 0xA9
+	var bb bytes.Buffer
+	bb.WriteByte(byte('é')) // 0xE9
+	if sb.String() == bb.String() {
+		t.Fatal("expected WriteRune != WriteByte for a multi-byte rune (the r<RuneSelf guard is load-bearing)")
+	}
+}
+
 // PS3104: sort.Ints/sort.Strings -> slices.Sort. Both must produce the identical
 // ordering (they share pdqsort since go1.21); pinned across random + tie-heavy
 // inputs so a divergence would be caught.
