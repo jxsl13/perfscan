@@ -1477,3 +1477,81 @@ func TestEquiv_PS1006ColReduce(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS1010ColMean pins PS1010's column-mean interchange. The rewrite
+// accumulates each column into a zeroed scratch in i-ASCENDING order (identical
+// to the serial column sum), divides by the same len(rows), and writes back with
+// an indexed `for j := 0; j < d` loop — NOT copy(mean[:d], ...) — so it preserves
+// the original's mean-LENGTH panic (unlike the PS1006 copy bug this check does
+// not share). Rectangular inputs must be bitwise-identical; a short mean must
+// panic in BOTH forms with the same partial writes.
+func TestEquiv_PS1010ColMean(t *testing.T) {
+	serial := func(rows [][]float64, mean []float64, d int) {
+		for j := 0; j < d; j++ {
+			s := 0.0
+			for i := range rows {
+				s += rows[i][j]
+			}
+			mean[j] = s / float64(len(rows))
+		}
+	}
+	interchanged := func(rows [][]float64, mean []float64, d int) {
+		sums := make([]float64, d)
+		for i := range rows {
+			for j := 0; j < d; j++ {
+				sums[j] += rows[i][j]
+			}
+		}
+		for j := 0; j < d; j++ {
+			mean[j] = sums[j] / float64(len(rows))
+		}
+	}
+	rng := rand.New(rand.NewSource(0x1010))
+	vals := []float64{1, -1, 1e300, 1e-300, math.Pi, 0, math.Copysign(0, -1), 1e16, math.SmallestNonzeroFloat64}
+	pick := func() float64 {
+		if rng.Intn(3) == 0 {
+			return vals[rng.Intn(len(vals))]
+		}
+		return (rng.Float64() - 0.5) * rng.Float64() * 1e8
+	}
+	// Correctness over rectangular matrices.
+	for trial := 0; trial < 1500; trial++ {
+		nr, d := rng.Intn(6)+1, rng.Intn(6)+1
+		rows := make([][]float64, nr)
+		for i := range rows {
+			rows[i] = make([]float64, d)
+			for j := range rows[i] {
+				rows[i][j] = pick()
+			}
+		}
+		m1, m2 := make([]float64, d), make([]float64, d)
+		serial(rows, m1, d)
+		interchanged(rows, m2, d)
+		for j := 0; j < d; j++ {
+			if math.Float64bits(m1[j]) != math.Float64bits(m2[j]) {
+				t.Fatalf("trial %d col %d: serial=%x interchanged=%x", trial, j, math.Float64bits(m1[j]), math.Float64bits(m2[j]))
+			}
+		}
+	}
+	// Panic parity: a mean shorter than d panics in BOTH, with identical partial writes.
+	rows := [][]float64{{1, 2, 3, 4}, {5, 6, 7, 8}}
+	d := 4
+	run := func(f func([][]float64, []float64, int)) (mean []float64, panicked bool) {
+		mean = make([]float64, 2) // len 2 < d
+		defer func() {
+			if recover() != nil {
+				panicked = true
+			}
+		}()
+		f(rows, mean, d)
+		return
+	}
+	ms, ps := run(serial)
+	mi, pi := run(interchanged)
+	if !ps || !pi {
+		t.Fatalf("short mean must panic in both: serial=%v interchanged=%v", ps, pi)
+	}
+	if math.Float64bits(ms[0]) != math.Float64bits(mi[0]) || math.Float64bits(ms[1]) != math.Float64bits(mi[1]) {
+		t.Fatalf("partial writes diverge before panic: serial=%v interchanged=%v", ms, mi)
+	}
+}
