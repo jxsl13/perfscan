@@ -124,3 +124,35 @@ func TestLoadBaselineAndFixErrors(t *testing.T) {
 		t.Errorf("omitted keys should be nil: %+v", f2)
 	}
 }
+
+// TestDiscoverYAMLAndPrecedence pins the parts of Discover that TestDiscover does
+// not: the .yaml spelling is found, .yml WINS when both exist (Names order), and
+// a DIRECTORY named like a config file is skipped (the !fi.IsDir() guard) so the
+// next candidate is still discovered.
+func TestDiscoverYAMLAndPrecedence(t *testing.T) {
+	// .yaml alone is discovered.
+	dyaml := t.TempDir()
+	write(t, dyaml, ".perfscanxx.yaml", "level: 1\n")
+	if p, ok := Discover(dyaml); !ok || filepath.Base(p) != ".perfscanxx.yaml" {
+		t.Errorf("Discover(.yaml only) = (%q, %v), want .perfscanxx.yaml", p, ok)
+	}
+
+	// When both exist, .yml wins (it is first in Names).
+	dboth := t.TempDir()
+	write(t, dboth, ".perfscanxx.yaml", "level: 1\n")
+	write(t, dboth, ".perfscanxx.yml", "level: 2\n")
+	if p, ok := Discover(dboth); !ok || filepath.Base(p) != ".perfscanxx.yml" {
+		t.Errorf("Discover(both) = (%q, %v), want .perfscanxx.yml (precedence)", p, ok)
+	}
+
+	// A directory named like a config file must be SKIPPED, and the next
+	// candidate found.
+	ddir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(ddir, ".perfscanxx.yml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, ddir, ".perfscanxx.yaml", "level: 1\n")
+	if p, ok := Discover(ddir); !ok || filepath.Base(p) != ".perfscanxx.yaml" {
+		t.Errorf("Discover(dir named .yml) = (%q, %v), want the .yaml file (dir skipped)", p, ok)
+	}
+}
