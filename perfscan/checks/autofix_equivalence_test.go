@@ -206,6 +206,107 @@ func TestEquiv_SortSliceToSortFunc(t *testing.T) {
 	}
 }
 
+// PS3002: the TWO-RETURN guard pair spelling
+//
+//	if x[i].a < x[j].a { return true }
+//	if x[i].a > x[j].a { return false }
+//
+// plus a bare `return false` tail ("all fields equal") is the same total
+// order as the emitted `if p.a != q.a { return cmp.Compare(p.a, q.a) }` chain
+// ending in `return 0`: when a field differs exactly one if of its pair fires
+// with the '<' verdict, when all are equal both comparators say "equal"
+// (false ↔ 0). Both sorts share pdqsort, so equal-order comparators must give
+// the identical permutation — pinned over tie-heavy random data (small value
+// domain, an id field to expose any tie reordering), STABLE and UNSTABLE.
+func TestEquiv_SortSliceTwoReturnPair(t *testing.T) {
+	type kv struct{ a, b, id int }
+	intCmp := func(p, q kv) int {
+		if p.a != q.a {
+			return cmp.Compare(p.a, q.a)
+		}
+		if p.b != q.b {
+			return cmp.Compare(p.b, q.b)
+		}
+		return 0
+	}
+	r := rand.New(rand.NewSource(4))
+	for trial := 0; trial < 3000; trial++ {
+		n := r.Intn(40)
+		base := make([]kv, n)
+		for i := range base {
+			base[i] = kv{r.Intn(4), r.Intn(4), i} // small domain -> many ties
+		}
+		boolCmp := func(x []kv) func(i, j int) bool {
+			return func(i, j int) bool {
+				if x[i].a < x[j].a {
+					return true
+				}
+				if x[i].a > x[j].a {
+					return false
+				}
+				if x[i].b < x[j].b {
+					return true
+				}
+				if x[i].b > x[j].b {
+					return false
+				}
+				return false
+			}
+		}
+		x := slices.Clone(base)
+		y := slices.Clone(base)
+		sort.Slice(x, boolCmp(x))
+		slices.SortFunc(y, intCmp)
+		if !slices.Equal(x, y) {
+			t.Fatalf("unstable: pair comparator != cmp chain on trial %d: %v vs %v", trial, x, y)
+		}
+		xs := slices.Clone(base)
+		ys := slices.Clone(base)
+		sort.SliceStable(xs, boolCmp(xs))
+		slices.SortStableFunc(ys, intCmp)
+		if !slices.Equal(xs, ys) {
+			t.Fatalf("stable: pair comparator != cmp chain on trial %d: %v vs %v", trial, xs, ys)
+		}
+
+		// FALSE-FIRST descending pair on a (the '<' if returns false and comes
+		// first, the '>' if returns true and carries the direction), then an
+		// ascending final compare on b — the swapped-halves spelling the check
+		// also accepts, emitted as cmp.Compare(q.a, p.a) then cmp.Compare(p.b,
+		// q.b). Must be the identical permutation, stable and unstable.
+		ffBool := func(x []kv) func(i, j int) bool {
+			return func(i, j int) bool {
+				if x[i].a < x[j].a {
+					return false
+				}
+				if x[i].a > x[j].a {
+					return true
+				}
+				return x[i].b < x[j].b
+			}
+		}
+		ffInt := func(p, q kv) int {
+			if p.a != q.a {
+				return cmp.Compare(q.a, p.a)
+			}
+			return cmp.Compare(p.b, q.b)
+		}
+		fx := slices.Clone(base)
+		fy := slices.Clone(base)
+		sort.Slice(fx, ffBool(fx))
+		slices.SortFunc(fy, ffInt)
+		if !slices.Equal(fx, fy) {
+			t.Fatalf("unstable: false-first desc pair != cmp chain on trial %d: %v vs %v", trial, fx, fy)
+		}
+		fxs := slices.Clone(base)
+		fys := slices.Clone(base)
+		sort.SliceStable(fxs, ffBool(fxs))
+		slices.SortStableFunc(fys, ffInt)
+		if !slices.Equal(fxs, fys) {
+			t.Fatalf("stable: false-first desc pair != cmp chain on trial %d: %v vs %v", trial, fxs, fys)
+		}
+	}
+}
+
 // PS2116 / PS3102: a zeroing loop -> clear(s); a delete loop -> clear(m).
 func TestEquiv_Clear(t *testing.T) {
 	r := rand.New(rand.NewSource(3))

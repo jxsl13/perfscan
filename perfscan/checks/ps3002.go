@@ -52,6 +52,17 @@ and an ordered basic element/field type. Three forms:
     (cmp.Compare(b.f, a.f) < 0 iff a.f > b.f), so the permutation is
     identical. Same "slices"+"cmp" requirements as the single field.
 
+Two further spellings of the tie-break chain are accepted, both exactly
+equivalent: a guard may be written as a TWO-RETURN pair "if xs[i].f <
+xs[j].f { return true }" / "if xs[i].f > xs[j].f { return false }" — when
+the fields differ one of the two ifs returns the ordering verdict, when
+they are equal both fall through, which is precisely the "!=" guard (the
+'>'-returns-true flip is the descending form; any other operator/boolean
+combination stays advisory) — and the chain may END in a bare "return
+false" ("all fields equal → i does not sort before j"), which becomes
+"return 0" after the emitted guards, cmp semantics for "equal". Pairs and
+"!=" guards mix freely within one chain.
+
 The fix edits imports as needed: a missing "slices" (and, for the field
 forms, "cmp") import is ADDED at its sorted position, and an existing
 import is reused under whatever alias the file gave it. The check itself
@@ -210,9 +221,13 @@ func ps3002FileImports(f *ast.File, path string) bool {
 //	})
 //
 // where xs is a plain identifier of slice type and the comparator body is a
-// run of zero or more `if xs[i]<CHAIN> != xs[j]<CHAIN> { return xs[i]<CHAIN>
-// OP xs[j]<CHAIN> }` tie-break guards — each guard ordering the very field it
-// tests — closed by a final `return A OP B`, where each OP is independently
+// run of zero or more tie-break guard UNITS — either a single `if xs[i]<CHAIN>
+// != xs[j]<CHAIN> { return xs[i]<CHAIN> OP xs[j]<CHAIN> }` guard (each guard
+// ordering the very field it tests) or the equivalent TWO-RETURN pair
+// `if A < B { return true }; if A > B { return false }` (see
+// ps3002TwoReturnPair) — closed by a final `return A OP B`, or, after at
+// least one guard unit, a bare `return false` (the "all fields equal" tail,
+// emitted as `return 0`), where each OP is independently
 // '<' (ascending) or '>' (descending); an ascending field becomes
 // cmp.Compare(a.f, b.f) and a descending field cmp.Compare(b.f, a.f) with the
 // operands swapped. Every comparison's operands must be identical selector
@@ -287,9 +302,20 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 	if fl.Type.Results == nil || fl.Type.Results.NumFields() != 1 {
 		return nil, false
 	}
-	// Body: zero or more `if xs[i].f != xs[j].f { return xs[i].f < xs[j].f }`
-	// (or `> xs[j].f`) tie-break guards followed by exactly one final
-	// `return A < B` / `return A > B`. Direction is INDEPENDENT per field.
+	// Body: an INDEX-based walk over a run of tie-break guard UNITS closed by
+	// one final statement. A guard unit is either
+	//   - a single `if xs[i].f != xs[j].f { return xs[i].f OP xs[j].f }`
+	//     guard (one statement), or
+	//   - a TWO-RETURN pair `if xs[i].f < xs[j].f { return true };
+	//     if xs[i].f > xs[j].f { return false }` (two consecutive
+	//     statements) — the `!=` guard in disguise, see ps3002TwoReturnPair.
+	// Units of either kind mix freely. The final statement is `return A < B`
+	// / `return A > B` (field or whole-element compare) or — only after at
+	// least one guard unit — a bare `return false`, the canonical "all
+	// fields equal → i does not sort before j" tail, which becomes
+	// `return 0` in the cmp chain: sort.Slice treats a false comparator
+	// result between equal elements exactly as SortFunc treats 0.
+	// Direction is INDEPENDENT per field.
 	body := fl.Body.List
 	if len(body) == 0 {
 		return nil, false
@@ -299,45 +325,87 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 		descending bool
 	}
 	fields := make([]fieldCmp, 0, len(body))
-	for _, stmt := range body[:len(body)-1] {
-		ifs, ok := stmt.(*ast.IfStmt)
-		if !ok || ifs.Init != nil || ifs.Else != nil || len(ifs.Body.List) != 1 {
+	tailZero := false // body ends in a bare `return false` → emit `return 0`
+	sawFinal := false
+	for i := 0; i < len(body); {
+		// (a) A two-return guard pair — tried first, but unambiguous either
+		// way: its ifs test '<'/'>' and return bool LITERALS, a `!=` guard's
+		// if tests '!=' and returns an ordering comparison.
+		if i+1 < len(body) {
+			if suffix, desc, ok := ps3002TwoReturnPair(pass, body[i], body[i+1], xsObj, params[0], params[1]); ok {
+				fields = append(fields, fieldCmp{suffix, desc})
+				i += 2
+				continue
+			}
+		}
+		// (b) A single `!=` tie-break guard.
+		if ifs, ok := body[i].(*ast.IfStmt); ok {
+			if i == len(body)-1 {
+				// A guard as the LAST statement leaves no final return.
+				return nil, false
+			}
+			if ifs.Init != nil || ifs.Else != nil || len(ifs.Body.List) != 1 {
+				return nil, false
+			}
+			condSuffix, ok := neqField(pass, ifs.Cond, xsObj, params[0], params[1])
+			if !ok {
+				return nil, false
+			}
+			ret, ok := ifs.Body.List[0].(*ast.ReturnStmt)
+			if !ok || len(ret.Results) != 1 {
+				return nil, false
+			}
+			cmpSuffix, cmpDesc, ok := orderingCompare(pass, ret.Results[0], xsObj, params[0], params[1])
+			// The guard must test the very field it then orders (an empty
+			// chain — a whole-element compare — never belongs in a guard):
+			// otherwise the bool chain and the cmp chain diverge on ties. The
+			// return's direction does not affect the guard: `!=` is symmetric.
+			if !ok || cmpSuffix == "" || cmpSuffix != condSuffix {
+				return nil, false
+			}
+			fields = append(fields, fieldCmp{cmpSuffix, cmpDesc})
+			i++
+			continue
+		}
+		// (c) The final statement — anything here must be the LAST one.
+		if i != len(body)-1 {
 			return nil, false
 		}
-		condSuffix, ok := neqField(pass, ifs.Cond, xsObj, params[0], params[1])
-		if !ok {
+		final, ok := body[i].(*ast.ReturnStmt)
+		if !ok || len(final.Results) != 1 {
 			return nil, false
 		}
-		ret, ok := ifs.Body.List[0].(*ast.ReturnStmt)
-		if !ok || len(ret.Results) != 1 {
-			return nil, false
+		if val, isLit := ps3002BoolLiteral(pass, final.Results[0]); isLit {
+			// A bare `return false` after ≥1 guard unit is the "all fields
+			// equal" tail → `return 0`. A `return true` tail (never a valid
+			// strict-order comparator on ties) or a bool literal as the SOLE
+			// statement (degenerate constant comparator) stays advisory.
+			if val || len(fields) == 0 {
+				return nil, false
+			}
+			tailZero = true
+		} else {
+			finalSuffix, finalDesc, ok := orderingCompare(pass, final.Results[0], xsObj, params[0], params[1])
+			if !ok {
+				return nil, false
+			}
+			// A whole-element compare is only valid as the sole statement AND
+			// ascending (→ slices.Sort, which has no comparator to swap
+			// operands in); as the tail of a tie-break chain it compares the
+			// whole element, which cmp.Compare cannot express.
+			if finalSuffix == "" && (len(fields) > 0 || finalDesc) {
+				return nil, false
+			}
+			fields = append(fields, fieldCmp{finalSuffix, finalDesc})
 		}
-		cmpSuffix, cmpDesc, ok := orderingCompare(pass, ret.Results[0], xsObj, params[0], params[1])
-		// The guard must test the very field it then orders (an empty
-		// chain — a whole-element compare — never belongs in a guard):
-		// otherwise the bool chain and the cmp chain diverge on ties. The
-		// return's direction does not affect the guard: `!=` is symmetric.
-		if !ok || cmpSuffix == "" || cmpSuffix != condSuffix {
-			return nil, false
-		}
-		fields = append(fields, fieldCmp{cmpSuffix, cmpDesc})
+		sawFinal = true
+		i++
 	}
-	final, ok := body[len(body)-1].(*ast.ReturnStmt)
-	if !ok || len(final.Results) != 1 {
+	if !sawFinal {
+		// All guard units, no final statement — cannot even compile as a
+		// bool comparator, but never trust the input.
 		return nil, false
 	}
-	finalSuffix, finalDesc, ok := orderingCompare(pass, final.Results[0], xsObj, params[0], params[1])
-	if !ok {
-		return nil, false
-	}
-	// A whole-element compare is only valid as the sole statement AND
-	// ascending (→ slices.Sort, which has no comparator to swap operands
-	// in); as the tail of a tie-break chain it compares the whole element,
-	// which cmp.Compare cannot express.
-	if finalSuffix == "" && (len(fields) > 0 || finalDesc) {
-		return nil, false
-	}
-	fields = append(fields, fieldCmp{finalSuffix, finalDesc})
 	// slices must be usable by name at the call site — required by BOTH
 	// rewrites below. An existing import is reused under its local name
 	// (alias included); a missing one is fine, runPS3002 adds the import
@@ -395,10 +463,21 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s.%s(%s, func(a, b %s) int { ", slicesName, fn, xs.Name, elemStr)
-	for _, f := range fields[:len(fields)-1] {
-		fmt.Fprintf(&b, "if a%s != b%s { return %s }; ", f.suffix, f.suffix, compare(f))
+	if tailZero {
+		// The bare `return false` tail: EVERY collected field is a guard and
+		// the tail becomes `return 0` — both say "equal", and sort.Slice's
+		// false-on-equal is exactly SortFunc's 0-on-equal, so ties keep the
+		// identical order under the shared pdqsort.
+		for _, f := range fields {
+			fmt.Fprintf(&b, "if a%s != b%s { return %s }; ", f.suffix, f.suffix, compare(f))
+		}
+		b.WriteString("return 0 })")
+	} else {
+		for _, f := range fields[:len(fields)-1] {
+			fmt.Fprintf(&b, "if a%s != b%s { return %s }; ", f.suffix, f.suffix, compare(f))
+		}
+		fmt.Fprintf(&b, "return %s })", compare(fields[len(fields)-1]))
 	}
-	fmt.Fprintf(&b, "return %s })", compare(fields[len(fields)-1]))
 	return &analysis.SuggestedFix{
 		Message: fmt.Sprintf("replace sort.%s with %s.%s", name, slicesName, fn),
 		TextEdits: []analysis.TextEdit{
@@ -447,6 +526,80 @@ func orderingCompare(pass *analysis.Pass, expr ast.Expr, xsObj types.Object, iNa
 	}
 	suffix, ok = comparisonSuffix(pass, bin, xsObj, iName, jName)
 	return suffix, bin.Op == token.GTR, ok
+}
+
+// ps3002BoolLiteral reports whether e is the predeclared boolean constant
+// true or false — the universe identifier itself, not a same-named local
+// shadowing it — and which one. Both the two-return guard pairs and the bare
+// `return false` tail hinge on the literal really being the untyped bool
+// constant: a shadowed `false` could hold anything.
+func ps3002BoolLiteral(pass *analysis.Pass, e ast.Expr) (val, ok bool) {
+	id, isID := e.(*ast.Ident)
+	if !isID || (id.Name != "true" && id.Name != "false") {
+		return false, false
+	}
+	if pass.TypesInfo.ObjectOf(id) != types.Universe.Lookup(id.Name) {
+		return false, false
+	}
+	return id.Name == "true", true
+}
+
+// ps3002PairHalf matches one half of a two-return guard pair: `if xs[i]<CHAIN>
+// OP xs[j]<CHAIN> { return BOOL }` with OP '<' or '>' over a NON-EMPTY chain
+// (a whole-element pair is rejected the same way an empty `!=` guard is:
+// guards must name the field they order) and BOOL a bool literal, with no
+// Init, no Else and a single-statement body. greater reports OP == '>' and
+// retTrue the literal's value.
+func ps3002PairHalf(pass *analysis.Pass, stmt ast.Stmt, xsObj types.Object, iName, jName string) (suffix string, greater, retTrue, ok bool) {
+	ifs, isIf := stmt.(*ast.IfStmt)
+	if !isIf || ifs.Init != nil || ifs.Else != nil || len(ifs.Body.List) != 1 {
+		return "", false, false, false
+	}
+	suffix, greater, condOK := orderingCompare(pass, ifs.Cond, xsObj, iName, jName)
+	if !condOK || suffix == "" {
+		return "", false, false, false
+	}
+	ret, isRet := ifs.Body.List[0].(*ast.ReturnStmt)
+	if !isRet || len(ret.Results) != 1 {
+		return "", false, false, false
+	}
+	val, isLit := ps3002BoolLiteral(pass, ret.Results[0])
+	if !isLit {
+		return "", false, false, false
+	}
+	return suffix, greater, val, true
+}
+
+// ps3002TwoReturnPair matches the TWO-RETURN guard pair
+//
+//	if xs[i].f < xs[j].f { return true }
+//	if xs[i].f > xs[j].f { return false }
+//
+// which is the `!=` tie-break guard in disguise: when the fields differ,
+// exactly one of the two ifs fires and returns the '<' verdict; when they are
+// equal, both fall through — precisely `if a.f != b.f { return a.f < b.f }`.
+// The GTR-returns-true flip (`>` → true, `<` → false) is the descending form.
+// A valid pair needs the SAME non-empty field chain in both conditions,
+// exactly one '<' and one '>', and exactly one `return true` and one
+// `return false`, with the operator of the true-returning if setting the
+// direction (LSS+true → ascending, GTR+true → descending). Anything else —
+// same operator twice, same boolean twice, `<=`/`>=`, mismatched fields — is
+// a DIFFERENT predicate and keeps the site advisory.
+func ps3002TwoReturnPair(pass *analysis.Pass, first, second ast.Stmt, xsObj types.Object, iName, jName string) (suffix string, descending, ok bool) {
+	s1, gt1, true1, ok1 := ps3002PairHalf(pass, first, xsObj, iName, jName)
+	if !ok1 {
+		return "", false, false
+	}
+	s2, gt2, true2, ok2 := ps3002PairHalf(pass, second, xsObj, iName, jName)
+	if !ok2 || s1 != s2 || gt1 == gt2 || true1 == true2 {
+		return "", false, false
+	}
+	// The if that returns true carries the direction; its partner is forced
+	// to be the opposite operator returning false by the checks above.
+	if true1 {
+		return s1, gt1, true
+	}
+	return s1, gt2, true
 }
 
 // neqField validates a tie-break guard condition `xs[i]<CHAIN> !=
