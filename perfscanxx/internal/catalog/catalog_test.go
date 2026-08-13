@@ -271,3 +271,21 @@ func TestAggressiveOnlyPerfChecks(t *testing.T) {
 		}
 	}
 }
+
+// TestLevelString pins the L1/L2/L3 labels the -list output and messages use,
+// plus the defensive "L?" for an out-of-range Level (so a bad catalog Level
+// renders visibly rather than as an empty string).
+func TestLevelString(t *testing.T) {
+	cases := map[Level]string{
+		LevelIdiomatic:  "L1",
+		LevelStructured: "L2",
+		LevelAggressive: "L3",
+		Level(0):        "L?",
+		Level(99):       "L?",
+	}
+	for lvl, want := range cases {
+		if got := lvl.String(); got != want {
+			t.Errorf("Level(%d).String() = %q, want %q", int(lvl), got, want)
+		}
+	}
+}
