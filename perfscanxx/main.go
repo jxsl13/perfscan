@@ -49,6 +49,7 @@ import (
 	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/cmake"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/compdb"
+	"github.com/jxsl13/perfscan/perfscanxx/internal/config"
 	diffpkg "github.com/jxsl13/perfscan/perfscanxx/internal/diff"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/fixes"
 	"github.com/jxsl13/perfscan/perfscanxx/internal/report"
@@ -87,6 +88,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		baseline   = fs.String("baseline", "", "ratchet file: if it does not exist, write the current findings as the accepted baseline; if it exists, report only NEW findings (line-independent) so CI fails on regressions while the backlog is burned down")
 		buildDir   = fs.String("p", "", "build directory containing compile_commands.json (default: found by walking up from the cwd)")
 		tidyBin    = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
+		configPath = fs.String("config", "", "path to a .perfscanxx.yml supplying default level/checks/exclude (default: auto-discovered in the current directory); command-line flags override it")
 		showVer    = fs.Bool("version", false, "print version and exit")
 		verbose    = fs.Bool("v", false, "verbose: list the translation units that did not fully parse (instead of only their count)")
 		cmakeCfg   = fs.Bool("cmake", false, "if no compile_commands.json is found, auto-configure a detected CMake project to generate one (runs cmake configure; only use on trusted code)")
@@ -118,6 +120,36 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if *explain != "" {
 		return printExplain(stdout, stderr, *explain)
+	}
+
+	// Merge an optional .perfscanxx.yml (project defaults for level/checks/
+	// exclude); an explicit command-line flag ALWAYS wins, so the file never
+	// overrides a one-off invocation. Auto-discovered in the cwd unless -config
+	// names a file.
+	cfgPath := *configPath
+	if cfgPath == "" {
+		if p, ok := config.Discover("."); ok {
+			cfgPath = p
+		}
+	}
+	if cfgPath != "" {
+		cf, err := config.Load(cfgPath)
+		if err != nil {
+			fmt.Fprintln(stderr, "perfscanxx:", err)
+			return 2
+		}
+		set := map[string]bool{}
+		fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+		if cf.Level != nil && !set["level"] {
+			*maxLevel = *cf.Level
+		}
+		if cf.Checks != nil && !set["checks"] {
+			*sel = *cf.Checks
+		}
+		if cf.Exclude != nil && !set["exclude"] {
+			excludeArg = stringSlice(cf.Exclude)
+		}
+		fmt.Fprintf(stderr, "perfscanxx: using config %s\n", cfgPath)
 	}
 
 	if *maxLevel < 1 || *maxLevel > 3 {
@@ -861,6 +893,13 @@ Examples:
 	perfscanxx -list -fixable            only the auto-fixable checks
 	perfscanxx -list -json               the catalog as machine-readable JSON
 	perfscanxx -explain PX1001           one check's documentation
+
+A .perfscanxx.yml in the working directory supplies project defaults
+(level, checks, exclude) that command-line flags override, e.g.:
+
+	level: 2
+	checks: performance-*,PX21*
+	exclude: [vendor/, third_party/]
 
 Fix levels (the maintainability cost of a check's remedy):
 
