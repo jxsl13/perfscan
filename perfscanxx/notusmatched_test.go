@@ -68,3 +68,14 @@ func TestNoTranslationUnitsMatched(t *testing.T) {
 		}
 	})
 }
+
+// TestDiagnoseNoMatchNoDatabase pins the early return: with no compilation
+// database resolvable from the given build dir, diagnoseNoMatch has no
+// database-specific context to add and returns "" (the caller then prints its
+// generic no-match guidance).
+func TestDiagnoseNoMatchNoDatabase(t *testing.T) {
+	emptyBuild := t.TempDir() // no compile_commands.json here
+	if got := diagnoseNoMatch([]string{"a.cpp"}, emptyBuild); got != "" {
+		t.Errorf("diagnoseNoMatch with no database = %q, want \"\"", got)
+	}
+}
