@@ -447,3 +447,29 @@ So a 159-TU container library both (a) stress-tests the orchestrator (no crash,
 clean parse-error accounting, 6s wall time) and (b) confirms the catalog's
 honesty about PX3020: the one check documented as FP-prone on this exact style of
 code is the one that lights up, and it is correctly withheld from any auto-fix.
+
+## yaml-cpp — full -fix roundtrip + test suite, and the L1/L2 behavior boundary
+
+`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` over `jbeder/yaml-cpp` (32 TUs). With
+the SDK sysroot supplied via `.perfscanxx.yml` (`extra-args: [-isysroot, <sdk>]`,
+dogfooding the config), `perfscanxx -fix` **applies 60 fix-its across 18 files**
+— `.cpp` AND shared `.h` headers included by many TUs — and the tree **rebuilds
+cleanly**. This is the first end-to-end C++ `-fix` + rebuild datapoint: the
+multi-TU header-fix orchestration produces compiling C++ on a real library.
+
+Running yaml-cpp's OWN test suite on the fixed tree then draws a sharp line that
+validates the level model:
+
+- `-fix -level 1` (idiomatic): 60→33 fixes, tree rebuilds, **all tests pass** —
+  L1 is behavior-preserving, as designed.
+- `-fix -level 2` (structured): **one test regresses** —
+  `ErrorMessageTest.Ex9_1_InvalidNodeErrorMessage` expects a `YAML::InvalidNode`
+  throw but the fixed code throws `YAML::TypedBadConversion<int>`. Bisected to an
+  interaction between two L2 fixes (PX3007 + PX3011); either excluded, the test
+  passes again.
+
+This is exactly what the catalog's grading promises — L1 mechanical/safe, L2
+"restructures code; review + benchmark expected" — demonstrated on real code
+rather than asserted. Acting on it, `perfscanxx -fix` at `-level >= 2` now prints
+a one-line reminder to review the diff and run the project's tests, since only L1
+fixes are behavior-preserving by design.
