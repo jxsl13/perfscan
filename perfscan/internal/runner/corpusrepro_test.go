@@ -240,3 +240,45 @@ func render(fields []struct{ Name, Type string }) string {
 		t.Errorf("fixed file does not parse: %v\n%s", err, got)
 	}
 }
+
+// TestFixMinioUtf8AndSlicesImportCompose pins a two-import-family composition
+// observed during corpus -fix validation on minio (internal/s3select/sql +
+// bucket packages): PS2125 rewrites len([]rune(s)) -> utf8.RuneCountInString(s)
+// (adding "unicode/utf8") in the same file where PS3104 rewrites sort.Strings ->
+// slices.Sort (adding "slices" and orphaning "sort"). The runner must, in one
+// pass, add BOTH new imports, prune the now-unused "sort", and produce a file
+// that parses. This is distinct from the io/slices/fmt import pins above — it
+// exercises the unicode/utf8 add alongside a slices add + sort prune.
+//
+// On the real minio this was part of 42 bit-identical fixes across 23 files; the
+// tree built, vetted, and every changed package's tests passed. Lock the mix.
+func TestFixMinioUtf8AndSlicesImportCompose(t *testing.T) {
+	const src = `package p
+
+import "sort"
+
+func f(names []string, s string) (int, []string) {
+	sort.Strings(names)
+	n := len([]rune(s))
+	return n, names
+}
+`
+	got := string(runFixMode(t, src))
+
+	for _, want := range []string{
+		"slices.Sort(names)",
+		"utf8.RuneCountInString(s)",
+		`"slices"`,
+		`"unicode/utf8"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in the composed fix:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `"sort"`) {
+		t.Errorf("sort import should be pruned as an orphan:\n%s", got)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+		t.Errorf("fixed file does not parse: %v\n%s", err, got)
+	}
+}
