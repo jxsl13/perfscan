@@ -1033,8 +1033,12 @@ func printExplain(stdout, stderr io.Writer, id string) int {
 	if e.HasFix {
 		fixLine = "clang-tidy fix-it available (-fix applies it)"
 	}
-	fmt.Fprintf(stdout, "%s (%s, %s)\n\n  %s\n\n  clang-tidy check: %s\n  fix: %s\n\n  %s\n",
-		e.ID, e.Level, e.Category, e.Title, e.TidyName, fixLine, explainDocLine(e))
+	fmt.Fprintf(stdout, "%s (%s, %s)\n\n  %s\n\n  clang-tidy check: %s\n  fix: %s\n",
+		e.ID, e.Level, e.Category, e.Title, e.TidyName, fixLine)
+	if e.Caveat != "" {
+		fmt.Fprintf(stdout, "\n  ⚠ caveat: %s\n", e.Caveat)
+	}
+	fmt.Fprintf(stdout, "\n  %s\n", explainDocLine(e))
 	return 0
 }
 
