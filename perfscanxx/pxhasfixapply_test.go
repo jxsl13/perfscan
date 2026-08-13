@@ -344,6 +344,72 @@ func TestFixAppliesMultipleChecksInOneRun(t *testing.T) {
 	}
 }
 
+// TestFixLevelGatesWhichFixesApply pins the -level fix-gating contract: with -fix
+// -level 1, only L1 (behavior-preserving-by-design) fix-its are applied — L2/L3
+// fixes, which the tool warns can change behavior, must be withheld. A user who
+// runs `perfscanxx -fix -level 1` for safe-only fixes in CI would be harmed if an
+// L2 fix slipped through. The existing fixreminder_test only checks the review-
+// reminder MESSAGE, not that the fixes themselves are gated. Here one TU carries a
+// PX3008 finding (L1: v.size()==0 -> v.empty()) and a PX3013 finding (L2:
+// ~S(){} -> = default): at -level 1 ONLY the L1 rewrite lands; at -level 2 BOTH
+// do. Skipped when clang-tidy is absent.
+func TestFixLevelGatesWhichFixesApply(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	const src = "#include <vector>\n" +
+		"struct S { ~S() {} };\n" +
+		"bool e(const std::vector<int>& v) { S s; (void)s; return v.size() == 0; }\n"
+	write := func() (dir, cpp string, ok bool) {
+		dir = t.TempDir()
+		cpp = filepath.Join(dir, "m.cpp")
+		if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		compile, okc := cppCompileCmdForTest("m.cpp")
+		if !okc {
+			return "", "", false
+		}
+		cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+		if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir, cpp, true
+	}
+
+	// -level 1: only the L1 PX3008 fix; the L2 PX3013 fix withheld.
+	dir1, cpp1, ok := write()
+	if !ok {
+		t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+	}
+	_, stderr1, _ := runCLI("-tidy", bin, "-fix", "-level", "1", "-p", dir1, cpp1)
+	got1, err := os.ReadFile(cpp1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stderr1, "fatal error") || strings.Contains(stderr1, "file not found") {
+		t.Skipf("toolchain could not parse the fixture; skipping. stderr:\n%s", stderr1)
+	}
+	if !strings.Contains(string(got1), ".empty()") {
+		t.Errorf("-level 1 must apply the L1 PX3008 fix (v.empty()):\n%s", got1)
+	}
+	if strings.Contains(string(got1), "= default") {
+		t.Errorf("-level 1 must NOT apply the L2 PX3013 fix (= default):\n%s", got1)
+	}
+
+	// -level 2: both the L1 and the L2 fix land.
+	dir2, cpp2, _ := write()
+	runCLI("-tidy", bin, "-fix", "-level", "2", "-p", dir2, cpp2)
+	got2, err := os.ReadFile(cpp2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got2), ".empty()") || !strings.Contains(string(got2), "= default") {
+		t.Errorf("-level 2 must apply BOTH the L1 and L2 fixes:\n%s", got2)
+	}
+}
+
 // hasFixCase is one HasFix:true built-in fixture: src triggers check id, and
 // after `perfscanxx -fix` want must appear and unwant must be gone (either "" to
 // skip that assertion).
