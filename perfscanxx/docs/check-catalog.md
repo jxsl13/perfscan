@@ -40,6 +40,11 @@ should eyeball `-diff` before `-fix`:
   operation can throw (e.g. a move-assignment that closes a handle whose close
   throws); `noexcept` would turn such a throw into `std::terminate`. (Seen on
   fmt's `file` move-assignment, commented "not noexcept because close may throw".)
+- **PX3027** (`performance-noexcept-destructor`) adds `noexcept` to a destructor
+  left implicitly `noexcept(false)` because a base/member destructor can throw —
+  the exact same trade-off as PX3004: if a subobject destructor really throws,
+  the added `noexcept` turns it into `std::terminate`. Confirm no subobject
+  destructor throws before applying.
 - **PX3007** (`modernize-pass-by-value`) rewrites a `const&` sink parameter to
   by-value + `std::move`. This is a **trade-off, not a strict win**: it pays off
   only for callers passing *rvalues* of a nothrow-movable type; an *lvalue*
@@ -57,15 +62,21 @@ readability-\*) against this catalog. Some fixable-looking checks are **left out
 on purpose** — recorded here (and pinned by `TestAuditedExclusionsStayExcluded`)
 so a future audit doesn't re-add them without the rationale:
 
-- `performance-move-constructor-init`, `performance-noexcept-destructor`,
-  `performance-type-promotion-in-math-fn` — genuine perf checks, but they apply
-  **no fix-it** on the macOS/libc++ toolchain, so they'd be advisory-only with no
-  auto-fix value beyond what the advisory set already covers.
-  - **Correction:** `performance-trivially-destructible` was once listed here as
-    "no fix-it" — a false negative from probing the wrong AST shape. It fires on
-    an **out-of-line defaulted destructor** (`~S();` then `S::~S() = default;`),
-    and for that shape `clang-tidy --fix` **does** apply a working fix-it, so it
-    is now a fixable catalog entry (**PX3026**), not an exclusion.
+- `performance-move-constructor-init` — a genuine perf check, but it applies
+  **no fix-it** (inserting `std::move` needs liveness it will not assume), so it'd
+  be advisory-only with no auto-fix value beyond the advisory set.
+- `performance-type-promotion-in-math-fn` — does not even diagnose on the
+  macOS/libc++ toolchain (`sqrt(float)` resolves to libc++'s float overload, no
+  promotion).
+  - **Correction (2×):** two checks once listed here as "no fix-it" were false
+    negatives from probing the wrong AST shape.
+    `performance-trivially-destructible` fires on an **out-of-line defaulted
+    destructor** (`~S();` then `S::~S() = default;`) → now **PX3026**.
+    `performance-noexcept-destructor` fires on a destructor made implicitly
+    `noexcept(false)` by a throwing base/member destructor
+    (`struct S{ ~S() noexcept(false){} }; struct T{ S s; ~T()=default; };` flags
+    T's) — `clang-tidy --fix` inserts ` noexcept ` and the result compiles → now
+    **PX3027** (HasFix, with a terminate-risk caveat mirroring PX3004).
 - `modernize-min-max-use-initializer-list` — its fix-it applies
   (`std::max(a, std::max(b, c))` → `std::max({a, b, c})`) and is bit-identical
   for integers, but it is a **readability** modernization with no perf angle

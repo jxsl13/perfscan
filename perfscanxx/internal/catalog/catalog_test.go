@@ -340,7 +340,7 @@ func TestCaveatsAreWellFormed(t *testing.T) {
 			t.Errorf("%s has a Caveat but HasFix=false; caveats only apply to fixable checks", e.ID)
 		}
 	}
-	for _, id := range []string{"PX3015", "PX3004", "PX3007"} {
+	for _, id := range []string{"PX3015", "PX3004", "PX3007", "PX3027"} {
 		e, ok := ByID(id)
 		if !ok {
 			t.Fatalf("%s missing from catalog", id)
@@ -356,12 +356,20 @@ func TestCaveatsAreWellFormed(t *testing.T) {
 // DELIBERATE exclusions so a future audit does not re-add them without the
 // rationale. Empirically (clang-tidy --fix on a crafted fixture):
 //
-//   - performance-noexcept-destructor, performance-type-promotion-in-math-fn:
-//     re-probed with precise trigger shapes (post-PX3026 lesson) and they do NOT
-//     even DIAGNOSE on this toolchain (macOS/libc++): a throwing-member class
-//     leaves the destructor implicitly-noexcept, and sqrt(float) resolves to the
-//     float overload libc++'s <math.h>/<cmath> provide, so no promotion. Nothing
-//     to surface, fixable or advisory.
+//   - performance-type-promotion-in-math-fn: re-probed with a precise trigger
+//     shape and it does NOT even DIAGNOSE on this toolchain (macOS/libc++):
+//     sqrt(float) resolves to the float overload libc++'s <math.h>/<cmath>
+//     provide, so no promotion. Nothing to surface, fixable or advisory.
+//
+// CORRECTION (clang-tidy 22 re-audit): performance-noexcept-destructor was
+// previously listed here as "does not diagnose" — another false negative from the
+// wrong trigger shape (the PX3026 lesson again). The earlier probe used a class
+// whose OWN destructor was implicitly noexcept. The check actually fires on a
+// destructor made implicitly noexcept(false) by a potentially-throwing base/member
+// destructor, e.g. `struct S{ ~S() noexcept(false){} }; struct T{ S s; ~T()=default; };`
+// flags T's destructor. For that shape `clang-tidy --fix` DOES apply a working
+// fix-it (inserts ` noexcept `, result compiles). It is now catalog entry PX3027
+// (HasFix:true + a terminate-risk Caveat mirroring PX3004's).
 //   - performance-move-constructor-init: this one DOES diagnose (a move ctor that
 //     copies a member, `S(S&& o) : m(o.m)`, is flagged — re-verified, 2 warnings)
 //     but ships NO fix-it (inserting std::move needs liveness the check will not
@@ -396,7 +404,6 @@ func TestAuditedExclusionsStayExcluded(t *testing.T) {
 	excluded := []string{
 		"modernize-min-max-use-initializer-list",
 		"performance-move-constructor-init",
-		"performance-noexcept-destructor",
 		"performance-type-promotion-in-math-fn",
 	}
 	for _, name := range excluded {

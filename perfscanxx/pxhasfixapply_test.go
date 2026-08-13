@@ -613,6 +613,11 @@ func hasFixFixtures() []hasFixCase {
 		{"PX3011", "struct Big { int a[8]; };\nconst Big make() { return Big(); }\n", "", "const Big"},
 		{"PX3016", "#include <functional>\nvoid g(int,int); auto f(){ return std::bind(g, 1, 2); }\n", "[]", "std::bind"},
 		{"PX3026", "struct S { int a; ~S(); };\nS::~S() = default;\n", "~S() = default", "S::~S()"},
+		// A destructor made implicitly noexcept(false) by a throwing member dtor;
+		// clang-tidy inserts ` noexcept ` into T's destructor. want: the marked
+		// form, which only exists after the fix (the member's own noexcept(false)
+		// is unrelated). See catalog PX3027 + its terminate-risk caveat.
+		{"PX3027", "struct S { ~S() noexcept(false) {} };\nstruct T { S s; ~T() = default; };\n", "~T() noexcept", ""},
 	}
 }
 

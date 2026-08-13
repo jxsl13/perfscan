@@ -345,6 +345,22 @@ var entries = []Entry{
 		Title:  "an out-of-line defaulted destructor makes the type non-trivially-destructible (blocks trivial relocation); default it on the first declaration",
 		HasFix: true,
 	},
+	{
+		// clang-tidy ships a working fix-it (verified end-to-end: it inserts
+		// ` noexcept ` into the destructor declaration and the result compiles).
+		// A destructor becomes implicitly noexcept(false) only when a base or
+		// member destructor it runs is potentially-throwing; that propagates up
+		// and blocks the same move/relocation optimizations the sibling noexcept
+		// checks (PX3004/PX3006) target. Same family, same encoding.
+		ID: "PX3027", TidyName: "performance-noexcept-destructor",
+		Level: LevelStructured, Category: "moves",
+		Title:  "a destructor left implicitly noexcept(false) because a base/member destructor can throw blocks move optimizations; mark it noexcept",
+		HasFix: true,
+		Caveat: "same trade-off as the noexcept-move-constructor check (PX3004): the " +
+			"destructor is noexcept(false) because a base or member destructor it runs " +
+			"can throw. Adding noexcept turns any such throw during destruction into " +
+			"std::terminate. Confirm no subobject destructor actually throws before -fix.",
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
