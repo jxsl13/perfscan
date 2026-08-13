@@ -426,3 +426,57 @@ func TestFixReusesAliasedImportAcrossChecks(t *testing.T) {
 		})
 	}
 }
+
+// TestFixTransformChecksReuseAliasedQualifier pins that the checks which
+// TRANSFORM an existing package call preserve the SOURCE's qualifier — including
+// an alias — rather than reconstructing the call with a hardcoded package name.
+// These checks splice the receiver/qualifier from the AST (e.g. by.Compare ->
+// by.Equal), so an aliased import keeps working with no duplicate import and no
+// undefined reference. Complements TestFixReusesAliasedImportAcrossChecks (the
+// import-ADDING checks); together they cover the whole aliased-qualifier class
+// found via hermetic probing. Each fixture imports the target under an alias.
+func TestFixTransformChecksReuseAliasedQualifier(t *testing.T) {
+	cases := []struct {
+		name, src, want, path string
+	}{
+		{
+			name: "PS5101_bytes_equal",
+			src:  "package p\n\nimport by \"bytes\"\n\nfunc f(a, b []byte) bool { return by.Compare(a, b) == 0 }\n",
+			want: "by.Equal(a, b)", path: `"bytes"`,
+		},
+		{
+			name: "PS5104_strings_contains",
+			src:  "package p\n\nimport s2 \"strings\"\n\nfunc f(s string) bool { return s2.Count(s, \"x\") > 0 }\n",
+			want: "s2.Contains(s, \"x\")", path: `"strings"`,
+		},
+		{
+			name: "PS5105_strings_hasprefix",
+			src:  "package p\n\nimport s2 \"strings\"\n\nfunc f(s, p string) bool { return s2.Index(s, p) == 0 }\n",
+			want: "s2.HasPrefix(s, p)", path: `"strings"`,
+		},
+		{
+			name: "PS2113_fmt_fprintf",
+			src:  "package p\n\nimport (\n\t\"bytes\"\n\tf2 \"fmt\"\n)\n\nfunc f(w *bytes.Buffer, n int) { w.Write([]byte(f2.Sprintf(\"%d\", n))) }\n",
+			want: "f2.Fprintf(w, \"%d\", n)", path: `"fmt"`,
+		},
+		{
+			name: "PS2109_fmt_appendf",
+			src:  "package p\n\nimport f2 \"fmt\"\n\nfunc f(id int) []byte { return []byte(f2.Sprintf(\"user=%d\", id)) }\n",
+			want: "f2.Appendf(nil, \"user=%d\", id)", path: `"fmt"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(runFixMode(t, tc.src))
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("must reuse the aliased qualifier (%s):\n%s", tc.want, got)
+			}
+			if n := strings.Count(got, tc.path); n != 1 {
+				t.Errorf("%s must be imported exactly once (no duplicate), got %d:\n%s", tc.path, n, got)
+			}
+			if _, err := parser.ParseFile(token.NewFileSet(), "p.go", got, 0); err != nil {
+				t.Errorf("fixed file does not parse: %v\n%s", err, got)
+			}
+		})
+	}
+}
