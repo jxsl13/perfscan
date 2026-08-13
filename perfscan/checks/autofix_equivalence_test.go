@@ -11,9 +11,13 @@ package checks_test
 import (
 	"bytes"
 	"cmp"
+	"encoding/hex"
+	"fmt"
+	"math"
 	"math/rand"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -480,6 +484,130 @@ func TestEquiv_LenConversions(t *testing.T) {
 		if len([]byte(s)) != len(s) {
 			t.Errorf("len([]byte(%q)) != len(s)", s)
 		}
+	}
+}
+
+// PS2107: fmt.Sprintf of a single bare verb -> the direct strconv/hex call.
+// Why each family is bit-identical:
+//
+//   - %d over any integer: fmt formats integers by plain base-10 division with
+//     a leading '-' for negatives — exactly strconv's algorithm (fmt actually
+//     defers to the same digit logic). strconv.Itoa(i) == FormatInt(int64(i), 10)
+//     by definition, and FormatInt handles MinInt64 correctly (it works in
+//     uint64 magnitude space, so the -x overflow trap does not exist there).
+//     For unsigned kinds the widening uint64(u) is value-preserving for every
+//     width up to uint64 itself, so FormatUint(uint64(u), 10) prints the same
+//     digits %d does, including MaxUint64 at full width.
+//   - %t over bool: fmt prints exactly "true"/"false"; strconv.FormatBool
+//     returns exactly those two strings.
+//   - %x over []byte: fmt hex-dumps the bytes as lowercase hex, two digits per
+//     byte, no separator — precisely hex.EncodeToString's output, including
+//     nil and empty both yielding "".
+//
+// PS2107 only rewrites UNNAMED basic/[]byte types (a named type could carry a
+// fmt.Formatter that fmt would honor), so unnamed values are what we pin here.
+// (%s over a string is an identity owned by PS2130, deliberately not tested.)
+func TestEquiv_Sprintf2107(t *testing.T) {
+	// %d / int -> strconv.Itoa. MinInt64 is the critical edge: a naive
+	// "negate then format" would overflow; both fmt and strconv must not.
+	ints := []int{
+		0, 1, -1, 7, -7, 42, -37, 123456789, -987654321,
+		math.MaxInt32, math.MinInt32,
+		math.MaxInt64, math.MinInt64,
+	}
+	for _, i := range ints {
+		if got, want := fmt.Sprintf("%d", i), strconv.Itoa(i); got != want {
+			t.Errorf("fmt.Sprintf(%%d, %d)=%q != strconv.Itoa=%q", i, got, want)
+		}
+	}
+
+	// %d / unsigned widths -> strconv.FormatUint(uint64(u), 10). MaxUint64 is
+	// the full-width edge; each smaller width's max pins the value-preserving
+	// widening.
+	for _, u := range []uint{0, 1, 42, math.MaxUint32, math.MaxUint} {
+		if got, want := fmt.Sprintf("%d", u), strconv.FormatUint(uint64(u), 10); got != want {
+			t.Errorf("fmt.Sprintf(%%d, uint(%d))=%q != strconv.FormatUint=%q", u, got, want)
+		}
+	}
+	for _, u := range []uint8{0, 1, 42, math.MaxUint8} {
+		if got, want := fmt.Sprintf("%d", u), strconv.FormatUint(uint64(u), 10); got != want {
+			t.Errorf("fmt.Sprintf(%%d, uint8(%d))=%q != strconv.FormatUint=%q", u, got, want)
+		}
+	}
+	for _, u := range []uint16{0, 1, 42, math.MaxUint8 + 1, math.MaxUint16} {
+		if got, want := fmt.Sprintf("%d", u), strconv.FormatUint(uint64(u), 10); got != want {
+			t.Errorf("fmt.Sprintf(%%d, uint16(%d))=%q != strconv.FormatUint=%q", u, got, want)
+		}
+	}
+	for _, u := range []uint32{0, 1, 42, math.MaxUint16 + 1, math.MaxUint32} {
+		if got, want := fmt.Sprintf("%d", u), strconv.FormatUint(uint64(u), 10); got != want {
+			t.Errorf("fmt.Sprintf(%%d, uint32(%d))=%q != strconv.FormatUint=%q", u, got, want)
+		}
+	}
+	for _, u := range []uint64{0, 1, 42, math.MaxUint32 + 1, math.MaxUint64} {
+		if got, want := fmt.Sprintf("%d", u), strconv.FormatUint(u, 10); got != want {
+			t.Errorf("fmt.Sprintf(%%d, uint64(%d))=%q != strconv.FormatUint=%q", u, got, want)
+		}
+	}
+
+	// %d / non-int signed widths -> strconv.FormatInt(int64(x), 10). The
+	// widening int64(x) is value-preserving for every signed width, and
+	// FormatInt handles MinInt64 without a negation overflow.
+	for _, x := range []int8{0, 1, -1, 42, math.MinInt8, math.MaxInt8} {
+		if got, want := fmt.Sprintf("%d", x), strconv.FormatInt(int64(x), 10); got != want {
+			t.Errorf("fmt.Sprintf(%%d, int8(%d))=%q != strconv.FormatInt=%q", x, got, want)
+		}
+	}
+	for _, x := range []int16{0, 1, -1, math.MinInt8 - 1, math.MinInt16, math.MaxInt16} {
+		if got, want := fmt.Sprintf("%d", x), strconv.FormatInt(int64(x), 10); got != want {
+			t.Errorf("fmt.Sprintf(%%d, int16(%d))=%q != strconv.FormatInt=%q", x, got, want)
+		}
+	}
+	for _, x := range []int32{0, 1, -1, math.MinInt16 - 1, math.MinInt32, math.MaxInt32} {
+		if got, want := fmt.Sprintf("%d", x), strconv.FormatInt(int64(x), 10); got != want {
+			t.Errorf("fmt.Sprintf(%%d, int32(%d))=%q != strconv.FormatInt=%q", x, got, want)
+		}
+	}
+	for _, x := range []int64{0, 1, -1, math.MinInt32 - 1, math.MinInt64, math.MaxInt64} {
+		if got, want := fmt.Sprintf("%d", x), strconv.FormatInt(x, 10); got != want {
+			t.Errorf("fmt.Sprintf(%%d, int64(%d))=%q != strconv.FormatInt=%q", x, got, want)
+		}
+	}
+
+	// %t / bool -> strconv.FormatBool.
+	for _, b := range []bool{true, false} {
+		if got, want := fmt.Sprintf("%t", b), strconv.FormatBool(b); got != want {
+			t.Errorf("fmt.Sprintf(%%t, %v)=%q != strconv.FormatBool=%q", b, got, want)
+		}
+	}
+
+	// %x / []byte -> hex.EncodeToString: lowercase, two digits per byte, no
+	// separator. all256 covers every byte value, so any per-byte digit
+	// divergence (case, padding) would surface.
+	all256 := make([]byte, 256)
+	for b := 0; b < 256; b++ {
+		all256[b] = byte(b)
+	}
+	byteCases := [][]byte{
+		nil,
+		{},
+		{0x00},
+		{0x0a},
+		{0xff},
+		{0x00, 0x0f, 0xff, 0xa5},
+		all256,
+	}
+	for _, bs := range byteCases {
+		if got, want := fmt.Sprintf("%x", bs), hex.EncodeToString(bs); got != want {
+			t.Errorf("fmt.Sprintf(%%x, %v)=%q != hex.EncodeToString=%q", bs, got, want)
+		}
+	}
+	// nil and empty must both render as "" on BOTH sides.
+	if fmt.Sprintf("%x", []byte(nil)) != "" || hex.EncodeToString(nil) != "" {
+		t.Error("nil []byte must render as \"\" under both the x verb and hex.EncodeToString")
+	}
+	if fmt.Sprintf("%x", []byte{}) != "" || hex.EncodeToString([]byte{}) != "" {
+		t.Error("empty []byte must render as \"\" under both the x verb and hex.EncodeToString")
 	}
 }
 
