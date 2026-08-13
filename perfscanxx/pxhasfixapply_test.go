@@ -65,6 +65,10 @@ func TestHasFixChecksActuallyApply(t *testing.T) {
 		{"PX3010", "#include <set>\nbool f(const std::set<int>& s, int k){ return s.find(k) != s.end(); }\n", ".contains(", "!= s.end()"},
 		{"PX3019", "#include <string>\nbool f(const std::string& s, const std::string& pre){ return s.substr(0, pre.size()) == pre; }\n", "starts_with", ".substr("},
 		{"PX3023", "#include <vector>\nvoid f(std::vector<int>& v){ std::vector<int>(v).swap(v); }\n", "shrink_to_fit", ".swap("},
+		{"PX2003", "#include <vector>\n#include <utility>\nvoid f(std::vector<std::pair<int,int>>& v){ v.push_back(std::make_pair(1,2)); }\n", "emplace_back", "make_pair"},
+		{"PX2004", "#include <memory>\nvoid f(){ std::shared_ptr<int> p(new int(5)); (void)p; }\n", "make_shared", "new int"},
+		{"PX3005", "#include <set>\n#include <algorithm>\nbool f(const std::set<int>& s, int k){ return std::find(s.begin(), s.end(), k) != s.end(); }\n", ".find(k)", "std::find("},
+		{"PX3013", "struct S { S() {} };\n", "= default", "S() {}"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
