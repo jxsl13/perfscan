@@ -1,0 +1,17 @@
+//go:build go1.24
+
+package ps2119
+
+import "strings"
+
+// VERSION BOUNDARY: an explicit //go:build go1.24 pins this file's effective
+// language version (pass.TypesInfo.FileVersions) EXACTLY at go1.24, where
+// strings.SplitSeq first exists. The gate is inclusive (>= go1.24), so PS2119
+// MUST fire here — a regression to a strict `> go1.24` would wrongly skip files
+// pinned at the boundary. oldversion.go covers the go1.23 block below it; the
+// main file covers the module default well above it.
+func boundaryVersion(s string) {
+	for _, part := range strings.Split(s, ",") { // want `ranging directly over strings\.Split allocates the whole result slice per loop entry; strings\.SplitSeq yields the same pieces in the same order with no slice allocation \(go1\.24\)`
+		_ = part
+	}
+}
