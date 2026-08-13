@@ -37,6 +37,7 @@ perfscanxx -p build ./...             # analyse the whole project (like `perfsca
 perfscanxx -p build ./src/game/...    # just a subtree
 perfscanxx -checks PX1* -p build ./... # only copy checks
 perfscanxx -level 1 -fix -p build ./... # apply only L1 (idiomatic) fix-its
+perfscanxx -fix -fix-sequential -p build ./... # apply each check's fix-its in its own pass (collision-free)
 perfscanxx -diff -p build ./...       # preview what -fix would change, as a unified diff (apply nothing)
 perfscanxx -baseline pxx.yaml -p build ./...  # ratchet: seed, then fail only on NEW findings
 perfscanxx -json -p build ./...       # machine-readable findings (also -sarif for GitHub Code Scanning)
@@ -53,6 +54,14 @@ clang-tidy's real `--fix`, renders the unified diff, and restores the originals 
 the preview equals `-fix` byte-for-byte and exits 1 if anything would change (a CI
 gate / review preview). `-baseline` records the accepted findings of an existing
 codebase so later runs report only regressions.
+
+`-fix-sequential` (with `-fix`) applies each fixable check in its own clang-tidy
+pass — one invocation per check — instead of letting a single pass combine every
+check's fix-its at once. On dense C++ two independent fix-its can target the same
+span and clang-tidy silently drops or garbles the overlap (e.g. adding `noexcept`
+and a member-initializer to the same constructor); isolating each check means every
+fix-it that *can* apply does, at the cost of extra passes. Reach for it when a plain
+`-fix` leaves fixes on the table on heavily-annotated code.
 
 ### Exit codes
 
