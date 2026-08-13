@@ -329,3 +329,58 @@ func TestBuildRestoreWriteError(t *testing.T) {
 		t.Fatalf("Build with a failing restore = %v, want a restore error", err)
 	}
 }
+
+// failReadAfterFixFS reads and writes like memFS, but once armed (set by the
+// runFix callback) its ReadFile fails for one path — reproducing the case where
+// a file is snapshotted fine, --fix rewrites it, but reading the MODIFIED bytes
+// back errors. Build must record that read error and skip the file's diff, not
+// crash or emit a bogus hunk.
+type failReadAfterFixFS struct {
+	*memFS
+	failPath string
+	armed    *bool
+}
+
+func (f *failReadAfterFixFS) ReadFile(path string) ([]byte, error) {
+	if *f.armed && path == f.failPath {
+		return nil, errors.New("read error after fix")
+	}
+	return f.memFS.ReadFile(path)
+}
+
+func TestBuildReadModifiedError(t *testing.T) {
+	const path = "/abs/main.cpp"
+	armed := false
+	fs := &failReadAfterFixFS{memFS: newMemFS(map[string]string{path: "orig\n"}), failPath: path, armed: &armed}
+	ef := &fixes.ExportFile{
+		MainSourceFile: path,
+		Diagnostics: []fixes.Diagnostic{{
+			DiagnosticName: "performance-for-range-copy",
+			DiagnosticMessage: fixes.DiagnosticMessage{
+				FilePath:     path,
+				Replacements: []fixes.Replacement{{FilePath: path, Offset: 0, Length: 4, ReplacementText: "NEW"}},
+			},
+		}},
+	}
+	// runFix rewrites the file (so a diff WOULD exist), then arms the read
+	// failure so the subsequent re-read of the modified bytes errors.
+	runFix := func() error {
+		if err := fs.WriteFile(path, []byte("fixed\n")); err != nil {
+			return err
+		}
+		armed = true
+		return nil
+	}
+
+	diffs, _, err := Build(ef, catalog.LevelAggressive, runFix, fs)
+	if err == nil || !strings.Contains(err.Error(), "reading modified") {
+		t.Fatalf("Build with a failing re-read = %v, want a 'reading modified' error", err)
+	}
+	if len(diffs) != 0 {
+		t.Errorf("no diff should be produced when the modified read fails, got %d", len(diffs))
+	}
+	// The deferred restore still runs (it writes, not reads): file is restored.
+	if got := fs.files[path]; got != "orig\n" {
+		t.Errorf("file not restored after the read error: on disk %q, want %q", got, "orig\n")
+	}
+}
