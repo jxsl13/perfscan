@@ -173,3 +173,10 @@ func fcn(g Glyph) string {
 func fcInt(i int) string {
 	return fmt.Sprintf("%c", i)
 }
+
+// %q over a string(...) conversion expression (not a bare ident): the argument
+// is spliced verbatim. Observed on the Go stdlib (text/scanner: %q over
+// string(tok)).
+func fqConv(tok []byte) string {
+	return fmt.Sprintf("%q", string(tok)) // want `fmt\.Sprintf\("%q", s\) on a string boxes the argument and walks fmt's formatter state machine; strconv\.Quote converts it directly`
+}
