@@ -186,3 +186,16 @@ func TestArgvExcludeHeaderFilter(t *testing.T) {
 		t.Errorf("no ExcludeHeaderFilter set, but argv carries a header-filter: %s", without)
 	}
 }
+
+func TestArgvFixErrors(t *testing.T) {
+	has := func(o Options, arg string) bool { return slices.Contains(Argv(o), arg) }
+	// FixErrors emits --fix-errors alongside --fix.
+	fe := Options{Fix: true, FixErrors: true, Files: []string{"a.cpp"}}
+	if !has(fe, "--fix-errors") || !has(fe, "--fix") {
+		t.Errorf("argv %v: want both --fix and --fix-errors", Argv(fe))
+	}
+	// Without FixErrors, --fix-errors is absent.
+	if has(Options{Fix: true, Files: []string{"a.cpp"}}, "--fix-errors") {
+		t.Error("--fix-errors must be absent when FixErrors is false")
+	}
+}
