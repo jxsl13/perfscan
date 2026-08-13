@@ -14,6 +14,18 @@ func positives(x float64) float64 {
 	return a + b + c + d + e + f
 }
 
+// compoundBase mirrors the shape found during corpus validation on gonum
+// (stat/distuv/logistic.go: math.Pow(1+E, 2); optimize/functions: math.Pow(x0-1, 4)):
+// the base is an arbitrary sub-expression, not a bare identifier. The check keys
+// only off the constant exponent, so it fires here too — and the double-
+// evaluation caveat is especially pointed (a hand-rewrite must hoist the
+// sub-expression into a local first).
+func compoundBase(e, x0 float64) float64 {
+	a := math.Pow(1+e, 2)  // want `math\.Pow with constant exponent 2 pays a general libm call ~50-100x slower than a multiply chain \(x\*x, x\*x\*x\); not auto-fixed: x\*x evaluates the base twice, and a NaN base yields a different NaN payload than math\.Pow`
+	b := math.Pow(x0-1, 4) // want `math\.Pow with constant exponent 4 pays a general libm call ~50-100x slower than a multiply chain \(x\*x, x\*x\*x\); not auto-fixed: x\*x evaluates the base twice, and a NaN base yields a different NaN payload than math\.Pow`
+	return a + b
+}
+
 // A variable exponent is exactly what math.Pow is for: silent.
 func variableExponent(x, y float64) float64 {
 	return math.Pow(x, y)
