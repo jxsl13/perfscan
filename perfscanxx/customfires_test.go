@@ -503,6 +503,7 @@ bool dup(const std::vector<int>& v, int x)     { return std::count(v.begin(), v.
 bool eqK(const std::vector<int>& v, int x)     { return std::count(v.begin(), v.end(), x) == 3; }  // NO (specific count)
 long bare(const std::vector<int>& v, int x)    { return std::count(v.begin(), v.end(), x); }        // NO (bare)
 bool member(const std::set<int>& s, int x)     { return s.count(x) > 0; }                            // NO (member count)
+bool existsIf(const std::vector<int>& v)       { return std::count_if(v.begin(), v.end(), [](int x){ return x > 0; }) > 0; } // MATCH line 11 (count_if for existence)
 `
 
 // TestPX2110DoesNotFireOnCountNeeded pins that PX2110 fires on the three
@@ -551,8 +552,8 @@ func TestPX2110DoesNotFireOnCountNeeded(t *testing.T) {
 	}
 
 	tag := "[" + e.TidyName + "]"
-	if n := strings.Count(output, tag); n != 3 {
-		t.Errorf("PX2110 fired %d time(s), want exactly 3 (the >0, !=0, >=1 existence checks):\n%s", n, output)
+	if n := strings.Count(output, tag); n != 4 {
+		t.Errorf("PX2110 fired %d time(s), want exactly 4 (the >0, !=0, >=1 count checks + count_if>0):\n%s", n, output)
 	}
 	for _, bad := range []string{"count.cpp:7:", "count.cpp:8:", "count.cpp:9:", "count.cpp:10:"} {
 		if strings.Contains(output, bad) {
