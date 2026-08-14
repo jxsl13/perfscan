@@ -570,7 +570,7 @@ var entries = []Entry{
 	{
 		ID: "PX2111", TidyName: "custom-map-double-lookup",
 		Level: LevelStructured, Category: "containers",
-		Title:  "an associative container is looked up twice — m.count(k)/m.find(k)!=m.end() then m[k] on the same key; find() returns an iterator you can test and reuse",
+		Title:  "an associative container is looked up twice — m.count(k)/m.find(k)!=m.end() then m[k]/m.at(k) on the same key; find() returns an iterator you can test and reuse",
 		HasFix: false,
 		Custom: true,
 		Bind:   "dl",
@@ -586,10 +586,12 @@ var entries = []Entry{
 		// where the != is the iterators' overloaded operator (cxxOperatorCallExpr) and
 		// the end() is on the SAME map; the == m.end() ABSENCE form is deliberately not
 		// matched (there m[k] is an insert, not a redundant lookup — a try_emplace case).
-		// The body access is operator[] on the same map and key. forEachDescendant sees
-		// through the ExprWithCleanups wrapping the iterator-temporary comparison;
-		// ignoringParenImpCasts through the const-ref key binding. isExpansionInMainFile
-		// keeps it off library headers. clang-tidy ships no equivalent. NO auto-fix: the
+		// The body access is operator[] OR .at() on the same map and key.
+		// forEachDescendant sees through the ExprWithCleanups wrapping the
+		// iterator-temporary comparison; ignoringParenImpCasts through the const-ref key
+		// binding. isExpansionInMainFile keeps it off library headers. clang-tidy ships
+		// no equivalent. (The C++20 contains() condition form is not yet matched — a
+		// libc++ heterogeneous-lookup wrinkle on the key argument.) NO auto-fix: the
 		// rewrite restructures the if around a find() iterator — a human call.
 		Query: `match ifStmt(isExpansionInMainFile(), ` +
 			`hasCondition(forEachDescendant(anyOf(` +
@@ -600,10 +602,12 @@ var entries = []Entry{
 			`callee(cxxMethodDecl(hasName("find"))), hasArgument(0, ignoringParenImpCasts(declRefExpr(to(valueDecl().bind("key")))))))), ` +
 			`hasArgument(1, ignoringParenImpCasts(cxxMemberCallExpr(on(declRefExpr(to(varDecl(equalsBoundNode("m"))))), ` +
 			`callee(cxxMethodDecl(hasName("end")))))))))), ` +
-			`hasThen(forEachDescendant(cxxOperatorCallExpr(hasOverloadedOperatorName("[]"), ` +
+			`hasThen(forEachDescendant(anyOf(cxxOperatorCallExpr(hasOverloadedOperatorName("[]"), ` +
 			`hasArgument(0, declRefExpr(to(varDecl(equalsBoundNode("m"))))), ` +
-			`hasArgument(1, ignoringParenImpCasts(declRefExpr(to(valueDecl(equalsBoundNode("key")))))))))).bind("dl")`,
-		Message: "the key is looked up twice on this map — the condition (m.count(k) or m.find(k) != m.end()) and m[k] in the body hash/compare the same key again; hold the iterator instead: auto it = m.find(k); if (it != m.end()) use(it->second); (query-based, no auto-fix)",
+			`hasArgument(1, ignoringParenImpCasts(declRefExpr(to(valueDecl(equalsBoundNode("key"))))))), ` +
+			`cxxMemberCallExpr(on(declRefExpr(to(varDecl(equalsBoundNode("m"))))), callee(cxxMethodDecl(hasName("at"))), ` +
+			`hasArgument(0, ignoringParenImpCasts(declRefExpr(to(valueDecl(equalsBoundNode("key"))))))))))).bind("dl")`,
+		Message: "the key is looked up twice on this map — the condition (m.count(k) or m.find(k) != m.end()) and m[k]/m.at(k) in the body hash/compare the same key again; hold the iterator instead: auto it = m.find(k); if (it != m.end()) use(it->second); (query-based, no auto-fix)",
 	},
 	{
 		ID: "PX2112", TidyName: "custom-return-move-temporary",
