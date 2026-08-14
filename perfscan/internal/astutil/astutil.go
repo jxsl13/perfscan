@@ -96,29 +96,37 @@ func CalleeName(fun ast.Expr) string {
 	return ""
 }
 
-// PkgFuncCall reports whether fun is a selector pkg.Name with Name in set
-// (nil set matches any), returning the name. The qualifier must resolve —
-// via info — to the imported package whose path is pkg (a *types.PkgName).
-// A var/func/type/const named like the package does not match; in
-// particular a PACKAGE-LEVEL shadow declared in another file leaves
-// Ident.Obj nil, so only type resolution discriminates it from the real
-// import.
+// PkgFuncCall reports whether fun is a selector qualifier.Name with Name in
+// set (nil set matches any), returning the name. Matching is by IMPORT PATH,
+// not the local qualifier spelling: the qualifier must resolve — via info — to
+// a *types.PkgName whose imported path is pkg. This means an ALIASED stdlib
+// import matches too (`import f "fmt"; f.Sprintf(...)` matches pkg "fmt"),
+// while a third-party package imported under the stdlib name does NOT (its
+// path differs). A var/func/type/const named like the package does not match
+// either — it does not resolve to a *types.PkgName; in particular a
+// PACKAGE-LEVEL shadow declared in another file leaves Ident.Obj nil, so only
+// type resolution discriminates it from the real import.
+//
+// Callers that reconstruct a qualified replacement (e.g. `pkg.NewFn(...)`)
+// MUST render the qualifier from the source selector (sel.X), not from the
+// literal pkg string, so an aliased source produces a compiling, bit-identical
+// rewrite. Whole-call replacers and advisory-only callers are unaffected.
 func PkgFuncCall(info *types.Info, fun ast.Expr, pkg string, set map[string]bool) (string, bool) {
 	sel, ok := fun.(*ast.SelectorExpr)
 	if !ok {
 		return "", false
 	}
 	id, ok := sel.X.(*ast.Ident)
-	if !ok || id.Name != pkg {
+	if !ok {
 		return "", false
 	}
 	pn, ok := info.Uses[id].(*types.PkgName)
 	if !ok {
 		return "", false
 	}
-	// Defensive: the qualifier must be THE stdlib package, not e.g. a
-	// third-party package imported under the same name. All callers pass a
-	// single-segment stdlib name, for which name == import path.
+	// The qualifier must resolve to THE stdlib package by path, not e.g. a
+	// third-party package imported under the same (or an aliased) name. All
+	// callers pass a single-segment stdlib name, for which name == import path.
 	if pn.Imported().Path() != pkg {
 		return "", false
 	}

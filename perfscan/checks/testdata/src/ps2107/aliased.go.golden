@@ -1,0 +1,12 @@
+package ps2107
+
+// ALIASED-IMPORT positive: the fixable Sprintf is written through an fmt
+// alias (`import f "fmt"`), pinning that the stdlib-call detector matches
+// aliased imports. The rewrite replaces the whole call, orphans the alias,
+// and the fix pipeline prunes it while adding the strconv import.
+
+import "strconv"
+
+func aliasedDecimal(i int) string {
+	return strconv.Itoa(i) // want `fmt\.Sprintf of a single %d value boxes the argument and walks fmt's formatter state machine; strconv\.Itoa/FormatInt/FormatUint converts it directly`
+}
