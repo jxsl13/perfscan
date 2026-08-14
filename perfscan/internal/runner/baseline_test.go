@@ -1,12 +1,85 @@
 package runner
 
 import (
+	"bytes"
 	"go/token"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/jxsl13/perfscan/perfscan/checks"
 	"github.com/jxsl13/perfscan/perfscan/lint"
 )
+
+// TestBaselineRunFlowSeedFilterAndWriteGuard drives the baseline flow through
+// Run() (not just writeBaseline/applyBaseline): -write-baseline SEEDS the file
+// and short-circuits (exit 0); a later -baseline run FILTERS — suppressing
+// everything on an identical corpus and, crucially, leaving the baseline file
+// byte-for-byte UNCHANGED (a filter run must never rewrite it, or the ratchet
+// would silently absorb regressions); and -write-baseline WITHOUT -baseline is a
+// usage error (exit 2). Only writeBaseline/applyBaseline were unit tested; this
+// covers the Run() wiring.
+func TestBaselineRunFlowSeedFilterAndWriteGuard(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(corpusGoMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(corpusMain), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(wd) }()
+	blPath := filepath.Join(dir, "baseline.yaml")
+
+	run := func(o Options) (string, int) {
+		var out, errBuf bytes.Buffer
+		o.Patterns = []string{"./..."}
+		o.MaxLevel = lint.LevelAggressive
+		o.Stdout, o.Stderr = &out, &errBuf
+		code := Run(checks.All(), o)
+		return out.String() + errBuf.String(), code
+	}
+
+	// Seed: -write-baseline writes the file and exits 0.
+	out, code := run(Options{Baseline: blPath, WriteBaseline: true})
+	if code != 0 {
+		t.Fatalf("seed run: exit %d, want 0\n%s", code, out)
+	}
+	seeded, err := os.ReadFile(blPath)
+	if err != nil {
+		t.Fatalf("seed run should have written %s: %v", blPath, err)
+	}
+	if len(seeded) == 0 {
+		t.Fatal("seeded baseline is empty; the corpus should produce findings")
+	}
+
+	// Filter: -baseline (no -write) suppresses everything (identical corpus),
+	// exits 0, and must NOT modify the baseline file.
+	out, code = run(Options{Baseline: blPath})
+	if code != 0 {
+		t.Fatalf("filter run: exit %d, want 0 (all baselined)\n%s", code, out)
+	}
+	after, err := os.ReadFile(blPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(seeded) {
+		t.Errorf("a filter run must NOT rewrite the baseline:\nbefore:\n%s\nafter:\n%s", seeded, after)
+	}
+
+	// Guard: -write-baseline without -baseline is a usage error (exit 2).
+	out, code = run(Options{WriteBaseline: true})
+	if code != 2 || !strings.Contains(out, "-write-baseline requires -baseline") {
+		t.Errorf("-write-baseline without -baseline: exit %d, want 2 with the requires-baseline message\n%s", code, out)
+	}
+}
 
 func fakeFinding(file, id, msg string, line int) Finding {
 	return Finding{
