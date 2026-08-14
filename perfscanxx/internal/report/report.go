@@ -88,11 +88,24 @@ func FromExport(ef *fixes.ExportFile, maxLevel catalog.Level) []Finding {
 		f.Line, f.Col = lineCol(abs, f.Offset)
 		out = append(out, f)
 	}
+	// Total order: file, then byte offset, then check ID, then message. The ID
+	// and message tiebreakers matter when two DIFFERENT checks fire at the same
+	// file+offset — their relative order in --export-fixes follows clang-tidy's
+	// TU processing order, which varies run-to-run (parallel runs, TU ordering)
+	// and across clang-tidy versions. Without the tiebreakers those co-located
+	// findings could reorder between otherwise-identical runs, making CI/report
+	// diffs noisy; a fully-specified order keeps the output stable.
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].File != out[j].File {
 			return out[i].File < out[j].File
 		}
-		return out[i].Offset < out[j].Offset
+		if out[i].Offset != out[j].Offset {
+			return out[i].Offset < out[j].Offset
+		}
+		if out[i].ID != out[j].ID {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Message < out[j].Message
 	})
 	return out
 }
