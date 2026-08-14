@@ -311,7 +311,13 @@ func lineIndependentFingerprint(f Finding) string {
 
 // SARIF renders findings as a minimal SARIF 2.1.0 log
 // (GitHub Code Scanning compatible).
-func SARIF(w io.Writer, findings []Finding) error {
+// SARIF renders findings as a SARIF 2.1.0 log. complete reports whether the
+// analysis ran to completion — false when some translation units failed to parse
+// (a partial run). It is emitted as run.invocations[].executionSuccessful so
+// GitHub Code Scanning does NOT treat the absence of a finding as "resolved" for a
+// file that was never analyzed: an incomplete run must not silently close alerts
+// in the TUs it couldn't parse.
+func SARIF(w io.Writer, findings []Finding, complete bool) error {
 	type sarifText struct {
 		Text string `json:"text"`
 	}
@@ -410,9 +416,16 @@ func SARIF(w io.Writer, findings []Finding) error {
 	type sarifAutomationDetails struct {
 		ID string `json:"id"`
 	}
+	// executionSuccessful lets GitHub Code Scanning tell a COMPLETE run (its
+	// absence of a finding means "resolved") from a PARTIAL one (some TUs did not
+	// parse, so absence means "not analyzed" and must not close an alert).
+	type sarifInvocation struct {
+		ExecutionSuccessful bool `json:"executionSuccessful"`
+	}
 	type sarifRun struct {
 		Tool              sarifTool               `json:"tool"`
 		AutomationDetails *sarifAutomationDetails `json:"automationDetails,omitempty"`
+		Invocations       []sarifInvocation       `json:"invocations,omitempty"`
 		Results           []sarifResult           `json:"results"`
 	}
 	type sarifLog struct {
@@ -515,6 +528,7 @@ func SARIF(w io.Writer, findings []Finding) error {
 		Runs: []sarifRun{{
 			Tool:              sarifTool{Driver: sarifDriver{Name: "perfscanxx", InformationURI: "https://github.com/jxsl13/perfscan/perfscanxx", Version: ToolVersion, Rules: rules}},
 			AutomationDetails: &sarifAutomationDetails{ID: "perfscanxx/"},
+			Invocations:       []sarifInvocation{{ExecutionSuccessful: complete}},
 			Results:           results,
 		}},
 	})

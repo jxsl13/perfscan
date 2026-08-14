@@ -366,7 +366,7 @@ func TestLineColAndText(t *testing.T) {
 // Valid (which uses three findings) and is a pure unit test — no clang-tidy.
 func TestSARIFEmptyFindingsIsValid(t *testing.T) {
 	var buf bytes.Buffer
-	if err := SARIF(&buf, nil); err != nil {
+	if err := SARIF(&buf, nil, true); err != nil {
 		t.Fatalf("SARIF(nil): %v", err)
 	}
 	var log struct {
@@ -432,7 +432,7 @@ func TestSARIFOmitsRegionForUnreadableOffset(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := SARIF(&buf, findings); err != nil {
+	if err := SARIF(&buf, findings, true); err != nil {
 		t.Fatal(err)
 	}
 	var doc struct {
@@ -515,7 +515,7 @@ func TestJSONAndSARIF(t *testing.T) {
 	}
 
 	var sarifBuf bytes.Buffer
-	if err := SARIF(&sarifBuf, findings); err != nil {
+	if err := SARIF(&sarifBuf, findings, true); err != nil {
 		t.Fatalf("SARIF: %v", err)
 	}
 
@@ -619,7 +619,7 @@ func TestJSONAndSARIF(t *testing.T) {
 // ToolVersion, so it carries the "dev" default here.
 func TestSARIFDriverCarriesVersion(t *testing.T) {
 	var buf bytes.Buffer
-	if err := SARIF(&buf, []Finding{{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 1}}); err != nil {
+	if err := SARIF(&buf, []Finding{{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 1}}, true); err != nil {
 		t.Fatalf("SARIF: %v", err)
 	}
 	var log struct {
@@ -647,7 +647,7 @@ func TestSARIFDriverCarriesVersion(t *testing.T) {
 // results, silently dropping findings.
 func TestSARIFRunCarriesAutomationDetailsCategory(t *testing.T) {
 	var buf bytes.Buffer
-	if err := SARIF(&buf, []Finding{{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 1}}); err != nil {
+	if err := SARIF(&buf, []Finding{{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 1}}, true); err != nil {
 		t.Fatalf("SARIF: %v", err)
 	}
 	var log struct {
@@ -681,7 +681,7 @@ func TestSARIFRuleCarriesCaveatInFullDescription(t *testing.T) {
 		{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 2},
 	}
 	var buf bytes.Buffer
-	if err := SARIF(&buf, findings); err != nil {
+	if err := SARIF(&buf, findings, true); err != nil {
 		t.Fatalf("SARIF: %v", err)
 	}
 	var log struct {
@@ -723,7 +723,7 @@ func TestSARIFLevelMapping(t *testing.T) {
 		{ID: "PX3022", TidyName: "performance-enum-size", Level: "L3", Message: "m", File: "c.cpp", Line: 1},
 	}
 	var buf bytes.Buffer
-	if err := SARIF(&buf, findings); err != nil {
+	if err := SARIF(&buf, findings, true); err != nil {
 		t.Fatal(err)
 	}
 	var log struct {
@@ -952,7 +952,7 @@ func TestFromExportCountsNoteFixIts(t *testing.T) {
 func TestSARIFPartialFingerprintsAreLineIndependent(t *testing.T) {
 	fp := func(f Finding) string {
 		var buf bytes.Buffer
-		if err := SARIF(&buf, []Finding{f}); err != nil {
+		if err := SARIF(&buf, []Finding{f}, true); err != nil {
 			t.Fatal(err)
 		}
 		var log struct {
@@ -994,7 +994,7 @@ func TestSARIFPartialFingerprintsAreLineIndependent(t *testing.T) {
 // rule-tag filter can group/narrow perfscanxx findings by category.
 func TestSARIFRuleCarriesPerformanceTags(t *testing.T) {
 	var buf bytes.Buffer
-	if err := SARIF(&buf, []Finding{{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 1}}); err != nil {
+	if err := SARIF(&buf, []Finding{{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 1}}, true); err != nil {
 		t.Fatal(err)
 	}
 	var log struct {
@@ -1046,7 +1046,7 @@ func TestSARIFEmitsFixForSingleReplacement(t *testing.T) {
 
 	findings := FromExport(sampleExport(), catalog.LevelAggressive)
 	var buf bytes.Buffer
-	if err := SARIF(&buf, findings); err != nil {
+	if err := SARIF(&buf, findings, true); err != nil {
 		t.Fatalf("SARIF: %v", err)
 	}
 
@@ -1143,7 +1143,7 @@ func TestSARIFOmitsFixForMultiReplacement(t *testing.T) {
 		t.Errorf("multi-replacement finding must carry no Edit, got %+v", findings[0].Edit)
 	}
 	var buf bytes.Buffer
-	if err := SARIF(&buf, findings); err != nil {
+	if err := SARIF(&buf, findings, true); err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(buf.Bytes(), []byte(`"fixes"`)) {
@@ -1197,5 +1197,39 @@ func TestJSONEmitsEditForSingleReplacement(t *testing.T) {
 	// PX2001 (no replacement) carries no edit.
 	if jf[byID["PX2001"]].Edit != nil {
 		t.Errorf("PX2001 carries a -json edit but offered no fix-it")
+	}
+}
+
+// TestSARIFExecutionSuccessfulReflectsCompleteness pins that the SARIF run carries
+// invocations[].executionSuccessful mirroring the `complete` argument: true for a
+// run where every TU parsed, false when some failed. GitHub Code Scanning relies
+// on this to avoid CLOSING alerts in files a partial run never analyzed — an
+// incomplete run must not read as "everything else is resolved".
+func TestSARIFExecutionSuccessfulReflectsCompleteness(t *testing.T) {
+	read := func(complete bool) bool {
+		var buf bytes.Buffer
+		if err := SARIF(&buf, []Finding{{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 1}}, complete); err != nil {
+			t.Fatalf("SARIF: %v", err)
+		}
+		var log struct {
+			Runs []struct {
+				Invocations []struct {
+					ExecutionSuccessful bool `json:"executionSuccessful"`
+				} `json:"invocations"`
+			} `json:"runs"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &log); err != nil {
+			t.Fatalf("SARIF not valid JSON: %v", err)
+		}
+		if len(log.Runs) != 1 || len(log.Runs[0].Invocations) != 1 {
+			t.Fatalf("want exactly one run with one invocation, got %+v", log.Runs)
+		}
+		return log.Runs[0].Invocations[0].ExecutionSuccessful
+	}
+	if !read(true) {
+		t.Error("complete run: executionSuccessful should be true")
+	}
+	if read(false) {
+		t.Error("partial run (a TU failed to parse): executionSuccessful should be false so GitHub does not close un-analyzed files' alerts")
 	}
 }
