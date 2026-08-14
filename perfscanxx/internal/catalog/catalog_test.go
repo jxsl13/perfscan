@@ -420,3 +420,17 @@ func TestAuditedExclusionsStayExcluded(t *testing.T) {
 		}
 	}
 }
+
+// TestAllReturnsSortedByID pins that All() yields entries in ascending PX-id
+// order — the source literal groups related checks (so ids like PX2002 land out
+// of numeric order), but -list/-json/-sarif and the selectors should render
+// predictably. IDs are "PX"+4 digits, so string order == numeric order. A future
+// entry inserted out of order is caught here.
+func TestAllReturnsSortedByID(t *testing.T) {
+	all := All()
+	for i := 1; i < len(all); i++ {
+		if all[i-1].ID >= all[i].ID {
+			t.Errorf("All() not ascending by id at %d: %s then %s", i, all[i-1].ID, all[i].ID)
+		}
+	}
+}
