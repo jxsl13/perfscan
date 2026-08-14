@@ -527,6 +527,22 @@ func TestBaselineRatchetSeedSuppressRegress(t *testing.T) {
 	if strings.Contains(out, "loop variable is copied") {
 		t.Errorf("regression run must still suppress the baselined finding, got:\n%s", out)
 	}
+
+	// The ratchet's core safety property: a run against an EXISTING baseline
+	// FILTERS, it must never REWRITE the file. If the regression run had
+	// re-seeded the baseline with {A, B}, the new finding B would be silently
+	// accepted and the next run would suppress it — the ratchet would leak
+	// regressions. Assert the on-disk baseline still holds ONLY finding A.
+	blData, err := os.ReadFile(blPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(blData), findingA.msg) {
+		t.Errorf("baseline lost its seeded finding (%q) after a filter run:\n%s", findingA.msg, blData)
+	}
+	if strings.Contains(string(blData), findingB.msg) {
+		t.Errorf("regression finding (%q) was written into the baseline — a filter run must NOT overwrite it (the ratchet would silently accept regressions):\n%s", findingB.msg, blData)
+	}
 }
 
 // TestCountMissingHeaderErrors pins the substring/name filter that drives the
