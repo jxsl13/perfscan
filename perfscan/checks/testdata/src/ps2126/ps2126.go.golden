@@ -1,0 +1,81 @@
+package ps2126
+
+import (
+	"errors"
+	"fmt"
+)
+
+// Verbless constant message → errors.New (errors already imported here).
+func basic() error {
+	return errors.New("database connection failed") // want `fmt\.Errorf with a verbless constant message`
+}
+
+// A raw-string literal with no % also qualifies; the literal is spliced back
+// byte-verbatim, backticks and all.
+func raw() error {
+	return errors.New(`disk is full`) // want `fmt\.Errorf with a verbless constant message`
+}
+
+// Two calls in the same file, both fixed.
+func two() (error, error) {
+	a := errors.New("first failure")  // want `fmt\.Errorf with a verbless constant message`
+	b := errors.New("second failure") // want `fmt\.Errorf with a verbless constant message`
+	return a, b
+}
+
+// A comment overlapping the call: reported but NOT fixed — the rewrite would
+// drop the comment.
+func commented() error {
+	return fmt.Errorf( /* keep me */ "commented failure") // want `fmt\.Errorf with a verbless constant message`
+}
+
+// Keep fmt referenced so this file's import is not orphaned (the orphan path
+// is exercised by orphan.go).
+func other() {
+	fmt.Println("side effect")
+}
+
+// Keep errors referenced independently of the fixes.
+var _ = errors.New
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// A verb consuming an argument is real formatting.
+func withVerb(name string) error {
+	return fmt.Errorf("bad name: %s", name)
+}
+
+// %w wraps an error — fmt returns a *wrapError, never errors.New.
+func wrapped(err error) error {
+	return fmt.Errorf("context: %w", err)
+}
+
+// A bare %% is transformed by fmt (%%->%) but kept verbatim by errors.New.
+func percentEscape() error {
+	return fmt.Errorf("100%% done")
+}
+
+// Extra arguments with no verbs: fmt appends %!(EXTRA ...), not verbatim.
+func extraArgs(x int) error {
+	return fmt.Errorf("static", x)
+}
+
+// A non-literal format proves nothing.
+func varFormat(msg string) error {
+	return fmt.Errorf(msg)
+}
+
+// A spread passes an unknown number of arguments.
+func spread(args ...any) error {
+	return fmt.Errorf("tmpl", args...)
+}
+
+// A shadowed fmt is not the fmt package.
+type fakeFmt struct{}
+
+func (fakeFmt) Errorf(format string, a ...any) error { return errors.New(format) }
+
+func shadowed() error {
+	fmt := fakeFmt{}
+	return fmt.Errorf("shadowed")
+}
