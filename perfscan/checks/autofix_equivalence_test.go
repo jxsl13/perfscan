@@ -2357,3 +2357,83 @@ func TestEquiv_PS2136StrconvBytesToAppend(t *testing.T) {
 		}
 	})
 }
+
+// PS2137: fmt.Sprint(x) / fmt.Sprintf("%v", x) over an UNNAMED predeclared
+// integer -> the strconv decimal form (Itoa / FormatInt / FormatUint).
+// Why it is bit-identical: for a plain integer operand %v IS %d — fmt's
+// catch-all verb formats an integer kind by plain base-10 division with a
+// leading '-' for negatives, exactly strconv's algorithm — and fmt.Sprint
+// formats a single operand exactly as %v does (its separating space appears
+// only BETWEEN operands). The Stringer/Formatter escape hatch that %v and
+// Sprint honor cannot fire: an unnamed predeclared type cannot carry
+// methods, which is precisely why PS2137 restricts itself to unnamed
+// integers (see the named-type demonstration at the end). MinInt64 is the
+// critical signed edge (FormatInt works in uint64 magnitude space, no
+// negation overflow) and MaxUint64 the full-width unsigned edge.
+func TestEquiv_PS2137SprintIntToStrconv(t *testing.T) {
+	// int -> strconv.Itoa, under both spellings.
+	ints := []int{
+		0, 1, -1, 7, -7, 42, -37, 123456789, -987654321,
+		math.MaxInt32, math.MinInt32,
+		math.MaxInt64, math.MinInt64,
+	}
+	for _, i := range ints {
+		want := strconv.Itoa(i)
+		if got := fmt.Sprint(i); got != want {
+			t.Errorf("fmt.Sprint(%d)=%q != strconv.Itoa=%q", i, got, want)
+		}
+		if got := fmt.Sprintf("%v", i); got != want {
+			t.Errorf("fmt.Sprintf(%%v, %d)=%q != strconv.Itoa=%q", i, got, want)
+		}
+	}
+
+	// int64 -> strconv.FormatInt(int64(x), 10). MinInt64/MaxInt64 included.
+	for _, x := range []int64{0, 1, -1, 42, -37, math.MinInt32 - 1, math.MaxInt64, math.MinInt64} {
+		want := strconv.FormatInt(int64(x), 10)
+		if got := fmt.Sprint(x); got != want {
+			t.Errorf("fmt.Sprint(int64(%d))=%q != strconv.FormatInt=%q", x, got, want)
+		}
+		if got := fmt.Sprintf("%v", x); got != want {
+			t.Errorf("fmt.Sprintf(%%v, int64(%d))=%q != strconv.FormatInt=%q", x, got, want)
+		}
+	}
+
+	// uint -> strconv.FormatUint(uint64(u), 10), including the full width.
+	for _, u := range []uint{0, 1, 42, math.MaxUint32, math.MaxUint} {
+		want := strconv.FormatUint(uint64(u), 10)
+		if got := fmt.Sprint(u); got != want {
+			t.Errorf("fmt.Sprint(uint(%d))=%q != strconv.FormatUint=%q", u, got, want)
+		}
+		if got := fmt.Sprintf("%v", u); got != want {
+			t.Errorf("fmt.Sprintf(%%v, uint(%d))=%q != strconv.FormatUint=%q", u, got, want)
+		}
+	}
+
+	// uint64 at MaxUint64: the full-width edge with no widening at all.
+	for _, u := range []uint64{0, 1, math.MaxUint32 + 1, math.MaxUint64} {
+		want := strconv.FormatUint(u, 10)
+		if got := fmt.Sprint(u); got != want {
+			t.Errorf("fmt.Sprint(uint64(%d))=%q != strconv.FormatUint=%q", u, got, want)
+		}
+		if got := fmt.Sprintf("%v", u); got != want {
+			t.Errorf("fmt.Sprintf(%%v, uint64(%d))=%q != strconv.FormatUint=%q", u, got, want)
+		}
+	}
+
+	// The guard's raison d'être, demonstrated: a NAMED integer type with a
+	// String() method prints via String() under %v/Sprint — NOT the decimal
+	// digits — so PS2137 must (and does) stay silent for named types.
+	n := equivNamedStringerInt(7)
+	if got := fmt.Sprint(n); got != "custom" {
+		t.Fatalf("fmt.Sprint(named Stringer int)=%q, expected the String() output %q — fmt no longer honors Stringer under Sprint?!", got, "custom")
+	}
+	if got := fmt.Sprint(n); got == strconv.Itoa(int(n)) {
+		t.Fatal("fmt.Sprint(named Stringer int) unexpectedly equals the strconv form; the unnamed-only guard would be obsolete")
+	}
+}
+
+// equivNamedStringerInt pins that %v/Sprint dispatch to String() for a named
+// integer type — the divergence PS2137's unnamed-only guard sidesteps.
+type equivNamedStringerInt int
+
+func (equivNamedStringerInt) String() string { return "custom" }

@@ -197,17 +197,9 @@ func ps2107Classify(pass *analysis.Pass, verb string, arg ast.Expr) *ps2107Case 
 		if !ok {
 			return c
 		}
-		switch {
-		case basic.Kind() == types.Int:
-			c.repl = "strconv.Itoa(" + argText + ")"
-			c.replName = "strconv.Itoa"
-		case basic.Info()&types.IsUnsigned != 0:
-			c.repl = "strconv.FormatUint(uint64(" + argText + "), 10)"
-			c.replName = "strconv.FormatUint"
-		default:
-			c.repl = "strconv.FormatInt(int64(" + argText + "), 10)"
-			c.replName = "strconv.FormatInt"
-		}
+		// The decimal replacement is shared with PS2137 (Sprint / "%v"
+		// over an unnamed integer prints exactly what %d does).
+		c.repl, c.replName = strconvDecimalRepl(basic, argText)
 		c.pkgName, c.pkgPath = "strconv", "strconv"
 		return c
 	case "%t":
