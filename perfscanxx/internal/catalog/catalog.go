@@ -366,16 +366,22 @@ var entries = []Entry{
 	{
 		ID: "PX2101", TidyName: "custom-reserve-before-loop",
 		Level: LevelStructured, Category: "allocation",
-		Title:  "vector grown via push_back/emplace_back in a loop with no prior reserve()",
+		Title:  "vector grown via push_back/emplace_back in a loop; reserve() the final size before it when known",
 		HasFix: false,
 		Custom: true,
 		Bind:   "grow",
 		// Any loop kind — forStmt alone missed range-for (the most common C++
 		// loop) and while/do loops. isExpansionInMainFile keeps it off headers.
+		// LIMITATION (why the message hedges): an AST matcher cannot reliably tell
+		// whether the grown vector was already reserve()'d in a preceding sibling
+		// statement — that needs data-flow, not a syntactic ancestor match. So the
+		// check flags the PATTERN and fires whether or not a reserve is present; the
+		// Title/Message are worded so an already-reserved loop reads as a
+		// "confirm you reserved" nudge, not a false "you forgot to reserve" claim.
 		Query: `match cxxMemberCallExpr(isExpansionInMainFile(), ` +
 			`callee(cxxMethodDecl(hasAnyName("push_back", "emplace_back"))), ` +
 			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("grow")`,
-		Message: "vector grown via push_back/emplace_back inside a loop; reserve() before the loop to avoid repeated reallocation (perfscanxx PS2101 analog, query-based)",
+		Message: "vector grown via push_back/emplace_back inside a loop; if the final size is known, reserve() it before the loop to avoid repeated reallocation — the query flags the pattern and cannot see whether a reserve is already present (perfscanxx PS2101 analog, query-based)",
 	},
 	{
 		ID: "PX2102", TidyName: "custom-pessimizing-move",
