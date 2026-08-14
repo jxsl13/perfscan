@@ -45,6 +45,12 @@ should eyeball `-diff` before `-fix`:
   the exact same trade-off as PX3004: if a subobject destructor really throws,
   the added `noexcept` turns it into `std::terminate`. Confirm no subobject
   destructor throws before applying.
+- **PX3028** (`performance-move-constructor-init`) — **advisory** (no fix-it): a
+  move constructor that initializes a member *by copy* (`S(S&& o) : m(o.m)` where
+  `m` is movable) deep-copies that member on every "move" — an avoidable
+  allocation+copy that defeats the move constructor. clang-tidy emits no fix-it
+  because inserting `std::move(o.m)` needs to know the source member is dead
+  afterwards, which it won't assume; the safe rewrite is a human call.
 - **PX3007** (`modernize-pass-by-value`) rewrites a `const&` sink parameter to
   by-value + `std::move`. This is a **trade-off, not a strict win**: it pays off
   only for callers passing *rvalues* of a nothrow-movable type; an *lvalue*
@@ -62,9 +68,6 @@ readability-\*) against this catalog. Some fixable-looking checks are **left out
 on purpose** — recorded here (and pinned by `TestAuditedExclusionsStayExcluded`)
 so a future audit doesn't re-add them without the rationale:
 
-- `performance-move-constructor-init` — a genuine perf check, but it applies
-  **no fix-it** (inserting `std::move` needs liveness it will not assume), so it'd
-  be advisory-only with no auto-fix value beyond the advisory set.
 - `performance-type-promotion-in-math-fn` — does not even diagnose on the
   macOS/libc++ toolchain (`sqrt(float)` resolves to libc++'s float overload, no
   promotion).
@@ -177,7 +180,7 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   > the minimal-C++ directive, custom checks are declarative clang-query matcher
   > strings, not a C++ module.
 
-Six built-in checks stay advisory because clang-tidy emits no fix-it for them:
+Seven built-in checks stay advisory because clang-tidy emits no fix-it for them:
 `PX2002` (inefficient-string-concatenation), `PX3020`
 (rvalue-reference-param-not-moved — a missed move, where inserting the corrected
 `std::move` needs to know the parameter is dead afterwards), `PX3024`
@@ -187,11 +190,13 @@ is a judgment call — match the type, use `const auto&`, or drop the reference 
 clang-tidy emits no fix), `PX3025` (no-automatic-move — a `const` local or value
 parameter that is returned can't be moved, so its constness forces a copy; the
 mechanical fix would drop the `const`, which may be load-bearing, so it stays
-advisory), and two L3-only
+advisory), `PX3028` (move-constructor-init — a move constructor that initializes a
+member by *copy*, deep-copying it on every move; inserting `std::move` needs
+source-member liveness clang-tidy won't assume, so no fix-it), and two L3-only
 diagnostics with no mechanical rewrite: `PX3021` (no-int-to-ptr — an integer↔pointer
 cast that defeats the optimizer's alias analysis) and `PX3022` (enum-size — an enum
 whose fixed underlying type is wider than its value set needs). So the advisory set is
-exactly `{PX2002, PX3020, PX3024, PX3025, PX3021, PX3022, PX2101, PX2102, PX2103, PX2104, PX2105, PX2106, PX2107, PX2108, PX2109, PX2110, PX2111, PX2112}`;
+exactly `{PX2002, PX3020, PX3024, PX3025, PX3028, PX3021, PX3022, PX2101, PX2102, PX2103, PX2104, PX2105, PX2106, PX2107, PX2108, PX2109, PX2110, PX2111, PX2112}`;
 everything else is auto-fixable.
 
 `PX3021`, `PX3022`, `PX2108`, and `PX2109` are gated to **L3 (aggressive)** — they

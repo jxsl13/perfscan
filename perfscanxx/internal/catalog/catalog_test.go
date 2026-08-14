@@ -381,11 +381,12 @@ func TestCaveatsAreWellFormed(t *testing.T) {
 //   - performance-move-constructor-init: this one DOES diagnose (a move ctor that
 //     copies a member, `S(S&& o) : m(o.m)`, is flagged — re-verified, 2 warnings)
 //     but ships NO fix-it (inserting std::move needs liveness the check will not
-//     assume). It was excluded as advisory-only with no NEW pattern beyond the
-//     documented advisory set; adding it would be a fresh curation decision, not a
-//     bug fix (unlike PX3026's false negative), so it stays out absent a
-//     maintainer call. NOTE: earlier this comment lumped it with the "no
-//     diagnostic" checks above — corrected: it fires, it just has no fix.
+//     assume). CURATION DECISION (now made): it is a genuine, DISTINCT perf
+//     anti-pattern (an avoidable deep copy on every "move") not covered by the
+//     other move/copy advisories, and advisory perf entries are established
+//     precedent (PX3021/PX3022/PX3025 are HasFix:false). It is now catalog entry
+//     PX3028 (HasFix:false, L2, "moves"), so it is NO LONGER in the excluded set
+//     below. No fix is invented — it stays advisory, respecting the safety bar.
 //
 // CORRECTION (later audit): performance-trivially-destructible was previously
 // listed here as "no fix-it", but that was a false negative — the earlier probe
@@ -411,13 +412,37 @@ func TestCaveatsAreWellFormed(t *testing.T) {
 func TestAuditedExclusionsStayExcluded(t *testing.T) {
 	excluded := []string{
 		"modernize-min-max-use-initializer-list",
-		"performance-move-constructor-init",
 		"performance-type-promotion-in-math-fn",
 	}
 	for _, name := range excluded {
 		if _, ok := ByTidyName(name); ok {
 			t.Errorf("%s is in the catalog but was deliberately excluded (see this test's rationale); if adding it intentionally, update the audit note", name)
 		}
+	}
+}
+
+// TestMoveConstructorInitIsAdvisory pins PX3028 (performance-move-constructor-init):
+// it is a genuine perf anti-pattern — a move constructor deep-copying a movable
+// member — but clang-tidy ships NO fix-it (inserting std::move needs liveness it
+// won't assume), so it MUST stay advisory (HasFix:false). Grouped with the other
+// move-ctor checks ("moves") at L2 (high-signal, low-noise). Regression guard so a
+// future edit can't silently flip it to HasFix:true (there is nothing to apply).
+func TestMoveConstructorInitIsAdvisory(t *testing.T) {
+	e, ok := ByID("PX3028")
+	if !ok {
+		t.Fatal("PX3028 (performance-move-constructor-init) missing from catalog")
+	}
+	if e.TidyName != "performance-move-constructor-init" {
+		t.Errorf("PX3028 TidyName = %q, want performance-move-constructor-init", e.TidyName)
+	}
+	if e.HasFix {
+		t.Error("PX3028: HasFix = true, but clang-tidy emits no fix-it for it (advisory-only)")
+	}
+	if e.Level != LevelStructured {
+		t.Errorf("PX3028: Level = %v, want LevelStructured (L2)", e.Level)
+	}
+	if e.Category != "moves" {
+		t.Errorf("PX3028: Category = %q, want \"moves\" (groups with the sibling move-ctor checks)", e.Category)
 	}
 }
 
