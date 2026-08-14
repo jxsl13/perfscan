@@ -43,6 +43,17 @@ func bytesFieldsDirect(b []byte) int {
 	return n
 }
 
+// bytes.SplitAfter completes the six-function matrix (strings + bytes ×
+// Split/SplitAfter/Fields); like the other bytes variants it is advisory, the
+// fix withheld because the subslices share the input's backing array.
+func bytesSplitAfterDirect(b []byte) int {
+	n := 0
+	for _, part := range bytes.SplitAfter(b, []byte{';'}) { // want `ranging directly over bytes\.SplitAfter allocates the whole result slice per loop entry; bytes\.SplitAfterSeq yields the same pieces in the same order with no slice allocation \(go1\.24\); fix withheld: not bit-identical if the loop body mutates the byte slice or appends to/measures the final piece`
+		n += len(part)
+	}
+	return n
+}
+
 // No key and no value at all: `for range` maps straight onto the Seq form.
 func countPieces(s string) int {
 	n := 0
