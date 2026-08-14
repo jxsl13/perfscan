@@ -76,6 +76,29 @@ func TestFilterDistinguishesByMessage(t *testing.T) {
 	}
 }
 
+// TestBaselineRoundTripsSpecialCharMessage pins that a message carrying
+// YAML-hostile characters survives Write -> Filter intact, so its {file, id,
+// message} key still matches and the finding stays suppressed. Real clang-tidy
+// messages contain colons, single and double quotes, apostrophes, percent signs
+// and can start with a dash — all of which YAML would mangle if not properly
+// escaped by Marshal and restored by Unmarshal. If the round-trip altered the
+// message by even one byte, the baselined finding would resurface as a false
+// regression on the next run. Existing baseline tests use plain messages only.
+func TestBaselineRoundTripsSpecialCharMessage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bl.yaml")
+	msg := `- 'variable' "x": copied, per #note: costs 100% more`
+	if _, err := Write(path, []report.Finding{f("a.cpp", "PX1001", msg)}); err != nil {
+		t.Fatal(err)
+	}
+	kept, suppressed, err := Filter(path, []report.Finding{f("a.cpp", "PX1001", msg)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suppressed != 1 || len(kept) != 0 {
+		t.Errorf("a baselined finding with a special-char message must stay suppressed (round-trip must preserve the message exactly); kept=%v suppressed=%d", kept, suppressed)
+	}
+}
+
 func TestFilterIsCountedPerKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bl.yaml")
 	// Baseline accepts TWO identical {file,id,message} findings.
