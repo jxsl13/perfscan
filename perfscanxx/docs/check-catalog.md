@@ -138,7 +138,14 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   allocates; `std::vector`/`std::deque` is usually faster; also L3, since a linked
   list is occasionally right for O(1) splice or reference/iterator stability). No
   auto-fix: swapping to `std::vector` changes invalidation/splice semantics — a
-  human must confirm nothing relies on them.
+  human must confirm nothing relies on them. **PX2110** count-for-existence
+  (`std::count(first, last, v)` compared `> 0` / `!= 0` / `>= 1` scans the WHOLE
+  range to answer a yes/no; `std::find(...) != last`, C++20 `std::ranges::any_of`,
+  or C++23 `std::ranges::contains` stop at the first match — and a sorted range
+  wants `std::binary_search`; the C++ analog of perfscan's PS5104). The
+  operator/literal pairing is exact, so `count(...) > 1` and `count(...) == k`
+  (which genuinely need the count) and a member `.count()` on a set/map are NOT
+  flagged. No auto-fix: which replacement fits is a human call.
 
   Every custom matcher is gated with `isExpansionInMainFile()` so it fires only on
   the project's own translation unit, never on `catch`/`return`/loop constructs
@@ -165,7 +172,7 @@ advisory), and two L3-only
 diagnostics with no mechanical rewrite: `PX3021` (no-int-to-ptr — an integer↔pointer
 cast that defeats the optimizer's alias analysis) and `PX3022` (enum-size — an enum
 whose fixed underlying type is wider than its value set needs). So the advisory set is
-exactly `{PX2002, PX3020, PX3024, PX3025, PX3021, PX3022, PX2101, PX2102, PX2103, PX2104, PX2105, PX2106, PX2107, PX2108, PX2109}`;
+exactly `{PX2002, PX3020, PX3024, PX3025, PX3021, PX3022, PX2101, PX2102, PX2103, PX2104, PX2105, PX2106, PX2107, PX2108, PX2109, PX2110}`;
 everything else is auto-fixable.
 
 `PX3021`, `PX3022`, `PX2108`, and `PX2109` are gated to **L3 (aggressive)** — they

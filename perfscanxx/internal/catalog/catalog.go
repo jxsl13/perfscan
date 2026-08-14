@@ -541,6 +541,32 @@ var entries = []Entry{
 			`hasType(hasCanonicalType(recordType(hasDeclaration(cxxRecordDecl(hasAnyName("::std::list", "::std::forward_list"))))))).bind("lst")`,
 		Message: "std::list/std::forward_list allocates a separate node per element and scatters them in memory, so traversal misses cache on every step and each insert allocates; std::vector (or std::deque) is usually faster — prefer it unless you specifically need O(1) splice or reference/iterator stability across insert/erase (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2110", TidyName: "custom-count-for-existence",
+		Level: LevelStructured, Category: "algorithms",
+		Title:  "std::count(...) compared to answer existence scans the whole range; std::find/std::ranges::any_of stops at the first match",
+		HasFix: false,
+		Custom: true,
+		Bind:   "cnt",
+		// A std::count algorithm call compared to 0/1 purely to test existence:
+		// count(...) > 0, count(...) != 0, or count(...) >= 1. std::count always
+		// walks the ENTIRE range, so using it for a boolean "is there any" does N
+		// comparisons where std::find (or C++20 std::ranges::any_of / C++23
+		// std::ranges::contains) stops at the first hit. The operator/literal pairing
+		// is exact so that count(...) > 1 (a genuine "more than one" test that NEEDS
+		// the count) and count(...) == k are NOT flagged; a member .count() on a
+		// set/map (its own O(log n) existence primitive) is excluded because the
+		// callee is the free ::std::count function, not a method. isExpansionInMainFile
+		// keeps it off library headers. clang-tidy ships no equivalent (the C++ analog
+		// of perfscan's PS5104 strings.Count>0 -> Contains). NO auto-fix: the right
+		// replacement (find vs any_of vs contains vs, for a sorted range, binary_search)
+		// is a human call.
+		Query: `match binaryOperator(isExpansionInMainFile(), ` +
+			`hasEitherOperand(ignoringImpCasts(callExpr(callee(functionDecl(hasName("::std::count")))))), ` +
+			`anyOf(allOf(hasAnyOperatorName(">", "!="), hasEitherOperand(ignoringImpCasts(integerLiteral(equals(0))))), ` +
+			`allOf(hasOperatorName(">="), hasEitherOperand(ignoringImpCasts(integerLiteral(equals(1))))))).bind("cnt")`,
+		Message: "std::count scans the entire range to answer an existence question; std::find(first, last, v) != last stops at the first match (or, C++20, std::ranges::any_of / C++23 std::ranges::contains) — and for a sorted range std::binary_search is O(log n) (query-based, no auto-fix)",
+	},
 }
 
 // Deliberately NOT in the catalog (do not re-add on a future audit):

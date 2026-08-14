@@ -16,16 +16,21 @@ import (
 //
 //	PX2101 reserve-before-loop, PX2102 pessimizing-move, PX2103 catch-by-value,
 //	PX2104 regex-in-loop, PX2105 dynamic-cast-in-loop, PX2106 stringstream-in-loop,
-//	PX2107 pow-const-exponent, PX2108 vector-bool, PX2109 std-list.
+//	PX2107 pow-const-exponent, PX2108 vector-bool, PX2109 std-list,
+//	PX2110 count-for-existence.
 const customTriggerSrc = `#include <vector>
 #include <regex>
 #include <sstream>
 #include <exception>
 #include <cmath>
 #include <list>
+#include <algorithm>
 struct B { virtual ~B(){} }; struct D : B {};
 std::vector<bool> g_flags; // PX2108 (space-optimized bitfield, not a real container)
 std::list<int> g_items;    // PX2109 (node-per-element linked list)
+bool present(const std::vector<int>& v, int x) {
+  return std::count(v.begin(), v.end(), x) > 0; // PX2110 (full scan for existence)
+}
 std::vector<int> pessimizing() {
   std::vector<int> v;
   return std::move(v); // PX2102
@@ -475,6 +480,79 @@ func TestPX2109DoesNotFireOnVectorOrParam(t *testing.T) {
 	}
 	if strings.Contains(output, "list.cpp:11:") {
 		t.Errorf("PX2109 must NOT fire on the by-value list PARAMETER at line 11:\n%s", output)
+	}
+}
+
+// px2110CountSrc pins PX2110's precise scope: std::count compared for EXISTENCE
+// (> 0, != 0, >= 1) is flagged, but count(...) > 1 (a genuine "more than one"
+// test that needs the count), count(...) == k, a bare count with no comparison,
+// and a member .count() on a set (its own O(log n) primitive, not the free
+// algorithm) are all silent.
+const px2110CountSrc = `#include <vector>
+#include <algorithm>
+#include <set>
+bool exists0(const std::vector<int>& v, int x) { return std::count(v.begin(), v.end(), x) > 0; }  // MATCH line 4
+bool existsNe(const std::vector<int>& v, int x){ return std::count(v.begin(), v.end(), x) != 0; }  // MATCH line 5
+bool existsGe(const std::vector<int>& v, int x){ return std::count(v.begin(), v.end(), x) >= 1; }  // MATCH line 6
+bool dup(const std::vector<int>& v, int x)     { return std::count(v.begin(), v.end(), x) > 1; }   // NO (count needed)
+bool eqK(const std::vector<int>& v, int x)     { return std::count(v.begin(), v.end(), x) == 3; }  // NO (specific count)
+long bare(const std::vector<int>& v, int x)    { return std::count(v.begin(), v.end(), x); }        // NO (bare)
+bool member(const std::set<int>& s, int x)     { return s.count(x) > 0; }                            // NO (member count)
+`
+
+// TestPX2110DoesNotFireOnCountNeeded pins that PX2110 fires on the three
+// existence comparisons (3 findings) and stays silent on > 1, == k, bare count,
+// and a member .count().
+func TestPX2110DoesNotFireOnCountNeeded(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	e, ok := catalog.ByID("PX2110")
+	if !ok || !e.Custom {
+		t.Fatal("PX2110 missing or not a custom check")
+	}
+	cfg := catalog.ClangTidyConfig([]catalog.Entry{e})
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".clang-tidy")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "count.cpp")
+	if err := os.WriteFile(src, []byte(px2110CountSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--experimental-custom-checks", "--config-file=" + cfgPath, "--", "-std=c++17"}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+
+	if strings.Contains(output, "Unknown command line argument") && strings.Contains(output, "experimental-custom-checks") {
+		t.Skip("clang-tidy is too old for --experimental-custom-checks; skipping")
+	}
+	if strings.Contains(output, "[clang-tidy-config]") {
+		t.Fatalf("clang-tidy rejected the PX2110 query:\n%s", output)
+	}
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture; skipping:\n%s", output)
+	}
+
+	tag := "[" + e.TidyName + "]"
+	if n := strings.Count(output, tag); n != 3 {
+		t.Errorf("PX2110 fired %d time(s), want exactly 3 (the >0, !=0, >=1 existence checks):\n%s", n, output)
+	}
+	for _, bad := range []string{"count.cpp:7:", "count.cpp:8:", "count.cpp:9:", "count.cpp:10:"} {
+		if strings.Contains(output, bad) {
+			t.Errorf("PX2110 fired at %s — it must not flag > 1, == k, bare count, or a member .count():\n%s", bad, output)
+		}
 	}
 }
 
