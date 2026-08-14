@@ -1,0 +1,45 @@
+package ps2013
+
+import (
+	"fmt"
+	"strings"
+)
+
+const oldKey = "the"
+
+// Basic form: constant literals, plain identifier argument.
+func basic(s string) string {
+	return strings.ReplaceAll(s, "the", "THE") // want `strings\.NewReplacer with a single constant pair`
+}
+
+// The s argument is kept byte-verbatim, however it is spelled: a field
+// selector and a compound expression with a call (evaluated exactly once
+// in both forms).
+func verbatim(w struct{ line string }, f func() string) {
+	fmt.Println(strings.ReplaceAll(w.line, "a", "b"))    // want `strings\.NewReplacer with a single constant pair`
+	fmt.Println(strings.ReplaceAll("x"+f(), "a", "b")) // want `strings\.NewReplacer with a single constant pair`
+}
+
+// A named constant and a constant concatenation are compile-time constant
+// strings; the pair is re-rendered after s.
+func constPair(s string) string {
+	out := strings.ReplaceAll(s, oldKey, "THE") // want `strings\.NewReplacer with a single constant pair`
+	return strings.ReplaceAll(out, "t"+"he", "T") // want `strings\.NewReplacer with a single constant pair`
+}
+
+// A raw-string pair keeps its backtick spelling.
+func rawPair(s string) string {
+	return strings.ReplaceAll(s, `th`, `TH`) // want `strings\.NewReplacer with a single constant pair`
+}
+
+// A parenthesized receiver is unwrapped by the match and swallowed by the
+// rewrite.
+func parenthesized(s string) string {
+	return strings.ReplaceAll(s, "a", "b") // want `strings\.NewReplacer with a single constant pair`
+}
+
+// Nested matches: the outer site's edits surround the verbatim s span, the
+// inner site's edits sit wholly inside it — both rewrite.
+func nested(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "c", "d"), "a", "b") // want `strings\.NewReplacer with a single constant pair` `strings\.NewReplacer with a single constant pair`
+}
