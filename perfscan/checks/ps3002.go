@@ -42,9 +42,15 @@ yield a different slice, whereas a pure path evaluates to the identical
 slice header every time, so dropping the per-comparison re-evaluation is
 observably free. Three forms:
 
-  - Whole element (empty chain, "return xs[i] < xs[j]") → slices.Sort(xs),
-    which drops the comparator entirely. Needs only the "slices" package.
-    Ascending only — slices.Sort has no comparator to reverse.
+  - Whole element (empty chain). Ascending "return xs[i] < xs[j]" →
+    slices.Sort(xs), which drops the comparator entirely and needs only the
+    "slices" package. DESCENDING "return xs[i] > xs[j]" → slices.SortFunc(xs,
+    func(a, b T) int { return cmp.Compare(b, a) }) — the operand swap makes
+    cmp.Compare(b, a) < 0 ⟺ b < a ⟺ a > b, the identical descending
+    predicate, so under the shared pdqsort the permutation is bit-identical
+    (the same reasoning as PS3105's sort.Reverse form). The descending form
+    needs "slices" and "cmp" and a locally spellable element type T, like
+    the field forms below.
   - A single field ("return xs[i].f < xs[j].f") → slices.SortFunc(xs,
     func(a, b T) int { return cmp.Compare(a.f, b.f) }); a descending
     "return xs[i].f > xs[j].f" swaps the operands to cmp.Compare(b.f, a.f).
@@ -256,9 +262,11 @@ func ps3002FileImports(f *ast.File, path string) bool {
 // sorts share the same pdqsort, and under these guards the bool chain and
 // the cmp.Compare chain induce the identical total order —
 // cmp.Compare(b.f, a.f) < 0 ⟺ a.f > b.f — so the resulting permutation is
-// bit-identical (including ties). The whole-element form stays ascending
-// only: slices.Sort has no comparator to swap operands in. All other shapes
-// get the advisory report only.
+// bit-identical (including ties). The whole-element form: ascending becomes
+// slices.Sort (no comparator at all), descending — only ever the SOLE
+// statement, since a guard must name the field it orders — becomes
+// slices.SortFunc with cmp.Compare(b, a), the empty-suffix rendering of the
+// same operand swap. All other shapes get the advisory report only.
 //
 // needsCmp reports whether the returned fix rewrites a field compare and so
 // relies on the cmp package (the whole-element slices.Sort form does not) —
@@ -408,11 +416,13 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 			if !ok {
 				return nil, false
 			}
-			// A whole-element compare is only valid as the sole statement AND
-			// ascending (→ slices.Sort, which has no comparator to swap
-			// operands in); as the tail of a tie-break chain it compares the
-			// whole element, which cmp.Compare cannot express.
-			if finalSuffix == "" && (len(fields) > 0 || finalDesc) {
+			// A whole-element compare is only valid as the SOLE statement: as
+			// the tail of a tie-break chain it would re-compare the whole
+			// element, which cmp.Compare over a field chain cannot express.
+			// Sole ascending → slices.Sort below; sole DESCENDING falls
+			// through to the SortFunc branch, whose empty suffix renders
+			// cmp.Compare(b, a) — the exact descending predicate.
+			if finalSuffix == "" && len(fields) > 0 {
 				return nil, false
 			}
 			fields = append(fields, fieldCmp{finalSuffix, finalDesc})
@@ -440,13 +450,17 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 	// source text (no parens, no calls, no line breaks to lose).
 	targetText := exprTextRendered(call.Args[0])
 
-	// Whole-element ascending compare — the body is exactly `xs[i] < xs[j]`
+	// Whole-element ASCENDING compare — the body is exactly `xs[i] < xs[j]`
 	// (empty selector chain) — becomes slices.Sort(xs), dropping the comparator
 	// entirely. For an ordered non-float element '<' is the total order
 	// slices.Sort already uses, and equal elements are indistinguishable so a
 	// SliceStable collapses to the same result. No cmp package, no element
-	// spelling needed.
-	if fields[0].suffix == "" {
+	// spelling needed. A whole-element DESCENDING compare falls through to the
+	// SortFunc branch below: with the empty suffix it renders
+	// cmp.Compare(b, a), whose sign is negative iff b < a iff a > b — the
+	// identical descending predicate under the shared pdqsort (the reasoning
+	// PS3105's sort.Reverse form uses), so the permutation is bit-identical.
+	if fields[0].suffix == "" && !fields[0].descending {
 		return &analysis.SuggestedFix{
 			Message: fmt.Sprintf("replace sort.%s with %s.Sort", name, slicesName),
 			TextEdits: []analysis.TextEdit{
@@ -461,7 +475,8 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 	// cmp.Compare(b.f, a.f) < 0 ⟺ b.f < a.f ⟺ a.f > b.f, the bool
 	// comparator's exact result), so cmp must also be usable by name (same
 	// resolution as slices: reuse or add) and the element type spellable
-	// without a new import.
+	// without a new import. The whole-element DESCENDING sole compare lands
+	// here too: its empty suffix renders cmp.Compare(b, a) verbatim.
 	cmpName, _, usable := ps3002CmpName(pass, f, call.Pos())
 	if !usable {
 		return nil, false
@@ -473,7 +488,14 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 	elemStr := types.TypeString(elem, types.RelativeTo(pass.Pkg))
 
 	fn := "SortFunc"
-	if name == "SliceStable" {
+	if name == "SliceStable" && fields[0].suffix != "" {
+		// Field compares keep stability: equal-keyed STRUCT elements are
+		// distinguishable, so SliceStable must become SortStableFunc. The
+		// whole-element descending form (empty suffix — only ever the sole
+		// field) collapses to the UNSTABLE SortFunc instead: equal basic
+		// elements are bitwise-identical, so the descending arrangement of
+		// the multiset is unique and stability is unobservable — the same
+		// collapse the ascending whole-element makes to slices.Sort.
 		fn = "SortStableFunc"
 	}
 	// One cmp.Compare per field, its operand order set by that field's own
