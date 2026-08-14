@@ -76,6 +76,37 @@ member-initializer/…) and the result **compiles cleanly**; the 13 residuals ar
 the unfixable PX2101 query-based diagnostics — proving the auto-fix suite is
 behavior-preserving on a real, non-trivial C++ codebase.
 
+### Re-validation on the current 51-check catalog (2026-08-15, clang-tidy 22.1.8)
+
+The catalog has since grown from the 38 checks above to **51** (35 clang-tidy-backed
++ 16 `--experimental-custom-checks` query checks). Re-running against leveldb
+(git-clean corpus, `-p build`, brew clang-tidy, SDK sysroot via
+`-extra-arg=-isysroot`) confirms the larger catalog is still `-fix`-clean end-to-end
+— no regression introduced by any check added since the 38-check run:
+
+```
+# L1 (idiomatic) whole-tree -fix
+perfscanxx -fix -level 1 ./...   →   5 fixes across 3 files
+    PX1002 unnecessary-value-param ×1   (cmp param → std::move)
+    PX2003 use-emplace           ×4   (push_back(make_pair(…)) → emplace_back(…))
+cmake --build build              →   [100%] Built target leveldb / leveldbutil   (links clean)
+
+# the two destructor-rewriting checks, isolated
+perfscanxx -fix -checks PX3013,PX3026 ./...   →   6 files rewritten
+    PX3026 trivially-destructible: ~Writer(); → ~Writer() = default;  (first decl,
+        out-of-line definition removed)
+    PX3013 use-equals-default:     4 trivial dtors → = default
+cmake --build build              →   [100%] Built target leveldb   (links clean)
+```
+
+Both runs restored with `git checkout .` (byte-clean after). So every check added
+between the 38- and 51-check catalogs preserves the whole-tree `-fix` compile
+guarantee — the auto-fix suite scaled without introducing a breaker on this corpus.
+(The catalog was also audited against `clang-tidy --list-checks`: the only
+`performance-*` check still uncatalogued, `performance-type-promotion-in-math-fn`,
+emits no fix-it and does not even fire on the macOS libc math headers, so it is not
+a catalog candidate — the safe-fixable set is exhausted.)
+
 ### Why PX3017 was removed (a real `-fix` integrity finding)
 
 An earlier revision of this doc claimed the fixed tree compiled with PX3017
