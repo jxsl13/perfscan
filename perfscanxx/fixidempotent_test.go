@@ -93,6 +93,55 @@ func TestPX3026FixIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestPX3015FixIsIdempotent pins convergence for prefer-member-initializer — the
+// ⚠-caveat check whose fix is the most involved of the fixable set: it DELETES
+// each constructor-body assignment and REWRITES the member-initializer list. A
+// partial rewrite that left a body assignment, or one that produced an init list
+// the check still targets, would oscillate a -fix CI loop. After one pass the
+// members are initialized in the list and the body no longer assigns them, so a
+// second pass must be a no-op. Real-world validation on corpus/leveldb showed
+// this fix compiling; this pins its convergence. Headerless TU (no sysroot);
+// skipped when clang-tidy is unavailable.
+func TestPX3015FixIsIdempotent(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found; skipping PX3015 -fix idempotency test")
+	}
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "t.cpp")
+	src := "struct Rep;\nRep* alloc();\nstruct S {\n  S(int n) { rep_ = alloc(); count_ = n; }\n  Rep* rep_;\n  int count_;\n};\n"
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"clang++ -std=c++17 -c t.cpp"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fix := func() { runCLI("-tidy", bin, "-fix", "-checks", "PX3015", "-p", dir, cpp) }
+
+	fix()
+	after1, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The members must now be in the initializer list, and the body assignments
+	// gone.
+	s1 := string(after1)
+	if !strings.Contains(s1, "rep_(alloc())") || !strings.Contains(s1, "count_(n)") || strings.Contains(s1, "rep_ = alloc()") {
+		t.Fatalf("first -fix did not apply PX3015 as expected; got:\n%s", s1)
+	}
+
+	fix()
+	after2, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s1 != string(after2) {
+		t.Errorf("second -fix changed the file — PX3015 not idempotent:\n--- after pass 1 ---\n%s\n--- after pass 2 ---\n%s", s1, string(after2))
+	}
+}
+
 // TestExcludeKeepsFixOffIncludedHeader is the regression for -exclude leaking a
 // fix into an EXCLUDED header that a non-excluded TU includes. Before the
 // --exclude-header-filter wiring, `-fix -exclude deps/` still rewrote deps/dep.h
