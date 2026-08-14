@@ -1,0 +1,29 @@
+package ps5005
+
+import (
+	"fmt"
+	"strings"
+)
+
+// These calls are the file's ONLY bytes references, so the fix also
+// drops the orphaned bytes import and inserts strings at its sorted
+// position ("fmt" orders between "bytes" and "strings", so an in-place
+// swap would unsort the group).
+func trimBasic(s, cutset string) string {
+	return strings.Trim(s, cutset) // want `string\(bytes\.Trim\(\[\]byte\(s\), cutset\)\) copies`
+}
+
+// All three siblings are matched and rewritten to their strings twin.
+func trimSiblings(s string) (string, string) {
+	l := strings.TrimLeft(s, " \t")    // want `string\(bytes\.TrimLeft\(\[\]byte\(s\), cutset\)\) copies`
+	r := strings.TrimRight(s, "\r\n") // want `string\(bytes\.TrimRight\(\[\]byte\(s\), cutset\)\) copies`
+	return l, r
+}
+
+// The operand and the cutset are kept byte-verbatim, however they are
+// spelled: a field selector, a compound expression with a call, and a
+// call producing the cutset (each evaluated exactly once in both forms).
+func trimVerbatim(w struct{ line, cut string }, f func() string) {
+	fmt.Println(strings.Trim(w.line, w.cut))     // want `string\(bytes\.Trim\(\[\]byte\(s\), cutset\)\) copies`
+	fmt.Println(strings.Trim("--"+f(), "-"+f())) // want `string\(bytes\.Trim\(\[\]byte\(s\), cutset\)\) copies`
+}

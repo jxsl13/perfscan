@@ -1,0 +1,9 @@
+package ps5005
+
+import "strings"
+
+// A single non-parenthesized import declaration whose only user is the
+// rewritten call: the whole spec is swapped for "strings" in place.
+func single(s string) string {
+	return strings.TrimLeft(s, "0") // want `string\(bytes\.TrimLeft\(\[\]byte\(s\), cutset\)\) copies`
+}
