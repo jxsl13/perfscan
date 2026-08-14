@@ -278,6 +278,19 @@ func TestPS2001(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS2001.Analyzer, "ps2001")
 }
 
+func TestPS2140(t *testing.T) {
+	defer config.SetForTesting(config.Config{OutputBufferElemTypes: []string{"float64", "Scalar"}})()
+	analysistest.Run(t, analysistest.TestData(), PS2140.Analyzer, "ps2140")
+}
+
+func TestPS2140SilentWithoutVocabulary(t *testing.T) {
+	defer config.SetForTesting(config.Config{})()
+	// The fixture contains a matching operation; with no outputBufferElemTypes
+	// vocabulary the check must stay silent (the fixture carries no
+	// want-comments, so any diagnostic would fail the run).
+	analysistest.Run(t, analysistest.TestData(), PS2140.Analyzer, "ps2140silent")
+}
+
 func TestPS2001SilentWithoutVocabulary(t *testing.T) {
 	restore := config.SetForTesting(config.Config{})
 	defer restore()

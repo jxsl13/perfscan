@@ -75,8 +75,17 @@ fanOutHelpers:
 dtypeMethods:
   - Dtype
 
+# Element type names of hot operation-result buffers. PS2140 flags an operation
+# that allocates an input-sized []T result, fully overwrites it, and returns it
+# (denying hot callers buffer reuse) and recommends a caller-owned Into variant.
+# List the element types your hot kernels produce (e.g. float64, float32, or a
+# named scalar type). Empty -> PS2140 stays silent.
+outputBufferElemTypes:
+  - float64
+  - float32
+
 # ---------------------------------------------------------------------------
-# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 11
+# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 12
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the
 # names:
 #
@@ -91,4 +100,5 @@ dtypeMethods:
 #   vectorizedSiblingFuncs: [vexpF32, vtanhF32, vsiluF32, vgeluF32]
 #   fanOutHelpers:          [parallel.For]
 #   dtypeMethods:           [Dtype]
+#   outputBufferElemTypes:  [float64, float32]
 # ---------------------------------------------------------------------------
