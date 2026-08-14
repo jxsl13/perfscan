@@ -1133,6 +1133,55 @@ func TestEquiv_Sprintf2107(t *testing.T) {
 	}
 }
 
+// TestEquiv_PS2107SByteSlice pins PS2107's %s-over-[]byte arm:
+// fmt.Sprintf("%s", b) -> string(b) for an UNNAMED []byte. %s on a []byte
+// writes the bytes verbatim — exactly what the builtin conversion string(b)
+// produces, including invalid UTF-8 (both preserve the raw bytes, no U+FFFD
+// substitution on either side) and nil ("" on both sides). Also pins WHY %v
+// is NOT handled: %v over a []byte prints the NUMERIC slice form, not the
+// string.
+func TestEquiv_PS2107SByteSlice(t *testing.T) {
+	all256 := make([]byte, 256)
+	for b := 0; b < 256; b++ {
+		all256[b] = byte(b)
+	}
+	byteCases := [][]byte{
+		nil,
+		{},
+		[]byte("hello"),          // plain ASCII
+		[]byte("héllo 日本語"),      // multi-byte UTF-8
+		{0xff, 0xfe},             // invalid UTF-8: raw bytes must pass through
+		{0x80},                   // lone continuation byte (also invalid UTF-8)
+		{'a', 0x00, 'b'},         // embedded NUL
+		{0xf0, 0x28, 0x8c, 0x28}, // truncated 4-byte sequence
+		all256,                   // every byte value
+	}
+	for _, bs := range byteCases {
+		//lint:ignore S1025 the Sprintf form is the point — this pins that PS2107's rewrite to string(b) is byte-identical
+		if got, want := fmt.Sprintf("%s", bs), string(bs); got != want {
+			t.Errorf("fmt.Sprintf(%%s, %v)=%q != string(b)=%q", bs, got, want)
+		}
+	}
+	// nil and empty must both render as "" on BOTH sides.
+	//lint:ignore S1025 deliberately the "before" form under test
+	if fmt.Sprintf("%s", []byte(nil)) != "" || string([]byte(nil)) != "" {
+		t.Error("nil []byte must render as \"\" under both the s verb and string(b)")
+	}
+	//lint:ignore S1025 deliberately the "before" form under test
+	if fmt.Sprintf("%s", []byte{}) != "" || string([]byte{}) != "" {
+		t.Error("empty []byte must render as \"\" under both the s verb and string(b)")
+	}
+	// NEGATIVE: %v over a []byte is the NUMERIC slice form, NOT string(b) —
+	// this is why PS2107 maps only %s (never %v) onto the conversion.
+	hi := []byte{104, 105}
+	if got := fmt.Sprintf("%v", hi); got != "[104 105]" {
+		t.Errorf("fmt.Sprintf(%%v, []byte{104,105})=%q, expected the numeric form \"[104 105]\"", got)
+	}
+	if fmt.Sprintf("%v", hi) == string(hi) {
+		t.Error("the v verb over []byte must NOT equal string(b) — a v arm must never be added to PS2107")
+	}
+}
+
 // PS2107 (%g case): fmt.Sprintf("%g", f) -> strconv.FormatFloat(f, 'g', -1, 64)
 // for float64, and -> strconv.FormatFloat(float64(f), 'g', -1, 32) for
 // float32. %g prints the SHORTEST representation that round-trips at the

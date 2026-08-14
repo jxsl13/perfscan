@@ -41,11 +41,24 @@ direct conversion for each such shape:
   fmt.Sprintf("%q", s)  -> strconv.Quote(s)                    (s is a string)
   fmt.Sprintf("%q", r)  -> strconv.QuoteRune(r)                (r is a rune)
   fmt.Sprintf("%c", r)  -> string(r)                           (r is a rune)
+  fmt.Sprintf("%s", bs) -> string(bs)                  (bs is an unnamed []byte)
 
 Only formats that are EXACTLY one of these verbs and nothing else are
 reported, with a single non-variadic argument of the matching type.
 (fmt.Sprintf("%s", s) over a string is an IDENTITY, not a conversion; that
 belongs to PS2130 — reporting it here too would double-report the call.)
+
+The %s-over-[]byte rewrite is bit-identical because %s on a []byte writes
+the bytes verbatim — exactly what the builtin conversion string(bs)
+produces, including invalid UTF-8 (both preserve the raw bytes) and nil
+(fmt.Sprintf("%s", []byte(nil)) == string([]byte(nil)) == ""). No fmt
+format-parse, no interface boxing, and string(...) is a builtin, so no
+import is needed. It applies only to an UNNAMED []byte: a named []byte
+type could carry a String() (fmt.Stringer) or Format() (fmt.Formatter)
+method that %s would honor and string(bs) would not — named types keep the
+plain advisory report (the same unnamed-slice guard as the %x []byte
+case). %v over a []byte is deliberately NOT handled: it prints the
+NUMERIC slice form ("[104 105]"), not the string.
 
 The automatic fix rewrites the call when the rewrite is provably
 bit-identical: the argument's type must be the unnamed predeclared kind
@@ -336,6 +349,47 @@ func ps2107Classify(pass *analysis.Pass, verb string, arg ast.Expr) *ps2107Case 
 		}
 		c.repl = "string(" + argText + ")"
 		c.replName = "string(rune)"
+		return c
+	case "%s":
+		// %s over a []byte writes the bytes verbatim — exactly what the
+		// builtin conversion string(bs) produces, byte for byte: invalid
+		// UTF-8 passes through untouched on both sides, and a nil slice
+		// yields "" on both sides (fmt.Sprintf("%s", []byte(nil)) ==
+		// string([]byte(nil)) == ""). No format parse, no interface boxing,
+		// and string(...) is a builtin, so no import is added. ONLY %s maps
+		// to string(bs): %v over a []byte prints the NUMERIC slice form
+		// ("[104 105]"), so %v is deliberately NOT recognized here. %s over
+		// a STRING is an identity owned by PS2130 (see the NOTE below), and
+		// %s over any other type is real formatting — both yield nil.
+		uSl, uIsSlice := t.Underlying().(*types.Slice)
+		if !uIsSlice {
+			return nil
+		}
+		// The element's underlying type must be byte/uint8 — string(bs)
+		// only converts byte slices. (A named byte ELEMENT is fine here,
+		// unlike the %x arm whose hex.EncodeToString needs assignability to
+		// []byte: the string() conversion goes by the element's underlying
+		// type, and fmt's byte-slice fast path keys on the element's uint8
+		// kind, not its name, so both sides still emit the raw bytes.)
+		eb, ok := uSl.Elem().Underlying().(*types.Basic)
+		if !ok || eb.Kind() != types.Byte {
+			return nil
+		}
+		c := &ps2107Case{msg: "fmt.Sprintf of a single %s []byte value" + boxes + "the builtin conversion string(bs) yields the bytes directly"}
+		// Same unnamed-slice reasoning as the %x []byte arm: a NAMED []byte
+		// type (*types.Named, not *types.Slice) could carry a String()
+		// (fmt.Stringer) or Format() (fmt.Formatter) method that %s would
+		// honor and string(bs) would not — named types keep the plain
+		// advisory report.
+		if _, unnamed := t.(*types.Slice); !unnamed {
+			return c
+		}
+		argText, ok := ps2107ExprText(arg)
+		if !ok {
+			return c
+		}
+		c.repl = "string(" + argText + ")"
+		c.replName = "string([]byte)"
 		return c
 	case "%x":
 		// Byte slices go to hex.EncodeToString; integers go to
