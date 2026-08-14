@@ -14,15 +14,23 @@ package diff
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
 // Unified renders a unified diff between orig and patched for a single file.
-// aPath/bPath label the --- / +++ headers (typically the same cwd-relative
-// path). Returns "" when orig == patched.
+// aPath/bPath label the --- / +++ headers. Returns "" when orig == patched.
 //
-// Output is 3-line-context, line-based, and valid for `git apply` / `patch -p1`,
-// including the "\ No newline at end of file" marker.
+// A RELATIVE path gets git's a/ … b/ prefix, so the patch applies with
+// `git apply -p1` / `patch -p1` from the tree root. An ABSOLUTE path (the usual
+// out-of-tree `-p build` case, where the compilation database records absolute
+// files outside the working directory) gets NO prefix: `git apply` refuses
+// absolute paths, and prefixing one produces the meaningless "a//abs" that
+// applies nowhere. A bare absolute header is a plain `diff -u` that applies with
+// `patch -p0`. Either way the header never carries the double slash.
+//
+// Output is 3-line-context, line-based, and includes the "\ No newline at end of
+// file" marker.
 func Unified(aPath, bPath string, orig, patched []byte) string {
 	if bytes.Equal(orig, patched) {
 		return ""
@@ -36,12 +44,22 @@ func Unified(aPath, bPath string, orig, patched []byte) string {
 	}
 
 	var out strings.Builder
-	fmt.Fprintf(&out, "--- a/%s\n", aPath)
-	fmt.Fprintf(&out, "+++ b/%s\n", bPath)
+	fmt.Fprintf(&out, "--- %s\n", headerPath("a/", aPath))
+	fmt.Fprintf(&out, "+++ %s\n", headerPath("b/", bPath))
 	for _, h := range hunks {
 		writeHunk(&out, h, len(aLines), len(bLines), aNoNL, bNoNL)
 	}
 	return out.String()
+}
+
+// headerPath prefixes a relative path with git's a/ or b/ marker, but leaves an
+// absolute path bare — prefixing it would yield "a//abs", which no patch tool
+// applies (git apply rejects absolute paths outright).
+func headerPath(prefix, p string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return prefix + p
 }
 
 // splitLines splits data into logical lines WITHOUT their trailing newline. The

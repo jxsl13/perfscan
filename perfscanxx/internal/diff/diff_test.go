@@ -254,3 +254,56 @@ func TestDiffHunksEmptyInputs(t *testing.T) {
 		t.Errorf("diffHunks(identical) = %v, want nil", h)
 	}
 }
+
+// TestUnifiedAbsolutePathHeader pins the fix for the out-of-tree `-p build`
+// case: when the file path is ABSOLUTE (the compilation database records files
+// outside the working directory), the header must NOT carry git's a/ b/ prefix
+// — "--- a//abs" is meaningless and applies nowhere (git apply rejects absolute
+// paths, patch -p1 strips into a non-existent path). A bare absolute header is a
+// plain `diff -u` that applies with `patch -p0`. Regression for the double-slash
+// bug seen on corpus scans.
+func TestUnifiedAbsolutePathHeader(t *testing.T) {
+	dir := t.TempDir()
+	abs := dir + "/sample.cc"
+	orig := "struct X {\n  ~X() {}\n};\n"
+	patched := "struct X {\n  ~X() = default;\n};\n"
+	if err := os.WriteFile(abs, []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Unified(abs, abs, []byte(orig), []byte(patched))
+	if strings.Contains(got, "a//") || strings.Contains(got, "b//") {
+		t.Fatalf("absolute header must not double-slash; got:\n%s", got)
+	}
+	if !strings.HasPrefix(got, "--- "+abs+"\n+++ "+abs+"\n") {
+		t.Fatalf("absolute path should get a bare (unprefixed) header; got:\n%s", got)
+	}
+
+	// It must actually apply. `patch -p0` locates the absolute file directly.
+	if _, err := exec.LookPath("patch"); err != nil {
+		t.Skip("patch not available")
+	}
+	cmd := exec.Command("patch", "-p0")
+	cmd.Stdin = strings.NewReader(got)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("patch -p0 failed to apply the preview: %v\n%s", err, out)
+	}
+	after, err := os.ReadFile(abs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != patched {
+		t.Fatalf("applied result mismatch:\ngot:  %q\nwant: %q", string(after), patched)
+	}
+}
+
+// TestUnifiedRelativePathKeepsPrefix pins that a relative path still gets git's
+// a/ b/ prefix (git apply / patch -p1 from the tree root) — the fix must not
+// regress the in-tree case.
+func TestUnifiedRelativePathKeepsPrefix(t *testing.T) {
+	got := Unified("util/cache.cc", "util/cache.cc",
+		[]byte("a\nb\n"), []byte("a\nc\n"))
+	if !strings.HasPrefix(got, "--- a/util/cache.cc\n+++ b/util/cache.cc\n") {
+		t.Fatalf("relative path should keep the a/ b/ prefix; got:\n%s", got)
+	}
+}
