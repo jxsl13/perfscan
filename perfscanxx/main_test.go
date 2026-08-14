@@ -1416,3 +1416,61 @@ func TestReportSummaryByCheck(t *testing.T) {
 		t.Errorf("advisory PX3021 wrongly tagged fixable:\n%s", errOut)
 	}
 }
+
+// TestSplitFiles pins the -j work distribution: round-robin (file i -> worker
+// i%n), group sizes differing by at most one, and every file placed exactly once
+// (no loss or duplication — a dropped file would silently skip a TU). Round-robin
+// (not contiguous chunks) is what balances load when cost correlates with position
+// in the compilation database.
+func TestSplitFiles(t *testing.T) {
+	// Round-robin layout for 5 files across 2 workers.
+	got := splitFiles([]string{"a", "b", "c", "d", "e"}, 2)
+	if len(got) != 2 {
+		t.Fatalf("got %d groups, want 2", len(got))
+	}
+	if !slices.Equal(got[0], []string{"a", "c", "e"}) || !slices.Equal(got[1], []string{"b", "d"}) {
+		t.Errorf("round-robin split = %v, want [[a c e] [b d]]", got)
+	}
+
+	// Property check across a range of sizes and worker counts: exactly-once
+	// placement and balanced group sizes.
+	for _, total := range []int{1, 2, 3, 7, 16, 100} {
+		files := make([]string, total)
+		for i := range files {
+			files[i] = itoa(i)
+		}
+		for _, n := range []int{1, 2, 3, 4, 8} {
+			if n > total {
+				continue
+			}
+			groups := splitFiles(files, n)
+			if len(groups) != n {
+				t.Errorf("total=%d n=%d: %d groups, want %d", total, n, len(groups), n)
+			}
+			seen := map[string]int{}
+			minSz, maxSz := total+1, -1
+			for _, g := range groups {
+				if len(g) < minSz {
+					minSz = len(g)
+				}
+				if len(g) > maxSz {
+					maxSz = len(g)
+				}
+				for _, f := range g {
+					seen[f]++
+				}
+			}
+			if len(seen) != total {
+				t.Errorf("total=%d n=%d: %d distinct files placed, want %d", total, n, len(seen), total)
+			}
+			for f, c := range seen {
+				if c != 1 {
+					t.Errorf("total=%d n=%d: file %s placed %d times, want 1", total, n, f, c)
+				}
+			}
+			if maxSz-minSz > 1 {
+				t.Errorf("total=%d n=%d: group sizes span %d..%d (differ by >1)", total, n, minSz, maxSz)
+			}
+		}
+	}
+}
