@@ -314,6 +314,78 @@ std::string paramMove(std::string p) {
 }
 `
 
+// px2101ContainerScopeSrc pins PX2101's container scope: only std::vector and
+// std::string (contiguous, have BOTH push_back and reserve) are flagged.
+// std::list and std::deque have push_back but NO reserve() — recommending one
+// there is a false positive, so they must stay silent.
+const px2101ContainerScopeSrc = `#include <vector>
+#include <string>
+#include <list>
+#include <deque>
+void vec(std::vector<int>& x) { for (int i = 0; i < 10; ++i) x.push_back(i); }   // MATCH line 5 (vector: has reserve)
+void str(std::string& x)      { for (int i = 0; i < 10; ++i) x.push_back('a'); } // MATCH line 6 (string: has reserve)
+void lst(std::list<int>& x)   { for (int i = 0; i < 10; ++i) x.push_back(i); }   // NO (list: no reserve)
+void deq(std::deque<int>& x)  { for (int i = 0; i < 10; ++i) x.push_back(i); }   // NO (deque: no reserve)
+`
+
+// TestPX2101DoesNotFireOnNonReservableContainers pins the fix for a real false
+// positive: PX2101 recommends reserve(), so it must fire only on containers that
+// HAVE reserve() — std::vector and std::string — never on std::list/std::deque,
+// whose push_back has no reallocation to prevent and no reserve() to call.
+func TestPX2101DoesNotFireOnNonReservableContainers(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	e, ok := catalog.ByID("PX2101")
+	if !ok || !e.Custom {
+		t.Fatal("PX2101 missing or not a custom check")
+	}
+	cfg := catalog.ClangTidyConfig([]catalog.Entry{e})
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".clang-tidy")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "containers.cpp")
+	if err := os.WriteFile(src, []byte(px2101ContainerScopeSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--experimental-custom-checks", "--config-file=" + cfgPath, "--", "-std=c++17"}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+
+	if strings.Contains(output, "Unknown command line argument") && strings.Contains(output, "experimental-custom-checks") {
+		t.Skip("clang-tidy is too old for --experimental-custom-checks; skipping")
+	}
+	if strings.Contains(output, "[clang-tidy-config]") {
+		t.Fatalf("clang-tidy rejected the PX2101 query:\n%s", output)
+	}
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture; skipping:\n%s", output)
+	}
+
+	tag := "[" + e.TidyName + "]"
+	if n := strings.Count(output, tag); n != 2 {
+		t.Errorf("PX2101 fired %d time(s), want exactly 2 (the vector and the string):\n%s", n, output)
+	}
+	if strings.Contains(output, "containers.cpp:7:") {
+		t.Errorf("PX2101 must NOT fire on the std::list at line 7 (no reserve()):\n%s", output)
+	}
+	if strings.Contains(output, "containers.cpp:8:") {
+		t.Errorf("PX2101 must NOT fire on the std::deque at line 8 (no reserve()):\n%s", output)
+	}
+}
+
 // TestPX2102DoesNotFireOnParameterMove pins that PX2102 fires on the local move
 // but NOT on the by-value-parameter move — the false positive that
 // unless(parmVarDecl()) removed.

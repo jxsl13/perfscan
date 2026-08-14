@@ -386,22 +386,29 @@ var entries = []Entry{
 	{
 		ID: "PX2101", TidyName: "custom-reserve-before-loop",
 		Level: LevelStructured, Category: "allocation",
-		Title:  "vector grown via push_back/emplace_back in a loop; reserve() the final size before it when known",
+		Title:  "std::vector/std::string grown via push_back/emplace_back in a loop; reserve() the final size before it when known",
 		HasFix: false,
 		Custom: true,
 		Bind:   "grow",
 		// Any loop kind — forStmt alone missed range-for (the most common C++
 		// loop) and while/do loops. isExpansionInMainFile keeps it off headers.
+		// CONTAINER SCOPE: only std::vector and std::basic_string are matched —
+		// the two contiguous sequence containers that have BOTH push_back and
+		// reserve(), so growth reallocates and reserve() prevents it. std::deque,
+		// std::list and std::forward_list also have push_back but NO reserve()
+		// (a node/block container has no reallocation to prevent), so flagging
+		// them would recommend a method that does not exist — they are excluded.
 		// LIMITATION (why the message hedges): an AST matcher cannot reliably tell
-		// whether the grown vector was already reserve()'d in a preceding sibling
+		// whether the container was already reserve()'d in a preceding sibling
 		// statement — that needs data-flow, not a syntactic ancestor match. So the
 		// check flags the PATTERN and fires whether or not a reserve is present; the
 		// Title/Message are worded so an already-reserved loop reads as a
 		// "confirm you reserved" nudge, not a false "you forgot to reserve" claim.
 		Query: `match cxxMemberCallExpr(isExpansionInMainFile(), ` +
 			`callee(cxxMethodDecl(hasAnyName("push_back", "emplace_back"))), ` +
+			`on(hasType(hasCanonicalType(hasDeclaration(cxxRecordDecl(hasAnyName("::std::vector", "::std::basic_string")))))), ` +
 			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("grow")`,
-		Message: "vector grown via push_back/emplace_back inside a loop; if the final size is known, reserve() it before the loop to avoid repeated reallocation — the query flags the pattern and cannot see whether a reserve is already present (perfscanxx PS2101 analog, query-based, no auto-fix)",
+		Message: "std::vector/std::string grown via push_back/emplace_back inside a loop; if the final size is known, reserve() it before the loop to avoid repeated reallocation — the query flags the pattern and cannot see whether a reserve is already present (perfscanxx PS2101 analog, query-based, no auto-fix)",
 	},
 	{
 		ID: "PX2102", TidyName: "custom-pessimizing-move",
