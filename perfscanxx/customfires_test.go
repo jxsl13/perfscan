@@ -185,6 +185,73 @@ func TestPX2101FiresAcrossLoopKinds(t *testing.T) {
 	}
 }
 
+// px2101ReserveSrc documents PX2101's KNOWN LIMITATION: the AST matcher cannot see
+// whether the grown vector was already reserve()'d in a preceding sibling
+// statement (that needs data-flow), so it fires on BOTH an un-reserved loop AND an
+// already-reserved one. The Title/Message are worded so the already-reserved case
+// reads as a "confirm you reserved" nudge rather than a false claim. This test
+// pins that behavior so a future data-flow refinement that DOES exclude reserved
+// loops updates it consciously.
+const px2101ReserveSrc = `#include <vector>
+void noReserve(std::vector<int>& v, int n) {
+  for (int i = 0; i < n; ++i) v.push_back(i);   // fires: genuine
+}
+void withReserve(std::vector<int>& v, int n) {
+  v.reserve(n);
+  for (int i = 0; i < n; ++i) v.push_back(i);    // ALSO fires: matcher can't see the reserve
+}
+`
+
+// TestPX2101FiresRegardlessOfPriorReserve pins the documented limitation: two
+// findings, one per loop, whether or not a reserve precedes the loop.
+func TestPX2101FiresRegardlessOfPriorReserve(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	e, ok := catalog.ByID("PX2101")
+	if !ok || !e.Custom {
+		t.Fatal("PX2101 missing or not a custom check")
+	}
+	cfg := catalog.ClangTidyConfig([]catalog.Entry{e})
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".clang-tidy")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "reserve.cpp")
+	if err := os.WriteFile(src, []byte(px2101ReserveSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--experimental-custom-checks", "--config-file=" + cfgPath, "--", "-std=c++17"}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+
+	if strings.Contains(output, "Unknown command line argument") && strings.Contains(output, "experimental-custom-checks") {
+		t.Skip("clang-tidy is too old for --experimental-custom-checks; skipping")
+	}
+	if strings.Contains(output, "[clang-tidy-config]") {
+		t.Fatalf("clang-tidy rejected the PX2101 query:\n%s", output)
+	}
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture; skipping:\n%s", output)
+	}
+
+	tag := "[" + e.TidyName + "]"
+	if n := strings.Count(output, tag); n != 2 {
+		t.Errorf("PX2101 fired %d time(s), want 2 (both loops; the matcher can't exclude a prior reserve):\n%s", n, output)
+	}
+}
+
 // px2102ParamSrc distinguishes PX2102's real target (a named LOCAL, where
 // std::move blocks NRVO) from a by-value PARAMETER, where NRVO does not apply at
 // all — copy elision is barred for function parameters, and `return param;`
