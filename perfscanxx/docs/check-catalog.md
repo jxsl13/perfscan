@@ -146,14 +146,16 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   operator/literal pairing is exact, so `count(...) > 1` and `count(...) == k`
   (which genuinely need the count) and a member `.count()` on a set/map are NOT
   flagged. No auto-fix: which replacement fits is a human call. **PX2111**
-  map-double-lookup (`if (m.count(k)) { … m[k] … }` hashes/compares the key twice —
-  once for `count()`, again for `operator[]` — where one `find()` answers both:
+  map-double-lookup (`if (m.count(k)) { … m[k] … }` or `if (m.find(k) != m.end())
+  { … m[k] … }` hashes/compares the key twice — once for the existence check, again
+  for `operator[]` — where one `find()` answers both:
   `auto it = m.find(k); if (it != m.end()) use(it->second);`). Precise: the map and
   key must be the SAME declared variables in the condition and the body
-  (`equalsBoundNode`), so `if (m.count(a)) use(m[b])` is not flagged, and the
-  condition's `count()` is a member call so the free `std::count` (PX2110) never
-  collides. No auto-fix: the rewrite restructures the `if` around the iterator (and
-  a `count()>0`-then-write may want `try_emplace`/`insert_or_assign`).
+  (`equalsBoundNode`), so `if (m.count(a)) use(m[b])` is not flagged; the `count()`
+  form is a member call so the free `std::count` (PX2110) never collides; and the
+  `find(k) == m.end()` **absence** form is deliberately not matched (there `m[k]` is
+  an insert, a `try_emplace` case, not a redundant lookup). No auto-fix: the rewrite
+  restructures the `if` around the iterator.
 
   Every custom matcher is gated with `isExpansionInMainFile()` so it fires only on
   the project's own translation unit, never on `catch`/`return`/loop constructs
