@@ -330,6 +330,77 @@ func TestEquiv_PS3105Reverse(t *testing.T) {
 	}
 }
 
+// PS3107: slices.SortFunc(s, func(a, b T) int { return cmp.Compare(a, b) })
+// -> slices.Sort(s). cmp.Compare(a, b) < 0 iff cmp.Less(a, b) — the exact
+// order slices.Sort is defined by — so both drive the shared pdqsort
+// template to the identical permutation, and for integer/string/named
+// elements every tie is bitwise-identical, so the output must be
+// byte-for-byte equal. Pinned over tie-heavy int, string and NAMED-type
+// inputs (the fix rewrites named ordered elements too), plus the
+// cmp.Compare-as-func-value spelling the check also matches.
+func TestEquiv_PS3107SortFuncCmpCompare(t *testing.T) {
+	type celsius int // named ordered element, like the fixture's type Celsius int
+	r := rand.New(rand.NewSource(31))
+	for trial := 0; trial < 3000; trial++ {
+		n := r.Intn(80)
+		base := make([]int, n)
+		for i := range base {
+			base[i] = r.Intn(6) // small domain -> many ties
+		}
+		a := slices.Clone(base)
+		b := slices.Clone(base)
+		c := slices.Clone(base)
+		slices.SortFunc(a, func(x, y int) int { return cmp.Compare(x, y) })
+		slices.Sort(b)
+		slices.SortFunc(c, cmp.Compare) // the func-value spelling
+		if !slices.Equal(a, b) || !slices.Equal(c, b) {
+			t.Fatalf("slices.SortFunc(cmp.Compare) != slices.Sort on %v: %v / %v vs %v", base, a, c, b)
+		}
+		named := make([]celsius, n)
+		for i := range base {
+			named[i] = celsius(base[i])
+		}
+		na := slices.Clone(named)
+		nb := slices.Clone(named)
+		slices.SortFunc(na, func(x, y celsius) int { return cmp.Compare(x, y) })
+		slices.Sort(nb)
+		if !slices.Equal(na, nb) {
+			t.Fatalf("named-type SortFunc(cmp.Compare) != slices.Sort on %v: %v vs %v", named, na, nb)
+		}
+	}
+	pool := []string{"", "a", "aa", "ab", "b", "ba", "bb", "abc"} // duplicates guaranteed
+	for trial := 0; trial < 3000; trial++ {
+		n := r.Intn(40)
+		base := make([]string, n)
+		for i := range base {
+			base[i] = pool[r.Intn(len(pool))]
+		}
+		a := slices.Clone(base)
+		b := slices.Clone(base)
+		slices.SortFunc(a, func(x, y string) int { return cmp.Compare(x, y) })
+		slices.Sort(b)
+		if !slices.Equal(a, b) {
+			t.Fatalf("string SortFunc(cmp.Compare) != slices.Sort on %v: %v vs %v", base, a, b)
+		}
+	}
+	// Big random ints too (not just tie-heavy): 4096 elements exercises the
+	// full pdqsort machinery (pivot selection, partitioning, heap fallback
+	// paths), not just insertion sort on short inputs.
+	for trial := 0; trial < 50; trial++ {
+		base := make([]int, 4096)
+		for i := range base {
+			base[i] = r.Int()
+		}
+		a := slices.Clone(base)
+		b := slices.Clone(base)
+		slices.SortFunc(a, func(x, y int) int { return cmp.Compare(x, y) })
+		slices.Sort(b)
+		if !slices.Equal(a, b) {
+			t.Fatal("large-input SortFunc(cmp.Compare) != slices.Sort")
+		}
+	}
+}
+
 // PS3002: sort.Slice(x, func(i,j) bool) -> slices.SortFunc(x, func(a,b) int)
 // with cmp.Compare. Both share pdqsort, so a comparator inducing the same order
 // yields the identical permutation (incl. ties) — the whole basis of the
