@@ -575,6 +575,56 @@ func TestEquiv_JoinLiteral(t *testing.T) {
 	}
 }
 
+// PS2122: fmt.Sprintf("%s%s...", a, b, ...) over plain strings -> a + b + ...
+// The %s verb writes a string operand verbatim, so a format of nothing but %s
+// verbs is the concatenation of its operands. Pin it across empties, a literal
+// splice, and strings that themselves contain % and format-verb bytes (which the
+// pre-parsed format never re-interprets — only the FORMAT string is parsed).
+func TestEquiv_SprintfPercentS(t *testing.T) {
+	cases := [][]string{
+		{"", ""}, {"a", ""}, {"", "b"}, {"a", "b"},
+		{"host", ":"}, {"%d", "%s"}, {"100%", " done"}, {"日本", "語"}, {"a\x00b", "\xff"},
+	}
+	for _, c := range cases {
+		a, b := c[0], c[1]
+		if got := fmt.Sprintf("%s%s", a, b); got != a+b {
+			t.Errorf("Sprintf(%%s%%s, %q, %q) = %q, want %q (a+b)", a, b, got, a+b)
+		}
+		// three-operand form (the check fires on 2+ %s verbs)
+		if got := fmt.Sprintf("%s%s%s", a, b, a); got != a+b+a {
+			t.Errorf("Sprintf 3x%%s (%q,%q,%q) = %q, want %q", a, b, a, got, a+b+a)
+		}
+	}
+}
+
+// PS2123: fmt.Sprint(a, b, ...) over plain strings -> a + b + ...
+// This rests on a SUBTLE fmt rule the check's string-only guard depends on:
+// Sprint inserts a space between two operands ONLY when NEITHER is a string. So
+// for all-string operands it is exactly the concatenation with NO separators.
+// The contrast case (two ints DO get a space) is pinned too, documenting why the
+// check must never fire unless every operand is statically a string.
+func TestEquiv_SprintStrings(t *testing.T) {
+	cases := [][]string{
+		{"", ""}, {"a", ""}, {"a", "b"}, {"host", ":"}, {"1", "2"}, {"", "", ""}, {"x", "y", "z"},
+	}
+	for _, c := range cases {
+		want := ""
+		args := make([]any, len(c))
+		for i, s := range c {
+			want += s
+			args[i] = s
+		}
+		if got := fmt.Sprint(args...); got != want {
+			t.Errorf("Sprint(%q) = %q, want %q (no space between string operands)", c, got, want)
+		}
+	}
+	// Contrast: non-string operands DO get a space — so PS2123's string-only
+	// guard is load-bearing; a widening to non-strings would break bit-identity.
+	if fmt.Sprint(1, 2) != "1 2" {
+		t.Error("fmt.Sprint(1, 2) must be \"1 2\" (space between non-strings) — the string-only guard is required")
+	}
+}
+
 // PS2125: len([]rune(s)) -> utf8.RuneCountInString(s); len([]byte(s)) -> len(s).
 // Invalid UTF-8 is included: []rune decodes each bad byte to U+FFFD and
 // RuneCountInString counts it identically, so the identity must still hold.
