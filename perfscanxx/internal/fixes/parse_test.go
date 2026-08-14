@@ -221,3 +221,54 @@ Diagnostics:
 		t.Errorf("known replacement fields lost around an unknown one: %+v", got)
 	}
 }
+
+// TestParseLLVMBlockScalarReplacementText pins the fix for a real interop bug:
+// LLVM's YAML emitter writes multi-line ReplacementText (e.g. the member-
+// initializer insertion of cppcoreguidelines-prefer-member-initializer) as a
+// literal block scalar with an EXPLICIT indentation indicator (`|4-`), which
+// gopkg.in/yaml.v3 mis-parses ("did not find expected key"), failing the whole
+// export — and, in a parallel scan, every worker's findings with it (observed on
+// abseil/synchronization). Parse must recover by normalizing the indicator away.
+func TestParseLLVMBlockScalarReplacementText(t *testing.T) {
+	// Verbatim shape of clang-tidy's export for a prefer-member-initializer fix.
+	doc := "MainSourceFile: x.cc\n" +
+		"Diagnostics:\n" +
+		"  - DiagnosticName: cppcoreguidelines-prefer-member-initializer\n" +
+		"    DiagnosticMessage:\n" +
+		"      Message: '''rep_'' should be initialized in a member initializer'\n" +
+		"      FilePath: x.cc\n" +
+		"      FileOffset: 10924\n" +
+		"      Replacements:\n" +
+		"          - FilePath: x.cc\n" +
+		"            Offset: 10893\n" +
+		"            Length: 0\n" +
+		"            ReplacementText: |4-\n" +
+		"               : rep_(new (base_internal::LowLevelAlloc::AllocWithArena(sizeof(Rep), arena))\n" +
+		"                    Rep)\n" +
+		"          - FilePath: x.cc\n" +
+		"            Offset: 10924\n" +
+		"            Length: 88\n" +
+		"            ReplacementText: \"\"\n" +
+		"    Level: Warning\n" +
+		"    BuildDirectory: /b\n"
+
+	f, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("Parse rejected an LLVM block-scalar export: %v", err)
+	}
+	if len(f.Diagnostics) != 1 {
+		t.Fatalf("got %d diagnostics, want 1", len(f.Diagnostics))
+	}
+	d := f.Diagnostics[0]
+	if d.DiagnosticName != "cppcoreguidelines-prefer-member-initializer" {
+		t.Errorf("DiagnosticName = %q", d.DiagnosticName)
+	}
+	if d.DiagnosticMessage.FilePath != "x.cc" || d.DiagnosticMessage.FileOffset != 10924 {
+		t.Errorf("location not recovered: %+v", d.DiagnosticMessage)
+	}
+	// The two replacements survive (their exact multi-line text is not consumed
+	// by perfscanxx, only their presence/positions matter).
+	if n := len(d.DiagnosticMessage.Replacements); n != 2 {
+		t.Errorf("got %d replacements, want 2", n)
+	}
+}
