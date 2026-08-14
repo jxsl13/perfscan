@@ -17,7 +17,7 @@ import (
 //	PX2101 reserve-before-loop, PX2102 pessimizing-move, PX2103 catch-by-value,
 //	PX2104 regex-in-loop, PX2105 dynamic-cast-in-loop, PX2106 stringstream-in-loop,
 //	PX2107 pow-const-exponent, PX2108 vector-bool, PX2109 std-list,
-//	PX2110 count-for-existence.
+//	PX2110 count-for-existence, PX2111 map-double-lookup.
 const customTriggerSrc = `#include <vector>
 #include <regex>
 #include <sstream>
@@ -25,7 +25,9 @@ const customTriggerSrc = `#include <vector>
 #include <cmath>
 #include <list>
 #include <algorithm>
+#include <map>
 struct B { virtual ~B(){} }; struct D : B {};
+int dbl(std::map<int,int>& m, int k) { if (m.count(k)) { return m[k]; } return 0; } // PX2111 (double lookup)
 std::vector<bool> g_flags; // PX2108 (space-optimized bitfield, not a real container)
 std::list<int> g_items;    // PX2109 (node-per-element linked list)
 bool present(const std::vector<int>& v, int x) {
@@ -552,6 +554,77 @@ func TestPX2110DoesNotFireOnCountNeeded(t *testing.T) {
 	for _, bad := range []string{"count.cpp:7:", "count.cpp:8:", "count.cpp:9:", "count.cpp:10:"} {
 		if strings.Contains(output, bad) {
 			t.Errorf("PX2110 fired at %s — it must not flag > 1, == k, bare count, or a member .count():\n%s", bad, output)
+		}
+	}
+}
+
+// px2111DoubleLookupSrc pins PX2111's precision: it fires only when the SAME map
+// and SAME key are looked up in both the condition (count) and the body (m[k]).
+// Different keys, a missing body [], and the free std::count algorithm stay silent.
+const px2111DoubleLookupSrc = `#include <map>
+#include <vector>
+#include <algorithm>
+int same(std::map<int,int>& m, int k)          { if (m.count(k)) { return m[k]; } return 0; }        // MATCH line 4
+int write(std::map<int,int>& m, int k)         { if (m.count(k) > 0) { m[k] = 1; } return 0; }       // MATCH line 5
+int diffKey(std::map<int,int>& m, int a, int b){ if (m.count(a)) { return m[b]; } return 0; }         // NO (diff keys)
+int noAccess(std::map<int,int>& m, int k)      { if (m.count(k)) { return 7; } return 0; }            // NO (no [] in body)
+int noCheck(std::map<int,int>& m, int k)       { return m[k]; }                                        // NO (no existence check)
+bool freeCount(const std::vector<int>& v,int x){ return std::count(v.begin(), v.end(), x) > 0; }       // NO (PX2110, not this)
+`
+
+// TestPX2111DoesNotFireOnDifferentKeyOrNoAccess pins that PX2111 fires on the two
+// genuine same-map/same-key double lookups (2 findings) and stays silent on a
+// different-key body access, a body with no operator[], a bare access with no
+// existence check, and the free std::count algorithm.
+func TestPX2111DoesNotFireOnDifferentKeyOrNoAccess(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	e, ok := catalog.ByID("PX2111")
+	if !ok || !e.Custom {
+		t.Fatal("PX2111 missing or not a custom check")
+	}
+	cfg := catalog.ClangTidyConfig([]catalog.Entry{e})
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".clang-tidy")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "dl.cpp")
+	if err := os.WriteFile(src, []byte(px2111DoubleLookupSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--experimental-custom-checks", "--config-file=" + cfgPath, "--", "-std=c++17"}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+
+	if strings.Contains(output, "Unknown command line argument") && strings.Contains(output, "experimental-custom-checks") {
+		t.Skip("clang-tidy is too old for --experimental-custom-checks; skipping")
+	}
+	if strings.Contains(output, "[clang-tidy-config]") {
+		t.Fatalf("clang-tidy rejected the PX2111 query:\n%s", output)
+	}
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture; skipping:\n%s", output)
+	}
+
+	tag := "[" + e.TidyName + "]"
+	if n := strings.Count(output, tag); n != 2 {
+		t.Errorf("PX2111 fired %d time(s), want exactly 2 (the same-map/same-key read and write):\n%s", n, output)
+	}
+	for _, bad := range []string{"dl.cpp:6:", "dl.cpp:7:", "dl.cpp:8:", "dl.cpp:9:"} {
+		if strings.Contains(output, bad) {
+			t.Errorf("PX2111 fired at %s — it must not flag a different key, a missing body access, a bare access, or the free std::count:\n%s", bad, output)
 		}
 	}
 }
