@@ -34,6 +34,7 @@ checks' fixes.
 | [PS2011](PS2011.md) | alloc | L1 |  | []byte(strings.Repeat(s, n)) builds the repetition twice; bytes.Repeat([]byte(s), n) fills one buffer |
 | [PS2012](PS2012.md) | alloc | L1 | yes | string(bytes.TrimSpace([]byte(s))) pays two throwaway copies; strings.TrimSpace(s) is the same trim with zero copies |
 | [PS2013](PS2013.md) | alloc | L1 | yes | single-pair strings.NewReplacer(...).Replace(s) rebuilds a replacer machine per call; strings.ReplaceAll(s, old, new) is the identical substitution in one scan |
+| [PS2014](PS2014.md) | alloc | L1 | yes | strings.Split(s, sep)[i] with a small constant i allocates every piece just to read one field; strings.SplitN(s, sep, i+2)[i] stops after that field |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
