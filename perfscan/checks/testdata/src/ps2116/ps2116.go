@@ -63,6 +63,14 @@ func zeroFloats(fs []float64) {
 	}
 }
 
+// A complex slice zeroed with 0 (real=imag=0) is clear-equivalent; exercises
+// ps2116ConstZero's complex handling on the firing side.
+func zeroComplex(cs []complex128) {
+	for i := range cs { // want `the loop writes the zero value to every element of cs; clear\(cs\) states that directly \(Go 1\.21\)`
+		cs[i] = 0
+	}
+}
+
 // --- report-only: the loop is a zero-fill but the fix is suppressed ---
 
 // A local `clear` captures the injected call: report, no fix.
@@ -88,6 +96,16 @@ func interiorComment(s []int) {
 func fillOnes(s []int) {
 	for i := range s {
 		s[i] = 1
+	}
+}
+
+// A non-zero IMAGINARY fill is not the complex zero value: ps2116ConstZero's
+// complex branch checks the sign of both the real AND imaginary parts, so
+// 1i (real 0, imag 1) must NOT fire. A branch that only tested the real part
+// would wrongly rewrite this to clear (which stores 0+0i).
+func fillImaginary(cs []complex128) {
+	for i := range cs {
+		cs[i] = 1i
 	}
 }
 
