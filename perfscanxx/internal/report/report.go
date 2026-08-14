@@ -41,6 +41,28 @@ type Finding struct {
 	Offset int `json:"offset"`
 	// Fixes counts the fix-it replacements clang-tidy offered.
 	Fixes int `json:"fixes"`
+	// Edit is the single fix-it replacement, set ONLY when the finding carries
+	// exactly one (Fixes == 1). It is surfaced as a SARIF fix so GitHub Code
+	// Scanning can offer a one-click suggestion. Excluded from -json (the fix
+	// COUNT already appears there); nil for multi-edit or fixless findings.
+	Edit *Edit `json:"-"`
+}
+
+// Edit is one fix-it replacement with its span pre-resolved to 1-based
+// line:column, ready to emit as a SARIF fix. Only findings with EXACTLY one
+// replacement carry it: with a single self-contained edit there is nothing for
+// clang-tidy --fix to coalesce, so the raw export replacement is byte-for-byte
+// what `perfscanxx -fix` would write — the safety bar for suggesting a fix that a
+// user (or GitHub) might apply blindly. A finding with multiple edits carries no
+// Edit, because clang-tidy may merge/clean adjacent edits on apply (see the diff
+// package), so a raw replay could diverge from -fix.
+type Edit struct {
+	URI         string // display (cwd-relative) path of the edited file
+	StartLine   int
+	StartColumn int
+	EndLine     int
+	EndColumn   int
+	Text        string // replacement text ("" means a pure deletion)
 }
 
 // ReadFile is the file loader used to translate byte offsets into
@@ -64,6 +86,20 @@ func fixItCount(d fixes.Diagnostic) int {
 		n += len(note.Replacements)
 	}
 	return n
+}
+
+// singleReplacement returns the sole fix-it replacement of a diagnostic (from its
+// main message or a note) when there is EXACTLY one, else ok=false. Only that case
+// is safe to surface as a suggested fix — see Edit.
+func singleReplacement(d fixes.Diagnostic) (r fixes.Replacement, ok bool) {
+	all := d.DiagnosticMessage.Replacements
+	for _, note := range d.Notes {
+		all = append(all, note.Replacements...)
+	}
+	if len(all) == 1 {
+		return all[0], true
+	}
+	return fixes.Replacement{}, false
 }
 
 func FromExport(ef *fixes.ExportFile, maxLevel catalog.Level) []Finding {
@@ -105,6 +141,26 @@ func FromExport(ef *fixes.ExportFile, maxLevel catalog.Level) []Finding {
 			f.Category = e.Category
 		}
 		f.Line, f.Col = lineCol(abs, f.Offset)
+		// One-click fix: only when there is a SINGLE self-contained replacement
+		// (nothing for --fix to coalesce), and only when both ends of its span
+		// resolve to a real line:column (the edited file was readable). The edit
+		// may target a file other than the diagnostic's anchor, so resolve its own
+		// FilePath.
+		if r, ok := singleReplacement(d); ok {
+			editAbs := resolvePath(r.FilePath, d.BuildDirectory, ef.MainSourceFile)
+			sl, sc := lineCol(editAbs, r.Offset)
+			el, ec := lineCol(editAbs, r.Offset+r.Length)
+			if sl > 0 && el > 0 {
+				f.Edit = &Edit{
+					URI:         displayPath(editAbs),
+					StartLine:   sl,
+					StartColumn: sc,
+					EndLine:     el,
+					EndColumn:   ec,
+					Text:        r.ReplacementText,
+				}
+			}
+		}
 		out = append(out, f)
 	}
 	// Total order: file, then byte offset, then check ID, then message. The ID
@@ -279,6 +335,10 @@ func SARIF(w io.Writer, findings []Finding) error {
 	type sarifRegion struct {
 		StartLine   int `json:"startLine,omitempty"`
 		StartColumn int `json:"startColumn,omitempty"`
+		// End bounds are set only for a fix's deletedRegion; a result's location
+		// region leaves them zero (omitempty), so existing output is unchanged.
+		EndLine   int `json:"endLine,omitempty"`
+		EndColumn int `json:"endColumn,omitempty"`
 	}
 	type sarifArtifactLocation struct {
 		URI string `json:"uri"`
@@ -290,12 +350,28 @@ func SARIF(w io.Writer, findings []Finding) error {
 	type sarifLocation struct {
 		PhysicalLocation sarifPhysicalLocation `json:"physicalLocation"`
 	}
+	// SARIF fix structures: a fix is one or more artifactChanges, each a set of
+	// text replacements over a file. GitHub Code Scanning renders these as a
+	// one-click "suggested fix". insertedContent is omitted for a pure deletion.
+	type sarifReplacement struct {
+		DeletedRegion   sarifRegion `json:"deletedRegion"`
+		InsertedContent *sarifText  `json:"insertedContent,omitempty"`
+	}
+	type sarifArtifactChange struct {
+		ArtifactLocation sarifArtifactLocation `json:"artifactLocation"`
+		Replacements     []sarifReplacement    `json:"replacements"`
+	}
+	type sarifFix struct {
+		Description     *sarifText            `json:"description,omitempty"`
+		ArtifactChanges []sarifArtifactChange `json:"artifactChanges"`
+	}
 	type sarifResult struct {
 		RuleID    string          `json:"ruleId"`
 		RuleIndex int             `json:"ruleIndex"`
 		Level     string          `json:"level,omitempty"`
 		Message   sarifMessage    `json:"message"`
 		Locations []sarifLocation `json:"locations"`
+		Fixes     []sarifFix      `json:"fixes,omitempty"`
 		// PartialFingerprints give GitHub Code Scanning a LINE-INDEPENDENT
 		// identity for the result, so a finding is tracked across commits and
 		// not closed+reopened when unrelated lines shift above it. The key is
@@ -391,7 +467,7 @@ func SARIF(w io.Writer, findings []Finding) error {
 		if f.Line > 0 {
 			region = &sarifRegion{StartLine: f.Line, StartColumn: f.Col}
 		}
-		results = append(results, sarifResult{
+		res := sarifResult{
 			RuleID:    f.ID,
 			RuleIndex: ruleIndex[f.ID],
 			Level:     sarifLevel(f.Level),
@@ -403,7 +479,31 @@ func SARIF(w io.Writer, findings []Finding) error {
 				},
 			}},
 			PartialFingerprints: map[string]string{"perfscanxxIdentity/v1": lineIndependentFingerprint(f)},
-		})
+		}
+		// A single-replacement finding carries a pre-resolved Edit — emit it as a
+		// SARIF fix so GitHub Code Scanning offers a one-click suggestion.
+		if f.Edit != nil {
+			var inserted *sarifText
+			if f.Edit.Text != "" {
+				inserted = &sarifText{Text: f.Edit.Text}
+			}
+			res.Fixes = []sarifFix{{
+				Description: &sarifText{Text: f.ID + ": apply the clang-tidy fix-it"},
+				ArtifactChanges: []sarifArtifactChange{{
+					ArtifactLocation: sarifArtifactLocation{URI: f.Edit.URI},
+					Replacements: []sarifReplacement{{
+						DeletedRegion: sarifRegion{
+							StartLine:   f.Edit.StartLine,
+							StartColumn: f.Edit.StartColumn,
+							EndLine:     f.Edit.EndLine,
+							EndColumn:   f.Edit.EndColumn,
+						},
+						InsertedContent: inserted,
+					}},
+				}},
+			}}
+		}
+		results = append(results, res)
 	}
 
 	enc := json.NewEncoder(w)

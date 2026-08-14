@@ -1029,3 +1029,124 @@ func TestSARIFRuleCarriesPerformanceTags(t *testing.T) {
 		t.Errorf("PX1001 rule tags = %v, want [performance %s]", tags, cat.Category)
 	}
 }
+
+// TestSARIFEmitsFixForSingleReplacement pins that a finding with EXACTLY one
+// fix-it replacement is emitted as a SARIF fix (GitHub Code Scanning renders it as
+// a one-click suggestion): an artifactChange over the edited file with a
+// deletedRegion and the insertedContent text. A finding with NO fix carries none.
+// The single-edit scoping is the safety bar — with one self-contained replacement
+// there is nothing for clang-tidy --fix to coalesce, so the suggested edit is
+// byte-for-byte what -fix would write.
+func TestSARIFEmitsFixForSingleReplacement(t *testing.T) {
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+	ReadFile = func(string) ([]byte, error) {
+		return []byte("aaaaaaaaaa\nbbbbbbbbbbbbbbbbbbbb\ncccccccccccccccccccc\n"), nil
+	}
+
+	findings := FromExport(sampleExport(), catalog.LevelAggressive)
+	var buf bytes.Buffer
+	if err := SARIF(&buf, findings); err != nil {
+		t.Fatalf("SARIF: %v", err)
+	}
+
+	var log struct {
+		Runs []struct {
+			Results []struct {
+				RuleID string `json:"ruleId"`
+				Fixes  []struct {
+					ArtifactChanges []struct {
+						ArtifactLocation struct {
+							URI string `json:"uri"`
+						} `json:"artifactLocation"`
+						Replacements []struct {
+							DeletedRegion struct {
+								StartLine int `json:"startLine"`
+								EndLine   int `json:"endLine"`
+							} `json:"deletedRegion"`
+							InsertedContent struct {
+								Text string `json:"text"`
+							} `json:"insertedContent"`
+						} `json:"replacements"`
+					} `json:"artifactChanges"`
+				} `json:"fixes"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &log); err != nil {
+		t.Fatalf("SARIF not valid JSON: %v\n%s", err, buf.String())
+	}
+	results := log.Runs[0].Results
+	if len(results) != 2 {
+		t.Fatalf("want 2 results, got %d", len(results))
+	}
+	byRule := map[string]int{}
+	for i, r := range results {
+		byRule[r.RuleID] = i
+	}
+	// PX1001 (single replacement) must carry a fix.
+	px1001 := results[byRule["PX1001"]]
+	if len(px1001.Fixes) != 1 {
+		t.Fatalf("PX1001: want 1 fix, got %d", len(px1001.Fixes))
+	}
+	ch := px1001.Fixes[0].ArtifactChanges
+	if len(ch) != 1 || len(ch[0].Replacements) != 1 {
+		t.Fatalf("PX1001 fix shape unexpected: %+v", px1001.Fixes[0])
+	}
+	rep := ch[0].Replacements[0]
+	if rep.InsertedContent.Text != "const auto&" {
+		t.Errorf("PX1001 insertedContent = %q, want %q", rep.InsertedContent.Text, "const auto&")
+	}
+	if rep.DeletedRegion.StartLine != 1 {
+		t.Errorf("PX1001 deletedRegion.startLine = %d, want 1", rep.DeletedRegion.StartLine)
+	}
+	if ch[0].ArtifactLocation.URI == "" {
+		t.Error("PX1001 fix artifactLocation.uri is empty")
+	}
+	// PX2001 (no replacement) must carry NO fix.
+	if px2001 := results[byRule["PX2001"]]; len(px2001.Fixes) != 0 {
+		t.Errorf("PX2001 has %d fixes, want 0 (it offered no fix-it)", len(px2001.Fixes))
+	}
+}
+
+// TestSARIFOmitsFixForMultiReplacement pins the safety scoping: a finding with
+// MORE THAN ONE replacement carries NO SARIF fix, because clang-tidy --fix may
+// coalesce/clean adjacent edits on apply, so a raw replay of the export offsets
+// could diverge from what -fix actually writes. Only the unambiguous single-edit
+// case is suggested.
+func TestSARIFOmitsFixForMultiReplacement(t *testing.T) {
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+	ReadFile = func(string) ([]byte, error) {
+		return []byte("aaaaaaaaaa\nbbbbbbbbbbbbbbbbbbbb\ncccccccccccccccccccc\n"), nil
+	}
+	ef := &fixes.ExportFile{
+		MainSourceFile: "/src/demo.cpp",
+		Diagnostics: []fixes.Diagnostic{{
+			DiagnosticName: "performance-for-range-copy",
+			DiagnosticMessage: fixes.DiagnosticMessage{
+				Message:    "two edits",
+				FilePath:   "/src/demo.cpp",
+				FileOffset: 10,
+				Replacements: []fixes.Replacement{
+					{FilePath: "/src/demo.cpp", Offset: 10, Length: 2, ReplacementText: "x"},
+					{FilePath: "/src/demo.cpp", Offset: 20, Length: 2, ReplacementText: "y"},
+				},
+			},
+		}},
+	}
+	findings := FromExport(ef, catalog.LevelAggressive)
+	if len(findings) != 1 {
+		t.Fatalf("want 1 finding, got %d", len(findings))
+	}
+	if findings[0].Edit != nil {
+		t.Errorf("multi-replacement finding must carry no Edit, got %+v", findings[0].Edit)
+	}
+	var buf bytes.Buffer
+	if err := SARIF(&buf, findings); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(buf.Bytes(), []byte(`"fixes"`)) {
+		t.Errorf("multi-replacement finding must emit no SARIF fix:\n%s", buf.String())
+	}
+}
