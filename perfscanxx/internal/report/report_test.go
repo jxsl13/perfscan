@@ -962,3 +962,44 @@ func TestSARIFPartialFingerprintsAreLineIndependent(t *testing.T) {
 		t.Error("partialFingerprint must distinguish different files")
 	}
 }
+
+// TestSARIFRuleCarriesPerformanceTags pins that a catalogued rule carries
+// properties.tags = ["performance", <category>], so GitHub Code Scanning's
+// rule-tag filter can group/narrow perfscanxx findings by category.
+func TestSARIFRuleCarriesPerformanceTags(t *testing.T) {
+	var buf bytes.Buffer
+	if err := SARIF(&buf, []Finding{{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	var log struct {
+		Runs []struct {
+			Tool struct {
+				Driver struct {
+					Rules []struct {
+						ID         string `json:"id"`
+						Properties struct {
+							Tags []string `json:"tags"`
+						} `json:"properties"`
+					} `json:"rules"`
+				} `json:"driver"`
+			} `json:"tool"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &log); err != nil {
+		t.Fatal(err)
+	}
+	tags := log.Runs[0].Tool.Driver.Rules[0].Properties.Tags
+	cat, _ := catalog.ByID("PX1001")
+	hasPerf, hasCat := false, false
+	for _, tg := range tags {
+		if tg == "performance" {
+			hasPerf = true
+		}
+		if tg == cat.Category {
+			hasCat = true
+		}
+	}
+	if !hasPerf || !hasCat {
+		t.Errorf("PX1001 rule tags = %v, want [performance %s]", tags, cat.Category)
+	}
+}

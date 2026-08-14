@@ -261,13 +261,17 @@ func SARIF(w io.Writer, findings []Finding) error {
 	type sarifConfig struct {
 		Level string `json:"level"`
 	}
+	type sarifRuleProps struct {
+		Tags []string `json:"tags,omitempty"`
+	}
 	type sarifRule struct {
-		ID                   string       `json:"id"`
-		Name                 string       `json:"name,omitempty"`
-		ShortDescription     *sarifText   `json:"shortDescription,omitempty"`
-		FullDescription      *sarifText   `json:"fullDescription,omitempty"`
-		HelpURI              string       `json:"helpUri,omitempty"`
-		DefaultConfiguration *sarifConfig `json:"defaultConfiguration,omitempty"`
+		ID                   string          `json:"id"`
+		Name                 string          `json:"name,omitempty"`
+		ShortDescription     *sarifText      `json:"shortDescription,omitempty"`
+		FullDescription      *sarifText      `json:"fullDescription,omitempty"`
+		HelpURI              string          `json:"helpUri,omitempty"`
+		DefaultConfiguration *sarifConfig    `json:"defaultConfiguration,omitempty"`
+		Properties           *sarifRuleProps `json:"properties,omitempty"`
 	}
 	type sarifMessage struct {
 		Text string `json:"text"`
@@ -361,6 +365,14 @@ func SARIF(w io.Writer, findings []Finding) error {
 				if url, ok := catalog.DocURL(e); ok {
 					r.HelpURI = url
 				}
+				// Tag every catalogued rule "performance" plus its category, so
+				// GitHub Code Scanning's rule-tag filter can group/narrow
+				// perfscanxx findings (all perf) by category (alloc, containers, …).
+				tags := []string{"performance"}
+				if e.Category != "" {
+					tags = append(tags, e.Category)
+				}
+				r.Properties = &sarifRuleProps{Tags: tags}
 			}
 			rules = append(rules, r)
 		}
