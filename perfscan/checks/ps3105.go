@@ -3,6 +3,7 @@ package checks
 import (
 	"go/ast"
 	"go/types"
+	"slices"
 
 	"golang.org/x/tools/go/analysis"
 
@@ -59,8 +60,34 @@ same bytes no matter which algorithm produced it, stability included.
 sort.Sort and sort.Stable return nothing, so only a call statement is
 rewritten.
 
+The DESCENDING idiom through sort.Reverse is matched and fixed too:
+
+	sort.Sort(sort.Reverse(sort.IntSlice(x)))
+
+(and the StringSlice and sort.Stable spellings) rewrites to
+
+	slices.SortFunc(x, func(a, b int) int { return cmp.Compare(b, a) })
+
+This is likewise BIT-IDENTICAL. sort.Reverse(sort.IntSlice(x)) has
+Less(i, j) = IntSlice.Less(j, i) = x[j] < x[i] — descending.
+slices.SortFunc with cmp.Compare(b, a) orders a before b iff
+cmp.Compare(b, a) < 0 iff b < a iff a > b — the identical descending
+predicate. Both are unstable pdqsort, and for []int/[]string any two
+equal elements are bitwise-identical, so the descending arrangement of
+the input multiset is unique and byte-for-byte the same. The
+sort.Stable(sort.Reverse(...)) spelling maps to the same UNSTABLE
+slices.SortFunc for the same reason the ascending sort.Stable does:
+stability is unobservable when every tie is bitwise-identical. Only the
+fresh sort.Reverse CALL wrapping a fresh conversion is matched — a
+pre-built sort.Interface value passed to sort.Reverse is opaque. The
+descending fix additionally needs the cmp package usable by name at the
+call site (an existing import alias is reused, the import added when
+missing); a dot- or blank-imported or shadowed cmp keeps the report
+advisory.
+
 sort.Float64Slice is deliberately EXCLUDED and never flagged — under
-either sort.Sort or sort.Stable — for the same reason PS3104 excludes
+either sort.Sort or sort.Stable, and equally under sort.Reverse — for
+the same reason PS3104 excludes
 sort.Float64s: Float64Slice.Less orders NaNs first, and float64 has
 DISTINGUISHABLE ties (-0.0 and +0.0 compare equal but differ in bits, as
 do NaNs with different payloads). For sort.Sort(sort.Float64Slice(x))
@@ -68,7 +95,10 @@ both sorts are unstable, so two correct implementations may arrange
 those ties differently. For sort.Stable(sort.Float64Slice(x)) the source
 is stable but slices.Sort is not, so the distinguishable ties could be
 reordered. Either way the uniqueness argument above collapses and the
-rewrite is not guaranteed bit-identical, so perfscan does not offer it.
+rewrite is not guaranteed bit-identical, so perfscan does not offer it —
+and sort.Sort(sort.Reverse(sort.Float64Slice(x))) inherits the exact
+same collapse (NaN ordering plus distinguishable float ties), so the
+Reverse form of Float64Slice is excluded too.
 
 Both selectors are resolved with type information: the callee must be
 the package function sort.Sort or sort.Stable — never a shadowed sort, a
@@ -83,10 +113,12 @@ rewritten.
 
 The fix edits imports as needed: the slices import is added when missing
 (reusing an existing alias when the file imports slices under another
-name), and the sort import is dropped when the rewrites remove the
-file's LAST sort references — each rewritten call gives up TWO of them,
-the sort.Sort/sort.Stable callee and the sort.IntSlice/StringSlice
-conversion, and the import is dropped only when the file holds none
+name), the cmp import is added when a descending rewrite needs it, and
+the sort import is dropped when the rewrites remove the file's LAST sort
+references — each rewritten ascending call gives up TWO of them (the
+sort.Sort/sort.Stable callee and the sort.IntSlice/StringSlice
+conversion), each rewritten descending call THREE (those two plus
+sort.Reverse), and the import is dropped only when the file holds none
 besides those. When the
 rewrites replace the whole import, the sort spec is swapped for "slices"
 in place. A dot- or blank-imported slices, a comment inside the
@@ -138,6 +170,13 @@ var ps3105SliceTypes = map[string]*types.Slice{
 	"StringSlice": types.NewSlice(types.Typ[types.String]),
 }
 
+// ps3105Elems spells the element type the descending fix's comparator
+// closure declares: func(a, b ELEM) int.
+var ps3105Elems = map[string]string{
+	"IntSlice":    "int",
+	"StringSlice": "string",
+}
+
 func runPS3105(pass *analysis.Pass) (any, error) {
 	for _, f := range pass.Files {
 		if !ps3104SlicesSortAvailable(pass, f) {
@@ -147,17 +186,20 @@ func runPS3105(pass *analysis.Pass) (any, error) {
 			continue
 		}
 		// Collect first, decide import edits once per file: every fixable
-		// call removes TWO sort references (sort.Sort and the inner
-		// conversion), and whether the sort import is orphaned depends on
+		// ascending call removes TWO sort references (sort.Sort and the
+		// inner conversion), every fixable descending call THREE (plus
+		// sort.Reverse), and whether the sort import is orphaned depends on
 		// ALL of them together (same per-file site collection as PS3104).
 		type site struct {
 			call  *ast.CallExpr
 			outer string // the outer sort.* callee: "Sort" or "Stable"
 			name  string // the inner adapter type: "IntSlice" or "StringSlice"
+			desc  bool   // the sort.Reverse descending form
 			fix   *analysis.SuggestedFix
 		}
 		var sites []site
-		fixable := 0
+		ascFixable, descFixable := 0, 0
+		needCmp := false
 		ast.Inspect(f, func(n ast.Node) bool {
 			es, ok := n.(*ast.ExprStmt)
 			if !ok {
@@ -185,66 +227,69 @@ func runPS3105(pass *analysis.Pass) (any, error) {
 			if sig, isSig := fn.Type().(*types.Signature); !isSig || sig.Recv() != nil {
 				return true
 			}
-			// The single argument must be a fresh CONVERSION to
-			// sort.IntSlice or sort.StringSlice — a CallExpr whose Fun
-			// denotes the named type. A pre-built value of those types is
-			// not matched: only the conversion form hands us the
-			// underlying []int/[]string operand to keep verbatim. The
-			// allowlist keeps sort.Float64Slice (NaN ordering, float ties)
-			// and every custom sort.Interface implementation out.
-			inner, ok := call.Args[0].(*ast.CallExpr)
-			if !ok || len(inner.Args) != 1 || inner.Ellipsis.IsValid() {
-				return true
+			// The single argument is either a fresh adapter CONVERSION
+			// (ascending) or a fresh sort.Reverse CALL wrapping one
+			// (descending). Anything else — a pre-built adapter value, a
+			// custom sort.Interface, sort.Float64Slice — is never matched.
+			name, x, matched := ps3105Adapter(pass, call.Args[0])
+			desc := false
+			if !matched {
+				rev, isCall := call.Args[0].(*ast.CallExpr)
+				if !isCall || len(rev.Args) != 1 || rev.Ellipsis.IsValid() {
+					return true
+				}
+				rsel, isSel := ps2110Unparen(rev.Fun).(*ast.SelectorExpr)
+				if !isSel {
+					return true
+				}
+				// Same type-checked pinning as the outer callee: the
+				// receiver-less package function sort.Reverse, never a
+				// shadowed sort or a same-named method.
+				rfn, isFn := pass.TypesInfo.Uses[rsel.Sel].(*types.Func)
+				if !isFn || rfn.Pkg() == nil || rfn.Pkg().Path() != "sort" || rfn.Name() != "Reverse" {
+					return true
+				}
+				if sig, isSig := rfn.Type().(*types.Signature); !isSig || sig.Recv() != nil {
+					return true
+				}
+				name, x, matched = ps3105Adapter(pass, rev.Args[0])
+				if !matched {
+					return true
+				}
+				desc = true
 			}
-			isel, ok := ps2110Unparen(inner.Fun).(*ast.SelectorExpr)
-			if !ok {
-				return true
+			var fix *analysis.SuggestedFix
+			if desc {
+				var cmpAdded bool
+				fix, cmpAdded = ps3105ReverseFix(pass, f, call, x, ps3105Elems[name])
+				if fix != nil {
+					descFixable++
+					needCmp = needCmp || cmpAdded
+				}
+			} else {
+				fix = ps3105Fix(pass, f, call, x)
+				if fix != nil {
+					ascFixable++
+				}
 			}
-			tn, ok := pass.TypesInfo.Uses[isel.Sel].(*types.TypeName)
-			if !ok || tn.Pkg() == nil || tn.Pkg().Path() != "sort" {
-				return true
-			}
-			if _, wanted := ps3105Targets[tn.Name()]; !wanted {
-				return true
-			}
-			if tv, has := pass.TypesInfo.Types[inner.Fun]; !has || !tv.IsType() {
-				return true
-			}
-			// The conversion operand must be a typed value assignable to
-			// the plain []int/[]string that slices.Sort will receive. An
-			// untyped nil is excluded: sort.Sort(sort.IntSlice(nil)) is
-			// legal, but slices.Sort(nil) cannot infer its type parameters
-			// and would not compile.
-			x := inner.Args[0]
-			xt := pass.TypesInfo.TypeOf(x)
-			if xt == nil {
-				return true
-			}
-			if b, isBasic := xt.(*types.Basic); isBasic && b.Info()&types.IsUntyped != 0 {
-				return true
-			}
-			if !types.AssignableTo(xt, ps3105SliceTypes[tn.Name()]) {
-				return true
-			}
-			fix := ps3105Fix(pass, f, call, x)
-			if fix != nil {
-				fixable++
-			}
-			sites = append(sites, site{call, fn.Name(), tn.Name(), fix})
+			sites = append(sites, site{call, fn.Name(), name, desc, fix})
 			return true
 		})
 		if len(sites) == 0 {
 			continue
 		}
-		// Each fixable call holds exactly TWO sort references — the
-		// sort.Sort selector's package identifier and the inner
-		// sort.IntSlice/StringSlice conversion's — so the rewrites orphan
-		// the import only when the file's sort reference count is exactly
-		// twice the fixable-site count (the operand kept verbatim can
-		// itself mention sort, in which case the count is higher and the
-		// import stays). The slices import is needed when the FILE lacks
-		// one — a site-local shadow only suppresses that site's fix, never
-		// the file's import edit.
+		// Each fixable ascending call holds exactly TWO sort references —
+		// the sort.Sort selector's package identifier and the inner
+		// sort.IntSlice/StringSlice conversion's — and each fixable
+		// descending call THREE (those two plus sort.Reverse), so the
+		// rewrites orphan the import only when the file's sort reference
+		// count equals exactly the sum consumed across all fixable sites
+		// (the operand kept verbatim can itself mention sort, in which
+		// case the count is higher and the import stays). The slices
+		// import is needed when the FILE lacks one — a site-local shadow
+		// only suppresses that site's fix, never the file's import edit —
+		// and the cmp import when a descending fix resolved it as missing.
+		fixable := ascFixable + descFixable
 		slicesImported := false
 		for _, imp := range f.Imports {
 			if imp.Path.Value == `"slices"` {
@@ -253,8 +298,9 @@ func runPS3105(pass *analysis.Pass) (any, error) {
 			}
 		}
 		needImport := fixable > 0 && !slicesImported
-		orphansSort := fixable > 0 && pkgRefCount(pass, f, "sort") == 2*fixable
-		importEdits, importsOK := ps3104ImportEdits(f, needImport, orphansSort)
+		consumed := 2*ascFixable + 3*descFixable
+		orphansSort := fixable > 0 && pkgRefCount(pass, f, "sort") == consumed
+		importEdits, importsOK := ps3105ImportEdits(f, needImport, needCmp, orphansSort)
 		if !importsOK {
 			// cgo file needing import surgery, or a sort spec we could not
 			// locate: keep every report advisory.
@@ -274,10 +320,14 @@ func runPS3105(pass *analysis.Pass) (any, error) {
 		}
 		for _, st := range sites {
 			elem := ps3105Targets[st.name]
+			msg := "sort." + st.outer + "(sort." + st.name + "(...)) sorts through the sort.Interface adapter (an interface dispatch per comparison and swap); slices.Sort sorts the concrete " + elem + " directly with the identical ascending order"
+			if st.desc {
+				msg = "sort." + st.outer + "(sort.Reverse(sort." + st.name + "(...))) sorts descending through the sort.Interface adapter (an interface dispatch per comparison and swap); slices.SortFunc with cmp.Compare(b, a) sorts the concrete " + elem + " directly with the identical descending order"
+			}
 			diag := analysis.Diagnostic{
 				Pos:     st.call.Pos(),
 				End:     st.call.End(),
-				Message: "sort." + st.outer + "(sort." + st.name + "(...)) sorts through the sort.Interface adapter (an interface dispatch per comparison and swap); slices.Sort sorts the concrete " + elem + " directly with the identical ascending order",
+				Message: msg,
 			}
 			if st.fix != nil {
 				diag.SuggestedFixes = []analysis.SuggestedFix{*st.fix}
@@ -313,4 +363,113 @@ func ps3105Fix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, x ast.Expr)
 			{Pos: x.End(), End: call.End(), NewText: []byte(")")},
 		},
 	}
+}
+
+// ps3105Adapter matches a fresh CONVERSION to sort.IntSlice or
+// sort.StringSlice — a CallExpr whose Fun denotes the named type, resolved
+// through type info — and returns the adapter name plus the conversion
+// operand. A pre-built value of those types is not matched: only the
+// conversion form hands us the underlying []int/[]string operand to keep
+// verbatim. The allowlist keeps sort.Float64Slice (NaN ordering, float
+// ties) and every custom sort.Interface implementation out. The operand
+// must be a typed value assignable to the plain []int/[]string that
+// slices.Sort / slices.SortFunc will receive; an untyped nil is excluded —
+// sort.Sort(sort.IntSlice(nil)) is legal, but slices.Sort(nil) cannot
+// infer its type parameters and would not compile.
+func ps3105Adapter(pass *analysis.Pass, arg ast.Expr) (name string, x ast.Expr, ok bool) {
+	inner, isCall := arg.(*ast.CallExpr)
+	if !isCall || len(inner.Args) != 1 || inner.Ellipsis.IsValid() {
+		return "", nil, false
+	}
+	isel, isSel := ps2110Unparen(inner.Fun).(*ast.SelectorExpr)
+	if !isSel {
+		return "", nil, false
+	}
+	tn, isType := pass.TypesInfo.Uses[isel.Sel].(*types.TypeName)
+	if !isType || tn.Pkg() == nil || tn.Pkg().Path() != "sort" {
+		return "", nil, false
+	}
+	if _, wanted := ps3105Targets[tn.Name()]; !wanted {
+		return "", nil, false
+	}
+	if tv, has := pass.TypesInfo.Types[inner.Fun]; !has || !tv.IsType() {
+		return "", nil, false
+	}
+	x = inner.Args[0]
+	xt := pass.TypesInfo.TypeOf(x)
+	if xt == nil {
+		return "", nil, false
+	}
+	if b, isBasic := xt.(*types.Basic); isBasic && b.Info()&types.IsUntyped != 0 {
+		return "", nil, false
+	}
+	if !types.AssignableTo(xt, ps3105SliceTypes[tn.Name()]) {
+		return "", nil, false
+	}
+	return tn.Name(), x, true
+}
+
+// ps3105ReverseFix builds the descending rewrite for one
+// sort.Sort(sort.Reverse(sort.IntSlice(x))) call:
+//
+//	slices.SortFunc(x, func(a, b ELEM) int { return cmp.Compare(b, a) })
+//
+// or nil when a guard fails and the report must stay advisory. The operand
+// expression stays untouched in place — only the punctuation and wrappers
+// around it are replaced — preserving its text and single evaluation (same
+// technique as the ascending ps3105Fix). cmpAdded reports that the fix
+// spelled cmp as a NEW import the file must add (an existing import alias
+// is reused instead when present); the import edit itself is appended
+// later, once per file. A dot- or blank-imported or shadowed cmp (or
+// slices) yields nil.
+func ps3105ReverseFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, x ast.Expr, elem string) (fix *analysis.SuggestedFix, cmpAdded bool) {
+	slicesName, _, usable := ps3104SlicesName(pass, f, call.Pos())
+	if !usable {
+		return nil, false
+	}
+	cmpName, cmpNeedImport, cmpUsable := ps3002CmpName(pass, f, call.Pos())
+	if !cmpUsable {
+		return nil, false
+	}
+	// The replaced spans are the call text around the operand — the outer
+	// sort.Sort(sort.Reverse(sort.IntSlice( on the left, the ))) on the
+	// right; a comment there would be silently destroyed — advisory then.
+	if ps2111CommentIn(f, call.Pos(), x.Pos()) || ps2111CommentIn(f, x.End(), call.End()) {
+		return nil, false
+	}
+	return &analysis.SuggestedFix{
+		Message: "replace with " + slicesName + ".SortFunc(..., " + cmpName + ".Compare(b, a))",
+		TextEdits: []analysis.TextEdit{
+			{Pos: call.Pos(), End: x.Pos(), NewText: []byte(slicesName + ".SortFunc(")},
+			{Pos: x.End(), End: call.End(), NewText: []byte(", func(a, b " + elem + ") int { return " + cmpName + ".Compare(b, a) })")},
+		},
+	}, cmpNeedImport
+}
+
+// ps3105ImportEdits composes the file's combined import edits: the
+// slices-add/sort-drop pair PS3104's helper already builds, plus the cmp
+// import a descending fix needs. When the cmp insertion lands at the very
+// position of a zero-width slices insertion (e.g. both belong before the
+// same spec), the two are merged into ONE edit — cmp first, then slices,
+// which is their gofmt order — so the applied fix never depends on how
+// same-position edits happen to be ordered. ok is false when the import
+// block must not or cannot be edited (cgo file, missing sort spec).
+func ps3105ImportEdits(f *ast.File, needSlices, needCmp, dropSort bool) (edits []analysis.TextEdit, ok bool) {
+	edits, ok = ps3104ImportEdits(f, needSlices, dropSort)
+	if !ok || !needCmp {
+		return edits, ok
+	}
+	if ps2110ImportsC(f) {
+		// ps3104ImportEdits only vetoes cgo when it has edits of its own;
+		// a cmp-only addition must respect the same rule.
+		return nil, false
+	}
+	cmpEdit := ps2110ImportEdit(f, "cmp")
+	for i := range edits {
+		if edits[i].Pos == cmpEdit.Pos && edits[i].End == edits[i].Pos && cmpEdit.End == cmpEdit.Pos {
+			edits[i].NewText = slices.Concat(cmpEdit.NewText, edits[i].NewText)
+			return edits, true
+		}
+	}
+	return append([]analysis.TextEdit{cmpEdit}, edits...), true
 }
