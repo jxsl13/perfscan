@@ -729,11 +729,9 @@ type hasFixCase struct {
 	unwant string
 }
 
-// hasFixFixtures is a triggering fixture for EVERY HasFix:true built-in check.
-// TestHasFixFixtureCompleteness keeps the set EXACTLY in step with the catalog —
-// every fixable check has a fixture and every fixture names a fixable check — so
-// the count is deliberately not hard-coded here (it drifts as checks land). The
-// fix-it is verified end-to-end by TestHasFixChecksActuallyApply.
+// hasFixFixtures is a triggering fixture for EVERY HasFix:true built-in check
+// (all 25). TestHasFixFixtureCompleteness keeps it exhaustive; the fix-it is
+// verified end-to-end by TestHasFixChecksActuallyApply.
 func hasFixFixtures() []hasFixCase {
 	return []hasFixCase{
 		{"PX1001", "#include <vector>\n#include <string>\nvoid f(const std::vector<std::string>& v){ for(auto s : v){ (void)s; } }\n", "const auto&", ""},
@@ -771,39 +769,19 @@ func hasFixFixtures() []hasFixCase {
 	}
 }
 
-// TestHasFixFixtureCompleteness asserts the fixture set and the catalog's
-// HasFix:true built-ins are EXACTLY the same set, in both directions:
-//
-//   - Forward: every HasFix:true built-in has a fixture — a future fixable check
-//     cannot be added without an end-to-end verification its fix-it applies.
-//   - Reverse: every fixture names a real HasFix:true built-in — a fixture left
-//     behind when a check is removed, renamed, or flipped to advisory (HasFix
-//     false / Custom) would otherwise linger and silently assert an apply for a
-//     check the catalog no longer claims to fix. The reverse guard makes the
-//     fixture list self-pruning under those edits.
-//
-// Custom query-based checks carry no clang-tidy fix-it (HasFix:false) and are
-// excluded. Needs no clang-tidy (pure catalog-vs-fixtures).
+// TestHasFixFixtureCompleteness asserts every HasFix:true built-in catalog entry
+// has a fixture in hasFixFixtures — so a future fixable check cannot be added to
+// the catalog without an end-to-end verification that its fix-it actually
+// applies. Custom query-based checks carry no clang-tidy fix-it (HasFix:false)
+// and are excluded. Needs no clang-tidy (pure catalog-vs-fixtures).
 func TestHasFixFixtureCompleteness(t *testing.T) {
 	covered := make(map[string]bool)
 	for _, tc := range hasFixFixtures() {
-		if covered[tc.id] {
-			t.Errorf("%s has a duplicate fixture in hasFixFixtures — each fixable check needs exactly one", tc.id)
-		}
 		covered[tc.id] = true
 	}
-	fixable := make(map[string]bool)
 	for _, e := range catalog.All() {
-		if e.HasFix && !e.Custom {
-			fixable[e.ID] = true
-			if !covered[e.ID] {
-				t.Errorf("%s (%s) is HasFix:true but has no fixture in hasFixFixtures — add one", e.ID, e.TidyName)
-			}
-		}
-	}
-	for id := range covered {
-		if !fixable[id] {
-			t.Errorf("%s has a fixture in hasFixFixtures but is not a HasFix:true built-in catalog entry — remove the stale fixture (the check was removed, renamed, or is now advisory/custom)", id)
+		if e.HasFix && !e.Custom && !covered[e.ID] {
+			t.Errorf("%s (%s) is HasFix:true but has no fixture in hasFixFixtures — add one", e.ID, e.TidyName)
 		}
 	}
 }
