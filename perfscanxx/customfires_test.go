@@ -16,13 +16,14 @@ import (
 //
 //	PX2101 reserve-before-loop, PX2102 pessimizing-move, PX2103 catch-by-value,
 //	PX2104 regex-in-loop, PX2105 dynamic-cast-in-loop, PX2106 stringstream-in-loop,
-//	PX2107 pow-const-exponent.
+//	PX2107 pow-const-exponent, PX2108 vector-bool.
 const customTriggerSrc = `#include <vector>
 #include <regex>
 #include <sstream>
 #include <exception>
 #include <cmath>
 struct B { virtual ~B(){} }; struct D : B {};
+std::vector<bool> g_flags; // PX2108 (space-optimized bitfield, not a real container)
 std::vector<int> pessimizing() {
   std::vector<int> v;
   return std::move(v); // PX2102
@@ -323,6 +324,82 @@ func TestPX2102DoesNotFireOnParameterMove(t *testing.T) {
 	}
 	if strings.Contains(output, "moves.cpp:7:") {
 		t.Errorf("PX2102 must NOT fire on the by-value PARAMETER move at line 7 (NRVO does not apply to parameters):\n%s", output)
+	}
+}
+
+// px2108VectorBoolSrc pins PX2108's scope: std::vector<bool> is flagged at a
+// FIELD and a LOCAL declaration (the storage-choice sites), but NOT on a
+// std::vector<int> (a real container) and NOT on a by-value PARAMETER (a
+// pass-through whose storage choice lives at the caller's declaration site). The
+// query keys on the canonical std::vector<bool> specialization with
+// unless(parmVarDecl()).
+const px2108VectorBoolSrc = `#include <vector>
+struct Widget { std::vector<bool> flags; };   // field: PX2108 (line 2)
+void f() {
+  std::vector<bool> local;                     // local: PX2108 (line 4)
+  std::vector<int> ints;                        // real container: NOT flagged
+  (void)ints;
+}
+void byval(std::vector<bool> p);               // parameter: NOT flagged
+`
+
+// TestPX2108DoesNotFireOnNonBoolVectorOrParam pins that PX2108 fires on the
+// vector<bool> field and local (2 findings) and stays silent on vector<int> and
+// on the by-value vector<bool> parameter.
+func TestPX2108DoesNotFireOnNonBoolVectorOrParam(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	e, ok := catalog.ByID("PX2108")
+	if !ok || !e.Custom {
+		t.Fatal("PX2108 missing or not a custom check")
+	}
+	cfg := catalog.ClangTidyConfig([]catalog.Entry{e})
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".clang-tidy")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "vb.cpp")
+	if err := os.WriteFile(src, []byte(px2108VectorBoolSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--experimental-custom-checks", "--config-file=" + cfgPath, "--", "-std=c++17"}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+
+	if strings.Contains(output, "Unknown command line argument") && strings.Contains(output, "experimental-custom-checks") {
+		t.Skip("clang-tidy is too old for --experimental-custom-checks; skipping")
+	}
+	if strings.Contains(output, "[clang-tidy-config]") {
+		t.Fatalf("clang-tidy rejected the PX2108 query:\n%s", output)
+	}
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture; skipping:\n%s", output)
+	}
+
+	tag := "[" + e.TidyName + "]"
+	if n := strings.Count(output, tag); n != 2 {
+		t.Errorf("PX2108 fired %d time(s), want exactly 2 (the field and the local):\n%s", n, output)
+	}
+	if !strings.Contains(output, "vb.cpp:2:") {
+		t.Errorf("PX2108 must fire on the vector<bool> FIELD at line 2:\n%s", output)
+	}
+	if !strings.Contains(output, "vb.cpp:4:") {
+		t.Errorf("PX2108 must fire on the vector<bool> LOCAL at line 4:\n%s", output)
+	}
+	if strings.Contains(output, "vb.cpp:8:") {
+		t.Errorf("PX2108 must NOT fire on the by-value vector<bool> PARAMETER at line 8:\n%s", output)
 	}
 }
 

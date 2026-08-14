@@ -495,6 +495,30 @@ var entries = []Entry{
 			`hasArgument(1, ignoringImpCasts(anyOf(integerLiteral(unless(anyOf(equals(0), equals(1)))), floatLiteral())))).bind("pow")`,
 		Message: "std::pow with a constant exponent pays a full libm call; for a small integer power multiply directly (x*x, x*x*x) and for pow(x, 0.5) use std::sqrt(x) — mind that x*x evaluates the base twice, so hoist it first if it has side effects (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2108", TidyName: "custom-vector-bool",
+		Level: LevelAggressive, Category: "containers",
+		Title:  "std::vector<bool> is a space-optimized bitfield, not a real container — its proxy references and missing data() silently break generic code",
+		HasFix: false,
+		Custom: true,
+		Bind:   "vb",
+		// A variable or field (NOT a parameter — a by-value vector<bool> parameter is
+		// a pass-through whose storage choice belongs to the caller's declaration
+		// site, so flagging it too would double-report) whose canonical type is the
+		// std::vector<bool> specialization. hasCanonicalType sees through typedef
+		// aliases (`using Mask = std::vector<bool>;`). isExpansionInMainFile keeps it
+		// off the standard library's own internal <vector> instantiations. The C++
+		// analog is well known (Effective STL Item 18); clang-tidy ships no
+		// equivalent. L3/aggressive because the bit-packing is sometimes chosen
+		// deliberately (a memory-constrained bitset), so it must not surface below
+		// the aggressive tier. NO auto-fix, deliberately: the right replacement
+		// depends on intent — std::vector<char>/std::uint8_t for a real bool
+		// container, std::bitset or boost::dynamic_bitset for a deliberate bitfield.
+		Query: `match valueDecl(isExpansionInMainFile(), unless(parmVarDecl()), anyOf(varDecl(), fieldDecl()), ` +
+			`hasType(hasCanonicalType(recordType(hasDeclaration(classTemplateSpecializationDecl(hasName("::std::vector"), ` +
+			`hasTemplateArgument(0, refersToType(booleanType())))))))).bind("vb")`,
+		Message: "std::vector<bool> is a space-optimized bitfield, not a real container: operator[] returns a proxy object (not bool&), it has no data() and does not model Container, so it silently breaks generic code and pessimizes element access (query-based, no auto-fix)",
+	},
 }
 
 // Deliberately NOT in the catalog (do not re-add on a future audit):
