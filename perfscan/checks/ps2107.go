@@ -37,6 +37,7 @@ direct conversion for each such shape:
                         -> strconv.FormatFloat(float64(f), 'g', -1, 32) (f is float32)
   fmt.Sprintf("%b", i)  -> strconv.FormatInt/FormatUint(i, 2)  (base 2)
   fmt.Sprintf("%o", i)  -> strconv.FormatInt/FormatUint(i, 8)  (base 8)
+  fmt.Sprintf("%x", i)  -> strconv.FormatInt/FormatUint(i, 16) (base 16; i an integer)
   fmt.Sprintf("%q", s)  -> strconv.Quote(s)                    (s is a string)
   fmt.Sprintf("%q", r)  -> strconv.QuoteRune(r)                (r is a rune)
   fmt.Sprintf("%c", r)  -> string(r)                           (r is a rune)
@@ -337,28 +338,55 @@ func ps2107Classify(pass *analysis.Pass, verb string, arg ast.Expr) *ps2107Case 
 		c.replName = "string(rune)"
 		return c
 	case "%x":
-		// Only byte slices: %x over strings or integers is out of scope.
-		uSl, uIsSlice := t.Underlying().(*types.Slice)
-		if !uIsSlice {
+		// Byte slices go to hex.EncodeToString; integers go to
+		// strconv.FormatInt/FormatUint with base 16. %x over strings (and
+		// floats, whose %x is hexadecimal floating point) is out of scope.
+		// Only the BARE lowercase %x reaches here — the switch match is
+		// case-sensitive, so %X (uppercase digits) never does, and a flagged
+		// form like %#x (0x prefix) is not a bare verb.
+		if uSl, uIsSlice := t.Underlying().(*types.Slice); uIsSlice {
+			// The element must be the predeclared byte itself — a named byte
+			// element would make the slice unassignable to hex's []byte.
+			eb, ok := uSl.Elem().(*types.Basic)
+			if !ok || eb.Kind() != types.Byte {
+				return nil
+			}
+			c := &ps2107Case{msg: "fmt.Sprintf of a single %x []byte value" + boxes + "hex.EncodeToString converts it directly"}
+			if _, unnamed := t.(*types.Slice); !unnamed {
+				return c
+			}
+			argText, ok := ps2107ExprText(arg)
+			if !ok {
+				return c
+			}
+			c.repl = "hex.EncodeToString(" + argText + ")"
+			c.replName = "hex.EncodeToString"
+			c.pkgName, c.pkgPath = "hex", "encoding/hex"
+			return c
+		}
+		// Integer path: mirrors the %b/%o arm with base 16. Bit-identical:
+		// %x on a negative signed integer prints the '-' then the hex
+		// magnitude ("-ff"), exactly what FormatInt produces (verified
+		// across 0/±1/±255/MinInt64/MaxInt64/MaxUint64).
+		if !underBasic || under.Info()&types.IsInteger == 0 {
 			return nil
 		}
-		// The element must be the predeclared byte itself — a named byte
-		// element would make the slice unassignable to hex's []byte.
-		eb, ok := uSl.Elem().(*types.Basic)
-		if !ok || eb.Kind() != types.Byte {
-			return nil
-		}
-		c := &ps2107Case{msg: "fmt.Sprintf of a single %x []byte value" + boxes + "hex.EncodeToString converts it directly"}
-		if _, unnamed := t.(*types.Slice); !unnamed {
+		c := &ps2107Case{msg: "fmt.Sprintf of a single %x integer value" + boxes + "strconv.FormatInt/FormatUint with base 16 (hexadecimal) converts it directly"}
+		if !tIsBasic {
 			return c
 		}
 		argText, ok := ps2107ExprText(arg)
 		if !ok {
 			return c
 		}
-		c.repl = "hex.EncodeToString(" + argText + ")"
-		c.replName = "hex.EncodeToString"
-		c.pkgName, c.pkgPath = "hex", "encoding/hex"
+		if basic.Info()&types.IsUnsigned != 0 {
+			c.repl = "strconv.FormatUint(uint64(" + argText + "), 16)"
+			c.replName = "strconv.FormatUint"
+		} else {
+			c.repl = "strconv.FormatInt(int64(" + argText + "), 16)"
+			c.replName = "strconv.FormatInt"
+		}
+		c.pkgName, c.pkgPath = "strconv", "strconv"
 		return c
 		// NOTE: %s over a string is an IDENTITY (fmt.Sprintf("%s", s) -> s), not
 		// a conversion like the cases above; it is owned by PS2130 (which also
