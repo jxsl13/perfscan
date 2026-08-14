@@ -106,6 +106,7 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		buildDir   = fs.String("p", "", "build directory containing compile_commands.json (default: found by walking up from the cwd)")
 		jobs       = fs.Int("j", 0, "parallel clang-tidy workers for the analysis pass (0 = one per CPU; 1 = sequential). Ignored for an in-place -fix, which always runs as a single pass")
 		timeout    = fs.Duration("timeout", 0, "abort the whole run if it exceeds this duration (e.g. 90s, 5m); 0 = no limit. A CI safety valve — clang-tidy can run very long on a pathological TU, and a hung worker would otherwise block a -j run indefinitely")
+		changed    = fs.String("changed", "", "scan only the translation units that changed vs the given git ref (e.g. origin/main, HEAD~1) — a best-effort CI speedup that pairs with -j. Changed HEADERS are reported but the TUs including them are NOT scanned, so run a periodic full scan; a git failure falls back to a full scan")
 		tidyBin    = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
 		configPath = fs.String("config", "", "path to a .perfscanxx.yml supplying project defaults (level, checks, exclude, tidy, extra-args, baseline, fix-errors, jobs, timeout; auto-discovered in the current directory); command-line flags override it")
 		showVer    = fs.Bool("version", false, "print version and exit")
@@ -334,6 +335,26 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		if len(files) == 0 {
 			fmt.Fprintf(stderr, "perfscanxx: all matched translation units were removed by -exclude %v\n", excludes)
 			return 2
+		}
+	}
+
+	// -changed: narrow to the TUs that differ from a git ref (incremental CI). A
+	// git failure is non-fatal — fall back to the full list so a hiccup never turns
+	// a lint into a no-op or an error.
+	if *changed != "" {
+		kept, headers, cerr := changedTUsFilter(ctx, *changed, files)
+		if cerr != nil {
+			fmt.Fprintf(stderr, "perfscanxx: -changed: %v — scanning all translation units instead\n", cerr)
+		} else {
+			if len(headers) > 0 {
+				fmt.Fprintf(stderr, "perfscanxx: -changed: %d changed header(s) — the TUs that include them are NOT scanned here; run a periodic full scan to catch header-driven regressions\n", len(headers))
+			}
+			files = kept
+			if len(files) == 0 {
+				fmt.Fprintf(stderr, "perfscanxx: -changed: no changed translation units vs %s — nothing to scan\n", *changed)
+				return 0
+			}
+			fmt.Fprintf(stderr, "perfscanxx: -changed: scanning %d translation unit(s) changed vs %s\n", len(files), *changed)
 		}
 	}
 
@@ -697,6 +718,73 @@ func summarizeParseErrors(stderr io.Writer, parseErrs []report.Finding, verbose,
 	if missing := countMissingHeaderErrors(parseErrs); missing > 0 && !cmakeBuild {
 		fmt.Fprintln(stderr, "perfscanxx: some reference headers generated at build time — re-run with -cmake-build to generate them.")
 	}
+}
+
+// changedTUsFilter narrows tus (absolute paths) to those that differ from the git
+// ref, and returns the changed C/C++ HEADERS (which are not TUs themselves; the
+// TUs that include them are NOT scanned by -changed, so the caller warns). It runs
+// `git diff --name-only <ref>` from the repository root; a git failure returns an
+// error so the caller can fall back to a full scan.
+func changedTUsFilter(ctx context.Context, ref string, tus []string) (kept, headers []string, err error) {
+	root, err := gitOutput(ctx, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil, nil, fmt.Errorf("git rev-parse --show-toplevel failed (not a git repo?): %w", err)
+	}
+	root = strings.TrimSpace(root)
+	out, err := gitOutput(ctx, "diff", "--name-only", ref)
+	if err != nil {
+		return nil, nil, fmt.Errorf("git diff --name-only %s failed: %w", ref, err)
+	}
+	// git rev-parse resolves symlinks (macOS /var -> /private/var), the compile
+	// database's paths may not — normalize BOTH sides through EvalSymlinks so the
+	// intersection is not silently empty. EvalSymlinks needs the file to exist
+	// (changed files are in the working tree, TUs are on disk); on failure (a
+	// deleted path) fall back to Clean.
+	norm := func(p string) string {
+		if r, e := filepath.EvalSymlinks(p); e == nil {
+			return r
+		}
+		return filepath.Clean(p)
+	}
+	changed := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			changed[norm(filepath.Join(root, line))] = true
+		}
+	}
+	tuSet := make(map[string]bool, len(tus))
+	for _, t := range tus {
+		tuSet[norm(t)] = true
+	}
+	for _, t := range tus {
+		if changed[norm(t)] {
+			kept = append(kept, t)
+		}
+	}
+	for c := range changed {
+		if !tuSet[c] && isHeaderPath(c) {
+			headers = append(headers, c)
+		}
+	}
+	sort.Strings(kept)
+	sort.Strings(headers)
+	return kept, headers, nil
+}
+
+// gitOutput runs a git subcommand and returns its stdout (a variable so tests can
+// drive the -changed flow without a real repository).
+var gitOutput = func(ctx context.Context, args ...string) (string, error) {
+	out, err := exec.CommandContext(ctx, "git", args...).Output()
+	return string(out), err
+}
+
+// isHeaderPath reports whether p has a C/C++ header extension.
+func isHeaderPath(p string) bool {
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".h", ".hpp", ".hh", ".hxx", ".inl", ".ipp", ".tcc":
+		return true
+	}
+	return false
 }
 
 // expandInputs turns the positional args into the concrete translation units

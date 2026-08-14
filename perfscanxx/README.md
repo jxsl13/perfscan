@@ -35,6 +35,7 @@ export PERFSCANXX_CLANG_TIDY="$(brew --prefix llvm)/bin/clang-tidy"
 ```bash
 perfscanxx -p build ./...             # analyse the whole project (like `perfscan ./...`)
 perfscanxx -j 8 -p build ./...        # analyse with 8 parallel clang-tidy workers (default: one per CPU; -j 1 = sequential)
+perfscanxx -changed origin/main -p build ./...  # incremental: only the TUs changed vs a git ref (pairs with -j; changed headers warn)
 perfscanxx -timeout 5m -p build ./... # abort if the whole run exceeds 5m (CI safety valve; 0 = no limit)
 perfscanxx -p build ./src/game/...    # just a subtree
 perfscanxx -checks PX1* -p build ./... # only copy checks
@@ -73,6 +74,13 @@ sorted, so the output is byte-identical to a sequential (`-j 1`) run regardless 
 worker count. An in-place `-fix` always runs as a single pass — parallel workers
 rewriting a shared header could race — so `-j` is ignored there; use `-j` for the
 reporting / `-json` / `-sarif` / `-diff` / `-baseline` runs that dominate CI.
+
+`-changed <ref>` scans only the translation units that differ from a git ref (e.g.
+`origin/main` for a PR) — an incremental CI speedup that pairs with `-j`. It is
+**best-effort**: a changed **header** is reported, but the TUs that include it are
+*not* scanned (perfscanxx has no include-dependency graph), so schedule a periodic
+full scan to catch header-driven regressions. A git failure falls back to a full
+scan, so a hiccup never turns the lint into a no-op.
 
 ### Exit codes
 
