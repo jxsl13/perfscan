@@ -285,9 +285,14 @@ func ps3077MathRefs(info *types.Info, f *ast.File) int {
 			return true
 		}
 		id, ok := sel.X.(*ast.Ident)
-		if !ok || id.Name != "math" {
+		if !ok {
 			return true
 		}
+		// Match the math package by import PATH, not the literal qualifier
+		// spelling — mirroring astutil.PkgFuncCall so an ALIASED `import m "math"`
+		// ref is counted. Otherwise an aliased file counts zero math refs, the
+		// would-orphan guard always trips, and the fix is withheld even when the
+		// import plainly survives the rewrite.
 		if pn, ok := info.Uses[id].(*types.PkgName); ok && pn.Imported().Path() == "math" {
 			n++
 		}
