@@ -40,12 +40,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"text/tabwriter"
 
 	baselinepkg "github.com/jxsl13/perfscan/perfscanxx/internal/baseline"
@@ -75,6 +77,16 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	// A signal-cancellable context so Ctrl-C / SIGTERM kills the clang-tidy and
+	// cmake child processes (via exec.CommandContext) instead of orphaning them —
+	// important now that -j spawns a worker per CPU. Split from runContext so tests
+	// can drive a run with an injected (e.g. already-cancelled) context.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runContext(ctx, args, stdout, stderr)
+}
+
+func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("perfscanxx", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
@@ -119,7 +131,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		case err != nil:
 			fmt.Fprintln(stdout, "clang-tidy: not found in PATH (install: brew install llvm)")
 		default:
-			if major, ok := tidy.MajorVersion(context.Background(), *tidyBin); ok {
+			if major, ok := tidy.MajorVersion(ctx, *tidyBin); ok {
 				fmt.Fprintf(stdout, "clang-tidy: %s (LLVM %d)\n", path, major)
 			} else {
 				fmt.Fprintf(stdout, "clang-tidy: %s (version unknown)\n", path)
@@ -223,7 +235,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 				build := filepath.Join(src, "build")
 				if _, e := os.Stat(filepath.Join(build, compdb.Name)); e != nil {
 					fmt.Fprintf(stderr, "perfscanxx: no %s found — configuring CMake project at %s\n", compdb.Name, src)
-					if e := cmake.Configure(context.Background(), src, build); e != nil {
+					if e := cmake.Configure(ctx, src, build); e != nil {
 						fmt.Fprintln(stderr, "perfscanxx:", e)
 						if errors.Is(e, cmake.ErrNoDatabaseProduced) {
 							// The generator ignored the export flag; the tests/deps
@@ -247,7 +259,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 				}
 				if *cmakeBuild {
 					fmt.Fprintln(stderr, "perfscanxx: cmake --build (incremental) to generate headers…")
-					if e := cmake.Build(context.Background(), build); e != nil {
+					if e := cmake.Build(ctx, build); e != nil {
 						fmt.Fprintln(stderr, "perfscanxx: warning:", e)
 						fmt.Fprintln(stderr, "perfscanxx: continuing with the configured database; some TUs may not parse")
 					}
@@ -340,7 +352,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// unknown argument and the whole run fails, so degrade gracefully: drop the
 	// custom checks (the built-in catalog still runs) and say why once.
 	if catalog.AnyCustom(selected) {
-		if major, ok := tidy.MajorVersion(context.Background(), opts.Binary); ok && major < tidy.MinExperimentalMajor {
+		if major, ok := tidy.MajorVersion(ctx, opts.Binary); ok && major < tidy.MinExperimentalMajor {
 			selected = catalog.WithoutCustom(selected)
 			fmt.Fprintf(stderr, "perfscanxx: clang-tidy (LLVM %d) predates --experimental-custom-checks (need >= %d); skipping the query-based custom checks — the built-in checks still run. Upgrade LLVM to enable them.\n", major, tidy.MinExperimentalMajor)
 		}
@@ -357,7 +369,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		opts.ConfigFile = cfgPath
 		opts.Experimental = true
 	}
-	res, err := runReport(context.Background(), opts, *jobs)
+	res, err := runReport(ctx, opts, *jobs)
 	if err != nil {
 		fmt.Fprintln(stderr, "perfscanxx:", err)
 		return 2
@@ -382,7 +394,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		opts.ConfigFile = ""
 		opts.Experimental = false
 		fmt.Fprintf(stderr, "perfscanxx: clang-tidy rejected --experimental-custom-checks (its LLVM predates it); re-running with the built-in checks only — upgrade LLVM to >= %d to enable the query-based custom checks.\n", tidy.MinExperimentalMajor)
-		res, err = tidy.Run(context.Background(), opts)
+		res, err = tidy.Run(ctx, opts)
 		if err != nil {
 			fmt.Fprintln(stderr, "perfscanxx:", err)
 			return 2
@@ -449,7 +461,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		for i := range findings {
 			fired[findings[i].ID] = true
 		}
-		if err := applySequentialFixes(context.Background(), stderr, opts, selected, fired, *verbose); err != nil {
+		if err := applySequentialFixes(ctx, stderr, opts, selected, fired, *verbose); err != nil {
 			fmt.Fprintln(stderr, "perfscanxx:", err)
 			return 2
 		}
@@ -497,7 +509,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fixOpts := opts
 		fixOpts.Fix = true
 		runFix := func() error {
-			_, ferr := tidy.Run(context.Background(), fixOpts)
+			_, ferr := tidy.Run(ctx, fixOpts)
 			return ferr
 		}
 		diffs, snapshots, derr := diffpkg.Build(ef, catalog.Level(*maxLevel), runFix, diffpkg.OSFS{})

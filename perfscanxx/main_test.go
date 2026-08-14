@@ -1235,3 +1235,49 @@ func TestParallelReportRun(t *testing.T) {
 		}
 	})
 }
+
+// TestRunContextRespectsCancellation pins that the run's context reaches the
+// clang-tidy invocation: with an already-cancelled context (as Ctrl-C produces),
+// the analysis must abort with exit 2 — NOT report a clean run — and the
+// cancellation must be observed at the invocation (so exec.CommandContext would
+// kill the child rather than orphan it). The stub mimics exec.CommandContext,
+// which fails immediately on a cancelled context.
+func TestRunContextRespectsCancellation(t *testing.T) {
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "t.cpp")
+	if err := os.WriteFile(cpp, []byte("int x;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"clang++ -std=c++17 -c t.cpp"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+	var sawCancelled bool
+	tidy.Executor = func(ctx context.Context, argv []string, stdout, stderr *bytes.Buffer) (int, error) {
+		if err := ctx.Err(); err != nil { // mimic exec.CommandContext on a cancelled ctx
+			sawCancelled = true
+			return -1, err
+		}
+		if len(argv) >= 2 && argv[1] == "--version" {
+			stdout.WriteString("LLVM version 22.0.0\n")
+			return 0, nil
+		}
+		return 0, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled, as after Ctrl-C
+
+	var out, errBuf bytes.Buffer
+	code := runContext(ctx, []string{"-p", dir, cpp}, &out, &errBuf)
+	if code != 2 {
+		t.Fatalf("cancelled run: exit=%d, want 2 (must not report clean); stderr:\n%s", code, errBuf.String())
+	}
+	if !sawCancelled {
+		t.Error("the cancelled context never reached the clang-tidy invocation — child processes would be orphaned on Ctrl-C")
+	}
+}
