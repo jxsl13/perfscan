@@ -35,11 +35,18 @@ Only formats made of literal text and bare %s/%d/%v verbs are reported;
 width, precision, flags, and float/hex verbs genuinely need fmt.
 
 The automatic fix rewrites the call into a plain concatenation when the
-format is an interpreted ("...") literal splicing only %s/%v verbs and
-every spliced argument is a plain (unnamed) string — for those, %s and %v
-emit the argument verbatim, so the concatenation is bit-identical and no
-strconv import is needed. Formats with %d, other argument types, named
-string types, and raw-string formats stay advisory.`,
+format is an interpreted ("...") literal splicing only %s/%v verbs over
+plain (unnamed) strings — those emit the argument verbatim, so the
+concatenation is bit-identical — and/or %d verbs over plain (unnamed)
+integers, rendered as strconv.Itoa(x) for int,
+strconv.FormatInt(int64(x), 10) for the other signed widths, and
+strconv.FormatUint(uint64(x), 10) for the unsigned kinds. Unlike %v,
+%d never consults fmt.Stringer or fmt.Formatter — it always prints the
+plain decimal — so the strconv form is bit-identical. A %d rewrite adds
+the strconv import when missing (honoring an existing strconv alias).
+Other argument types (%d over a non-integer, %s over a named string),
+raw-string formats, a shadowed strconv name, and cgo files that would
+need an import edit stay advisory.`,
 		Before: `for _, u := range users {
 	keys = append(keys, fmt.Sprintf("%s:%d", u.Name, u.ID))
 }`,
@@ -71,6 +78,10 @@ func runPS2103(pass *analysis.Pass) (any, error) {
 		}
 		var sites []site
 		fixable := 0
+		// All fixes of a run are applied together, so only the first fix
+		// needing the strconv import carries the import edit (same
+		// convention as PS2107/PS2137).
+		importAdded := false
 		astutil.WithStack(f, func(n ast.Node, stack []ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok || len(call.Args) < 2 {
@@ -90,7 +101,7 @@ func runPS2103(pass *analysis.Pass) (any, error) {
 			if _, inLoop := astutil.InLoop(stack); !inLoop {
 				return true
 			}
-			fix := sprintfConcatFix(pass, stack, call, lit)
+			fix := sprintfConcatFix(pass, f, stack, call, lit, &importAdded)
 			if fix != nil {
 				fixable++
 			}
@@ -118,18 +129,30 @@ func runPS2103(pass *analysis.Pass) (any, error) {
 //
 //   - the format is an interpreted ("...") string literal — raw (backtick)
 //     literals would force re-escaping decisions;
-//   - the DECODED format consists only of literal text and bare %s/%v
+//   - the DECODED format consists only of literal text and bare %s/%v/%d
 //     verbs (splitStringVerbs re-derives this on the decoded text, so a
-//     "\x25d" smuggling a %d past the detection regex is rejected);
+//     "\x25x" smuggling a %x past the detection regex is rejected);
 //   - the verb count matches the argument count exactly;
-//   - every spliced argument is a plain (unnamed) basic string: %s and %v
+//   - every %s/%v argument is a plain (unnamed) basic string: %s and %v
 //     both emit such a value verbatim, and concatenating a named string
-//     type would change the type of the resulting expression.
+//     type would change the type of the resulting expression;
+//   - every %d argument is of an unnamed predeclared integer type,
+//     rendered through the shared strconvDecimalRepl (strconv.Itoa /
+//     FormatInt(int64(x), 10) / FormatUint(uint64(x), 10)). Unlike %v,
+//     %d never consults fmt.Stringer or fmt.Formatter — it always prints
+//     the plain decimal, so the strconv form is bit-identical for any
+//     integer; the unnamed-basic restriction just keeps the emitted
+//     expression compiling as-is (strconv.Itoa's parameter is exactly
+//     int) and mirrors PS2107/PS2137.
 //
-// Everything else — %d (which would need a strconv import), non-string or
-// named-string arguments, count mismatches — keeps the plain advisory
-// report with no fix.
-func sprintfConcatFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr, lit *ast.BasicLit) *analysis.SuggestedFix {
+// A %d rewrite needs the strconv import: ps2107PkgUsable resolves how to
+// reference it (reusing an existing import's name, e.g. an alias), and the
+// first fix of the file needing the import carries the ps2107ImportEdit.
+// Everything else — a %d argument that is not an unnamed integer, a
+// non-string or named-string %s/%v argument, count mismatches, a shadowed
+// strconv name, a cgo file (import "C") whose import block would need the
+// strconv insertion — keeps the plain advisory report with no fix.
+func sprintfConcatFix(pass *analysis.Pass, f *ast.File, stack []ast.Node, call *ast.CallExpr, lit *ast.BasicLit, importAdded *bool) *analysis.SuggestedFix {
 	if !strings.HasPrefix(lit.Value, `"`) {
 		return nil
 	}
@@ -137,15 +160,40 @@ func sprintfConcatFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr,
 	if err != nil {
 		return nil
 	}
-	segs, ok := splitStringVerbs(format)
-	if !ok || len(segs) < 2 || len(segs)-1 != len(call.Args)-1 {
+	segs, verbs, ok := splitStringVerbs(format)
+	if !ok || len(verbs) == 0 || len(verbs) != len(call.Args)-1 {
 		return nil
 	}
-	for _, arg := range call.Args[1:] {
+	// Per-argument type guards. basics[i] is non-nil exactly for the %d
+	// arguments and carries the integer type strconvDecimalRepl formats.
+	// types.Default materializes an untyped constant as its default type
+	// (an untyped int becomes int — Itoa territory); a named type never
+	// asserts to *types.Basic and bails.
+	basics := make([]*types.Basic, len(verbs))
+	needStrconv := false
+	for i, arg := range call.Args[1:] {
+		if verbs[i] == 'd' {
+			b, isBasic := types.Default(pass.TypesInfo.TypeOf(arg)).(*types.Basic)
+			if !isBasic || b.Info()&types.IsInteger == 0 {
+				return nil
+			}
+			basics[i] = b
+			needStrconv = true
+			continue
+		}
 		b, isBasic := pass.TypesInfo.TypeOf(arg).(*types.Basic)
 		if !isBasic || b.Info()&types.IsString == 0 {
 			return nil
 		}
+	}
+	strconvName := "strconv"
+	needImport := false
+	if needStrconv {
+		useName, need, usable := ps2107PkgUsable(pass, f, call.Pos(), "strconv", "strconv")
+		if !usable || (need && ps2107ImportsC(f)) {
+			return nil
+		}
+		strconvName, needImport = useName, need
 	}
 	// Literal segments become quoted strings, args slot between them in
 	// order; empty segments (leading, trailing, or between adjacent verbs)
@@ -164,26 +212,44 @@ func sprintfConcatFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr,
 			if err := printer.Fprint(&b, fset, call.Args[i+1]); err != nil {
 				return nil
 			}
-			tokens = append(tokens, b.String())
+			argText := b.String()
+			if basics[i] != nil {
+				dec, _ := strconvDecimalRepl(basics[i], argText)
+				// dec always begins with "strconv."; requalify that leading
+				// qualifier when the import is used under another name. Slice
+				// rather than strings.Replace so this per-argument loop stays
+				// allocation-free (and off perfscan's own PS2003).
+				if strconvName != "strconv" {
+					dec = strconvName + "." + dec[len("strconv."):]
+				}
+				argText = dec
+			}
+			tokens = append(tokens, argText)
 		}
 	}
 	repl := strings.Join(tokens, "+")
 	if len(tokens) > 1 && concatNeedsParens(stack, call) {
 		repl = "(" + repl + ")"
 	}
+	edits := []analysis.TextEdit{
+		{Pos: call.Pos(), End: call.End(), NewText: []byte(repl)},
+	}
+	if needImport && !*importAdded {
+		edits = append(edits, ps2107ImportEdit(f, "strconv"))
+		*importAdded = true
+	}
 	return &analysis.SuggestedFix{
-		Message: "replace fmt.Sprintf with string concatenation",
-		TextEdits: []analysis.TextEdit{
-			{Pos: call.Pos(), End: call.End(), NewText: []byte(repl)},
-		},
+		Message:   "replace fmt.Sprintf with string concatenation",
+		TextEdits: edits,
 	}
 }
 
-// splitStringVerbs splits a DECODED format string on its %s/%v verbs,
-// returning the literal segments around them (verb count = len(segs)-1).
-// Any other use of % — %d, %%, a trailing % — returns ok=false.
-func splitStringVerbs(format string) ([]string, bool) {
-	segs := make([]string, 0, len(format))
+// splitStringVerbs splits a DECODED format string on its %s/%v/%d verbs,
+// returning the literal segments around them and the verb letters in
+// order (len(segs) == len(verbs)+1). Any other use of % — %x, %%, a
+// width like %3d, a trailing % — returns ok=false.
+func splitStringVerbs(format string) (segs []string, verbs []byte, ok bool) {
+	segs = make([]string, 0, len(format))
 	var cur strings.Builder
 	cur.Grow(len(format))
 	for i := 0; i < len(format); i++ {
@@ -192,15 +258,16 @@ func splitStringVerbs(format string) ([]string, bool) {
 			cur.WriteByte(c)
 			continue
 		}
-		if i+1 >= len(format) || (format[i+1] != 's' && format[i+1] != 'v') {
-			return nil, false
+		if i+1 >= len(format) || (format[i+1] != 's' && format[i+1] != 'v' && format[i+1] != 'd') {
+			return nil, nil, false
 		}
 		segs = append(segs, cur.String())
 		cur.Reset()
+		verbs = append(verbs, format[i+1])
 		i++
 	}
 	segs = append(segs, cur.String())
-	return segs, true
+	return segs, verbs, true
 }
 
 // concatNeedsParens reports whether the call sits in a syntactic position
