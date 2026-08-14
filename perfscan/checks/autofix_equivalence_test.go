@@ -729,6 +729,67 @@ func TestEquiv_FprintfStringToWriteString(t *testing.T) {
 	}
 }
 
+// PS4101: for i := range src { dst[i] = src[i] } -> copy(dst, src). copy is a
+// memmove, so it is bit-identical to a forward element loop ONLY when the two
+// preconditions the check proves before firing both hold: (1) len(dst) >= len(src)
+// (no index-panic gap) and (2) dst cannot share src's backing array (no overlap).
+// This pins the guarded equivalence AND the two divergences that make those
+// guards mandatory.
+func TestEquiv_LoopCopy(t *testing.T) {
+	// Guarded case — distinct backing arrays, len(dst) >= len(src): identical.
+	for _, n := range []int{0, 1, 5} {
+		src := make([]int, n)
+		for i := range src {
+			src[i] = i + 1
+		}
+		dstLoop := make([]int, n+2)
+		dstCopy := make([]int, n+2)
+		//lint:ignore S1001 the forward copy-loop is the PS4101 "before" form; this pins it equals copy() in the guarded case
+		for i := range src {
+			dstLoop[i] = src[i]
+		}
+		copy(dstCopy, src)
+		if !slices.Equal(dstLoop, dstCopy) {
+			t.Errorf("n=%d: forward loop %v != copy %v", n, dstLoop, dstCopy)
+		}
+	}
+	// Divergence 1 — OVERLAP on one backing array (dst = a[1:], src = a[:3]):
+	// copy is memmove (a shift -> {1,1,2,3}); the forward loop propagates a[0]
+	// (a fill -> {1,1,1,1}). They differ, which is why the check excludes any
+	// shared backing.
+	aLoop := []int{1, 2, 3, 4}
+	aCopy := []int{1, 2, 3, 4}
+	dst, src := aLoop[1:], aLoop[:3]
+	//lint:ignore S1001 deliberately the overlapping forward loop the check must NOT rewrite to copy
+	for i := range src {
+		dst[i] = src[i]
+	}
+	copy(aCopy[1:], aCopy[:3])
+	if slices.Equal(aLoop, aCopy) {
+		t.Errorf("expected loop %v and copy %v to DIVERGE on overlapping slices — the no-overlap guard is required", aLoop, aCopy)
+	}
+	// Divergence 2 — SHORT dst (len(dst) < len(src)): copy truncates to len(dst);
+	// the forward loop indexes dst out of range and panics.
+	long := []int{1, 2, 3}
+	shortCopy := make([]int, 2)
+	if n := copy(shortCopy, long); n != 2 {
+		t.Errorf("copy short: n=%d, want 2 (copy truncates to len(dst))", n)
+	}
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("expected the forward loop to PANIC when len(dst) < len(src) — the length guard is required")
+			}
+		}()
+		shortLoop := make([]int, 2)
+		//lint:ignore S1001 the panic on the short-dst forward loop is the point
+		for i := range long {
+			shortLoop[i] = long[i] // panics at i == 2
+		}
+		_ = shortLoop
+	}()
+}
+
 // PS2125: len([]rune(s)) -> utf8.RuneCountInString(s); len([]byte(s)) -> len(s).
 // Invalid UTF-8 is included: []rune decodes each bad byte to U+FFFD and
 // RuneCountInString counts it identically, so the identity must still hold.
