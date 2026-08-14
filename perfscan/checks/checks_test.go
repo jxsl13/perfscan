@@ -291,6 +291,19 @@ func TestPS2140SilentWithoutVocabulary(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS2140.Analyzer, "ps2140silent")
 }
 
+func TestPS3090(t *testing.T) {
+	defer config.SetForTesting(config.Config{FanOutHelpers: []string{"parallelFor"}})()
+	analysistest.Run(t, analysistest.TestData(), PS3090.Analyzer, "ps3090")
+}
+
+func TestPS3090SilentWithoutVocabulary(t *testing.T) {
+	defer config.SetForTesting(config.Config{})()
+	// The fixture has a capturing closure passed to parallelFor; with no
+	// fanOutHelpers vocabulary the check must stay silent (no expectation
+	// comments, so any diagnostic fails the run).
+	analysistest.Run(t, analysistest.TestData(), PS3090.Analyzer, "ps3090silent")
+}
+
 func TestPS2001SilentWithoutVocabulary(t *testing.T) {
 	restore := config.SetForTesting(config.Config{})
 	defer restore()
