@@ -101,6 +101,7 @@ checks' fixes.
 | [PS5001](PS5001.md) | arith | L3 |  | a divide by a loop-invariant scalar on every element |
 | [PS5002](PS5002.md) | arith | L2 | yes | a nested loop accumulating a full symmetric matrix |
 | [PS5003](PS5003.md) | alloc | L1 | yes | Write([]byte{c}) copies one byte through a throwaway slice; WriteByte(c) appends it directly |
+| [PS5004](PS5004.md) | arith | L1 | yes | WriteString of a one-byte string runs the string-append machinery; WriteByte appends the byte directly |
 | [PS5008](PS5008.md) | arith | L1 | yes | math.Sin and math.Cos on the same argument (fusable to math.Sincos) |
 | [PS5009](PS5009.md) | arith | L2 |  | math.Pow with a small constant exponent |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |

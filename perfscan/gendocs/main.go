@@ -81,9 +81,9 @@ func renderCheckPage(c *lint.Check) string {
 	if c.NeedsConfig {
 		fmt.Fprintf(&b, "- Domain check: requires vocabulary `%s` in perfscan.yaml\n", strings.Join(c.Vocab, "`, `"))
 	}
-	b.WriteString("\n")
+	b.WriteByte('\n')
 	b.WriteString(strings.TrimSpace(c.Doc.Text))
-	b.WriteString("\n")
+	b.WriteByte('\n')
 	if c.Doc.Before != "" {
 		fmt.Fprintf(&b, "\n## Example\n\nBefore:\n\n```go\n%s\n```\n\nAfter:\n\n```go\n%s\n```\n", c.Doc.Before, c.Doc.After)
 	}
