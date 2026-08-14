@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -328,5 +330,106 @@ func TestDiffExcludeKeepsHeaderOutOfPreview(t *testing.T) {
 	outEx, _, _ := runCLI("-tidy", bin, "-diff", "-checks", "PX3013", "-exclude", "deps/", "-p", proj, proj)
 	if strings.Contains(outEx, "dep.h") {
 		t.Errorf("-diff -exclude deps/ still previewed the excluded header:\n%s", outEx)
+	}
+}
+
+// TestPX3004FixIsIdempotent pins convergence for the ⚠ noexcept-move-constructor
+// fix, which appends `noexcept` to a user move constructor and move-assignment.
+// A fix that re-inserted noexcept, or one that re-matched an already-noexcept
+// move op, would oscillate. After one pass both move ops are noexcept, which the
+// check no longer targets, so a second pass is a no-op. Headerless TU (no
+// sysroot); skipped when clang-tidy is unavailable.
+func TestPX3004FixIsIdempotent(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found; skipping PX3004 -fix idempotency test")
+	}
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "t.cpp")
+	src := "struct S {\n  int* p;\n  S(S&& o) { p = o.p; }\n  S& operator=(S&&) { return *this; }\n};\n"
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"clang++ -std=c++17 -c t.cpp"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fix := func() { runCLI("-tidy", bin, "-fix", "-checks", "PX3004", "-p", dir, cpp) }
+
+	fix()
+	after1, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(after1), "noexcept") != 2 {
+		t.Fatalf("first -fix did not mark both move ops noexcept; got:\n%s", after1)
+	}
+
+	fix()
+	after2, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after1) != string(after2) {
+		t.Errorf("second -fix changed the file — PX3004 not idempotent:\n--- after pass 1 ---\n%s\n--- after pass 2 ---\n%s", after1, after2)
+	}
+}
+
+// TestPX3007FixIsIdempotent pins convergence for the ⚠ pass-by-value fix — the
+// most involved of the ⚠ set: it rewrites a `const T&` parameter to by-value,
+// wraps the member init in std::move, AND injects `#include <utility>`. A partial
+// or re-firing rewrite (or a duplicated include) would oscillate a -fix CI loop.
+// After one pass the parameter is by-value with a std::move'd init, which the
+// check no longer targets, so a second pass is a no-op. The fixed code includes
+// <utility>, so a sysroot is passed on darwin; skipped when clang-tidy or the
+// sysroot is unavailable.
+func TestPX3007FixIsIdempotent(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found; skipping PX3007 -fix idempotency test")
+	}
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "t.cpp")
+	src := "#include <string>\nstruct S {\n  std::string s_;\n  S(const std::string& s) : s_(s) {}\n};\n"
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"clang++ -std=c++17 -c t.cpp"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Flags must precede the positional path arg (Go's flag parser stops at the
+	// first non-flag), so -extra-arg is added BEFORE cpp.
+	args := []string{"-tidy", bin, "-fix", "-checks", "PX3007", "-p", dir}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-extra-arg=-isysroot", "-extra-arg="+strings.TrimSpace(string(out)))
+	}
+	args = append(args, cpp)
+	fix := func() { runCLI(args...) }
+
+	fix()
+	after1, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1 := string(after1)
+	// By-value parameter, std::move'd init, and the injected include.
+	if strings.Contains(s1, "const std::string& s") || !strings.Contains(s1, "std::move(s)") || !strings.Contains(s1, "#include <utility>") {
+		t.Fatalf("first -fix did not apply PX3007 as expected; got:\n%s", s1)
+	}
+
+	fix()
+	after2, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s1 != string(after2) {
+		t.Errorf("second -fix changed the file — PX3007 not idempotent:\n--- after pass 1 ---\n%s\n--- after pass 2 ---\n%s", s1, string(after2))
 	}
 }
