@@ -282,6 +282,28 @@ func TestTextOffsetFallbackAndNoFix(t *testing.T) {
 	}
 }
 
+// TestTextMetaWithoutLevel pins the meta line for a LEVEL-LESS finding — a
+// pass-through clang-diagnostic-* (compile error/warning) has no catalog entry,
+// so Level == "". Text must then omit the level entirely, never emit a stray
+// space where it would go. The other Text tests all use catalog findings with a
+// level (PX1001 = L1), so the empty-level branch was untested; a regression that
+// unconditionally appended " " + f.Level would leave a trailing space before the
+// closing paren.
+func TestTextMetaWithoutLevel(t *testing.T) {
+	var buf bytes.Buffer
+	Text(&buf, []Finding{
+		// level-less, no fix
+		{File: "a.cpp", Line: 3, Col: 5, Message: "compile error", ID: "clang-diagnostic-error"},
+		// level-less, WITH a fix-it
+		{File: "b.cpp", Line: 1, Col: 1, Message: "m2", ID: "clang-diagnostic-warning", Fixes: 2},
+	})
+	want := "a.cpp:3:5: compile error (clang-diagnostic-error)\n" +
+		"b.cpp:1:1: m2 (clang-diagnostic-warning, fix available)\n"
+	if got := buf.String(); got != want {
+		t.Errorf("Text (level-less) =\n  %q\nwant\n  %q", got, want)
+	}
+}
+
 func TestLineColAndText(t *testing.T) {
 	origRead := ReadFile
 	defer func() { ReadFile = origRead }()
