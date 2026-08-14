@@ -53,6 +53,18 @@ var ReadFile = os.ReadFile
 // clang-diagnostic-* compile errors, since perfscanxx runs clang-tidy with
 // -checks=-*,<curated>) pass through ungated so a broken build is never
 // silent.
+// fixItCount is the total number of fix-it edits a diagnostic carries — the main
+// message's replacements PLUS any in its notes. clang-tidy --fix applies all of
+// them, so counting only the main message would under-report "fix available" (and
+// the -json/-list fix count) for a check that emits its fix-it in a note.
+func fixItCount(d fixes.Diagnostic) int {
+	n := len(d.DiagnosticMessage.Replacements)
+	for _, note := range d.Notes {
+		n += len(note.Replacements)
+	}
+	return n
+}
+
 func FromExport(ef *fixes.ExportFile, maxLevel catalog.Level) []Finding {
 	var out []Finding
 	// Deduplicate diagnostics that repeat across translation units. When
@@ -81,7 +93,7 @@ func FromExport(ef *fixes.ExportFile, maxLevel catalog.Level) []Finding {
 			Message:  d.DiagnosticMessage.Message,
 			File:     displayPath(abs),
 			Offset:   d.DiagnosticMessage.FileOffset,
-			Fixes:    len(d.DiagnosticMessage.Replacements),
+			Fixes:    fixItCount(d),
 		}
 		if e, ok := catalog.ByTidyName(d.DiagnosticName); ok {
 			if e.Level > maxLevel {

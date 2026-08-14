@@ -881,3 +881,39 @@ func TestFromExportStableOrderForColocatedChecks(t *testing.T) {
 		}
 	}
 }
+
+// TestFromExportCountsNoteFixIts pins that a fix-it emitted in a diagnostic NOTE
+// counts toward the finding's Fixes (fix-available) tally — clang-tidy --fix
+// applies note fix-its too, so counting only the main message would report "no
+// fix available" for a finding that -fix would nonetheless change.
+func TestFromExportCountsNoteFixIts(t *testing.T) {
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+	ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+
+	ef := &fixes.ExportFile{
+		MainSourceFile: "/s/x.cpp",
+		Diagnostics: []fixes.Diagnostic{{
+			DiagnosticName: "performance-for-range-copy", // PX1001
+			DiagnosticMessage: fixes.DiagnosticMessage{
+				Message: "m", FilePath: "/s/x.cpp", FileOffset: 0,
+				Replacements: []fixes.Replacement{{FilePath: "/s/x.cpp", Offset: 0, Length: 1, ReplacementText: "a"}},
+			},
+			Notes: []fixes.DiagnosticMessage{{
+				Message: "note fix", FilePath: "/s/x.cpp",
+				Replacements: []fixes.Replacement{
+					{FilePath: "/s/x.cpp", Offset: 5, Length: 0, ReplacementText: "b"},
+					{FilePath: "/s/x.cpp", Offset: 9, Length: 0, ReplacementText: "c"},
+				},
+			}},
+		}},
+	}
+	got := FromExport(ef, catalog.LevelAggressive)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got))
+	}
+	// 1 main-message replacement + 2 note replacements = 3.
+	if got[0].Fixes != 3 {
+		t.Errorf("Fixes = %d, want 3 (1 main + 2 note fix-its)", got[0].Fixes)
+	}
+}
