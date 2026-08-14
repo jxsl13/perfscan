@@ -207,6 +207,15 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	if len(o.Files) == 0 {
 		return nil, errors.New("tidy: no input files")
 	}
+	// With no config file, Argv builds --checks=-*,<Checks...>; an empty Checks
+	// list collapses to --checks=-*, which DISABLES every check. clang-tidy then
+	// runs to completion and reports nothing — indistinguishable from "clean".
+	// Empty Checks + no ConfigFile is never an intended request (Argv always
+	// prepends -*), so reject it explicitly rather than silently scan nothing —
+	// the same fail-loud philosophy as the no-input-files guard above.
+	if o.ConfigFile == "" && len(o.Checks) == 0 {
+		return nil, errors.New("tidy: no checks selected (would disable all checks and report nothing)")
+	}
 
 	export := o.ExportFixes
 	if export == "" {
