@@ -1513,3 +1513,59 @@ func TestTimeoutAbortsRun(t *testing.T) {
 		t.Errorf("expected the timeout message; stderr:\n%s", errOut)
 	}
 }
+
+// TestTimeoutCancelsParallelWorkers pins the -timeout x -j interaction that
+// TestTimeoutAbortsRun (single TU) does not reach: with several TUs and -j, the
+// deadline must cancel ALL parallel workers and let runReport's wg.Wait return —
+// a worker that ignored the context would deadlock the merge (and hang this test).
+// Asserts the run aborts (exit 2 + timeout message) and that more than one worker
+// actually entered analysis and observed the cancellation.
+func TestTimeoutCancelsParallelWorkers(t *testing.T) {
+	dir := t.TempDir()
+	var files, entries []string
+	for _, n := range []string{"a", "b", "c", "d", "e", "f"} {
+		p := filepath.Join(dir, n+".cpp")
+		if err := os.WriteFile(p, []byte("int x;\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, p)
+		entries = append(entries, `{"directory":"`+dir+`","file":"`+p+`","command":"clang++ -std=c++17 -c `+n+`.cpp"}`)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte("["+strings.Join(entries, ",")+"]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+	var mu sync.Mutex
+	var entered, cancelled int
+	tidy.Executor = func(ctx context.Context, argv []string, stdout, _ *bytes.Buffer) (int, error) {
+		if len(argv) >= 2 && argv[1] == "--version" {
+			stdout.WriteString("LLVM version 22.0.0\n")
+			return 0, nil
+		}
+		mu.Lock()
+		entered++
+		mu.Unlock()
+		<-ctx.Done() // every worker hangs until the deadline cancels it
+		mu.Lock()
+		cancelled++
+		mu.Unlock()
+		return -1, ctx.Err()
+	}
+
+	_, errOut, code := runCLI(append([]string{"-timeout", "30ms", "-j", "4", "-checks", "PX3008", "-p", dir}, files...)...)
+	if code != 2 || !strings.Contains(errOut, "exceeded -timeout") {
+		t.Fatalf("parallel timed-out run: code=%d, want 2 + timeout message; stderr:\n%s", code, errOut)
+	}
+	mu.Lock()
+	e, c := entered, cancelled
+	mu.Unlock()
+	if e < 2 {
+		t.Errorf("only %d worker(s) entered analysis; expected the -j split to run >= 2 in parallel", e)
+	}
+	if c != e {
+		t.Errorf("%d/%d workers observed cancellation — a worker ignoring the context would deadlock wg.Wait", c, e)
+	}
+}
