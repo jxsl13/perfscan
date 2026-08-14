@@ -323,9 +323,20 @@ func SARIF(w io.Writer, findings []Finding) error {
 	type sarifTool struct {
 		Driver sarifDriver `json:"driver"`
 	}
+	// GitHub Code Scanning uses run.automationDetails.id to categorize an
+	// analysis: the portion before the trailing "/" is the category. Without
+	// it, a repo that uploads perfscanxx's SARIF alongside another tool's (or
+	// a second perfscanxx run, e.g. a matrix build) on the same commit can have
+	// the two runs treated as the same analysis, so the later upload CLOBBERS
+	// the earlier one's results. A stable "perfscanxx/" category keeps our
+	// findings a distinct, non-overwriting analysis.
+	type sarifAutomationDetails struct {
+		ID string `json:"id"`
+	}
 	type sarifRun struct {
-		Tool    sarifTool     `json:"tool"`
-		Results []sarifResult `json:"results"`
+		Tool              sarifTool               `json:"tool"`
+		AutomationDetails *sarifAutomationDetails `json:"automationDetails,omitempty"`
+		Results           []sarifResult           `json:"results"`
 	}
 	type sarifLog struct {
 		Schema  string     `json:"$schema"`
@@ -401,8 +412,9 @@ func SARIF(w io.Writer, findings []Finding) error {
 		Schema:  "https://json.schemastore.org/sarif-2.1.0.json",
 		Version: "2.1.0",
 		Runs: []sarifRun{{
-			Tool:    sarifTool{Driver: sarifDriver{Name: "perfscanxx", InformationURI: "https://github.com/jxsl13/perfscan/perfscanxx", Version: ToolVersion, Rules: rules}},
-			Results: results,
+			Tool:              sarifTool{Driver: sarifDriver{Name: "perfscanxx", InformationURI: "https://github.com/jxsl13/perfscan/perfscanxx", Version: ToolVersion, Rules: rules}},
+			AutomationDetails: &sarifAutomationDetails{ID: "perfscanxx/"},
+			Results:           results,
 		}},
 	})
 }
