@@ -656,6 +656,42 @@ var entries = []Entry{
 			`hasArgument(0, cxxBindTemporaryExpr())).bind("mv")`,
 		Message: "std::move on a temporary here is redundant — a prvalue is already an rvalue — and turns it into an xvalue, defeating the copy elision that would construct the value in place (a pessimization in a return or initializer); drop the std::move (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2113", TidyName: "custom-map-absent-insert",
+		Level: LevelStructured, Category: "containers",
+		Title:  "a map key's ABSENCE is checked then the key is inserted — `if (m.find(k) == m.end()) m[k] = v` looks the key up twice (and default-constructs then assigns); `m.try_emplace(k, v)` does one lookup and constructs in place",
+		HasFix: false,
+		Custom: true,
+		Bind:   "ins",
+		// The absence-side sibling of PX2111. `if (m.find(k) == m.end()) m[k] = v`
+		// hashes/compares the key THREE times in the worst case: once for find(),
+		// then operator[] looks it up AGAIN and, on the miss the condition just
+		// proved, default-CONSTRUCTS the value before the assignment overwrites it.
+		// `m.try_emplace(k, v)` does a single lookup and constructs the value in
+		// place from v — no default-construct, no second hash. PRECISION mirrors
+		// PX2111: the map (varDecl "m") and key (valueDecl "key") must be the SAME
+		// declared variables in the `find(k) == m.end()` condition and the body's
+		// `m[k]`, via equalsBoundNode — so an existence-only `if (m.find(k) ==
+		// m.end()) return;` (no body access) and a different-key `m[k2] = v` are NOT
+		// flagged (both verified). PX2111 deliberately scoped OUT this `== m.end()`
+		// form (its body `[]` is an insert, not a redundant read); this check owns it.
+		// The two are disjoint: PX2111 matches the `!=`/count(presence) condition,
+		// this the `==`(absence) condition, so no double report. Only the canonical
+		// find()==end() absence form is matched; the `!m.count(k)` and C++20
+		// `!m.contains(k)` conditions are not yet matched. isExpansionInMainFile keeps
+		// it off library headers. clang-tidy ships no equivalent. NO auto-fix: the
+		// try_emplace rewrite restructures the if — a human call.
+		Query: `match ifStmt(isExpansionInMainFile(), ` +
+			`hasCondition(forEachDescendant(cxxOperatorCallExpr(hasOverloadedOperatorName("=="), ` +
+			`hasArgument(0, ignoringParenImpCasts(cxxMemberCallExpr(on(declRefExpr(to(varDecl().bind("m")))), ` +
+			`callee(cxxMethodDecl(hasName("find"))), hasArgument(0, ignoringParenImpCasts(declRefExpr(to(valueDecl().bind("key")))))))), ` +
+			`hasArgument(1, ignoringParenImpCasts(cxxMemberCallExpr(on(declRefExpr(to(varDecl(equalsBoundNode("m"))))), ` +
+			`callee(cxxMethodDecl(hasName("end"))))))))), ` +
+			`hasThen(forEachDescendant(cxxOperatorCallExpr(hasOverloadedOperatorName("[]"), ` +
+			`hasArgument(0, declRefExpr(to(varDecl(equalsBoundNode("m"))))), ` +
+			`hasArgument(1, ignoringParenImpCasts(declRefExpr(to(valueDecl(equalsBoundNode("key")))))))))).bind("ins")`,
+		Message: "the key's absence is checked with find() == end() then inserted via m[k] — two lookups of the same key (and a default-construct then assign on the miss); m.try_emplace(k, v) does a single lookup and constructs in place (query-based, no auto-fix)",
+	},
 }
 
 // Deliberately NOT in the catalog (do not re-add on a future audit):

@@ -17,7 +17,8 @@ import (
 //	PX2101 reserve-before-loop, PX2102 pessimizing-move, PX2103 catch-by-value,
 //	PX2104 regex-in-loop, PX2105 dynamic-cast-in-loop, PX2106 stringstream-in-loop,
 //	PX2107 pow-const-exponent, PX2108 vector-bool, PX2109 std-list,
-//	PX2110 count-for-existence, PX2111 map-double-lookup, PX2112 redundant-move-temporary.
+//	PX2110 count-for-existence, PX2111 map-double-lookup, PX2112 redundant-move-temporary,
+//	PX2113 map-absent-insert.
 const customTriggerSrc = `#include <vector>
 #include <regex>
 #include <sstream>
@@ -29,6 +30,7 @@ const customTriggerSrc = `#include <vector>
 #include <utility>
 struct B { virtual ~B(){} }; struct D : B {};
 int dbl(std::map<int,int>& m, int k) { if (m.count(k)) { return m[k]; } return 0; } // PX2111 (double lookup)
+void absIns(std::map<int,int>& m, int k, int v) { if (m.find(k) == m.end()) { m[k] = v; } } // PX2113 (absence-form double lookup)
 std::vector<int> makeVecPX2112();
 std::vector<int> retMoveTemp() { return std::move(makeVecPX2112()); } // PX2112 (move of a prvalue temporary)
 std::vector<bool> g_flags; // PX2108 (space-optimized bitfield, not a real container)
