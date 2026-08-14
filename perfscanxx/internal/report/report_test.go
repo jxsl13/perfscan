@@ -917,3 +917,48 @@ func TestFromExportCountsNoteFixIts(t *testing.T) {
 		t.Errorf("Fixes = %d, want 3 (1 main + 2 note fix-its)", got[0].Fixes)
 	}
 }
+
+// TestSARIFPartialFingerprintsAreLineIndependent pins that each SARIF result
+// carries a partialFingerprint that depends on the finding's (id, file, message)
+// but NOT its line — so GitHub Code Scanning tracks a finding across commits and
+// does not close+reopen it when unrelated lines shift above it. Two findings that
+// differ only in line share a fingerprint; a different message differs.
+func TestSARIFPartialFingerprintsAreLineIndependent(t *testing.T) {
+	fp := func(f Finding) string {
+		var buf bytes.Buffer
+		if err := SARIF(&buf, []Finding{f}); err != nil {
+			t.Fatal(err)
+		}
+		var log struct {
+			Runs []struct {
+				Results []struct {
+					PartialFingerprints map[string]string `json:"partialFingerprints"`
+				} `json:"results"`
+			} `json:"runs"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &log); err != nil {
+			t.Fatal(err)
+		}
+		got := log.Runs[0].Results[0].PartialFingerprints["perfscanxxIdentity/v1"]
+		if got == "" {
+			t.Fatalf("result carries no partialFingerprint: %s", buf.String())
+		}
+		return got
+	}
+	base := Finding{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 10, Col: 3}
+	shifted := base
+	shifted.Line, shifted.Col = 200, 7 // same finding, moved down
+	if fp(base) != fp(shifted) {
+		t.Error("partialFingerprint must be line-independent: same finding at different lines got different fingerprints")
+	}
+	diff := base
+	diff.Message = "a different message"
+	if fp(base) == fp(diff) {
+		t.Error("partialFingerprint must distinguish different messages")
+	}
+	otherFile := base
+	otherFile.File = "b.cpp"
+	if fp(base) == fp(otherFile) {
+		t.Error("partialFingerprint must distinguish different files")
+	}
+}

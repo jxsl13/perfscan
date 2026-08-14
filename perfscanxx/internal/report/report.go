@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"os"
 	"path/filepath"
@@ -235,6 +236,22 @@ func JSON(w io.Writer, findings []Finding) error {
 	return enc.Encode(findings)
 }
 
+// lineIndependentFingerprint hashes a finding's line-independent identity — its
+// check id, file and message, the same triple the baseline ratchet keys on —
+// into a compact stable hex value for SARIF partialFingerprints. GitHub Code
+// Scanning uses it to track a result across commits, so a finding is not closed
+// and reopened when unrelated lines shift above it (the line/column in the
+// physical location moves, but the fingerprint does not).
+func lineIndependentFingerprint(f Finding) string {
+	h := fnv.New64a()
+	io.WriteString(h, f.ID)
+	h.Write([]byte{0})
+	io.WriteString(h, f.File)
+	h.Write([]byte{0})
+	io.WriteString(h, f.Message)
+	return strconv.FormatUint(h.Sum64(), 16)
+}
+
 // SARIF renders findings as a minimal SARIF 2.1.0 log
 // (GitHub Code Scanning compatible).
 func SARIF(w io.Writer, findings []Finding) error {
@@ -275,6 +292,12 @@ func SARIF(w io.Writer, findings []Finding) error {
 		Level     string          `json:"level,omitempty"`
 		Message   sarifMessage    `json:"message"`
 		Locations []sarifLocation `json:"locations"`
+		// PartialFingerprints give GitHub Code Scanning a LINE-INDEPENDENT
+		// identity for the result, so a finding is tracked across commits and
+		// not closed+reopened when unrelated lines shift above it. The key is
+		// (id, file, message) — the same line-independent identity the baseline
+		// ratchet uses — hashed for a compact stable value.
+		PartialFingerprints map[string]string `json:"partialFingerprints,omitempty"`
 	}
 
 	// sarifLevel maps a catalog level to a SARIF result level for GitHub Code
@@ -356,6 +379,7 @@ func SARIF(w io.Writer, findings []Finding) error {
 					Region:           region,
 				},
 			}},
+			PartialFingerprints: map[string]string{"perfscanxxIdentity/v1": lineIndependentFingerprint(f)},
 		})
 	}
 
