@@ -692,6 +692,33 @@ var entries = []Entry{
 			`hasArgument(1, ignoringParenImpCasts(declRefExpr(to(valueDecl(equalsBoundNode("key")))))))))).bind("ins")`,
 		Message: "the key's absence is checked with find() == end() then inserted via m[k] — two lookups of the same key (and a default-construct then assign on the miss); m.try_emplace(k, v) does a single lookup and constructs in place (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2114", TidyName: "custom-substr-compare",
+		Level: LevelStructured, Category: "strings",
+		Title:  "comparing a std::string::substr() result allocates a whole temporary string just to compare a slice; compare()/starts_with() do it in place",
+		HasFix: false,
+		Custom: true,
+		Bind:   "sub",
+		// substr(pos, len) ALLOCATES a fresh std::string holding the slice, only to
+		// throw it away after the ==/!= — the classic `s.substr(0, n) == prefix`
+		// prefix test (the C++ analog of the Go linter's PS5105 strings.Index==0).
+		// std::string::compare(pos, len, str) compares the slice in place with no
+		// allocation, and C++20's s.starts_with(prefix) says the 0-offset case
+		// directly. The ==/!= on a std::string is an OVERLOADED operator, so the
+		// node is a cxxOperatorCallExpr (not a builtin binaryOperator), and the
+		// substr temporary reaches the operand through a MaterializeTemporary /
+		// CXXBindTemporary that only ignoringImplicit (not ignoringParenImpCasts)
+		// strips. on(...basic_string...) pins the call to a real std::string, so a
+		// user-defined T::substr is NOT flagged. isExpansionInMainFile keeps it off
+		// headers. clang-tidy ships no equivalent (abseil-string-find-startswith is
+		// abseil-specific and matches find()==0, not substr). NO auto-fix: choosing
+		// compare() vs starts_with() (and the C++ standard) is the author's call.
+		Query: `match cxxOperatorCallExpr(isExpansionInMainFile(), ` +
+			`hasAnyOverloadedOperatorName("==", "!="), ` +
+			`hasAnyArgument(ignoringImplicit(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("substr"))), ` +
+			`on(hasType(hasCanonicalType(hasDeclaration(cxxRecordDecl(hasName("::std::basic_string"))))))).bind("sub"))))`,
+		Message: "comparing a std::string::substr() result allocates a temporary string just to compare a slice; std::string::compare(pos, len, str) == 0 (or starts_with(prefix) for a 0-offset prefix, C++20) compares in place with no allocation (query-based, no auto-fix)",
+	},
 }
 
 // Deliberately NOT in the catalog (do not re-add on a future audit):
