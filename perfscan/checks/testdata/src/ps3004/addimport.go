@@ -1,0 +1,15 @@
+package ps3004
+
+import (
+	"bytes"
+)
+
+// strings is NOT imported here: the fixable site's fix also inserts the
+// strings import at its sorted position; the bytes.HasPrefix reference on
+// a real []byte keeps bytes alive, so only the addition is needed.
+func addImport(b []byte, s, sub string) bool {
+	if bytes.HasPrefix(b, []byte{0x2}) {
+		return false
+	}
+	return bytes.Contains([]byte(s), []byte(sub)) // want `bytes\.Contains\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.Contains\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}

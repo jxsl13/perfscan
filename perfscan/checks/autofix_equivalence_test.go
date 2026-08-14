@@ -3400,3 +3400,62 @@ func TestEquiv_PS2139WriteStringRune(t *testing.T) {
 type equivFailWriter struct{}
 
 func (equivFailWriter) Write(p []byte) (int, error) { return 0, errors.New("equivFailWriter: boom") }
+
+// PS3004: bytes.<pred>([]byte(s), []byte(sub)) -> strings.<pred>(s, sub) for
+// the read-only members whose strings twin has the identical shape. The fix
+// is bit-identical only if every listed predicate returns the same bool/int
+// over the same bytes — across empty strings, empty separators, invalid
+// UTF-8, NUL bytes, Unicode case-folding pairs (EqualFold's Kelvin sign and
+// ligatures) and needles at every position. string([]byte(x)) round-trips
+// byte-exactly (pinned by TestEquiv_StringByteRoundTrip), so the operands
+// seen by both sides are identical; this pins that the RESULTS are too.
+func TestEquiv_PS3004BytesPredToStrings(t *testing.T) {
+	inputs := []string{
+		"", "a", "abc", "aaa", "héllo\xffworld", "\xff", "\xff\xfe", "ABC",
+		"ﬀ", "ﬀ IS ff folded", "κόσμε", "K", "k", "K", "a\x00b", "\x00",
+		"prefix-mid-suffix", strings.Repeat("xy", 100) + "z",
+	}
+	subs := []string{
+		"", "a", "abc", "aa", "\xff", "héllo", "world", "b", "K", "k", "K",
+		"ﬀ", "FF", "ff", "ΚΌΣΜΕ", "xyx", "z", "\x00", "prefix", "suffix",
+		"missing", strings.Repeat("xy", 50),
+	}
+	for _, s := range inputs {
+		for _, sub := range subs {
+			bs, bsub := []byte(s), []byte(sub)
+			if got, want := strings.Contains(s, sub), bytes.Contains(bs, bsub); got != want {
+				t.Errorf("Contains(%q,%q): strings=%v bytes=%v", s, sub, got, want)
+			}
+			if got, want := strings.ContainsAny(s, sub), bytes.ContainsAny(bs, sub); got != want {
+				t.Errorf("ContainsAny(%q,%q): strings=%v bytes=%v", s, sub, got, want)
+			}
+			if got, want := strings.HasPrefix(s, sub), bytes.HasPrefix(bs, bsub); got != want {
+				t.Errorf("HasPrefix(%q,%q): strings=%v bytes=%v", s, sub, got, want)
+			}
+			if got, want := strings.HasSuffix(s, sub), bytes.HasSuffix(bs, bsub); got != want {
+				t.Errorf("HasSuffix(%q,%q): strings=%v bytes=%v", s, sub, got, want)
+			}
+			if got, want := strings.Index(s, sub), bytes.Index(bs, bsub); got != want {
+				t.Errorf("Index(%q,%q): strings=%d bytes=%d", s, sub, got, want)
+			}
+			if got, want := strings.IndexAny(s, sub), bytes.IndexAny(bs, sub); got != want {
+				t.Errorf("IndexAny(%q,%q): strings=%d bytes=%d", s, sub, got, want)
+			}
+			if got, want := strings.LastIndex(s, sub), bytes.LastIndex(bs, bsub); got != want {
+				t.Errorf("LastIndex(%q,%q): strings=%d bytes=%d", s, sub, got, want)
+			}
+			if got, want := strings.Count(s, sub), bytes.Count(bs, bsub); got != want {
+				t.Errorf("Count(%q,%q): strings=%d bytes=%d", s, sub, got, want)
+			}
+			if got, want := strings.EqualFold(s, sub), bytes.EqualFold(bs, bsub); got != want {
+				t.Errorf("EqualFold(%q,%q): strings=%v bytes=%v", s, sub, got, want)
+			}
+		}
+	}
+	// The named-type gate is load-bearing for COMPILABILITY, not results: a
+	// defined string type is a legal []byte-conversion operand but not a
+	// legal strings.* argument, so PS3004 must not fire there (fixture-pinned;
+	// nothing to run here). The []byte round-trip identity the fix leans on —
+	// string([]byte(s)) == s for every s, invalid UTF-8 included — is pinned
+	// by TestEquiv_StringByteRoundTrip.
+}

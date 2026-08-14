@@ -1,0 +1,135 @@
+package ps3004
+
+import (
+	"bytes"
+	"strings"
+)
+
+// bytes and strings both stay imported: these references keep the imports
+// alive after every fix in this file is applied.
+func keepAlive(b []byte, s string) bool {
+	return bytes.HasPrefix(b, []byte{0x1}) && strings.ToUpper(s) == s
+}
+
+func contains(s, sub string) bool {
+	return strings.Contains(s, sub) // want `bytes\.Contains\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.Contains\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+func hasPrefix(s, sub string) bool {
+	return strings.HasPrefix(s, sub) // want `bytes\.HasPrefix\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.HasPrefix\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+func hasSuffix(s, sub string) bool {
+	return strings.HasSuffix(s, sub) // want `bytes\.HasSuffix\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.HasSuffix\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+func index(s, sub string) int {
+	return strings.Index(s, sub) // want `bytes\.Index\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.Index\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+func lastIndex(s, sub string) int {
+	return strings.LastIndex(s, sub) // want `bytes\.LastIndex\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.LastIndex\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+func count(s, sub string) int {
+	return strings.Count(s, sub) // want `bytes\.Count\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.Count\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+func equalFold(s, t string) bool {
+	return strings.EqualFold(s, t) // want `bytes\.EqualFold\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.EqualFold\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+// ContainsAny/IndexAny take a string second parameter in BOTH packages:
+// only the first argument is a conversion, the second carries over verbatim.
+func containsAny(s, chars string) bool {
+	return strings.ContainsAny(s, chars) // want `bytes\.ContainsAny\(\[\]byte\(s\), chars\) allocates a throwaway \[\]byte copy just to scan it; strings\.ContainsAny\(s, chars\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+func indexAny(s, chars string) int {
+	return strings.IndexAny(s, chars) // want `bytes\.IndexAny\(\[\]byte\(s\), chars\) allocates a throwaway \[\]byte copy just to scan it; strings\.IndexAny\(s, chars\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+// An untyped string constant operand is valid as the strings twin's
+// argument and is kept verbatim.
+func untypedConst(s string) bool {
+	return strings.Contains(s, "needle") // want `bytes\.Contains\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.Contains\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+// The parenthesized conversion form is the same conversion.
+func parenType(s, sub string) bool {
+	return strings.Contains(s, sub) // want `bytes\.Contains\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.Contains\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+// Operands with side effects are kept byte-verbatim in place — each is
+// still evaluated exactly once, in the original order.
+func sideEffects(f, g func() string) bool {
+	return strings.Contains(f(), g()) // want `bytes\.Contains\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.Contains\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+// Compound operand expressions carry over verbatim; a call argument is
+// self-delimiting, so no parentheses are ever needed.
+func compound(s, a, b string) int {
+	return strings.Index(s[1:], a+b) // want `bytes\.Index\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.Index\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+// --- advisory only: reported, but never rewritten ---
+
+// A local named strings shadows the package at the call site: the emitted
+// strings.Contains qualifier would not resolve — no fix.
+func shadowedStrings(s, sub string) bool {
+	strings := 1
+	_ = strings
+	return bytes.Contains([]byte(s), []byte(sub)) // want `bytes\.Contains\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.Contains\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+// A comment inside the rewritten scaffolding would be swallowed — no fix.
+func commented(s, sub string) bool {
+	return bytes.Contains([]byte(s) /* keep me */, []byte(sub)) // want `bytes\.Contains\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.Contains\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
+
+// --- guards: none of the following may be reported ---
+
+type myStr string
+
+type myBytes []byte
+
+// A defined string type operand would not compile as the strings twin's
+// parameter without a conversion — silent.
+func namedStringOperand(m myStr, sub string) bool {
+	return bytes.Contains([]byte(m), []byte(sub))
+}
+
+// A defined byte-slice conversion target is a different value, not the
+// predeclared []byte — silent.
+func namedSliceTarget(s, sub string) bool {
+	return bytes.Contains(myBytes(s), []byte(sub))
+}
+
+// Raw []byte arguments are not this pattern (no conversion to drop).
+func rawBytes(b, sub []byte) bool {
+	return bytes.Contains(b, sub)
+}
+
+// Both rewritten arguments must be conversions for the both-[]byte
+// members: a single conversion cannot be rewritten (strings.Contains
+// needs two strings) — that half is PS3101's hoisting territory.
+func oneConvOnly(b []byte, sub string) bool {
+	return bytes.Contains(b, []byte(sub))
+}
+
+// Members whose strings twin has a different parameter shape or returns
+// derived []byte values are out of scope.
+func outOfScope(s, sub string) {
+	_ = bytes.IndexByte([]byte(s), 'x')
+	_ = bytes.ContainsRune([]byte(s), 'x')
+	_ = bytes.IndexRune([]byte(s), 'x')
+	_ = bytes.Equal([]byte(s), []byte(sub))
+	_ = bytes.Split([]byte(s), []byte(sub))
+	_ = bytes.TrimPrefix([]byte(s), []byte(sub))
+}
+
+// A []byte→string→[]byte round trip still matches — string(b) is a plain
+// string operand — and the rewrite saves one of the two copies.
+func roundTrip(b []byte, sub string) bool {
+	return strings.Contains(string(b), sub) // want `bytes\.Contains\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.Contains\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}
