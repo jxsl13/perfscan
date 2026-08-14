@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	htmltemplate "html/template"
+	"io"
 	"math"
 	"math/rand"
 	"regexp"
@@ -622,6 +623,87 @@ func TestEquiv_SprintStrings(t *testing.T) {
 	// guard is load-bearing; a widening to non-strings would break bit-identity.
 	if fmt.Sprint(1, 2) != "1 2" {
 		t.Error("fmt.Sprint(1, 2) must be \"1 2\" (space between non-strings) — the string-only guard is required")
+	}
+}
+
+// PS2105: for _, r := range []rune(s) -> for _, r := range s. Ranging a string
+// decodes UTF-8 to the same sequence of rune VALUES that []rune(s) holds —
+// including U+FFFD for every byte of invalid UTF-8 — so the loop sees identical
+// runes (only the index differs, which the blank-key check requires to be unused).
+func TestEquiv_RangeRunes(t *testing.T) {
+	for _, s := range []string{"", "a", "abc", "héllo", "日本語", "a\x00b", "\xff\xfe", "é", "\U0001F400", "\xed\xa0\x80"} {
+		// []rune(s) holds exactly the runes the before-loop `range []rune(s)`
+		// iterates; range over the string must yield the same rune sequence.
+		viaSlice := []rune(s)
+		var viaString []rune
+		for _, r := range s {
+			viaString = append(viaString, r)
+		}
+		if !slices.Equal(viaSlice, viaString) {
+			t.Errorf("range []rune(%q) = %v != range %q = %v", s, viaSlice, s, viaString)
+		}
+	}
+}
+
+// PS2106: consecutive appends to the same slice combine into one append call.
+// The resulting slice is identical however many calls build it (append appends
+// its variadic args left to right).
+func TestEquiv_AppendCombine(t *testing.T) {
+	base := []string{"x"}
+	split := append(append(slices.Clone(base), "a"), "b", "c")
+	combined := append(slices.Clone(base), "a", "b", "c")
+	if !slices.Equal(split, combined) {
+		t.Errorf("append(append(s,\"a\"),\"b\",\"c\") = %v != append(s,\"a\",\"b\",\"c\") = %v", split, combined)
+	}
+}
+
+// PS2108: string([]byte(s)) -> s. The string->[]byte->string round-trip is the
+// identity for every string (including invalid UTF-8, which is preserved verbatim
+// — neither conversion sanitizes bytes).
+func TestEquiv_StringByteRoundTrip(t *testing.T) {
+	for _, s := range []string{"", "a", "héllo", "a\x00b", "\xff\xfe", "日本語"} {
+		if got := string([]byte(s)); got != s {
+			t.Errorf("string([]byte(%q)) = %q, want %q", s, got, s)
+		}
+	}
+}
+
+// PS2113: w.Write([]byte(fmt.Sprintf(f, a...))) -> fmt.Fprintf(w, f, a...). Both
+// write the same bytes to w and return the same (n, err): Fprintf renders into
+// its own buffer and Writes it, exactly the bytes []byte(Sprintf(...)) holds.
+func TestEquiv_WriteSprintfToFprintf(t *testing.T) {
+	cases := []struct {
+		f    string
+		args []any
+	}{
+		{"user=%s id=%d", []any{"bob", 7}},
+		{"%d%% done", []any{100}},
+		{"", nil},
+		{"%x", []any{[]byte{0xff, 0x00}}},
+		{"%q\n", []any{"a\tb"}},
+	}
+	for _, c := range cases {
+		var a, b bytes.Buffer
+		nA, eA := a.Write([]byte(fmt.Sprintf(c.f, c.args...)))
+		nB, eB := fmt.Fprintf(&b, c.f, c.args...)
+		if a.String() != b.String() || nA != nB || (eA == nil) != (eB == nil) {
+			t.Errorf("Write([]byte(Sprintf(%q))) vs Fprintf: bytes %q/%q n %d/%d", c.f, a.String(), b.String(), nA, nB)
+		}
+	}
+}
+
+// PS2118: io.WriteString(w, string(b)) -> w.Write(b). Same bytes, same (n, err):
+// io.WriteString on a bytes.Buffer (an io.StringWriter) writes string(b)'s bytes,
+// which are exactly b's bytes.
+func TestEquiv_WriteStringOfBytes(t *testing.T) {
+	for _, b := range [][]byte{nil, {}, []byte("hi"), {0xff, 0xfe}, {0, 1, 2}, []byte("日本語")} {
+		var x, y bytes.Buffer
+		//lint:ignore SA6006 the io.WriteString(w, string(b)) form is the point — this pins that PS2118's rewrite to w.Write(b) is byte-identical
+		nX, eX := io.WriteString(&x, string(b))
+		nY, eY := y.Write(b)
+		if x.String() != y.String() || nX != nY || (eX == nil) != (eY == nil) {
+			t.Errorf("io.WriteString(string(%v)) vs Write: bytes %q/%q n %d/%d", b, x.String(), y.String(), nX, nY)
+		}
 	}
 }
 
