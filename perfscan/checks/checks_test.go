@@ -174,7 +174,7 @@ func TestPS3083(t *testing.T) {
 }
 
 func TestPS3077(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3077.Analyzer, "ps3077", "pkgshadow")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3077.Analyzer, "ps3077", "pkgshadow", "ps3077alias")
 }
 
 func TestPS3082(t *testing.T) {
