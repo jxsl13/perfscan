@@ -42,8 +42,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"text/tabwriter"
 
 	baselinepkg "github.com/jxsl13/perfscan/perfscanxx/internal/baseline"
@@ -89,6 +91,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		sarifOut   = fs.Bool("sarif", false, "emit findings as SARIF 2.1.0 (GitHub Code Scanning) (mutually exclusive with -json)")
 		baseline   = fs.String("baseline", "", "ratchet file: if it does not exist, write the current findings as the accepted baseline; if it exists, report only NEW findings (line-independent) so CI fails on regressions while the backlog is burned down")
 		buildDir   = fs.String("p", "", "build directory containing compile_commands.json (default: found by walking up from the cwd)")
+		jobs       = fs.Int("j", 0, "parallel clang-tidy workers for the analysis pass (0 = one per CPU; 1 = sequential). Ignored for an in-place -fix, which always runs as a single pass")
 		tidyBin    = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
 		configPath = fs.String("config", "", "path to a .perfscanxx.yml supplying project defaults (level, checks, exclude, tidy, extra-args, baseline, fix-errors; auto-discovered in the current directory); command-line flags override it")
 		showVer    = fs.Bool("version", false, "print version and exit")
@@ -354,7 +357,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		opts.ConfigFile = cfgPath
 		opts.Experimental = true
 	}
-	res, err := tidy.Run(context.Background(), opts)
+	res, err := runReport(context.Background(), opts, *jobs)
 	if err != nil {
 		fmt.Fprintln(stderr, "perfscanxx:", err)
 		return 2
@@ -1120,6 +1123,106 @@ func relPathCwd(p string) string {
 		}
 	}
 	return p
+}
+
+// runReport runs the analysis clang-tidy pass, parallelizing across `jobs` worker
+// processes when it is safe. Each worker analyzes a DISJOINT slice of the
+// translation units into its own --export-fixes file; the per-worker exports are
+// merged into one Result the rest of the pipeline consumes exactly as it would a
+// single run's. A diagnostic anchored in a shared header may appear in several
+// workers' exports — report.FromExport already dedups by (file, offset, check),
+// so the merge needs no special handling.
+//
+// Parallelization is DISABLED when opts.Fix is set: that pass rewrites files in
+// place, and two workers touching a shared header would race and could corrupt it,
+// so an in-place -fix always runs as a single invocation. It is also skipped for a
+// single TU or jobs == 1 (sequential).
+func runReport(ctx context.Context, opts tidy.Options, jobs int) (*tidy.Result, error) {
+	n := len(opts.Files)
+	if jobs <= 0 {
+		jobs = runtime.NumCPU()
+	}
+	if jobs > n {
+		jobs = n
+	}
+	if jobs <= 1 || opts.Fix || n <= 1 {
+		return tidy.Run(ctx, opts)
+	}
+
+	chunks := splitFiles(opts.Files, jobs)
+	results := make([]*tidy.Result, len(chunks))
+	errs := make([]error, len(chunks))
+	var wg sync.WaitGroup
+	for i, chunk := range chunks {
+		wg.Add(1)
+		go func(i int, chunk []string) {
+			defer wg.Done()
+			o := opts
+			o.Files = chunk
+			o.ExportFixes = "" // each worker manages its own temp export
+			results[i], errs[i] = tidy.Run(ctx, o)
+		}(i, chunk)
+	}
+	wg.Wait()
+
+	// Merge: concatenate every worker's diagnostics, join stderr, and keep the
+	// first non-zero exit. Preserve the "empty payload" signal (no diagnostics ->
+	// nil ExportYAML) that the callers' degradation/failed-run guards rely on, so
+	// re-serializing an empty merge does not read as a non-empty result.
+	merged := &fixes.ExportFile{}
+	var stderrs []string
+	worstExit := 0
+	for i := range chunks {
+		if errs[i] != nil {
+			return nil, errs[i]
+		}
+		ef, perr := fixes.Parse(results[i].ExportYAML)
+		if perr != nil {
+			return nil, perr
+		}
+		if merged.MainSourceFile == "" {
+			merged.MainSourceFile = ef.MainSourceFile
+		}
+		merged.Diagnostics = append(merged.Diagnostics, ef.Diagnostics...)
+		if s := strings.TrimSpace(results[i].Stderr); s != "" {
+			stderrs = append(stderrs, s)
+		}
+		if results[i].ExitCode != 0 && worstExit == 0 {
+			worstExit = results[i].ExitCode
+		}
+	}
+	var mergedYAML []byte
+	if len(merged.Diagnostics) > 0 {
+		var merr error
+		if mergedYAML, merr = fixes.Marshal(merged); merr != nil {
+			return nil, merr
+		}
+	}
+	return &tidy.Result{
+		ExportYAML: mergedYAML,
+		Stderr:     strings.Join(stderrs, "\n"),
+		ExitCode:   worstExit,
+	}, nil
+}
+
+// splitFiles partitions files into at most n contiguous, roughly-equal chunks
+// (the last chunks are one shorter when it does not divide evenly). n is assumed
+// >= 1 and <= len(files) (runReport clamps it).
+func splitFiles(files []string, n int) [][]string {
+	chunks := make([][]string, 0, n)
+	total := len(files)
+	base := total / n
+	rem := total % n
+	start := 0
+	for i := 0; i < n; i++ {
+		size := base
+		if i < rem {
+			size++
+		}
+		chunks = append(chunks, files[start:start+size])
+		start += size
+	}
+	return chunks
 }
 
 func printExplain(stdout, stderr io.Writer, id string) int {

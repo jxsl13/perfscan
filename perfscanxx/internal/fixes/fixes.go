@@ -90,3 +90,14 @@ func Parse(data []byte) (*ExportFile, error) {
 	}
 	return &f, nil
 }
+
+// Marshal serializes an ExportFile back to the --export-fixes YAML form (the
+// inverse of Parse), used to merge several parallel-worker exports into one
+// payload the rest of the pipeline consumes exactly as a single clang-tidy run's.
+func Marshal(f *ExportFile) ([]byte, error) {
+	data, err := yaml.Marshal(f)
+	if err != nil {
+		return nil, fmt.Errorf("fixes: marshaling merged export: %w", err)
+	}
+	return data, nil
+}

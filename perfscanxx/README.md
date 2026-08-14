@@ -34,6 +34,7 @@ export PERFSCANXX_CLANG_TIDY="$(brew --prefix llvm)/bin/clang-tidy"
 
 ```bash
 perfscanxx -p build ./...             # analyse the whole project (like `perfscan ./...`)
+perfscanxx -j 8 -p build ./...        # analyse with 8 parallel clang-tidy workers (default: one per CPU; -j 1 = sequential)
 perfscanxx -p build ./src/game/...    # just a subtree
 perfscanxx -checks PX1* -p build ./... # only copy checks
 perfscanxx -level 1 -fix -p build ./... # apply only L1 (idiomatic) fix-its
@@ -62,6 +63,14 @@ span and clang-tidy silently drops or garbles the overlap (e.g. adding `noexcept
 and a member-initializer to the same constructor); isolating each check means every
 fix-it that *can* apply does, at the cost of extra passes. Reach for it when a plain
 `-fix` leaves fixes on the table on heavily-annotated code.
+
+`-j` parallelizes the **analysis** pass across worker processes (default: one per
+CPU), each handling a disjoint slice of the translation units — so a large project
+scans in a fraction of the wall-clock time. The per-worker results are merged and
+sorted, so the output is byte-identical to a sequential (`-j 1`) run regardless of
+worker count. An in-place `-fix` always runs as a single pass — parallel workers
+rewriting a shared header could race — so `-j` is ignored there; use `-j` for the
+reporting / `-json` / `-sarif` / `-diff` / `-baseline` runs that dominate CI.
 
 ### Exit codes
 

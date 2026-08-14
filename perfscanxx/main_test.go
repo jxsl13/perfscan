@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jxsl13/perfscan/perfscanxx/internal/catalog"
@@ -826,9 +827,11 @@ func TestExcludeFiltersInvocation(t *testing.T) {
 	}
 	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
 
-	// Without -exclude: both files reach clang-tidy.
+	// Without -exclude: both files reach clang-tidy. -j 1 pins a single
+	// invocation so both files land in one argv (this test isolates exclude
+	// filtering, not the parallel split covered by TestParallelReportRun).
 	gotArgv = nil
-	runCLI(keep, drop)
+	runCLI("-j", "1", keep, drop)
 	base := strings.Join(gotArgv, " ")
 	if !strings.Contains(base, keep) || !strings.Contains(base, drop) {
 		t.Fatalf("baseline: both files should be passed, got argv: %v", gotArgv)
@@ -836,7 +839,7 @@ func TestExcludeFiltersInvocation(t *testing.T) {
 
 	// With -exclude vendor/: the vendored file is dropped from the invocation.
 	gotArgv = nil
-	runCLI("-exclude", "vendor/", keep, drop)
+	runCLI("-j", "1", "-exclude", "vendor/", keep, drop)
 	joined := strings.Join(gotArgv, " ")
 	if !strings.Contains(joined, keep) {
 		t.Errorf("kept file must still be passed to clang-tidy, argv: %v", gotArgv)
@@ -1142,4 +1145,93 @@ func TestExplainShowsCaveat(t *testing.T) {
 	if !sawCaveat {
 		t.Fatal("no caveat'd checks found — the caveat mechanism appears unwired")
 	}
+}
+
+// TestParallelReportRun pins the -j parallel analysis path: with more than one TU
+// and -j >= 2, perfscanxx splits the files across concurrent clang-tidy workers
+// (each analyzing a disjoint subset into its own export) and MERGES the results,
+// so every file's findings still surface. An in-place -fix must NOT parallelize
+// (a single pass, since parallel workers editing a shared header could race).
+func TestParallelReportRun(t *testing.T) {
+	dir := t.TempDir()
+	var files []string
+	for _, name := range []string{"a.cpp", "b.cpp", "c.cpp", "d.cpp"} {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("int x;\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, p)
+	}
+
+	// Thread-safe stub (workers invoke it concurrently): record each analysis
+	// invocation's input file and emit a one-diagnostic export for it.
+	var mu sync.Mutex
+	var analysisRuns int
+	var seenFiles []string
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+	tidy.Executor = func(_ context.Context, argv []string, stdout, stderr *bytes.Buffer) (int, error) {
+		// The version probe (custom checks are selected by default) is not an
+		// analysis invocation — answer it with a modern LLVM and don't count it.
+		if len(argv) >= 2 && argv[1] == "--version" {
+			stdout.WriteString("Homebrew LLVM version 22.1.8\n")
+			return 0, nil
+		}
+		var cpp, export string
+		for _, a := range argv {
+			if strings.HasSuffix(a, ".cpp") {
+				cpp = a
+			}
+			if strings.HasPrefix(a, "--export-fixes=") {
+				export = strings.TrimPrefix(a, "--export-fixes=")
+			}
+		}
+		mu.Lock()
+		analysisRuns++
+		seenFiles = append(seenFiles, cpp)
+		mu.Unlock()
+		if export != "" {
+			// A single performance-for-range-copy (PX1001) diagnostic in this file.
+			yaml := "MainSourceFile: '" + cpp + "'\n" +
+				"Diagnostics:\n" +
+				"  - DiagnosticName: performance-for-range-copy\n" +
+				"    DiagnosticMessage:\n" +
+				"      Message: 'copy'\n" +
+				"      FilePath: '" + cpp + "'\n" +
+				"      FileOffset: 0\n" +
+				"      Replacements: []\n"
+			_ = os.WriteFile(export, []byte(yaml), 0o644)
+		}
+		return 0, nil
+	}
+
+	t.Run("splits across workers and merges", func(t *testing.T) {
+		mu.Lock()
+		analysisRuns, seenFiles = 0, nil
+		mu.Unlock()
+		stdout, _, code := runCLI(append([]string{"-j", "4", "-json"}, files...)...)
+		if code != 1 {
+			t.Fatalf("exit=%d, want 1 (findings reported)", code)
+		}
+		if analysisRuns != 4 {
+			t.Errorf("analysis ran %d times, want 4 (one per worker); files seen: %v", analysisRuns, seenFiles)
+		}
+		// Every file's finding must survive the merge.
+		for _, f := range files {
+			if !strings.Contains(stdout, f) {
+				t.Errorf("merged -json is missing a finding for %s:\n%s", f, stdout)
+			}
+		}
+	})
+
+	t.Run("in-place -fix stays a single invocation", func(t *testing.T) {
+		mu.Lock()
+		analysisRuns, seenFiles = 0, nil
+		mu.Unlock()
+		runCLI(append([]string{"-j", "4", "-fix"}, files...)...)
+		if analysisRuns != 1 {
+			t.Errorf("in-place -fix ran %d clang-tidy invocations, want 1 (parallelism must be disabled to avoid racing on shared headers); files seen: %v", analysisRuns, seenFiles)
+		}
+	})
 }
