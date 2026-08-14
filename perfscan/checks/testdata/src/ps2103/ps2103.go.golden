@@ -1,5 +1,6 @@
 package ps2103
 
+import "strconv"
 import "fmt"
 
 type user struct {
@@ -7,11 +8,12 @@ type user struct {
 	id   int
 }
 
-// %d would need strconv in the rewrite: reported, but left advisory.
+// Mixed %s/%d splice: fixed — the %s arg is spliced verbatim, the %d arg
+// is rendered with strconv.Itoa, and the strconv import is added.
 func keys(users []user) []string {
 	out := make([]string, 0, len(users))
 	for _, u := range users {
-		out = append(out, fmt.Sprintf("%s:%d", u.name, u.id)) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
+		out = append(out, u.name+":"+strconv.Itoa(u.id)) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
 	}
 	return out
 }
@@ -45,7 +47,37 @@ func joined(pairs [][2]string) []string {
 	return out
 }
 
-// %v over a non-string argument: reported, no fix.
+// %d over a plain int: fixed to strconv.Itoa.
+func items(nums []int) []string {
+	out := make([]string, 0, len(nums))
+	for _, i := range nums {
+		out = append(out, "item-"+strconv.Itoa(i)) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
+	}
+	return out
+}
+
+// %d over a signed non-int width: fixed to strconv.FormatInt with the
+// int64 widening.
+func seqs(nums []int64) []string {
+	out := make([]string, 0, len(nums))
+	for _, n := range nums {
+		out = append(out, "n="+strconv.FormatInt(int64(n), 10)) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
+	}
+	return out
+}
+
+// %d over an unsigned width: fixed to strconv.FormatUint with the uint64
+// widening.
+func counts(nums []uint) []string {
+	out := make([]string, 0, len(nums))
+	for _, u := range nums {
+		out = append(out, "u="+strconv.FormatUint(uint64(u), 10)) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
+	}
+	return out
+}
+
+// %v over a non-string argument: %v honors Stringer/Formatter, so unlike
+// %d it is NOT extended to integers — reported, no fix.
 func ids(nums []int) []string {
 	out := make([]string, 0, len(nums))
 	for _, id := range nums {
@@ -66,11 +98,60 @@ func tags(ts []tag) []string {
 	return out
 }
 
+// %d over a float: %d does not format a float, and there is no strconv
+// decimal for it — reported, no fix.
+func floatD(xs []float64) []string {
+	out := make([]string, 0, len(xs))
+	for _, x := range xs {
+		out = append(out, fmt.Sprintf("f=%d", x)) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
+	}
+	return out
+}
+
+// %d over a bool: not an integer — reported, no fix.
+func boolD(bs []bool) []string {
+	out := make([]string, 0, len(bs))
+	for _, b := range bs {
+		out = append(out, fmt.Sprintf("b=%d", b)) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
+	}
+	return out
+}
+
+// %d over a string: not an integer — reported, no fix.
+func stringD(ss []string) []string {
+	out := make([]string, 0, len(ss))
+	for _, s := range ss {
+		out = append(out, fmt.Sprintf("s=%d", s)) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
+	}
+	return out
+}
+
 // Width/precision genuinely needs fmt: silent.
 func padded(xs []float64) []string {
 	out := make([]string, 0, len(xs))
 	for _, x := range xs {
 		out = append(out, fmt.Sprintf("%8.3f", x))
+	}
+	return out
+}
+
+// A padded integer width like %3d genuinely needs fmt: silent.
+func paddedInt(nums []int) []string {
+	out := make([]string, 0, len(nums))
+	for _, n := range nums {
+		out = append(out, fmt.Sprintf("%3d", n))
+	}
+	return out
+}
+
+// Hex/octal/quote verbs genuinely need fmt (PS2107's bare-verb territory,
+// not a simple splice): silent.
+func based(nums []int, ss []string) []string {
+	out := make([]string, 0, len(nums))
+	for i, n := range nums {
+		out = append(out, fmt.Sprintf("x=%x", n))
+		out = append(out, fmt.Sprintf("o=%o", n))
+		out = append(out, fmt.Sprintf("q=%q", ss[i]))
 	}
 	return out
 }

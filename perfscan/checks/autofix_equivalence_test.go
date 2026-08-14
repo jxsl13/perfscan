@@ -2175,6 +2175,58 @@ func TestEquiv_PS2103SprintfSpliceToConcat(t *testing.T) {
 	}
 }
 
+// TestEquiv_PS2103SprintfDecimalToStrconv pins the %d arm of PS2103's
+// concatenation rewrite: %d NEVER consults fmt.Stringer or fmt.Formatter —
+// it always prints the operand's plain decimal — so splicing the
+// strconvDecimalRepl form (Itoa / FormatInt(int64(x), 10) /
+// FormatUint(uint64(x), 10)) into the concatenation is byte-identical.
+// Mirrors the fixed golden shapes ("%s:%d" mixed, "item-%d", the int64 and
+// uint widths) over edge cases: negative ints, 0, MinInt64/MaxInt64 at
+// full width (FormatInt works in uint64 magnitude space, so MinInt64 needs
+// no special case), MaxUint64, empty strings, and %-laden string args —
+// only the FORMAT literal is parsed for verbs, a "%d" inside a spliced
+// argument is emitted verbatim by both forms.
+func TestEquiv_PS2103SprintfDecimalToStrconv(t *testing.T) {
+	strs := []string{"", "x", "100%", "%s", "%d", "%!d(int=3)", "a\tb", "日本語", ":"}
+	ints := []int{0, 1, -1, 42, -137, math.MaxInt, math.MinInt}
+	for _, s := range strs {
+		for _, n := range ints {
+			// "%s:%d" -> s+":"+strconv.Itoa(n)
+			if got, want := fmt.Sprintf("%s:%d", s, n), s+":"+strconv.Itoa(n); got != want {
+				t.Errorf("%%s:%%d (s=%q n=%d): sprintf=%q concat=%q", s, n, got, want)
+			}
+			// "item-%d" -> "item-"+strconv.Itoa(n)
+			if got, want := fmt.Sprintf("item-%d", n), "item-"+strconv.Itoa(n); got != want {
+				t.Errorf("item-%%d (n=%d): sprintf=%q concat=%q", n, got, want)
+			}
+		}
+	}
+	for _, n := range []int64{0, 1, -1, -9007199254740993, math.MinInt64, math.MaxInt64} {
+		// "n=%d" over int64 -> "n="+strconv.FormatInt(int64(n), 10), the
+		// exact widening the fix emits.
+		if got, want := fmt.Sprintf("n=%d", n), "n="+strconv.FormatInt(int64(n), 10); got != want {
+			t.Errorf("n=%%d (int64 %d): sprintf=%q concat=%q", n, got, want)
+		}
+	}
+	for _, n := range []int32{0, -1, math.MinInt32, math.MaxInt32} {
+		if got, want := fmt.Sprintf("n=%d", n), "n="+strconv.FormatInt(int64(n), 10); got != want {
+			t.Errorf("n=%%d (int32 %d): sprintf=%q concat=%q", n, got, want)
+		}
+	}
+	for _, u := range []uint{0, 1, 42, math.MaxUint} {
+		// "u=%d" over uint -> "u="+strconv.FormatUint(uint64(u), 10), the
+		// exact widening the fix emits.
+		if got, want := fmt.Sprintf("u=%d", u), "u="+strconv.FormatUint(uint64(u), 10); got != want {
+			t.Errorf("u=%%d (uint %d): sprintf=%q concat=%q", u, got, want)
+		}
+	}
+	for _, u := range []uint64{0, 1, math.MaxInt64 + 1, math.MaxUint64} {
+		if got, want := fmt.Sprintf("u=%d", u), "u="+strconv.FormatUint(uint64(u), 10); got != want {
+			t.Errorf("u=%%d (uint64 %d): sprintf=%q concat=%q", u, got, want)
+		}
+	}
+}
+
 // TestEquiv_PS2120WriteStringSprintfToFprintf pins that PS2120's rewrite of
 // `w.WriteString(fmt.Sprintf(f, a...))` to `fmt.Fprintf(w, f, a...)` is
 // byte-identical in what it writes AND in its (n, err) return: fmt.Fprintf

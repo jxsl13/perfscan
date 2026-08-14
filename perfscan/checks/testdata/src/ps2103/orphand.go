@@ -1,0 +1,16 @@
+package ps2103
+
+// %d ORPHAN positive: the only fmt reference in this FILE is the fixable
+// %d Sprintf itself. The strconv rewrite orphans the fmt import — the fix
+// pipeline prunes it afterwards — and the fix adds the strconv import the
+// rewrite needs (non-cgo file).
+
+import "fmt"
+
+func orphanIDs(nums []int) []string {
+	out := make([]string, 0, len(nums))
+	for _, n := range nums {
+		out = append(out, fmt.Sprintf("id=%d", n)) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
+	}
+	return out
+}
