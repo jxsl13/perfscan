@@ -16,14 +16,16 @@ import (
 //
 //	PX2101 reserve-before-loop, PX2102 pessimizing-move, PX2103 catch-by-value,
 //	PX2104 regex-in-loop, PX2105 dynamic-cast-in-loop, PX2106 stringstream-in-loop,
-//	PX2107 pow-const-exponent, PX2108 vector-bool.
+//	PX2107 pow-const-exponent, PX2108 vector-bool, PX2109 std-list.
 const customTriggerSrc = `#include <vector>
 #include <regex>
 #include <sstream>
 #include <exception>
 #include <cmath>
+#include <list>
 struct B { virtual ~B(){} }; struct D : B {};
 std::vector<bool> g_flags; // PX2108 (space-optimized bitfield, not a real container)
+std::list<int> g_items;    // PX2109 (node-per-element linked list)
 std::vector<int> pessimizing() {
   std::vector<int> v;
   return std::move(v); // PX2102
@@ -400,6 +402,79 @@ func TestPX2108DoesNotFireOnNonBoolVectorOrParam(t *testing.T) {
 	}
 	if strings.Contains(output, "vb.cpp:8:") {
 		t.Errorf("PX2108 must NOT fire on the by-value vector<bool> PARAMETER at line 8:\n%s", output)
+	}
+}
+
+// px2109StdListSrc pins PX2109's scope: std::list and std::forward_list are
+// flagged at a FIELD and a LOCAL declaration, but NOT on a std::vector (the
+// recommended container) and NOT on a by-value list PARAMETER (a pass-through).
+const px2109StdListSrc = `#include <list>
+#include <forward_list>
+#include <vector>
+struct Node { std::list<int> kids; };          // field: PX2109 (line 4)
+void f() {
+  std::list<int> local;                         // local: PX2109 (line 6)
+  std::forward_list<int> fl;                     // local: PX2109 (line 7)
+  std::vector<int> v;                            // recommended: NOT flagged
+  (void)local; (void)fl; (void)v;
+}
+void byval(std::list<int> p);                    // parameter: NOT flagged
+`
+
+// TestPX2109DoesNotFireOnVectorOrParam pins that PX2109 fires on the list and
+// forward_list field/locals (3 findings) and stays silent on std::vector and on
+// the by-value list parameter.
+func TestPX2109DoesNotFireOnVectorOrParam(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	e, ok := catalog.ByID("PX2109")
+	if !ok || !e.Custom {
+		t.Fatal("PX2109 missing or not a custom check")
+	}
+	cfg := catalog.ClangTidyConfig([]catalog.Entry{e})
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".clang-tidy")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "list.cpp")
+	if err := os.WriteFile(src, []byte(px2109StdListSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--experimental-custom-checks", "--config-file=" + cfgPath, "--", "-std=c++17"}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+
+	if strings.Contains(output, "Unknown command line argument") && strings.Contains(output, "experimental-custom-checks") {
+		t.Skip("clang-tidy is too old for --experimental-custom-checks; skipping")
+	}
+	if strings.Contains(output, "[clang-tidy-config]") {
+		t.Fatalf("clang-tidy rejected the PX2109 query:\n%s", output)
+	}
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture; skipping:\n%s", output)
+	}
+
+	tag := "[" + e.TidyName + "]"
+	if n := strings.Count(output, tag); n != 3 {
+		t.Errorf("PX2109 fired %d time(s), want exactly 3 (list+forward_list field and locals):\n%s", n, output)
+	}
+	if strings.Contains(output, "list.cpp:8:") {
+		t.Errorf("PX2109 must NOT fire on the std::vector at line 8:\n%s", output)
+	}
+	if strings.Contains(output, "list.cpp:11:") {
+		t.Errorf("PX2109 must NOT fire on the by-value list PARAMETER at line 11:\n%s", output)
 	}
 }
 

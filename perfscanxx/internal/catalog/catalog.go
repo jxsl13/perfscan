@@ -519,6 +519,28 @@ var entries = []Entry{
 			`hasTemplateArgument(0, refersToType(booleanType())))))))).bind("vb")`,
 		Message: "std::vector<bool> is a space-optimized bitfield, not a real container: operator[] returns a proxy object (not bool&), it has no data() and does not model Container, so it silently breaks generic code and pessimizes element access (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2109", TidyName: "custom-std-list",
+		Level: LevelAggressive, Category: "containers",
+		Title:  "std::list/std::forward_list is a node-per-element linked list — poor cache locality and an allocation per element; std::vector is usually faster",
+		HasFix: false,
+		Custom: true,
+		Bind:   "lst",
+		// A variable or field (NOT a parameter — a by-value list parameter is a
+		// pass-through whose storage choice belongs to the caller's declaration site)
+		// whose canonical type is a std::list or std::forward_list specialization.
+		// hasCanonicalType sees through typedef aliases (`using L = std::list<int>;`).
+		// isExpansionInMainFile keeps it off the standard library's own <list>
+		// instantiations. clang-tidy ships no equivalent. L3/aggressive because a
+		// linked list is occasionally the right call (O(1) splice, or reference/
+		// iterator stability across insertions and erasures), so it must not surface
+		// below the aggressive tier. NO auto-fix, deliberately: swapping to
+		// std::vector changes iterator/reference-invalidation and splice semantics —
+		// a human must confirm the code does not rely on them.
+		Query: `match valueDecl(isExpansionInMainFile(), unless(parmVarDecl()), anyOf(varDecl(), fieldDecl()), ` +
+			`hasType(hasCanonicalType(recordType(hasDeclaration(cxxRecordDecl(hasAnyName("::std::list", "::std::forward_list"))))))).bind("lst")`,
+		Message: "std::list/std::forward_list allocates a separate node per element and scatters them in memory, so traversal misses cache on every step and each insert allocates; std::vector (or std::deque) is usually faster — prefer it unless you specifically need O(1) splice or reference/iterator stability across insert/erase (query-based, no auto-fix)",
+	},
 }
 
 // Deliberately NOT in the catalog (do not re-add on a future audit):
