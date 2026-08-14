@@ -238,3 +238,47 @@ func TestChangedSARIFNotAuthoritative(t *testing.T) {
 		t.Errorf("full -sarif run: executionSuccessful should be true:\n%s", full)
 	}
 }
+
+// TestChangedFixNarrowsToChangedTU pins that -changed -fix hands clang-tidy ONLY
+// the changed translation units — so an incremental fix never rewrites a file the
+// run didn't scan. Hermetic (stubbed git + clang-tidy): the earlier real-git-repo
+// version corrupted the worktree perfscanxx itself lives in, so this verifies the
+// same property safely by capturing which files the (fix) invocation received.
+func TestChangedFixNarrowsToChangedTU(t *testing.T) {
+	origLook, origExec, origGit := tidy.LookPath, tidy.Executor, gitOutput
+	defer func() { tidy.LookPath, tidy.Executor, gitOutput = origLook, origExec, origGit }()
+
+	dir, files, scanned := changedProject(t, "a.cpp", "b.cpp")
+	gitOutput = func(_ context.Context, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "rev-parse" {
+			return dir + "\n", nil
+		}
+		return "a.cpp\n", nil // only a.cpp changed
+	}
+	// Capture whether the analysis invocation carried --fix (the fix pass).
+	var mu sync.Mutex
+	sawFix := false
+	base := tidy.Executor
+	tidy.Executor = func(ctx context.Context, argv []string, out, errb *bytes.Buffer) (int, error) {
+		for _, a := range argv {
+			if a == "--fix" {
+				mu.Lock()
+				sawFix = true
+				mu.Unlock()
+			}
+		}
+		return base(ctx, argv, out, errb)
+	}
+
+	runCLI(append([]string{"-tidy", "clang-tidy", "-changed", "origin/main", "-fix", "-checks", "PX3008", "-p", dir}, files...)...)
+
+	got := scanned()
+	if len(got) != 1 || got[0] != "a.cpp" {
+		t.Errorf("-changed -fix analyzed %v, want only a.cpp (must not touch unchanged TUs)", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !sawFix {
+		t.Error("expected the analysis pass to carry --fix under -fix")
+	}
+}
