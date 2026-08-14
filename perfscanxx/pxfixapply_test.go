@@ -72,3 +72,65 @@ func TestFixAppliesPX3023(t *testing.T) {
 	}
 	t.Errorf("PX3023 -fix did not rewrite std::vector<int>(v).swap(v) to shrink_to_fit():\n%s", got)
 }
+
+// TestFixWithAdvisoryCustomCheckReportsButAppliesNothing pins the -fix behavior
+// when the ONLY selected check is a query-based custom check (advisory,
+// HasFix:false): custom checks carry no clang-tidy fix-it, so -fix must still
+// REPORT the finding, leave the source byte-for-byte, print the "no fix-it" note,
+// and exit 0 (fix mode completed — nothing to apply). This is the custom-check
+// analog of the built-in fix tests and closes the untested advisory-under-fix
+// path — a regression that dropped advisory findings under -fix, or that let a
+// no-op fix run mutate/damage the file, would slip through otherwise. Uses
+// PX2108 (custom-vector-bool).
+func TestFixWithAdvisoryCustomCheckReportsButAppliesNothing(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "v.cpp")
+	const src = "#include <vector>\nstruct S { std::vector<bool> flags; };\n"
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile := "clang++ -std=c++17"
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skipf("xcrun --show-sdk-path failed (%v); cannot locate the C++ sysroot", err)
+		}
+		compile += " -isysroot " + strings.TrimSpace(string(out))
+	}
+	compile += " -c v.cpp"
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI("-tidy", bin, "-fix", "-checks", "PX2108", "-p", dir, cpp)
+	if strings.Contains(stderr, "file not found") || strings.Contains(stderr, "fatal error") {
+		t.Skipf("toolchain could not parse <vector>; skipping. stderr:\n%s", stderr)
+	}
+
+	// The advisory finding must still be reported under -fix.
+	if !strings.Contains(stdout, "PX2108") {
+		t.Errorf("-fix with an advisory custom check must still REPORT the finding on stdout:\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	// And the note that nothing was fixable must be printed.
+	if !strings.Contains(stderr, "no reported finding carries a fix-it") {
+		t.Errorf("-fix with only an advisory check must print the 'no fix-it' note on stderr:\n%s", stderr)
+	}
+	// The source must be byte-for-byte unchanged: a custom check has no fix-it,
+	// so the no-op fix run must not touch the file.
+	got, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != src {
+		t.Errorf("-fix mutated the file for an advisory-only check; it must stay byte-identical:\n%s", got)
+	}
+	// Fix mode completed with nothing to apply: exit 0 per the -fix contract.
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0 (-fix completed; nothing to apply)", code)
+	}
+}
