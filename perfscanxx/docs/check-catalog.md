@@ -127,7 +127,12 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   `powf`/`powl` variants — a full libm call where a couple of multiplies or
   `std::sqrt` would do; clang-tidy ships no equivalent). No auto-fix on purpose:
   `x*x` evaluates the base twice (unsafe if it has side effects) and the right
-  form depends on the exponent.
+  form depends on the exponent. **PX2108** vector-bool (`std::vector<bool>` is a
+  space-optimized bitfield, not a real container — `operator[]` yields a proxy,
+  not `bool&`, and it has no `data()`, so it silently breaks generic code; gated
+  to L3 because the bit-packing is sometimes deliberate). No auto-fix: the right
+  replacement depends on intent (`std::vector<char>` for a real bool container,
+  `std::bitset`/`boost::dynamic_bitset` for a deliberate bitfield).
 
   Every custom matcher is gated with `isExpansionInMainFile()` so it fires only on
   the project's own translation unit, never on `catch`/`return`/loop constructs
@@ -154,13 +159,14 @@ advisory), and two L3-only
 diagnostics with no mechanical rewrite: `PX3021` (no-int-to-ptr — an integer↔pointer
 cast that defeats the optimizer's alias analysis) and `PX3022` (enum-size — an enum
 whose fixed underlying type is wider than its value set needs). So the advisory set is
-exactly `{PX2002, PX3020, PX3024, PX3025, PX3021, PX3022, PX2101, PX2102, PX2103, PX2104, PX2105, PX2106}`;
+exactly `{PX2002, PX3020, PX3024, PX3025, PX3021, PX3022, PX2101, PX2102, PX2103, PX2104, PX2105, PX2106, PX2107, PX2108}`;
 everything else is auto-fixable.
 
-`PX3021` and `PX3022` are gated to **L3 (aggressive)** — they target niche
-systems/embedded patterns (integer↔pointer round-tripping, deliberately-wide
-enums) and must never surface at the default level, so they are the first
-aggressive-tier entries in the catalog.
+`PX3021`, `PX3022`, and `PX2108` are gated to **L3 (aggressive)** — they target
+niche or opinionated patterns (integer↔pointer round-tripping, deliberately-wide
+enums, and `std::vector<bool>`, whose bit-packing is sometimes chosen on purpose)
+that should stay below the structured tier so they never surface for users who
+run `-level 1`/`-level 2`.
 
 ## Provenance
 

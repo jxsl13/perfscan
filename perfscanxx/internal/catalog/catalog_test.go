@@ -271,11 +271,11 @@ func TestEntryMetadata(t *testing.T) {
 	}
 }
 
-// TestAggressiveOnlyPerfChecks pins PX3021/PX3022: they are genuine clang-tidy
-// perf diagnostics with no fix-it, and must be gated to L3 so they never spam
-// at the default level. Regression guard for the no-spam / level-gating policy.
+// TestAggressiveOnlyPerfChecks pins PX3021/PX3022/PX2108: they are advisory perf
+// diagnostics with no fix-it, and must be gated to L3 so they never spam below
+// the aggressive tier. Regression guard for the no-spam / level-gating policy.
 func TestAggressiveOnlyPerfChecks(t *testing.T) {
-	for _, id := range []string{"PX3021", "PX3022"} {
+	for _, id := range []string{"PX3021", "PX3022", "PX2108"} {
 		e, ok := ByID(id)
 		if !ok {
 			t.Fatalf("%s missing from catalog", id)
