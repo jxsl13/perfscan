@@ -200,6 +200,14 @@ func Text(w io.Writer, findings []Finding) {
 		}
 		if f.Fixes > 0 {
 			meta += ", fix available"
+			// Flag a fix whose upstream fix-it is unsafe to apply blindly
+			// (PX3004/PX3007/PX3015/PX3027) right where the user decides whether
+			// to -fix — the default text output. The full rationale stays in
+			// -explain (and -json/-sarif carry it too); here a compact marker is
+			// enough to stop a blind -fix. Only caveated checks get it.
+			if e, ok := catalog.ByID(f.ID); ok && e.Caveat != "" {
+				meta += " (⚠ caveat — see -explain " + f.ID + ")"
+			}
 		}
 		fmt.Fprintf(w, "%s: %s (%s)\n", pos, f.Message, meta)
 	}
