@@ -1,0 +1,22 @@
+package ps2012
+
+import (
+	"fmt"
+	"strings"
+)
+
+// These three calls are the file's ONLY bytes references, so the fix also
+// drops the orphaned bytes import and inserts strings at its sorted
+// position ("fmt" orders between "bytes" and "strings", so an in-place
+// swap would unsort the group).
+func trimBasic(s string) string {
+	return strings.TrimSpace(s) // want `string\(bytes\.TrimSpace\(\[\]byte\(s\)\)\) copies`
+}
+
+// The operand expression is kept byte-verbatim, however it is spelled:
+// a field selector and a compound expression with a call (evaluated
+// exactly once in both forms).
+func trimVerbatim(w struct{ line string }, f func() string) {
+	fmt.Println(strings.TrimSpace(w.line))     // want `string\(bytes\.TrimSpace\(\[\]byte\(s\)\)\) copies`
+	fmt.Println(strings.TrimSpace("  " + f())) // want `string\(bytes\.TrimSpace\(\[\]byte\(s\)\)\) copies`
+}
