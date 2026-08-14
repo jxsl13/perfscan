@@ -42,27 +42,28 @@ type Finding struct {
 	// Fixes counts the fix-it replacements clang-tidy offered.
 	Fixes int `json:"fixes"`
 	// Edit is the single fix-it replacement, set ONLY when the finding carries
-	// exactly one (Fixes == 1). It is surfaced as a SARIF fix so GitHub Code
-	// Scanning can offer a one-click suggestion. Excluded from -json (the fix
-	// COUNT already appears there); nil for multi-edit or fixless findings.
-	Edit *Edit `json:"-"`
+	// exactly one (Fixes == 1). It is surfaced as a SARIF fix (a one-click GitHub
+	// Code Scanning suggestion) and in -json, so editor/CI tooling can apply the
+	// suggestion without re-running clang-tidy. Nil for multi-edit or fixless
+	// findings.
+	Edit *Edit `json:"edit,omitempty"`
 }
 
 // Edit is one fix-it replacement with its span pre-resolved to 1-based
-// line:column, ready to emit as a SARIF fix. Only findings with EXACTLY one
-// replacement carry it: with a single self-contained edit there is nothing for
-// clang-tidy --fix to coalesce, so the raw export replacement is byte-for-byte
-// what `perfscanxx -fix` would write — the safety bar for suggesting a fix that a
-// user (or GitHub) might apply blindly. A finding with multiple edits carries no
-// Edit, because clang-tidy may merge/clean adjacent edits on apply (see the diff
-// package), so a raw replay could diverge from -fix.
+// line:column, ready to emit as a SARIF fix or in -json. Only findings with
+// EXACTLY one replacement carry it: with a single self-contained edit there is
+// nothing for clang-tidy --fix to coalesce, so the raw export replacement is
+// byte-for-byte what `perfscanxx -fix` would write — the safety bar for suggesting
+// a fix that a user (or GitHub) might apply blindly. A finding with multiple edits
+// carries no Edit, because clang-tidy may merge/clean adjacent edits on apply (see
+// the diff package), so a raw replay could diverge from -fix.
 type Edit struct {
-	URI         string // display (cwd-relative) path of the edited file
-	StartLine   int
-	StartColumn int
-	EndLine     int
-	EndColumn   int
-	Text        string // replacement text ("" means a pure deletion)
+	File        string `json:"file"` // display (cwd-relative) path of the edited file
+	StartLine   int    `json:"startLine"`
+	StartColumn int    `json:"startColumn"`
+	EndLine     int    `json:"endLine"`
+	EndColumn   int    `json:"endColumn"`
+	Text        string `json:"text"` // replacement text ("" means a pure deletion)
 }
 
 // ReadFile is the file loader used to translate byte offsets into
@@ -152,7 +153,7 @@ func FromExport(ef *fixes.ExportFile, maxLevel catalog.Level) []Finding {
 			el, ec := lineCol(editAbs, r.Offset+r.Length)
 			if sl > 0 && el > 0 {
 				f.Edit = &Edit{
-					URI:         displayPath(editAbs),
+					File:        displayPath(editAbs),
 					StartLine:   sl,
 					StartColumn: sc,
 					EndLine:     el,
@@ -490,7 +491,7 @@ func SARIF(w io.Writer, findings []Finding) error {
 			res.Fixes = []sarifFix{{
 				Description: &sarifText{Text: f.ID + ": apply the clang-tidy fix-it"},
 				ArtifactChanges: []sarifArtifactChange{{
-					ArtifactLocation: sarifArtifactLocation{URI: f.Edit.URI},
+					ArtifactLocation: sarifArtifactLocation{URI: f.Edit.File},
 					Replacements: []sarifReplacement{{
 						DeletedRegion: sarifRegion{
 							StartLine:   f.Edit.StartLine,

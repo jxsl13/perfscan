@@ -1150,3 +1150,52 @@ func TestSARIFOmitsFixForMultiReplacement(t *testing.T) {
 		t.Errorf("multi-replacement finding must emit no SARIF fix:\n%s", buf.String())
 	}
 }
+
+// TestJSONEmitsEditForSingleReplacement pins that -json carries the structured
+// fix edit for a single-replacement finding (so an editor/CI consumer can apply
+// the suggestion without re-running clang-tidy) and omits it for a fixless one.
+// The edit's span and replacement text mirror the SARIF fix.
+func TestJSONEmitsEditForSingleReplacement(t *testing.T) {
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+	ReadFile = func(string) ([]byte, error) {
+		return []byte("aaaaaaaaaa\nbbbbbbbbbbbbbbbbbbbb\ncccccccccccccccccccc\n"), nil
+	}
+
+	findings := FromExport(sampleExport(), catalog.LevelAggressive)
+	var buf bytes.Buffer
+	if err := JSON(&buf, findings); err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+
+	var jf []struct {
+		ID   string `json:"id"`
+		Edit *struct {
+			File      string `json:"file"`
+			StartLine int    `json:"startLine"`
+			Text      string `json:"text"`
+		} `json:"edit"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &jf); err != nil {
+		t.Fatalf("-json invalid: %v\n%s", err, buf.String())
+	}
+	if len(jf) != 2 {
+		t.Fatalf("want 2 findings, got %d", len(jf))
+	}
+	byID := map[string]int{}
+	for i, f := range jf {
+		byID[f.ID] = i
+	}
+	// PX1001 (single replacement) carries the edit.
+	e := jf[byID["PX1001"]].Edit
+	if e == nil {
+		t.Fatal("PX1001: -json edit is absent; want the single-replacement fix")
+	}
+	if e.Text != "const auto&" || e.StartLine != 1 || e.File == "" {
+		t.Errorf("PX1001 edit = %+v, want text=%q startLine=1 with a file", e, "const auto&")
+	}
+	// PX2001 (no replacement) carries no edit.
+	if jf[byID["PX2001"]].Edit != nil {
+		t.Errorf("PX2001 carries a -json edit but offered no fix-it")
+	}
+}

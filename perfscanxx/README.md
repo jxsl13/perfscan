@@ -40,7 +40,7 @@ perfscanxx -level 1 -fix -p build ./... # apply only L1 (idiomatic) fix-its
 perfscanxx -fix -fix-sequential -p build ./... # apply each check's fix-its in its own pass (collision-free)
 perfscanxx -diff -p build ./...       # preview what -fix would change, as a unified diff (apply nothing)
 perfscanxx -baseline pxx.yaml -p build ./...  # ratchet: seed, then fail only on NEW findings
-perfscanxx -json -p build ./...       # machine-readable findings (also -sarif for GitHub Code Scanning — single-edit fix-its ship as one-click suggested fixes)
+perfscanxx -json -p build ./...       # machine-readable findings; a single-edit fix-it ships as a structured `edit` (also -sarif for GitHub Code Scanning one-click fixes)
 perfscanxx -v -p build ./...          # also list the TUs that did not fully parse
 perfscanxx -p build src/a.cpp         # a single translation unit
 perfscanxx -list                      # the PX check table (with an auto-fix coverage summary)
