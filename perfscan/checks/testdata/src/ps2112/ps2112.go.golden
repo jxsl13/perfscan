@@ -1,19 +1,21 @@
 package ps2112
 
+import "slices"
+
 // Nil-conversion base: the chain's result is nil exactly when
 // slices.Concat's is — fixed, adding the slices import.
 func concat2(a, b []int) []int {
-	return append(append([]int(nil), a...), b...) // want `chained spread appends onto an empty base hand-roll a concatenation, growing the result per append; slices\.Concat sizes and allocates it once`
+	return slices.Concat(a, b) // want `chained spread appends onto an empty base hand-roll a concatenation, growing the result per append; slices\.Concat sizes and allocates it once`
 }
 
 // Three spread segments collapse into one Concat call.
 func concat3(a, b, c []string) []string {
-	return append(append(append([]string(nil), a...), b...), c...) // want `chained spread appends onto an empty base hand-roll a concatenation, growing the result per append; slices\.Concat sizes and allocates it once`
+	return slices.Concat(a, b, c) // want `chained spread appends onto an empty base hand-roll a concatenation, growing the result per append; slices\.Concat sizes and allocates it once`
 }
 
 // Parenthesized conversion form of the nil base: fixed too.
 func parenConv(a, b []int) []int {
-	return append(append(([]int)(nil), a...), b...) // want `chained spread appends onto an empty base hand-roll a concatenation, growing the result per append; slices\.Concat sizes and allocates it once`
+	return slices.Concat(a, b) // want `chained spread appends onto an empty base hand-roll a concatenation, growing the result per append; slices\.Concat sizes and allocates it once`
 }
 
 // Empty literal base: empty but NON-nil — with all-empty operands the
