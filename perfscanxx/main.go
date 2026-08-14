@@ -535,13 +535,23 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "perfscanxx: wrote %d finding(s) to baseline %s\n", n, *baseline)
 			return 0
 		}
-		kept, suppressed, err := baselinepkg.Filter(*baseline, findings)
+		kept, suppressed, stale, err := baselinepkg.Filter(*baseline, findings)
 		if err != nil {
 			fmt.Fprintln(stderr, "perfscanxx:", err)
 			return 2
 		}
 		if suppressed > 0 {
 			fmt.Fprintf(stderr, "perfscanxx: %d baselined finding(s) suppressed (%s)\n", suppressed, *baseline)
+		}
+		// Stale entries (baselined findings that no longer occur) still hold
+		// suppression credit, so they would MASK the same finding if it were
+		// reintroduced. Nudge the user to regenerate and tighten the ratchet.
+		if stale > 0 {
+			word := "entries"
+			if stale == 1 {
+				word = "entry"
+			}
+			fmt.Fprintf(stderr, "perfscanxx: %d stale baseline %s (no longer matched by any finding — fixed?) — delete %s and re-run to regenerate; a stale entry can mask the same finding if it is reintroduced.\n", stale, word, *baseline)
 		}
 		findings = kept
 	}

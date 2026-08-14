@@ -107,14 +107,20 @@ func Write(path string, findings []report.Finding) (int, error) {
 // Filter loads the baseline at path and returns the findings NOT covered by it
 // (the regressions) plus the number suppressed. Each baselined {file,id,message}
 // suppresses up to its recorded Count of matching findings.
-func Filter(path string, findings []report.Finding) (kept []report.Finding, suppressed int, err error) {
+//
+// stale is the number of baselined findings that did NOT occur this run (their
+// key was recorded with a higher Count than the run produced — usually because
+// they were fixed). A stale entry still holds suppression "credit", so it would
+// MASK the same finding if it were reintroduced; the caller surfaces stale > 0 so
+// the user can regenerate the baseline to tighten the ratchet.
+func Filter(path string, findings []report.Finding) (kept []report.Finding, suppressed, stale int, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	var bf file
 	if err := yaml.Unmarshal(data, &bf); err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	anchor := anchorFor(path)
 	remaining := make(map[key]int, len(bf.Entries))
@@ -129,5 +135,12 @@ func Filter(path string, findings []report.Finding) (kept []report.Finding, supp
 		}
 		kept = append(kept, f)
 	}
-	return kept, suppressed, nil
+	// Whatever suppression credit went unspent is stale: those baselined findings
+	// no longer occur, so their entries now only serve to mask a reintroduction.
+	for _, n := range remaining {
+		if n > 0 {
+			stale += n
+		}
+	}
+	return kept, suppressed, stale, nil
 }

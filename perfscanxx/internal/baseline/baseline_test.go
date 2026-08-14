@@ -23,7 +23,7 @@ func TestWriteThenFilterSuppressesEverything(t *testing.T) {
 	if err != nil || n != 3 {
 		t.Fatalf("Write = %d, %v; want 3, nil", n, err)
 	}
-	kept, suppressed, err := Filter(path, findings)
+	kept, suppressed, _, err := Filter(path, findings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestFilterReportsOnlyNewFindings(t *testing.T) {
 		f("a.cpp", "PX1001", "copy"),   // baselined -> suppressed
 		f("c.cpp", "PX3007", "by val"), // NEW -> reported
 	}
-	kept, suppressed, err := Filter(path, later)
+	kept, suppressed, _, err := Filter(path, later)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestFilterDistinguishesByMessage(t *testing.T) {
 	if _, err := Write(path, []report.Finding{f("a.cpp", "PX1001", "copy of x")}); err != nil {
 		t.Fatal(err)
 	}
-	kept, suppressed, err := Filter(path, []report.Finding{
+	kept, suppressed, _, err := Filter(path, []report.Finding{
 		f("a.cpp", "PX1001", "copy of x"), // baselined -> suppressed
 		f("a.cpp", "PX1001", "copy of y"), // same file+id, different message -> NEW
 	})
@@ -90,7 +90,7 @@ func TestBaselineRoundTripsSpecialCharMessage(t *testing.T) {
 	if _, err := Write(path, []report.Finding{f("a.cpp", "PX1001", msg)}); err != nil {
 		t.Fatal(err)
 	}
-	kept, suppressed, err := Filter(path, []report.Finding{f("a.cpp", "PX1001", msg)})
+	kept, suppressed, _, err := Filter(path, []report.Finding{f("a.cpp", "PX1001", msg)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestFilterIsCountedPerKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Later there are THREE — the third is a regression.
-	kept, suppressed, err := Filter(path, []report.Finding{
+	kept, suppressed, _, err := Filter(path, []report.Finding{
 		f("a.cpp", "PX2101", "grow"),
 		f("a.cpp", "PX2101", "grow"),
 		f("a.cpp", "PX2101", "grow"),
@@ -146,7 +146,7 @@ func TestFilterErrorAndEdgePaths(t *testing.T) {
 	findings := []report.Finding{f("a.cpp", "PX1001", "copy")}
 
 	t.Run("missing baseline is an error", func(t *testing.T) {
-		if _, _, err := Filter(filepath.Join(dir, "nope.yaml"), findings); err == nil {
+		if _, _, _, err := Filter(filepath.Join(dir, "nope.yaml"), findings); err == nil {
 			t.Error("Filter of a missing baseline: want error, got nil")
 		}
 	})
@@ -156,7 +156,7 @@ func TestFilterErrorAndEdgePaths(t *testing.T) {
 		if err := os.WriteFile(p, []byte("entries: [this is: not, valid: yaml"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		kept, suppressed, err := Filter(p, findings)
+		kept, suppressed, _, err := Filter(p, findings)
 		if err == nil {
 			t.Fatalf("Filter of malformed YAML: want error; got kept=%d suppressed=%d", len(kept), suppressed)
 		}
@@ -167,7 +167,7 @@ func TestFilterErrorAndEdgePaths(t *testing.T) {
 		if _, err := Write(p, nil); err != nil {
 			t.Fatal(err)
 		}
-		kept, suppressed, err := Filter(p, findings)
+		kept, suppressed, _, err := Filter(p, findings)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -175,6 +175,46 @@ func TestFilterErrorAndEdgePaths(t *testing.T) {
 			t.Fatalf("empty baseline: kept=%d suppressed=%d; want 1, 0 (nothing baselined)", len(kept), suppressed)
 		}
 	})
+}
+
+// TestFilterReportsStaleEntries pins the stale-entry count: a baselined finding
+// that no longer occurs (its recorded Count exceeds what the run produced) is
+// STALE — its leftover suppression credit would mask the same finding if it were
+// reintroduced. Filter must report that leftover so the caller can nudge the user
+// to regenerate. A fully-consumed baseline reports zero stale.
+func TestFilterReportsStaleEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bl.yaml")
+	// Baseline accepts THREE findings across two keys.
+	if _, err := Write(path, []report.Finding{
+		f("a.cpp", "PX1001", "copy"),
+		f("a.cpp", "PX1001", "copy"), // count 2 for this key
+		f("b.cpp", "PX2101", "grow"), // count 1 for this key
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// This run: only ONE of the two "copy" findings remains; "grow" is fully fixed.
+	kept, suppressed, stale, err := Filter(path, []report.Finding{
+		f("a.cpp", "PX1001", "copy"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One matched (suppressed); one "copy" credit + one "grow" credit went unspent.
+	if suppressed != 1 || len(kept) != 0 {
+		t.Fatalf("kept=%d suppressed=%d; want 0 kept, 1 suppressed", len(kept), suppressed)
+	}
+	if stale != 2 {
+		t.Errorf("stale=%d; want 2 (one unspent PX1001 credit + the fully-fixed PX2101)", stale)
+	}
+
+	// A run that matches the baseline exactly reports zero stale.
+	if _, _, stale0, err := Filter(path, []report.Finding{
+		f("a.cpp", "PX1001", "copy"),
+		f("a.cpp", "PX1001", "copy"),
+		f("b.cpp", "PX2101", "grow"),
+	}); err != nil || stale0 != 0 {
+		t.Errorf("fully-matched baseline: stale=%d err=%v; want 0, nil", stale0, err)
+	}
 }
 
 // TestWriteIsDeterministicallySorted pins that Write emits byte-identical,

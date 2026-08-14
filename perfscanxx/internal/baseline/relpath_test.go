@@ -91,7 +91,7 @@ func TestKeyIsInvocationCWDIndependent(t *testing.T) {
 		t.Fatal(err)
 	}
 	abs := filepath.Join(root, "src", "a.cpp")
-	kept, suppressed, err := Filter(baselinePath, []report.Finding{f(abs, "PX1001", "copy")})
+	kept, suppressed, _, err := Filter(baselinePath, []report.Finding{f(abs, "PX1001", "copy")})
 	if err != nil {
 		t.Fatal(err)
 	}
