@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -31,20 +30,45 @@ type entry struct {
 	Count   int    `yaml:"count"`
 }
 
-// relPath renders a finding's path relative to the cwd for a portable, stable
-// baseline; falls back to the original path if it can't be made relative.
-func relPath(p string) string {
-	if wd, err := os.Getwd(); err == nil {
-		if rel, err := filepath.Rel(wd, p); err == nil && !strings.HasPrefix(rel, "..") {
-			return filepath.ToSlash(rel)
-		}
+// relPath renders a finding's path relative to anchorDir (the directory of the
+// baseline file) for a portable, stable, invocation-independent key — the same
+// model .gitignore uses, where paths are relative to the file itself, not the
+// process CWD. It first reconstructs the finding's ABSOLUTE path: a finding's
+// File is already CWD-relative (report.displayPath), so filepath.Abs recovers
+// the absolute path using the same CWD the finding was built under, then
+// filepath.Rel re-anchors it to anchorDir. Keying on the baseline's own location
+// (rather than the CWD) is what makes suppression survive a run from a different
+// directory — e.g. a baseline written at the repo root and checked from build/
+// in CI. For the common case (baseline at the root, run from the root) the key
+// is identical to the previous CWD-relative one, so existing baselines keep
+// matching. A path that cannot be made relative (different volume, unresolvable)
+// falls back to its slash-normalized absolute form.
+func relPath(p, anchorDir string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.ToSlash(p)
 	}
-	return filepath.ToSlash(p)
+	if rel, err := filepath.Rel(anchorDir, abs); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(abs)
+}
+
+// anchorFor is the directory a baseline's paths are keyed against: the absolute
+// directory containing the baseline file. Absolutizing here (rather than storing
+// a CWD-relative anchor) is what decouples the key from the invocation CWD.
+func anchorFor(baselinePath string) string {
+	if abs, err := filepath.Abs(baselinePath); err == nil {
+		return filepath.Dir(abs)
+	}
+	return filepath.Dir(baselinePath)
 }
 
 type key struct{ file, id, message string }
 
-func keyOf(f report.Finding) key { return key{relPath(f.File), f.ID, f.Message} }
+func keyOf(f report.Finding, anchorDir string) key {
+	return key{relPath(f.File, anchorDir), f.ID, f.Message}
+}
 
 // Exists reports whether a baseline file is present.
 func Exists(path string) bool { _, err := os.Stat(path); return err == nil }
@@ -52,9 +76,10 @@ func Exists(path string) bool { _, err := os.Stat(path); return err == nil }
 // Write records findings as the accepted baseline (sorted for stable diffs) and
 // returns how many findings were written.
 func Write(path string, findings []report.Finding) (int, error) {
+	anchor := anchorFor(path)
 	counts := map[key]int{}
 	for _, f := range findings {
-		counts[keyOf(f)]++
+		counts[keyOf(f, anchor)]++
 	}
 	entries := make([]entry, 0, len(counts))
 	for k, n := range counts {
@@ -91,12 +116,13 @@ func Filter(path string, findings []report.Finding) (kept []report.Finding, supp
 	if err := yaml.Unmarshal(data, &bf); err != nil {
 		return nil, 0, err
 	}
+	anchor := anchorFor(path)
 	remaining := make(map[key]int, len(bf.Entries))
 	for _, e := range bf.Entries {
 		remaining[key{e.File, e.ID, e.Message}] += e.Count
 	}
 	for _, f := range findings {
-		if k := keyOf(f); remaining[k] > 0 {
+		if k := keyOf(f, anchor); remaining[k] > 0 {
 			remaining[k]--
 			suppressed++
 			continue
