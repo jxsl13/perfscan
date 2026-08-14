@@ -1,0 +1,15 @@
+package ps5010
+
+import (
+	"strings"
+	"unicode"
+)
+
+// The spec after "bytes" already sorts after "strings", so the orphaned
+// bytes spec is swapped for "strings" in place and the group stays
+// gofmt-sorted.
+func swapInPlace(s string) (string, bool) {
+	t := strings.ToUpper(s) // want `string\(bytes\.ToUpper\(\[\]byte\(s\)\)\) copies`
+	ok := len(t) > 0 && unicode.IsUpper(rune(t[0]))
+	return t, ok
+}

@@ -111,6 +111,7 @@ checks' fixes.
 | [PS5006](PS5006.md) | alloc | L1 | yes | string(bytes.TrimPrefix([]byte(s), []byte(p))) pays throwaway copies; strings.TrimPrefix(s, p) is the same trim with zero copies |
 | [PS5008](PS5008.md) | arith | L1 | yes | math.Sin and math.Cos on the same argument (fusable to math.Sincos) |
 | [PS5009](PS5009.md) | arith | L2 |  | math.Pow with a small constant exponent |
+| [PS5010](PS5010.md) | alloc | L1 | yes | string(bytes.ToUpper([]byte(s))) pays two throwaway copies; strings.ToUpper(s) is the same case mapping with at most one allocation |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
