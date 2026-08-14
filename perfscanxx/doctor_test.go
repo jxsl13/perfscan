@@ -40,7 +40,7 @@ func TestDoctorReadyEnvironment(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("ready env: exit=%d, want 0; output:\n%s", code, out)
 	}
-	for _, want := range []string{"clang-tidy: /usr/bin/clang-tidy (LLVM 22)", "custom checks: supported", "compile database:", "1 TU(s), 1 on disk", "ready to scan."} {
+	for _, want := range []string{"perfscanxx doctor (perfscanxx ", "clang-tidy: /usr/bin/clang-tidy (LLVM 22)", "custom checks: supported", "compile database:", "1 TU(s), 1 on disk", "ready to scan."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("-doctor output missing %q:\n%s", want, out)
 		}
@@ -111,5 +111,28 @@ func TestDoctorPartialStaleDatabase(t *testing.T) {
 	}
 	if strings.Contains(out, "✗ compile database") {
 		t.Errorf("a partially-stale DB must be ⚠, not ✗:\n%s", out)
+	}
+}
+
+// TestSetupFailureSuggestsDoctor pins that a setup failure — no compilation
+// database discoverable — points the user at -doctor, so the diagnostic is
+// discoverable at the moment of failure rather than only if you already know it.
+func TestSetupFailureSuggestsDoctor(t *testing.T) {
+	origLook := tidy.LookPath
+	defer func() { tidy.LookPath = origLook }()
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+
+	dir := t.TempDir() // empty: no compile_commands.json anywhere up the tree
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut, code := runCLI("-p", dir, "./...")
+	if code != 2 {
+		t.Fatalf("no-DB run: exit=%d, want 2; stderr:\n%s", code, errOut)
+	}
+	if !strings.Contains(errOut, "perfscanxx -doctor") {
+		t.Errorf("a setup failure should suggest -doctor; stderr:\n%s", errOut)
 	}
 }
