@@ -155,7 +155,14 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   form is a member call so the free `std::count` (PX2110) never collides; and the
   `find(k) == m.end()` **absence** form is deliberately not matched (there `m[k]` is
   an insert, a `try_emplace` case, not a redundant lookup). No auto-fix: the rewrite
-  restructures the `if` around the iterator.
+  restructures the `if` around the iterator. **PX2112** return-move-temporary
+  (`return std::move(makeThing())` — `std::move` on a **prvalue temporary** is
+  redundant and turns the return into an xvalue, defeating the guaranteed copy
+  elision that would construct the value in place: a strict pessimization). The
+  temporary is matched as a `cxxBindTemporaryExpr`, so a move of an **lvalue
+  reference** (`std::move(getRef())`, a real move) and a move of a named **local**
+  (that's PX2102) are not flagged; `performance-move-const-arg` does not catch this.
+  No auto-fix: drop the `std::move`.
 
   Every custom matcher is gated with `isExpansionInMainFile()` so it fires only on
   the project's own translation unit, never on `catch`/`return`/loop constructs
@@ -182,7 +189,7 @@ advisory), and two L3-only
 diagnostics with no mechanical rewrite: `PX3021` (no-int-to-ptr — an integer↔pointer
 cast that defeats the optimizer's alias analysis) and `PX3022` (enum-size — an enum
 whose fixed underlying type is wider than its value set needs). So the advisory set is
-exactly `{PX2002, PX3020, PX3024, PX3025, PX3021, PX3022, PX2101, PX2102, PX2103, PX2104, PX2105, PX2106, PX2107, PX2108, PX2109, PX2110, PX2111}`;
+exactly `{PX2002, PX3020, PX3024, PX3025, PX3021, PX3022, PX2101, PX2102, PX2103, PX2104, PX2105, PX2106, PX2107, PX2108, PX2109, PX2110, PX2111, PX2112}`;
 everything else is auto-fixable.
 
 `PX3021`, `PX3022`, `PX2108`, and `PX2109` are gated to **L3 (aggressive)** — they
