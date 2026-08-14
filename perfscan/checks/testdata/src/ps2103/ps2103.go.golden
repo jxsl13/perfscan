@@ -98,6 +98,24 @@ func tags(ts []tag) []string {
 	return out
 }
 
+type fmtInt int
+
+// Format makes fmtInt an fmt.Formatter: it controls EVERY verb, %d included,
+// so `fmt.Sprintf("%d", fmtInt(42))` is "F<42>", not "42".
+func (f fmtInt) Format(s fmt.State, verb rune) { fmt.Fprintf(s, "F<%d>", int(f)) }
+
+// Named fmt.Formatter integer under %d: %d honors the Format method, so
+// strconv.Itoa would diverge (see TestPS2103DFormatterDiverges). The
+// unnamed-predeclared-integer guard excludes it — reported, no fix. This is
+// the load-bearing regression: it must stay advisory (golden UNCHANGED).
+func formatterInts(ns []fmtInt) []string {
+	out := make([]string, 0, len(ns))
+	for _, n := range ns {
+		out = append(out, fmt.Sprintf("v=%d", n)) // want `fmt\.Sprintf in a loop parses its format and boxes every argument per iteration; this format only splices simple verbs — build the string with concatenation or strconv instead`
+	}
+	return out
+}
+
 // %d over a float: %d does not format a float, and there is no strconv
 // decimal for it — reported, no fix.
 func floatD(xs []float64) []string {
