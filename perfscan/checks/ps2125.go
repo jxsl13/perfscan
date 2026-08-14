@@ -29,7 +29,7 @@ var PS2125 = register(&lint.Check{
 	Level:    lint.LevelIdiomatic,
 	AutoFix:  true,
 	Doc: lint.Documentation{
-		Title: "len([]rune(s)) / len([]byte(s)) allocate a throwaway conversion just to take a length",
+		Title: "len([]rune(s)) / len([]byte(s)) take a length through a throwaway conversion; count the string directly",
 		Text: `[]rune(s) decodes every rune of s into a rune slice; taking only
 its len discards that slice immediately. utf8.RuneCountInString(s)
 counts the runes in a single pass with zero allocation. The two are
@@ -95,7 +95,7 @@ the rewrite removes a real O(len) allocation per evaluation.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS2125",
-		Doc:  "len over a throwaway []rune/[]byte conversion of a string allocates the slice just to count it",
+		Doc:  "len over a throwaway []rune/[]byte conversion of a string; count or measure it directly instead",
 		Run:  runPS2125,
 	},
 })
@@ -155,7 +155,7 @@ func ps2125ReportRune(pass *analysis.Pass, f *ast.File, lenCall, inner *ast.Call
 	diag := analysis.Diagnostic{
 		Pos:     lenCall.Pos(),
 		End:     lenCall.End(),
-		Message: fmt.Sprintf("len(%s) decodes and allocates the whole rune slice just to count it; utf8.RuneCountInString(%s) is the bit-identical count with zero allocation", convText, xText),
+		Message: fmt.Sprintf("len(%s) spells a rune count as a throwaway []rune conversion; utf8.RuneCountInString(%s) is the direct, bit-identical count (allocation-free on every toolchain)", convText, xText),
 	}
 	// A comment inside the rewritten scaffolding would be destroyed —
 	// the fix is withheld then and the report stays advisory.
@@ -211,7 +211,7 @@ func ps2125ReportByte(pass *analysis.Pass, f *ast.File, lenCall, inner *ast.Call
 	diag := analysis.Diagnostic{
 		Pos:     lenCall.Pos(),
 		End:     lenCall.End(),
-		Message: fmt.Sprintf("len(%s) copies the whole string just to take its length; len(%s) is the identical byte count with zero allocation", convText, xText),
+		Message: fmt.Sprintf("len(%s) spells a byte length as a throwaway []byte conversion; len(%s) is the direct, bit-identical byte count (allocation-free on every toolchain)", convText, xText),
 	}
 	if !ps2111CommentIn(f, inner.Pos(), x.Pos()) && !ps2111CommentIn(f, x.End(), inner.End()) {
 		diag.SuggestedFixes = []analysis.SuggestedFix{{
