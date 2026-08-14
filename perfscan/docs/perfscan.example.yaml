@@ -93,8 +93,17 @@ compiledResourceFuncs:
   - compileGraph
   - newPipeline
 
+# Entry-point names of GPU compute kernels (Metal) embedded as Go string literals
+# that PS7001 should scan for a serial-K reduction — one thread per output row
+# looping the whole reduction dimension with no SIMD-group cooperative reduction,
+# which leaves lanes idle at batch M=1. The list is both opt-in and scope (only
+# these kernels are inspected), because whether a serial reduction is wrong is
+# shape/dtype/device-dependent. Empty -> PS7001 stays silent.
+gpuReductionKernels:
+  - matvec_q4k
+
 # ---------------------------------------------------------------------------
-# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 13
+# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 14
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the
 # names:
 #
@@ -111,4 +120,5 @@ compiledResourceFuncs:
 #   dtypeMethods:           [Dtype]
 #   outputBufferElemTypes:  [float64, float32]
 #   compiledResourceFuncs:  [NewMPSGraph, compilePipeline, buildProgram]
+#   gpuReductionKernels:    [matvec_q4k, mul_mat_vec_q4_K_f32]
 # ---------------------------------------------------------------------------

@@ -107,6 +107,16 @@ type Config struct {
 	// shapes. With none listed PS3091 stays silent — the set is the opt-in that
 	// distinguishes an expensive compile from cheap last-value memoization.
 	CompiledResourceFuncs []string `json:"compiledResourceFuncs,omitempty" yaml:"compiledResourceFuncs"`
+
+	// GPUReductionKernels are the entry-point names of GPU compute kernels
+	// (Metal initially) embedded as Go string literals that PS7001 should scan
+	// for a serial-K reduction — one thread per output row looping the whole
+	// reduction dimension with NO SIMD-group/subgroup cooperative reduction,
+	// which leaves lanes idle at batch M=1. The list is the opt-in AND the scope
+	// (only the named kernels are inspected), because whether a serial reduction
+	// is the wrong choice is shape/dtype/device-dependent and cannot be judged
+	// from source alone. With none listed PS7001 stays silent.
+	GPUReductionKernels []string `json:"gpuReductionKernels,omitempty" yaml:"gpuReductionKernels"`
 }
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
@@ -124,6 +134,7 @@ type Sets struct {
 	DtypeMethods           map[string]bool
 	OutputBufferElemTypes  map[string]bool
 	CompiledResourceFuncs  map[string]bool
+	GPUReductionKernels    map[string]bool
 }
 
 func toSet(xs []string) map[string]bool {
@@ -153,6 +164,7 @@ func (c Config) Compile() Sets {
 		DtypeMethods:           toSet(c.DtypeMethods),
 		OutputBufferElemTypes:  toSet(c.OutputBufferElemTypes),
 		CompiledResourceFuncs:  toSet(c.CompiledResourceFuncs),
+		GPUReductionKernels:    toSet(c.GPUReductionKernels),
 	}
 }
 

@@ -316,6 +316,20 @@ func TestPS3091SilentWithoutVocabulary(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS3091.Analyzer, "ps3091silent")
 }
 
+func TestPS7001(t *testing.T) {
+	defer config.SetForTesting(config.Config{GPUReductionKernels: []string{
+		"matvec_q4k", "matvec_coop", "matvec_noloop", "serial_a", "coop_b",
+	}})()
+	analysistest.Run(t, analysistest.TestData(), PS7001.Analyzer, "ps7001")
+}
+
+func TestPS7001SilentWithoutVocabulary(t *testing.T) {
+	defer config.SetForTesting(config.Config{})()
+	// The fixture has a serial-K Metal kernel; with no gpuReductionKernels
+	// vocabulary the check must stay silent (no expectation comments).
+	analysistest.Run(t, analysistest.TestData(), PS7001.Analyzer, "ps7001silent")
+}
+
 func TestPS2001SilentWithoutVocabulary(t *testing.T) {
 	restore := config.SetForTesting(config.Config{})
 	defer restore()
