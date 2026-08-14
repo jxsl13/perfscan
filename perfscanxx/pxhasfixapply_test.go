@@ -140,6 +140,60 @@ func TestPX3026DoesNotFireOnNonTrivialMember(t *testing.T) {
 	}
 }
 
+// TestFixJSONAppliesAndEmitsFindings pins the -fix + -json COMBINATION — a CI
+// pipeline that applies the fixes AND wants a machine-readable report of what was
+// found. -fix must apply the fix-it to disk AND still emit valid findings JSON on
+// stdout (the output switch runs after the fix pass; only -diff short-circuits).
+// Neither the -fix tests (which check the file) nor the JSON tests (which check
+// stdout) exercise the two together.
+func TestFixJSONAppliesAndEmitsFindings(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	// The PX3026 positive shape: an out-of-line defaulted destructor.
+	const src = "struct S { int a; ~S(); };\nS::~S() = default;\n"
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "s.cpp")
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile, ok := cppCompileCmdForTest("s.cpp")
+	if !ok {
+		t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, stderr, _ := runCLI("-tidy", bin, "-fix", "-json", "-checks", "PX3026", "-p", dir, cpp)
+	if strings.Contains(stderr, "file not found") || strings.Contains(stderr, "fatal error") {
+		t.Skipf("toolchain could not parse the fixture; skipping. stderr:\n%s", stderr)
+	}
+
+	// (a) the fix was applied on disk: the out-of-line `= default` is gone.
+	gotB, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotB) == src || strings.Contains(string(gotB), "S::~S()") {
+		t.Errorf("-fix -json did not apply the PX3026 fix on disk:\n%s", gotB)
+	}
+
+	// (b) stdout is valid findings JSON listing PX3026 — -fix must not suppress it.
+	var findings []struct {
+		ID    string `json:"id"`
+		Check string `json:"check"`
+	}
+	if err := json.Unmarshal([]byte(out), &findings); err != nil {
+		t.Fatalf("-fix -json stdout is not valid JSON: %v\n%s", err, out)
+	}
+	if len(findings) != 1 || findings[0].ID != "PX3026" {
+		t.Errorf("-fix -json must emit the PX3026 finding as JSON, got:\n%s", out)
+	}
+}
+
 // TestPX3027DoesNotFireOnNoexceptDestructor pins the SAFETY BOUNDARY of the
 // noexcept-destructor fix (PX3027), which carries a std::terminate footgun: it
 // inserts `noexcept` only when the destructor is implicitly noexcept(false)
