@@ -303,6 +303,7 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	files, effBuildDir, err := expandInputs(inputs, *buildDir)
 	if err != nil {
 		fmt.Fprintln(stderr, "perfscanxx:", err)
+		fmt.Fprintln(stderr, "perfscanxx: run `perfscanxx -doctor` to diagnose your setup.")
 		return 2
 	}
 	if len(files) == 0 {
@@ -311,6 +312,7 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		} else {
 			fmt.Fprintf(stderr, "perfscanxx: no C++ translation units matched %v\n", inputs)
 		}
+		fmt.Fprintln(stderr, "perfscanxx: run `perfscanxx -doctor` to diagnose your setup.")
 		return 2
 	}
 
@@ -1358,7 +1360,9 @@ func splitFiles(files []string, n int) [][]string {
 // probe — the canonical "why isn't this working?" answer for a tool that
 // orchestrates an external binary with several setup requirements.
 func runDoctor(ctx context.Context, stdout io.Writer, tidyBin, buildDir string) int {
-	fmt.Fprintln(stdout, "perfscanxx doctor:")
+	// Lead with our own version so the whole -doctor output is a self-contained,
+	// paste-able bug-report snapshot (perfscanxx version + resolved backend + env).
+	fmt.Fprintf(stdout, "perfscanxx doctor (perfscanxx %s):\n", version)
 	ready := true // all HARD requirements satisfied
 
 	// 1. clang-tidy binary + LLVM version.
