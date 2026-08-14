@@ -62,6 +62,31 @@ void f(B* p) {
 // TU) cannot close: a matcher can be syntactically accepted yet semantically
 // match nothing (a wrong-but-valid matcher would fire on no real code). This is
 // the custom-check analog of TestHasFixChecksActuallyApply for built-ins.
+// TestCustomTriggerSrcCoversEveryCustomCheck is the pure-Go completeness backstop
+// for TestCustomChecksFireOnTargetPattern: the fires test proves each custom
+// check matches, but it SKIPS whenever clang-tidy is absent (common in CI). This
+// asserts — with no clang-tidy needed — that customTriggerSrc carries a marker
+// for every custom check in the catalog, so a newly added custom check that
+// forgot its trigger snippet fails HERE (loudly, everywhere) rather than silently
+// slipping through a skipped fires test. Each anti-pattern in customTriggerSrc is
+// annotated with a `// PXxxxx` marker comment; this checks every catalog custom ID
+// is present.
+func TestCustomTriggerSrcCoversEveryCustomCheck(t *testing.T) {
+	custom := 0
+	for _, e := range catalog.All() {
+		if !e.Custom {
+			continue
+		}
+		custom++
+		if !strings.Contains(customTriggerSrc, e.ID) {
+			t.Errorf("%s (%s) has no trigger snippet in customTriggerSrc — add code exhibiting its anti-pattern with a `// %s` marker, or the fires test silently loses coverage when clang-tidy is absent", e.ID, e.TidyName, e.ID)
+		}
+	}
+	if custom == 0 {
+		t.Fatal("no custom checks found in the catalog")
+	}
+}
+
 func TestCustomChecksFireOnTargetPattern(t *testing.T) {
 	bin := findClangTidyForTest()
 	if bin == "" {
