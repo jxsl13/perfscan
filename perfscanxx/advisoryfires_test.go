@@ -16,7 +16,7 @@ import (
 //
 //	PX2002 inefficient-string-concatenation, PX3020 rvalue-reference-param-not-moved,
 //	PX3021 no-int-to-ptr, PX3022 enum-size, PX3024 implicit-conversion-in-loop,
-//	PX3025 no-automatic-move.
+//	PX3025 no-automatic-move, PX3028 move-constructor-init.
 //
 // Unlike the custom checks, these are upstream clang-tidy checks with no
 // fix-it, so they are driven by --checks (not --experimental-custom-checks).
@@ -62,6 +62,14 @@ long advSumConverted(const std::vector<int>& v) {
 std::string advConstParamReturn(const std::string s) {
   return s;
 }
+
+// performance-move-constructor-init: the move constructor initializes a movable
+// member by COPY (m(o.m)) instead of m(std::move(o.m)), so every "move"
+// deep-copies the string.
+struct AdvCopyingMove {
+  std::string m;
+  AdvCopyingMove(AdvCopyingMove&& o) : m(o.m) {}
+};
 `
 
 // TestAdvisoryChecksFireOnTargetPattern verifies each advisory (HasFix:false,

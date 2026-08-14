@@ -364,6 +364,23 @@ var entries = []Entry{
 			"can throw. Adding noexcept turns any such throw during destruction into " +
 			"std::terminate. Confirm no subobject destructor actually throws before -fix.",
 	},
+	{
+		// Advisory (clang-tidy diagnoses but emits NO fix-it — re-verified end to
+		// end): a user-written move constructor that initializes a member from the
+		// source by COPY, e.g. `S(S&& o) : m(o.m)` where m is movable. The member is
+		// deep-copied on every "move" — an avoidable O(n) allocation+copy that
+		// defeats the whole point of the move constructor. No fix-it because
+		// inserting `std::move(o.m)` needs use-after liveness the check will not
+		// assume (the source member might be read again later in the body), so the
+		// safe rewrite is a human call. Grouped with the sibling move-ctor checks
+		// (PX3004/PX3025/PX3027) in -list. L2, not L3: it is high-signal and
+		// low-noise — it only fires on a hand-written move ctor that provably copies
+		// a movable member, which is nearly always a real bug, so it does not spam.
+		ID: "PX3028", TidyName: "performance-move-constructor-init",
+		Level: LevelStructured, Category: "moves",
+		Title:  "a move constructor initializes a member by COPY (e.g. `: m(o.m)`) — every \"move\" deep-copies that member; initialize it from std::move(o.m)",
+		HasFix: false,
+	},
 	// Query-based custom check (ZERO compiled C++) — the C++ analog of the
 	// Go linter's PS2101. Run via clang-tidy --experimental-custom-checks.
 	{
