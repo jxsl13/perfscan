@@ -586,6 +586,33 @@ func TestJSONAndSARIF(t *testing.T) {
 	}
 }
 
+// TestSARIFDriverCarriesVersion pins that the SARIF tool.driver.version is
+// populated (from report.ToolVersion, which main stamps with the build version).
+// GitHub Code Scanning uses it to track and dedup results across tool versions;
+// an empty version leaves consumers unable to distinguish runs. Tests never set
+// ToolVersion, so it carries the "dev" default here.
+func TestSARIFDriverCarriesVersion(t *testing.T) {
+	var buf bytes.Buffer
+	if err := SARIF(&buf, []Finding{{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 1}}); err != nil {
+		t.Fatalf("SARIF: %v", err)
+	}
+	var log struct {
+		Runs []struct {
+			Tool struct {
+				Driver struct {
+					Version string `json:"version"`
+				} `json:"driver"`
+			} `json:"tool"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &log); err != nil {
+		t.Fatalf("SARIF not valid JSON: %v", err)
+	}
+	if got := log.Runs[0].Tool.Driver.Version; got != "dev" {
+		t.Errorf("SARIF tool.driver.version = %q, want the ToolVersion default %q", got, "dev")
+	}
+}
+
 // TestSARIFRuleCarriesCaveatInFullDescription pins that a check's safety caveat
 // (the "this fix-it is unsafe to apply blindly" warning on PX3004/PX3007/PX3015/
 // PX3027) reaches the SARIF rule's fullDescription, which GitHub Code Scanning
