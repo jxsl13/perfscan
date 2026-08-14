@@ -185,6 +185,80 @@ func TestPX2101FiresAcrossLoopKinds(t *testing.T) {
 	}
 }
 
+// px2102ParamSrc distinguishes PX2102's real target (a named LOCAL, where
+// std::move blocks NRVO) from a by-value PARAMETER, where NRVO does not apply at
+// all — copy elision is barred for function parameters, and `return param;`
+// already implicit-moves — so `return std::move(param)` is redundant-but-harmless,
+// NOT a pessimization. Parameters have local storage, so the earlier
+// hasLocalStorage()-only matcher flagged them (a false positive with a message
+// about NRVO that does not apply). The query now adds unless(parmVarDecl()).
+const px2102ParamSrc = `#include <string>
+std::string localMove() {
+  std::string s = "x";
+  return std::move(s);   // PX2102: real NRVO pessimization on a local
+}
+std::string paramMove(std::string p) {
+  return std::move(p);   // by-value parameter: must NOT fire
+}
+`
+
+// TestPX2102DoesNotFireOnParameterMove pins that PX2102 fires on the local move
+// but NOT on the by-value-parameter move — the false positive that
+// unless(parmVarDecl()) removed.
+func TestPX2102DoesNotFireOnParameterMove(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	e, ok := catalog.ByID("PX2102")
+	if !ok || !e.Custom {
+		t.Fatal("PX2102 missing or not a custom check")
+	}
+	cfg := catalog.ClangTidyConfig([]catalog.Entry{e})
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".clang-tidy")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "moves.cpp")
+	if err := os.WriteFile(src, []byte(px2102ParamSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--experimental-custom-checks", "--config-file=" + cfgPath, "--", "-std=c++17"}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+
+	if strings.Contains(output, "Unknown command line argument") && strings.Contains(output, "experimental-custom-checks") {
+		t.Skip("clang-tidy is too old for --experimental-custom-checks; skipping")
+	}
+	if strings.Contains(output, "[clang-tidy-config]") {
+		t.Fatalf("clang-tidy rejected the PX2102 query:\n%s", output)
+	}
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture; skipping:\n%s", output)
+	}
+
+	tag := "[" + e.TidyName + "]"
+	if n := strings.Count(output, tag); n != 1 {
+		t.Errorf("PX2102 fired %d time(s), want exactly 1 (the local move only):\n%s", n, output)
+	}
+	if !strings.Contains(output, "moves.cpp:4:") {
+		t.Errorf("PX2102 must fire on the LOCAL move at line 4:\n%s", output)
+	}
+	if strings.Contains(output, "moves.cpp:7:") {
+		t.Errorf("PX2102 must NOT fire on the by-value PARAMETER move at line 7 (NRVO does not apply to parameters):\n%s", output)
+	}
+}
+
 // px2107TrivialSrc exercises PX2107's exponent scoping: the NON-actionable
 // integer exponents 0 (pow(x,0)==1) and 1 (pow(x,1)==x) must NOT fire — for
 // those "multiply directly" is wrong advice — while an actionable constant

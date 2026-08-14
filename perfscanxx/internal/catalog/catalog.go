@@ -385,10 +385,16 @@ var entries = []Entry{
 		Custom: true,
 		Bind:   "mv",
 		// isExpansionInMainFile keeps it off headers (inline/template returns).
+		// unless(parmVarDecl()): NRVO applies only to a named LOCAL, never to a
+		// by-value PARAMETER (copy elision is barred for parameters, and
+		// `return param;` already implicit-moves), so `return std::move(param)`
+		// is redundant-but-harmless, NOT an NRVO pessimization. Excluding
+		// parameters keeps this off that false positive — parameters have local
+		// storage, so hasLocalStorage() alone would match them.
 		Query: `match returnStmt(isExpansionInMainFile(), hasReturnValue(ignoringParenImpCasts(` +
 			`cxxConstructExpr(hasArgument(0, ignoringParenImpCasts(` +
 			`callExpr(callee(functionDecl(hasName("::std::move"))), ` +
-			`hasArgument(0, declRefExpr(to(varDecl(hasLocalStorage()))))).bind("mv")))))))`,
+			`hasArgument(0, declRefExpr(to(varDecl(hasLocalStorage(), unless(parmVarDecl())))))).bind("mv")))))))`,
 		Message: "std::move of a local in a return statement pessimizes NRVO — the compiler can elide the copy/move entirely if you return the local directly (query-based, no auto-fix)",
 	},
 	{
