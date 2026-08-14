@@ -278,6 +278,58 @@ func TestEquiv_SlicesSort(t *testing.T) {
 	}
 }
 
+// PS3105 (Reverse form): sort.Sort(sort.Reverse(sort.IntSlice(x))) ->
+// slices.SortFunc(x, func(a, b int) int { return cmp.Compare(b, a) }).
+// sort.Reverse flips Less(i,j) to x[j] < x[i] (descending); cmp.Compare(b, a)
+// < 0 iff b < a iff a > b — the identical descending predicate. Both are
+// unstable pdqsort and for []int/[]string ties are bitwise-identical, so the
+// output must be byte-for-byte equal. Pinned over tie-heavy shuffled inputs
+// (small domains -> many duplicates), for the sort.Stable spelling too.
+func TestEquiv_PS3105Reverse(t *testing.T) {
+	r := rand.New(rand.NewSource(7))
+	for trial := 0; trial < 3000; trial++ {
+		n := r.Intn(50)
+		base := make([]int, n)
+		for i := range base {
+			base[i] = r.Intn(6) // small domain -> many ties
+		}
+		a := slices.Clone(base)
+		b := slices.Clone(base)
+		sort.Sort(sort.Reverse(sort.IntSlice(a)))
+		slices.SortFunc(b, func(x, y int) int { return cmp.Compare(y, x) })
+		if !slices.Equal(a, b) {
+			t.Fatalf("sort.Sort(sort.Reverse(sort.IntSlice)) != slices.SortFunc(cmp.Compare(b,a)) on %v: %v vs %v", base, a, b)
+		}
+		// The stable spelling maps to the SAME unstable SortFunc: for []int
+		// stability is unobservable, so the descending arrangement is unique.
+		c := slices.Clone(base)
+		sort.Stable(sort.Reverse(sort.IntSlice(c)))
+		if !slices.Equal(a, c) {
+			t.Fatalf("sort.Stable(sort.Reverse(sort.IntSlice)) diverged on %v: %v vs %v", base, a, c)
+		}
+	}
+	pool := []string{"", "a", "aa", "ab", "b", "ba", "bb", "abc"} // duplicates guaranteed
+	for trial := 0; trial < 3000; trial++ {
+		n := r.Intn(40)
+		base := make([]string, n)
+		for i := range base {
+			base[i] = pool[r.Intn(len(pool))]
+		}
+		a := slices.Clone(base)
+		b := slices.Clone(base)
+		sort.Sort(sort.Reverse(sort.StringSlice(a)))
+		slices.SortFunc(b, func(x, y string) int { return cmp.Compare(y, x) })
+		if !slices.Equal(a, b) {
+			t.Fatalf("sort.Sort(sort.Reverse(sort.StringSlice)) != slices.SortFunc(cmp.Compare(b,a)) on %v: %v vs %v", base, a, b)
+		}
+		c := slices.Clone(base)
+		sort.Stable(sort.Reverse(sort.StringSlice(c)))
+		if !slices.Equal(a, c) {
+			t.Fatalf("sort.Stable(sort.Reverse(sort.StringSlice)) diverged on %v: %v vs %v", base, a, c)
+		}
+	}
+}
+
 // PS3002: sort.Slice(x, func(i,j) bool) -> slices.SortFunc(x, func(a,b) int)
 // with cmp.Compare. Both share pdqsort, so a comparator inducing the same order
 // yields the identical permutation (incl. ties) — the whole basis of the
