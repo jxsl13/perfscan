@@ -318,26 +318,32 @@ func TestRegistryInvariant(t *testing.T) {
 		} else {
 			slugs[c.Slug] = c.ID
 		}
-		// Every auto-fixable check must ship a golden fixture proving its
-		// rewrite: a fix that is not golden-tested (or a check mislabeled
-		// AutoFix) is a latent hole in the bit-identical safety bar.
-		if c.AutoFix {
-			dir := filepath.Join("testdata", "src", strings.ToLower(c.ID))
-			entries, err := os.ReadDir(dir)
-			if err != nil {
-				t.Errorf("check %s: AutoFix but no testdata dir %s", c.ID, dir)
-				continue
+		// EVERY check — advisory or auto-fixable — must ship an analysistest
+		// fixture directory (testdata/src/<id>) with at least one .go fixture, so
+		// a check can never land without firing coverage. On top of that, an
+		// auto-fixable check must ship a .go.golden proving its rewrite: a fix
+		// that is not golden-tested (or a check mislabeled AutoFix) is a latent
+		// hole in the bit-identical safety bar.
+		dir := filepath.Join("testdata", "src", strings.ToLower(c.ID))
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Errorf("check %s: no testdata dir %s — every check needs analysistest coverage", c.ID, dir)
+			continue
+		}
+		hasGo, hasGolden := false, false
+		for _, e := range entries {
+			switch {
+			case strings.HasSuffix(e.Name(), ".go.golden"):
+				hasGolden = true
+			case strings.HasSuffix(e.Name(), ".go"):
+				hasGo = true
 			}
-			hasGolden := false
-			for _, e := range entries {
-				if strings.HasSuffix(e.Name(), ".go.golden") {
-					hasGolden = true
-					break
-				}
-			}
-			if !hasGolden {
-				t.Errorf("check %s: AutoFix but no .go.golden fixture in %s — the fix is not golden-tested", c.ID, dir)
-			}
+		}
+		if !hasGo {
+			t.Errorf("check %s: testdata dir %s has no .go fixture — the check has no firing coverage", c.ID, dir)
+		}
+		if c.AutoFix && !hasGolden {
+			t.Errorf("check %s: AutoFix but no .go.golden fixture in %s — the fix is not golden-tested", c.ID, dir)
 		}
 	}
 }
