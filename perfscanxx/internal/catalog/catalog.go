@@ -86,7 +86,7 @@ var entries = []Entry{
 	{
 		ID: "PX1001", TidyName: "performance-for-range-copy",
 		Level: LevelIdiomatic, Category: "copies",
-		Title:  "range-for loop variable copies each element; take a const reference",
+		Title:  "range-for loop variable copies each element (including a structured binding `for (auto [k, v] : m)`); take a const reference",
 		HasFix: true,
 	},
 	{
@@ -110,7 +110,7 @@ var entries = []Entry{
 	{
 		ID: "PX2003", TidyName: "modernize-use-emplace",
 		Level: LevelIdiomatic, Category: "allocation",
-		Title:  "push_back(T(args)) constructs a temporary then moves; emplace_back(args) builds in place",
+		Title:  "push_back(T(args)) — or emplace_back(T(args)) — constructs a temporary then moves; emplace_back(args) builds in place",
 		HasFix: true,
 	},
 	{
