@@ -282,3 +282,18 @@ func TestChangedFixNarrowsToChangedTU(t *testing.T) {
 		t.Error("expected the analysis pass to carry --fix under -fix")
 	}
 }
+
+// TestChangedRejectsFlagLookingRef pins the guard for a common footgun: writing
+// `-changed -fix` (ref omitted) makes Go's flag parser swallow -fix as the ref
+// value. Since git refs never start with "-", perfscanxx rejects it up front with
+// a clear message instead of running a full scan that silently drops the intended
+// flag. Hermetic — the guard fires at flag validation, before any git/clang-tidy.
+func TestChangedRejectsFlagLookingRef(t *testing.T) {
+	_, errOut, code := runCLI("-changed", "-fix")
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2; stderr:\n%s", code, errOut)
+	}
+	if !strings.Contains(errOut, "looks like a flag") {
+		t.Errorf("expected the flag-looking-ref error; stderr:\n%s", errOut)
+	}
+}
