@@ -570,6 +570,8 @@ int diffKey(std::map<int,int>& m, int a, int b){ if (m.count(a)) { return m[b]; 
 int noAccess(std::map<int,int>& m, int k)      { if (m.count(k)) { return 7; } return 0; }            // NO (no [] in body)
 int noCheck(std::map<int,int>& m, int k)       { return m[k]; }                                        // NO (no existence check)
 bool freeCount(const std::vector<int>& v,int x){ return std::count(v.begin(), v.end(), x) > 0; }       // NO (PX2110, not this)
+int findForm(std::map<int,int>& m, int k)      { if (m.find(k) != m.end()) { return m[k]; } return 0; } // MATCH line 10 (find!=end)
+int findAbsent(std::map<int,int>& m, int k)    { if (m.find(k) == m.end()) { return 0; } return m[k]; } // NO line 11 (==end: insert, not redundant)
 `
 
 // TestPX2111DoesNotFireOnDifferentKeyOrNoAccess pins that PX2111 fires on the two
@@ -619,12 +621,12 @@ func TestPX2111DoesNotFireOnDifferentKeyOrNoAccess(t *testing.T) {
 	}
 
 	tag := "[" + e.TidyName + "]"
-	if n := strings.Count(output, tag); n != 2 {
-		t.Errorf("PX2111 fired %d time(s), want exactly 2 (the same-map/same-key read and write):\n%s", n, output)
+	if n := strings.Count(output, tag); n != 3 {
+		t.Errorf("PX2111 fired %d time(s), want exactly 3 (count read, count-write, find!=end):\n%s", n, output)
 	}
-	for _, bad := range []string{"dl.cpp:6:", "dl.cpp:7:", "dl.cpp:8:", "dl.cpp:9:"} {
+	for _, bad := range []string{"dl.cpp:6:", "dl.cpp:7:", "dl.cpp:8:", "dl.cpp:9:", "dl.cpp:11:"} {
 		if strings.Contains(output, bad) {
-			t.Errorf("PX2111 fired at %s — it must not flag a different key, a missing body access, a bare access, or the free std::count:\n%s", bad, output)
+			t.Errorf("PX2111 fired at %s — it must not flag a different key, a missing body access, a bare access, the free std::count, or the find()==end() absence form:\n%s", bad, output)
 		}
 	}
 }

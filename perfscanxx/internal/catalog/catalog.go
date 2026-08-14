@@ -570,31 +570,40 @@ var entries = []Entry{
 	{
 		ID: "PX2111", TidyName: "custom-map-double-lookup",
 		Level: LevelStructured, Category: "containers",
-		Title:  "an associative container is looked up twice — m.count(k) then m[k] on the same key; find() returns an iterator you can test and reuse",
+		Title:  "an associative container is looked up twice — m.count(k)/m.find(k)!=m.end() then m[k] on the same key; find() returns an iterator you can test and reuse",
 		HasFix: false,
 		Custom: true,
 		Bind:   "dl",
-		// The classic double lookup: `if (m.count(k)) { ... m[k] ... }` hashes/compares
-		// the key TWICE — once for count(), again for operator[] — where a single
-		// find() answers both: `auto it = m.find(k); if (it != m.end()) use(it->second);`.
+		// The classic double lookup: `if (m.count(k)) { ... m[k] ... }` OR
+		// `if (m.find(k) != m.end()) { ... m[k] ... }` hashes/compares the key TWICE —
+		// once for the existence check, again for operator[] — where a single find()
+		// answers both: `auto it = m.find(k); if (it != m.end()) use(it->second);`.
 		// PRECISION: the map object and the key must be the SAME declared variable in
 		// both the condition and the body — equalsBoundNode on the map's varDecl and on
 		// the key's valueDecl — so `if (m.count(a)) use(m[b])` (different keys) is NOT
-		// flagged. The condition's count() is a MEMBER call on the object (on(...)), so
-		// the free std::count algorithm (PX2110) can never match here. The body access
-		// is operator[] on the same map and key. ignoringParenImpCasts sees through the
-		// const-ref binding of the key argument. isExpansionInMainFile keeps it off
-		// library headers. clang-tidy ships no equivalent. NO auto-fix: the rewrite
-		// restructures the if around a find() iterator — a human call (and for a
-		// count()>0-then-write it may be a try_emplace/insert-or-assign instead).
+		// flagged. The condition is either a MEMBER count() on the object (so the free
+		// std::count algorithm, PX2110, can never match here) or `m.find(k) != m.end()`
+		// where the != is the iterators' overloaded operator (cxxOperatorCallExpr) and
+		// the end() is on the SAME map; the == m.end() ABSENCE form is deliberately not
+		// matched (there m[k] is an insert, not a redundant lookup — a try_emplace case).
+		// The body access is operator[] on the same map and key. forEachDescendant sees
+		// through the ExprWithCleanups wrapping the iterator-temporary comparison;
+		// ignoringParenImpCasts through the const-ref key binding. isExpansionInMainFile
+		// keeps it off library headers. clang-tidy ships no equivalent. NO auto-fix: the
+		// rewrite restructures the if around a find() iterator — a human call.
 		Query: `match ifStmt(isExpansionInMainFile(), ` +
-			`hasCondition(forEachDescendant(cxxMemberCallExpr(on(declRefExpr(to(varDecl().bind("m")))), ` +
-			`callee(cxxMethodDecl(hasName("count"))), ` +
-			`hasArgument(0, ignoringParenImpCasts(declRefExpr(to(valueDecl().bind("key")))))))), ` +
+			`hasCondition(forEachDescendant(anyOf(` +
+			`cxxMemberCallExpr(on(declRefExpr(to(varDecl().bind("m")))), callee(cxxMethodDecl(hasName("count"))), ` +
+			`hasArgument(0, ignoringParenImpCasts(declRefExpr(to(valueDecl().bind("key")))))), ` +
+			`cxxOperatorCallExpr(hasOverloadedOperatorName("!="), ` +
+			`hasArgument(0, ignoringParenImpCasts(cxxMemberCallExpr(on(declRefExpr(to(varDecl().bind("m")))), ` +
+			`callee(cxxMethodDecl(hasName("find"))), hasArgument(0, ignoringParenImpCasts(declRefExpr(to(valueDecl().bind("key")))))))), ` +
+			`hasArgument(1, ignoringParenImpCasts(cxxMemberCallExpr(on(declRefExpr(to(varDecl(equalsBoundNode("m"))))), ` +
+			`callee(cxxMethodDecl(hasName("end")))))))))), ` +
 			`hasThen(forEachDescendant(cxxOperatorCallExpr(hasOverloadedOperatorName("[]"), ` +
 			`hasArgument(0, declRefExpr(to(varDecl(equalsBoundNode("m"))))), ` +
 			`hasArgument(1, ignoringParenImpCasts(declRefExpr(to(valueDecl(equalsBoundNode("key")))))))))).bind("dl")`,
-		Message: "the key is looked up twice on this map — m.count(k) in the condition and m[k] in the body hash/compare the same key again; hold the iterator instead: auto it = m.find(k); if (it != m.end()) use(it->second); (query-based, no auto-fix)",
+		Message: "the key is looked up twice on this map — the condition (m.count(k) or m.find(k) != m.end()) and m[k] in the body hash/compare the same key again; hold the iterator instead: auto it = m.find(k); if (it != m.end()) use(it->second); (query-based, no auto-fix)",
 	},
 }
 
