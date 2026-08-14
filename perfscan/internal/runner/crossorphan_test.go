@@ -89,6 +89,62 @@ func f(buf *bytes.Buffer, s string, n int) {
 	}
 }
 
+// TestFixPS3002CrossCheckAddsCmpAndSlicesPrunesSort pins the specific
+// composition the autofix-candidates backlog flagged as the "highest-value"
+// cross-check import hazard: PS3002 (sort.Slice -> slices.SortFunc) is unique in
+// that a single fixable site ADDS TWO imports at once — "slices" AND "cmp" — while
+// ALSO orphaning "sort". Composed with a PS3104 site (sort.Strings -> slices.Sort,
+// which independently adds "slices" and removes the other sort reference), the
+// runner must: prune the now-fully-orphaned "sort", add "cmp" and "slices" exactly
+// ONCE each (no duplicate slices from the two adders), apply BOTH rewrites, and
+// leave a file that COMPILES. Every other cross-check orphan test exercises
+// single-import adders (PS3104/PS3105/PS2107); none drives PS3002's dual add +
+// orphan, so a regression in the two-add-plus-prune interaction for the cmp-adding
+// path would slip through. (Empirically already correct — this locks it, since a
+// released fix silently reverting is a demonstrated failure mode.)
+func TestFixPS3002CrossCheckAddsCmpAndSlicesPrunesSort(t *testing.T) {
+	const src = `package p
+
+import "sort"
+
+type Row struct{ F int }
+
+func A(x []Row) {
+	sort.Slice(x, func(i, j int) bool { return x[i].F < x[j].F })
+}
+
+func B(s []string) {
+	sort.Strings(s)
+}
+`
+	got := runFixMode(t, src)
+	s := string(got)
+
+	// sort is now referenced by neither rewrite -> must be pruned.
+	if strings.Contains(s, `"sort"`) {
+		t.Errorf(`"sort" should have been pruned (orphaned by PS3002 + PS3104):\n%s`, s)
+	}
+	// cmp and slices each added exactly once (PS3002 adds both; PS3104 also adds
+	// slices, and the dedupe must collapse it to a single import).
+	if n := strings.Count(s, `"slices"`); n != 1 {
+		t.Errorf(`expected exactly one "slices" import, got %d:\n%s`, n, s)
+	}
+	if n := strings.Count(s, `"cmp"`); n != 1 {
+		t.Errorf(`expected exactly one "cmp" import, got %d:\n%s`, n, s)
+	}
+	// Both rewrites applied.
+	if !strings.Contains(s, "slices.SortFunc(x, func(a, b Row) int { return cmp.Compare(a.F, b.F) })") {
+		t.Errorf("PS3002 rewrite (sort.Slice -> slices.SortFunc with cmp.Compare) missing:\n%s", s)
+	}
+	if !strings.Contains(s, "slices.Sort(s)") {
+		t.Errorf("PS3104 rewrite (sort.Strings -> slices.Sort) missing:\n%s", s)
+	}
+	// The strongest assertion: the result actually compiles — the exact failure
+	// mode the backlog described was an orphaned "sort" producing
+	// "imported and not used: sort".
+	assertFixedCompiles(t, got)
+}
+
 // TestFixHoistCrossFileNameCollision pins a package-scope naming hazard of the
 // hoist family (PS2127/PS2132/PS2134): each seeds its fresh package-level var
 // name from the ENCLOSING FUNCTION'S SOURCE LINE, so two hoists in DIFFERENT
