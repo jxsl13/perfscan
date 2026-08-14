@@ -52,7 +52,7 @@ checks' fixes.
 | [PS2122](PS2122.md) | alloc | L1 | yes | fmt.Sprintf("%s%s", a, b) over plain strings is a reflection-priced +; concatenate directly |
 | [PS2123](PS2123.md) | alloc | L1 | yes | fmt.Sprint over plain strings is a reflection-priced +; concatenate directly |
 | [PS2124](PS2124.md) | alloc | L1 | yes | strings.Join over an inline []string literal is a slice-priced +; concatenate with the separator interleaved |
-| [PS2125](PS2125.md) | alloc | L1 | yes | len([]rune(s)) / len([]byte(s)) allocate a throwaway conversion just to take a length |
+| [PS2125](PS2125.md) | alloc | L1 | yes | len([]rune(s)) / len([]byte(s)) take a length through a throwaway conversion; count the string directly |
 | [PS2127](PS2127.md) | alloc | L2 | yes | a regexp.MustCompile of a constant pattern used inline in a function body |
 | [PS2128](PS2128.md) | alloc | L2 | yes | a string grown by += in a loop; strings.Builder appends without re-copying |
 | [PS2129](PS2129.md) | alloc | L1 | yes | fmt.Fprintf(w, "%s", s) on a plain string pays fmt's whole machinery; io.WriteString(w, s) writes the bytes directly |
