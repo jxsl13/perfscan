@@ -639,6 +639,32 @@ func TestSARIFDriverCarriesVersion(t *testing.T) {
 	}
 }
 
+// TestSARIFRunCarriesAutomationDetailsCategory pins that every run carries a
+// stable run.automationDetails.id ending in "/" — the category GitHub Code
+// Scanning uses to keep perfscanxx a distinct analysis. Without it, a repo
+// uploading perfscanxx's SARIF next to another tool's (or a second perfscanxx
+// run in a build matrix) on the same commit can have one clobber the other's
+// results, silently dropping findings.
+func TestSARIFRunCarriesAutomationDetailsCategory(t *testing.T) {
+	var buf bytes.Buffer
+	if err := SARIF(&buf, []Finding{{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 1}}); err != nil {
+		t.Fatalf("SARIF: %v", err)
+	}
+	var log struct {
+		Runs []struct {
+			AutomationDetails struct {
+				ID string `json:"id"`
+			} `json:"automationDetails"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &log); err != nil {
+		t.Fatalf("SARIF not valid JSON: %v", err)
+	}
+	if got := log.Runs[0].AutomationDetails.ID; got != "perfscanxx/" {
+		t.Errorf("SARIF run.automationDetails.id = %q, want %q (category must end in / so GitHub treats runs as one non-overwriting analysis)", got, "perfscanxx/")
+	}
+}
+
 // TestSARIFRuleCarriesCaveatInFullDescription pins that a check's safety caveat
 // (the "this fix-it is unsafe to apply blindly" warning on PX3004/PX3007/PX3015/
 // PX3027) reaches the SARIF rule's fullDescription, which GitHub Code Scanning
