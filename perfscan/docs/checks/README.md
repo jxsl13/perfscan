@@ -73,6 +73,7 @@ checks' fixes.
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
 | [PS3004](PS3004.md) | alloc | L1 | yes | a bytes.* predicate fed []byte(s) conversions of strings pays two throwaway copies; the strings.* twin scans the strings directly |
 | [PS3005](PS3005.md) | indirect | L2 | yes | an index-slice sort whose comparator dereferences into a 2-D structure |
+| [PS3006](PS3006.md) | indirect | L1 | yes | slices.SortStableFunc with a bare cmp.Compare(a, b) comparator is slices.Sort spelled the slow, stable way |
 | [PS3007](PS3007.md) | indirect | L2 | yes | a membership set built from a slice the caller already owns, probed in a loop |
 | [PS3034](PS3034.md) | indirect | L3 |  | a serial nest whose every write names the outermost loop variable |
 | [PS3059](PS3059.md) | indirect | L3 |  | a serial nest writing through a base derived from the outermost loop variable |
