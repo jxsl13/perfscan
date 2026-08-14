@@ -18,6 +18,7 @@ checks' fixes.
 | [PS1005](PS1005.md) | access | L3 |  | a per-element accessor whose 2+ index args are enclosing-loop variables (a manual tensor walk) |
 | [PS1006](PS1006.md) | access | L2 | yes | a reduction striding a flat array by the inner loop variable |
 | [PS1007](PS1007.md) | access | L3 | yes | an inner loop accumulating into an output row that does not vary with the outer loop |
+| [PS1008](PS1008.md) | indirect | L1 | yes | slices.EqualFunc with a bare x == y equality closure is slices.Equal spelled with a per-element indirect call |
 | [PS1009](PS1009.md) | access | L2 |  | a named dtype-switch case on the per-element accessor beside a typed sibling case |
 | [PS1010](PS1010.md) | access | L2 | yes | an inner loop reading one column of a [][]T (a row-jumping walk) |
 | [PS2001](PS2001.md) | alloc | L2 |  | a project allocation entry point called inside a loop |

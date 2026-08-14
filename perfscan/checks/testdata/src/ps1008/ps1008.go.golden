@@ -1,0 +1,74 @@
+package ps1008
+
+import (
+	"fmt"
+	"slices"
+)
+
+type ID int64
+type Ints []int
+type pair struct{ X, Y int }
+type node struct{ v int }
+
+// The bare x == y closure is slices.Equal spelled with a per-element
+// indirect call. The slice expressions are kept verbatim in place.
+func eqInts(a, b []int) bool {
+	return slices.Equal(a, b) // want `slices\.EqualFunc with a bare x == y equality closure pays an indirect call per element pair; slices\.Equal compares the int elements with the identical result and the comparison inlined`
+}
+
+func eqStrings(a, b []string) bool {
+	return slices.Equal(a, b) // want `slices\.Equal compares the string elements with the identical result and the comparison inlined`
+}
+
+func eqBytes(a, b []byte) bool {
+	return slices.Equal(a, b) // want `slices\.Equal compares the byte elements with the identical result and the comparison inlined`
+}
+
+// A NAMED element type is fixed too: == compares the underlying values and
+// no method is ever consulted.
+func eqIDs(a, b []ID) bool {
+	return slices.Equal(a, b) // want `slices\.Equal compares the ID elements with the identical result and the comparison inlined`
+}
+
+// A NAMED slice type on BOTH sides is one S — fixable.
+func eqNamedSlices(a, b Ints) bool {
+	return slices.Equal(a, b) // want `slices\.Equal compares the int elements with the identical result and the comparison inlined`
+}
+
+// FLOATS are fixed — unlike the ordered-sort family: NaN != NaN makes both
+// spellings answer false and -0.0 == +0.0 makes both answer true.
+func eqFloats(a, b []float64) bool {
+	return slices.Equal(a, b) // want `slices\.Equal compares the float64 elements with the identical result and the comparison inlined`
+}
+
+// == is symmetric, so the swapped spelling return y == x is the same
+// equality; comparable STRUCT elements are strictly comparable.
+func eqPairs(a, b []pair) bool {
+	return slices.Equal(a, b) // want `slices\.Equal compares the pair elements with the identical result and the comparison inlined`
+}
+
+// Pointer elements compare by identity on both sides.
+func eqNodes(a, b []*node) bool {
+	return slices.Equal(a, b) // want `slices\.Equal compares the \*node elements with the identical result and the comparison inlined`
+}
+
+// INTERFACE elements behave identically too (both sides compare dynamic
+// types first and panic alike on an uncomparable identical dynamic type);
+// they satisfy comparable from go1.20 on, which any module importing
+// slices already is.
+func eqAnys(a, b []any) bool {
+	return slices.Equal(a, b) // want `slices\.Equal compares the any elements with the identical result and the comparison inlined`
+}
+
+// A comparable-constrained TYPE PARAMETER element: x == y type-checks only
+// because T is strictly comparable — exactly what Equal's E comparable
+// needs.
+func eqGeneric[T comparable](a, b []T) bool {
+	return slices.Equal(a, b) // want `slices\.Equal compares the T elements with the identical result and the comparison inlined`
+}
+
+// The two-field parameter spelling func(x T, y T) matches like func(x, y T),
+// and the operand expressions are kept verbatim, however they are spelled.
+func eqField(w struct{ xs, ys []uint64 }) {
+	fmt.Println(slices.Equal(w.xs, w.ys)) // want `slices\.Equal compares the uint64 elements with the identical result and the comparison inlined`
+}
