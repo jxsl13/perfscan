@@ -1,0 +1,170 @@
+package ps5004
+
+import (
+	"bufio"
+	"bytes"
+	"io"
+	"strings"
+)
+
+func buffer(b *bytes.Buffer) {
+	b.WriteByte(',')  // want `WriteString of the single-byte string "," runs the string-append machinery; WriteByte\(','\) appends the byte directly`
+	b.WriteByte('\n') // want `WriteString of the single-byte string "\\n" runs the string-append machinery; WriteByte\('\\n'\) appends the byte directly`
+}
+
+func builder(sb *strings.Builder) {
+	sb.WriteByte(' ') // want `WriteString of the single-byte string " " runs the string-append machinery; WriteByte\(' '\) appends the byte directly`
+}
+
+// bufio.Writer is fix-eligible too: a one-byte WriteString can never take
+// the io.StringWriter delegation (it needs an empty buffer AND more bytes
+// than Available()), so both forms flush-when-full and store the byte.
+func buffered(w *bufio.Writer) {
+	w.WriteByte(';') // want `WriteString of the single-byte string ";" runs the string-append machinery; WriteByte\(';'\) appends the byte directly`
+}
+
+// Escapes round-trip through the type checker's constant: the replacement
+// byte literal re-escapes the decoded byte, whatever the source spelling.
+func escapes(b *bytes.Buffer) {
+	b.WriteByte('\'')   // want `WriteString of the single-byte string "'" runs the string-append machinery; WriteByte\('\\''\) appends the byte directly`
+	b.WriteByte('\\')   // want `WriteString of the single-byte string "\\\\" runs the string-append machinery; WriteByte\('\\\\'\) appends the byte directly`
+	b.WriteByte('\x00') // want `WriteString of the single-byte string "\\x00" runs the string-append machinery; WriteByte\('\\x00'\) appends the byte directly`
+	b.WriteByte('\xff') // want `WriteString of the single-byte string "\\xff" runs the string-append machinery; WriteByte\('\\xff'\) appends the byte directly`
+	b.WriteByte('\x7f') // want `WriteString of the single-byte string "\\x7f" runs the string-append machinery; WriteByte\('\\x7f'\) appends the byte directly`
+}
+
+// A raw string literal is decoded the same way; a double quote needs no
+// escape in the replacement character literal.
+func raw(b *bytes.Buffer) {
+	b.WriteByte(',') // want "WriteString of the single-byte string `,` runs the string-append machinery; WriteByte\\(','\\) appends the byte directly"
+	b.WriteByte('"') // want "WriteString of the single-byte string `\"` runs the string-append machinery; WriteByte\\('\"'\\) appends the byte directly"
+}
+
+// Parentheses around the literal are looked through; only the literal token
+// itself is replaced.
+func parens(b *bytes.Buffer) {
+	b.WriteByte((',')) // want `WriteString of the single-byte string "," runs the string-append machinery; WriteByte\(','\) appends the byte directly`
+}
+
+// A value receiver works: the pointer-receiver WriteString already required
+// the variable to be addressable, so WriteByte is reachable the same way.
+func valueRecv() string {
+	var sb strings.Builder
+	sb.WriteByte('!') // want `WriteString of the single-byte string "!" runs the string-append machinery; WriteByte\('!'\) appends the byte directly`
+	return sb.String()
+}
+
+// Promotion through an embedded std writer resolves both methods to the
+// std pair — the fix still applies.
+type wrapper struct {
+	*bytes.Buffer
+}
+
+func embedded(w wrapper) {
+	w.WriteByte(',') // want `WriteString of the single-byte string "," runs the string-append machinery; WriteByte\(','\) appends the byte directly`
+}
+
+// defer discards the results just like an expression statement.
+func deferred(b *bytes.Buffer) {
+	defer b.WriteByte('\t') // want `WriteString of the single-byte string "\\t" runs the string-append machinery; WriteByte\('\\t'\) appends the byte directly`
+}
+
+// --- advisory: reported but never rewritten ---
+
+// A used result changes shape: WriteString returns (int, error), WriteByte
+// only error.
+func resultUsed(b *bytes.Buffer) int {
+	n, _ := b.WriteString(",") // want `WriteString of the single-byte string "," runs the string-append machinery; WriteByte\(','\) appends the byte directly; WriteString returns \(int, error\) but WriteByte returns only error — adjust the result handling by hand`
+	return n
+}
+
+// A named constant (or any constant expression that is not a literal) keeps
+// its symbolic name — splicing the raw byte in would discard it.
+const comma = ","
+
+func namedConst(b *bytes.Buffer) {
+	b.WriteString(comma)    // want `WriteString of the single-byte string comma runs the string-append machinery; WriteByte\(','\) appends the byte directly; the argument is a constant expression, not a string literal — introduce the matching byte constant and rewrite by hand`
+	b.WriteString("," + "") // want `WriteString of the single-byte string "," \+ "" runs the string-append machinery; WriteByte\(','\) appends the byte directly; the argument is a constant expression, not a string literal — introduce the matching byte constant and rewrite by hand`
+}
+
+// A custom pair carries no proof the two methods agree.
+type customPair struct{}
+
+func (customPair) WriteString(s string) (int, error) { return len(s), nil }
+func (customPair) WriteByte(c byte) error            { return nil }
+
+func custom(w customPair) {
+	w.WriteString(",") // want `WriteString of the single-byte string "," runs the string-append machinery; WriteByte\(','\) appends the byte directly; this WriteString/WriteByte pair is not the standard library's — verify WriteByte appends identically before rewriting`
+}
+
+// An interface pair is equally unproven.
+type stringByteWriter interface {
+	WriteString(s string) (int, error)
+	WriteByte(c byte) error
+}
+
+func iface(w stringByteWriter) {
+	w.WriteString(",") // want `WriteString of the single-byte string "," runs the string-append machinery; WriteByte\(','\) appends the byte directly; this WriteString/WriteByte pair is not the standard library's — verify WriteByte appends identically before rewriting`
+}
+
+// --- guards: none of the following may be reported ---
+
+// Anything but a one-byte constant string writes a different byte count.
+// "é" is two bytes of UTF-8 — a rune/encoding divergence the length rule
+// excludes.
+func lengths(b *bytes.Buffer, s string) {
+	b.WriteString("")
+	b.WriteString(", ")
+	b.WriteString("é")
+	b.WriteString(s)
+}
+
+// io.WriteString is a package function, not a method — out of scope.
+func pkgFunc(w io.Writer) {
+	io.WriteString(w, ",")
+}
+
+// A receiver without WriteByte has nothing to rewrite to (io.StringWriter
+// carries only WriteString).
+type stringOnly struct{}
+
+func (stringOnly) WriteString(s string) (int, error) { return len(s), nil }
+
+func noWriteByte(w stringOnly, sw io.StringWriter) {
+	w.WriteString(",")
+	sw.WriteString(",")
+}
+
+// A function-typed field named WriteString is not a method call.
+type fieldFunc struct {
+	WriteString func(s string) (int, error)
+	WriteByte   func(c byte) error
+}
+
+func field(f fieldFunc) {
+	f.WriteString(",")
+}
+
+// A pointer-receiver WriteByte is not in the method set of a value
+// returned by a call: the rewrite would not even compile.
+type mixed struct{}
+
+func (mixed) WriteString(s string) (int, error) { return len(s), nil }
+func (*mixed) WriteByte(c byte) error           { return nil }
+
+func makeMixed() mixed { return mixed{} }
+
+func mixedRecv() {
+	makeMixed().WriteString(",")
+}
+
+// A WriteString with a different shape (extra results, wrong param) is not
+// io.StringWriter's method.
+type oddShape struct{}
+
+func (oddShape) WriteString(s string) error { return nil }
+func (oddShape) WriteByte(c byte) error     { return nil }
+
+func odd(w oddShape) {
+	w.WriteString(",")
+}
