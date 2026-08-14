@@ -1303,22 +1303,20 @@ func runReport(ctx context.Context, opts tidy.Options, jobs int) (*tidy.Result, 
 	}, nil
 }
 
-// splitFiles partitions files into at most n contiguous, roughly-equal chunks
-// (the last chunks are one shorter when it does not divide evenly). n is assumed
-// >= 1 and <= len(files) (runReport clamps it).
+// splitFiles partitions files into n groups by ROUND-ROBIN (file i goes to worker
+// i%n), so each worker gets an evenly-interleaved slice. This balances load better
+// than contiguous chunks when analysis cost correlates with position in the
+// compilation database — e.g. big generated TUs grouped together, or a
+// size/directory-sorted database would hand one contiguous worker all the
+// expensive files and make it the straggler; interleaving spreads them. Group
+// sizes still differ by at most one. Order within a group does not matter: the
+// merged findings are sorted in report.FromExport, so the result is identical to a
+// sequential run regardless of how files are distributed. n is assumed >= 1 and
+// <= len(files) (runReport clamps it).
 func splitFiles(files []string, n int) [][]string {
-	chunks := make([][]string, 0, n)
-	total := len(files)
-	base := total / n
-	rem := total % n
-	start := 0
-	for i := 0; i < n; i++ {
-		size := base
-		if i < rem {
-			size++
-		}
-		chunks = append(chunks, files[start:start+size])
-		start += size
+	chunks := make([][]string, n)
+	for i, f := range files {
+		chunks[i%n] = append(chunks[i%n], f)
 	}
 	return chunks
 }
