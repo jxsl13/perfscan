@@ -31,6 +31,7 @@ const customTriggerSrc = `#include <vector>
 #include <string>
 struct B { virtual ~B(){} }; struct D : B {};
 bool subCmp(const std::string& s) { return s.substr(0, 3) == "abc"; } // PX2114 (substr temporary just to compare)
+void frontIns(std::vector<int>& v, int x) { v.insert(v.begin(), x); } // PX2115 (O(n) front insertion)
 int dbl(std::map<int,int>& m, int k) { if (m.count(k)) { return m[k]; } return 0; } // PX2111 (double lookup)
 void absIns(std::map<int,int>& m, int k, int v) { if (m.find(k) == m.end()) { m[k] = v; } } // PX2113 (absence-form double lookup)
 std::vector<int> makeVecPX2112();

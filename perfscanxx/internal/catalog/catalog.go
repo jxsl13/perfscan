@@ -719,6 +719,37 @@ var entries = []Entry{
 			`on(hasType(hasCanonicalType(hasDeclaration(cxxRecordDecl(hasName("::std::basic_string"))))))).bind("sub"))))`,
 		Message: "comparing a std::string::substr() result allocates a temporary string just to compare a slice; std::string::compare(pos, len, str) == 0 (or starts_with(prefix) for a 0-offset prefix, C++20) compares in place with no allocation (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2115", TidyName: "custom-front-insert",
+		Level: LevelStructured, Category: "containers",
+		Title:  "inserting at the front of a std::vector/std::string shifts every element (O(n)); use a container with a cheap front, or build and reverse",
+		HasFix: false,
+		Custom: true,
+		Bind:   "ins",
+		// v.insert(v.begin(), x) on a CONTIGUOUS container (std::vector or
+		// std::basic_string) shifts every existing element up one slot — O(n) per
+		// insert, O(n^2) to prepend a sequence. std::deque, std::list, or building
+		// with push_back and a single std::reverse (or push_front on a deque)
+		// prepend in amortized O(1). Scoped tightly: only ::std::vector and
+		// ::std::basic_string (deque/list front-insert is already O(1), and set/map
+		// insert(begin(), v) is a HINT, not a shift, so their record types are
+		// excluded); and only when the position argument is begin()/cbegin()
+		// itself, NOT begin()+k (a mid insert, a different message). The iterator
+		// -> const_iterator conversion on begin() wraps it in a one-arg
+		// cxxConstructExpr, so the position matches either the bare begin()/cbegin()
+		// call (cbegin already yields const_iterator) or that construct around it.
+		// isExpansionInMainFile keeps it off headers. clang-tidy ships no equivalent
+		// (performance-inefficient-vector-operation flags only push_back growth in a
+		// loop, never front insertion). NO auto-fix: the right container/algorithm
+		// is a design choice.
+		Query: `match cxxMemberCallExpr(isExpansionInMainFile(), ` +
+			`callee(cxxMethodDecl(hasName("insert"))), ` +
+			`on(hasType(hasCanonicalType(hasDeclaration(cxxRecordDecl(hasAnyName("::std::vector", "::std::basic_string")))))), ` +
+			`hasArgument(0, anyOf(` +
+			`ignoringImplicit(cxxMemberCallExpr(callee(cxxMethodDecl(hasAnyName("begin", "cbegin"))))), ` +
+			`cxxConstructExpr(argumentCountIs(1), hasArgument(0, ignoringImplicit(cxxMemberCallExpr(callee(cxxMethodDecl(hasAnyName("begin", "cbegin")))))))))).bind("ins")`,
+		Message: "inserting at the front of a std::vector/std::string shifts every existing element up one slot (O(n) per insert, O(n^2) to prepend a sequence); prepend with std::deque/std::list, or build with push_back and one std::reverse (query-based, no auto-fix)",
+	},
 }
 
 // Deliberately NOT in the catalog (do not re-add on a future audit):
