@@ -25,7 +25,23 @@ import (
 // built-in checks instead.
 const MinExperimentalMajor = 20
 
+// experimentalFlag is the clang-tidy flag that enables query-based custom checks
+// (single-sourced so Argv and ExperimentalUnsupported never drift apart).
+const experimentalFlag = "--experimental-custom-checks"
+
 var versionRe = regexp.MustCompile(`LLVM version (\d+)`)
+
+// ExperimentalUnsupported reports whether clang-tidy's stderr shows it rejected
+// --experimental-custom-checks as an unknown argument. This is the signature of a
+// clang-tidy older than MinExperimentalMajor whose --version string we could NOT
+// parse (so the version gate did not pre-empt it): clang-tidy aborts before
+// analyzing anything, exits non-zero, and writes no fixes. The caller uses this to
+// degrade to the built-in checks instead of misreporting the empty payload as a
+// clean run.
+func ExperimentalUnsupported(stderr string) bool {
+	return strings.Contains(stderr, experimentalFlag) &&
+		strings.Contains(stderr, "Unknown command line argument")
+}
 
 // MajorVersion returns the clang-tidy LLVM major version by parsing
 // `<binary> --version` (via the injectable Executor, so it is hermetically
@@ -115,7 +131,7 @@ func Argv(o Options) []string {
 		args = append(args, "-p", o.BuildDir)
 	}
 	if o.Experimental {
-		args = append(args, "--experimental-custom-checks")
+		args = append(args, experimentalFlag)
 	}
 	if o.ConfigFile != "" {
 		// The config file supplies both Checks and any CustomChecks; a

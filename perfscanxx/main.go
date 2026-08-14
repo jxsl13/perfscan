@@ -335,6 +335,46 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "perfscanxx:", err)
 		return 2
 	}
+	// A clang-tidy older than MinExperimentalMajor whose --version we could NOT
+	// parse (so the >= N gate above didn't pre-empt it) rejects
+	// --experimental-custom-checks as an unknown argument: clang-tidy aborts
+	// WITHOUT analyzing, exits non-zero, and writes no fixes. Degrade exactly like
+	// the version gate does — drop the custom checks and re-run the built-ins — so
+	// the user still gets a real analysis instead of the empty-payload "clean" lie.
+	if opts.Experimental && res.ExitCode != 0 && len(res.ExportYAML) == 0 && tidy.ExperimentalUnsupported(res.Stderr) {
+		selected = catalog.WithoutCustom(selected)
+		if len(selected) == 0 {
+			fmt.Fprintf(stderr, "perfscanxx: this clang-tidy does not support --experimental-custom-checks and only query-based custom checks were selected; upgrade LLVM to >= %d or select built-in checks.\n", tidy.MinExperimentalMajor)
+			return 2
+		}
+		tidyChecks = tidyChecks[:0]
+		for _, e := range selected {
+			tidyChecks = append(tidyChecks, e.TidyName)
+		}
+		opts.Checks = tidyChecks
+		opts.ConfigFile = ""
+		opts.Experimental = false
+		fmt.Fprintf(stderr, "perfscanxx: clang-tidy rejected --experimental-custom-checks (its LLVM predates it); re-running with the built-in checks only — upgrade LLVM to >= %d to enable the query-based custom checks.\n", tidy.MinExperimentalMajor)
+		res, err = tidy.Run(context.Background(), opts)
+		if err != nil {
+			fmt.Fprintln(stderr, "perfscanxx:", err)
+			return 2
+		}
+	}
+	// clang-tidy exited non-zero AND produced no results: the analysis never ran to
+	// completion (a bad -p, an unreadable file, a fatal toolchain error). Do NOT
+	// fall through to the report path — an empty payload there reads as "no
+	// findings", misreporting a FAILED run as a clean one. Fail loudly instead.
+	// (A partial failure — some TUs don't compile but others do — still writes
+	// their diagnostics, so ExportYAML is non-empty and this guard is not tripped;
+	// those clang-diagnostic-* entries are summarized downstream.)
+	if res.ExitCode != 0 && len(res.ExportYAML) == 0 {
+		fmt.Fprintf(stderr, "perfscanxx: clang-tidy exited %d without producing any results — the analysis did not run to completion.\n", res.ExitCode)
+		if s := strings.TrimSpace(res.Stderr); s != "" {
+			fmt.Fprintln(stderr, s)
+		}
+		return 2
+	}
 
 	ef, err := fixes.Parse(res.ExportYAML)
 	if err != nil {
