@@ -8,5 +8,5 @@ package ps2137
 import f "fmt"
 
 func aliasedSprint(n int) string {
-	return f.Sprint(n) // want `fmt\.Sprint\(i\) / fmt\.Sprintf\("%v", i\) on an integer pays fmt's reflection and boxing for a plain decimal; strconv\.Itoa/FormatInt/FormatUint converts it directly`
+	return f.Sprint(n) // want `fmt\.Sprint\(x\) / fmt\.Sprintf\("%v", x\) on a bool/int/float pays fmt's reflection for a value strconv formats directly`
 }

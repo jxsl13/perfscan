@@ -2359,18 +2359,25 @@ func TestEquiv_PS2136StrconvBytesToAppend(t *testing.T) {
 }
 
 // PS2137: fmt.Sprint(x) / fmt.Sprintf("%v", x) over an UNNAMED predeclared
-// integer -> the strconv decimal form (Itoa / FormatInt / FormatUint).
-// Why it is bit-identical: for a plain integer operand %v IS %d — fmt's
-// catch-all verb formats an integer kind by plain base-10 division with a
-// leading '-' for negatives, exactly strconv's algorithm — and fmt.Sprint
-// formats a single operand exactly as %v does (its separating space appears
-// only BETWEEN operands). The Stringer/Formatter escape hatch that %v and
-// Sprint honor cannot fire: an unnamed predeclared type cannot carry
-// methods, which is precisely why PS2137 restricts itself to unnamed
-// integers (see the named-type demonstration at the end). MinInt64 is the
-// critical signed edge (FormatInt works in uint64 magnitude space, no
-// negation overflow) and MaxUint64 the full-width unsigned edge.
-func TestEquiv_PS2137SprintIntToStrconv(t *testing.T) {
+// integer, bool or float -> the strconv form (Itoa / FormatInt / FormatUint /
+// FormatBool / FormatFloat 'g' -1). Why it is bit-identical: for a plain
+// integer operand %v IS %d — fmt's catch-all verb formats an integer kind by
+// plain base-10 division with a leading '-' for negatives, exactly strconv's
+// algorithm; for a plain bool %v prints the literal true/false FormatBool
+// returns; for a plain float %v is the shortest-'g' form — FormatFloat with
+// precision -1 and the operand's own bit size (fmt itself formats floats via
+// strconv.AppendFloat with these parameters). fmt.Sprint formats a single
+// operand exactly as %v does (its separating space appears only BETWEEN
+// operands). The Stringer/Formatter escape hatch that %v and Sprint honor
+// cannot fire: an unnamed predeclared type cannot carry methods, which is
+// precisely why PS2137 restricts itself to unnamed operands (see the
+// named-type demonstrations at the end). MinInt64 is the critical signed
+// edge (FormatInt works in uint64 magnitude space, no negation overflow),
+// MaxUint64 the full-width unsigned edge; for the floats NaN, ±Inf, -0,
+// MaxFloat and the smallest subnormals are pinned explicitly and a large
+// fixed-seed sweep of raw bit patterns per width guards the identity
+// against a future toolchain change.
+func TestEquiv_PS2137SprintScalarToStrconv(t *testing.T) {
 	// int -> strconv.Itoa, under both spellings.
 	ints := []int{
 		0, 1, -1, 7, -7, 42, -37, 123456789, -987654321,
@@ -2420,6 +2427,82 @@ func TestEquiv_PS2137SprintIntToStrconv(t *testing.T) {
 		}
 	}
 
+	// bool -> strconv.FormatBool, under both spellings.
+	for _, b := range []bool{true, false} {
+		want := strconv.FormatBool(b)
+		if got := fmt.Sprint(b); got != want {
+			t.Errorf("fmt.Sprint(%v)=%q != strconv.FormatBool=%q", b, got, want)
+		}
+		if got := fmt.Sprintf("%v", b); got != want {
+			t.Errorf("fmt.Sprintf(%%v, %v)=%q != strconv.FormatBool=%q", b, got, want)
+		}
+	}
+
+	// float64 -> strconv.FormatFloat(f, 'g', -1, 64): the explicit edges
+	// first — -0 keeps its sign under both forms, NaN and the Infs print
+	// the same words, MaxFloat64 exercises full magnitude and the smallest
+	// subnormal the shortest-representation machinery.
+	f64s := []float64{
+		0, math.Copysign(0, -1), 1, -1, 0.5, -2.75, 3.141592653589793,
+		1e21, 1e-21, 123456.789, -0.001, 1.0 / 3.0,
+		math.NaN(), math.Inf(1), math.Inf(-1),
+		math.MaxFloat64, -math.MaxFloat64,
+		math.SmallestNonzeroFloat64, -math.SmallestNonzeroFloat64,
+	}
+	for _, f := range f64s {
+		want := strconv.FormatFloat(f, 'g', -1, 64)
+		if got := fmt.Sprint(f); got != want {
+			t.Errorf("fmt.Sprint(%v)=%q != strconv.FormatFloat(_, 'g', -1, 64)=%q", f, got, want)
+		}
+		if got := fmt.Sprintf("%v", f); got != want {
+			t.Errorf("fmt.Sprintf(%%v, %v)=%q != strconv.FormatFloat(_, 'g', -1, 64)=%q", f, got, want)
+		}
+	}
+
+	// float32 -> strconv.FormatFloat(float64(f), 'g', -1, 32): the widening
+	// is value-preserving, bitSize 32 keeps the float32 rounding.
+	f32s := []float32{
+		0, float32(math.Copysign(0, -1)), 1, -1, 0.1, 2.5, 1e20, 1e-20,
+		float32(math.NaN()), float32(math.Inf(1)), float32(math.Inf(-1)),
+		math.MaxFloat32, -math.MaxFloat32,
+		math.SmallestNonzeroFloat32, -math.SmallestNonzeroFloat32,
+	}
+	for _, f := range f32s {
+		want := strconv.FormatFloat(float64(f), 'g', -1, 32)
+		if got := fmt.Sprint(f); got != want {
+			t.Errorf("fmt.Sprint(float32(%v))=%q != strconv.FormatFloat(float64(_), 'g', -1, 32)=%q", f, got, want)
+		}
+		if got := fmt.Sprintf("%v", f); got != want {
+			t.Errorf("fmt.Sprintf(%%v, float32(%v))=%q != strconv.FormatFloat(float64(_), 'g', -1, 32)=%q", f, got, want)
+		}
+	}
+
+	// A fixed-seed sweep of raw bit patterns per width: every float shape
+	// reachable at all (normals, subnormals, both zeros, the Infs and every
+	// NaN payload) occurs among uniform bit patterns, so a future toolchain
+	// change that broke the %v == shortest-'g' identity anywhere fails here.
+	rng := rand.New(rand.NewSource(0x2137))
+	for i := 0; i < 300000; i++ {
+		f := math.Float64frombits(rng.Uint64())
+		want := strconv.FormatFloat(f, 'g', -1, 64)
+		if got := fmt.Sprint(f); got != want {
+			t.Fatalf("bits %#016x: fmt.Sprint(%v)=%q != strconv.FormatFloat(_, 'g', -1, 64)=%q", math.Float64bits(f), f, got, want)
+		}
+		if got := fmt.Sprintf("%v", f); got != want {
+			t.Fatalf("bits %#016x: fmt.Sprintf(%%v, %v)=%q != strconv.FormatFloat(_, 'g', -1, 64)=%q", math.Float64bits(f), f, got, want)
+		}
+	}
+	for i := 0; i < 300000; i++ {
+		f := math.Float32frombits(rng.Uint32())
+		want := strconv.FormatFloat(float64(f), 'g', -1, 32)
+		if got := fmt.Sprint(f); got != want {
+			t.Fatalf("bits %#08x: fmt.Sprint(float32(%v))=%q != strconv.FormatFloat(float64(_), 'g', -1, 32)=%q", math.Float32bits(f), f, got, want)
+		}
+		if got := fmt.Sprintf("%v", f); got != want {
+			t.Fatalf("bits %#08x: fmt.Sprintf(%%v, float32(%v))=%q != strconv.FormatFloat(float64(_), 'g', -1, 32)=%q", math.Float32bits(f), f, got, want)
+		}
+	}
+
 	// The guard's raison d'être, demonstrated: a NAMED integer type with a
 	// String() method prints via String() under %v/Sprint — NOT the decimal
 	// digits — so PS2137 must (and does) stay silent for named types.
@@ -2430,6 +2513,16 @@ func TestEquiv_PS2137SprintIntToStrconv(t *testing.T) {
 	if got := fmt.Sprint(n); got == strconv.Itoa(int(n)) {
 		t.Fatal("fmt.Sprint(named Stringer int) unexpectedly equals the strconv form; the unnamed-only guard would be obsolete")
 	}
+
+	// The same divergence for the float arm: a NAMED float type with a
+	// String() method prints via String(), never the FormatFloat digits.
+	cf := equivNamedStringerFloat(1.5)
+	if got := fmt.Sprint(cf); got != "customf" {
+		t.Fatalf("fmt.Sprint(named Stringer float)=%q, expected the String() output %q — fmt no longer honors Stringer under Sprint?!", got, "customf")
+	}
+	if got := fmt.Sprint(cf); got == strconv.FormatFloat(float64(cf), 'g', -1, 64) {
+		t.Fatal("fmt.Sprint(named Stringer float) unexpectedly equals the strconv form; the unnamed-only guard would be obsolete")
+	}
 }
 
 // equivNamedStringerInt pins that %v/Sprint dispatch to String() for a named
@@ -2437,3 +2530,9 @@ func TestEquiv_PS2137SprintIntToStrconv(t *testing.T) {
 type equivNamedStringerInt int
 
 func (equivNamedStringerInt) String() string { return "custom" }
+
+// equivNamedStringerFloat pins the same for a named float type — the
+// divergence PS2137's unnamed-only guard sidesteps on its float arm.
+type equivNamedStringerFloat float64
+
+func (equivNamedStringerFloat) String() string { return "customf" }

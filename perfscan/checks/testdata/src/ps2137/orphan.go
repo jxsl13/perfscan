@@ -8,5 +8,5 @@ package ps2137
 import "fmt"
 
 func orphanSprintf(n int) string {
-	return fmt.Sprintf("%v", n) // want `fmt\.Sprint\(i\) / fmt\.Sprintf\("%v", i\) on an integer pays fmt's reflection and boxing for a plain decimal; strconv\.Itoa/FormatInt/FormatUint converts it directly`
+	return fmt.Sprintf("%v", n) // want `fmt\.Sprint\(x\) / fmt\.Sprintf\("%v", x\) on a bool/int/float pays fmt's reflection for a value strconv formats directly`
 }
