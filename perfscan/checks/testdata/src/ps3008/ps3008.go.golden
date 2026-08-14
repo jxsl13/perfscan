@@ -1,0 +1,31 @@
+package ps3008
+
+import (
+	"fmt"
+	"slices"
+)
+
+// The predicate is rewritten wherever its bool is consumed — condition,
+// assignment, return. These calls are the file's ONLY sort references, so
+// the fix also swaps the orphaned sort import for slices.
+func checkBoth(xs []int, ss []string) bool {
+	if slices.IsSorted(xs) { // want `sort\.IntsAreSorted is the legacy spelling of slices\.IsSorted \(an interface-dispatch scan on go1\.21, a one-line wrapper since go1\.22\); slices\.IsSorted checks the concrete \[\]int directly with the identical boolean result`
+		fmt.Println("ints sorted")
+	}
+	ok := slices.IsSorted(ss) // want `sort\.StringsAreSorted is the legacy spelling of slices\.IsSorted \(an interface-dispatch scan on go1\.21, a one-line wrapper since go1\.22\); slices\.IsSorted checks the concrete \[\]string directly with the identical boolean result`
+	return ok && slices.IsSorted(xs) // want `sort\.IntsAreSorted is the legacy spelling of slices\.IsSorted \(an interface-dispatch scan on go1\.21, a one-line wrapper since go1\.22\); slices\.IsSorted checks the concrete \[\]int directly with the identical boolean result`
+}
+
+// The argument expression is kept verbatim, however it is spelled.
+func checkField(w struct{ ids []int }) bool {
+	return slices.IsSorted(w.ids) // want `sort\.IntsAreSorted is the legacy spelling of slices\.IsSorted \(an interface-dispatch scan on go1\.21, a one-line wrapper since go1\.22\); slices\.IsSorted checks the concrete \[\]int directly with the identical boolean result`
+}
+
+type intList []int
+
+// A NAMED slice type is fine: slices.IsSorted infers the element through
+// ~[]E and compares the ordered underlying int values — never a method —
+// so the bool is unchanged.
+func checkNamed(xs intList) bool {
+	return slices.IsSorted(xs) // want `sort\.IntsAreSorted is the legacy spelling of slices\.IsSorted \(an interface-dispatch scan on go1\.21, a one-line wrapper since go1\.22\); slices\.IsSorted checks the concrete \[\]int directly with the identical boolean result`
+}

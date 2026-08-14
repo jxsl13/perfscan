@@ -1,0 +1,10 @@
+package ps3008
+
+import st "sort"
+
+// sort is imported under an ALIAS: type info still resolves
+// st.StringsAreSorted to the sort package function; the orphaned aliased
+// spec (name included) is swapped for "slices".
+func aliasedSort(ss []string) bool {
+	return st.StringsAreSorted(ss) // want `sort\.StringsAreSorted is the legacy spelling of slices\.IsSorted \(an interface-dispatch scan on go1\.21, a one-line wrapper since go1\.22\); slices\.IsSorted checks the concrete \[\]string directly with the identical boolean result`
+}

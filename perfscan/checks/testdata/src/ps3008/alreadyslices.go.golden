@@ -1,0 +1,13 @@
+package ps3008
+
+import (
+	"slices"
+)
+
+// slices is ALREADY imported: the fix must not duplicate the import, and
+// the now-orphaned sort spec is deleted from the group.
+func alreadySlices(xs []int) bool {
+	ok := slices.IsSorted(xs) // want `sort\.IntsAreSorted is the legacy spelling of slices\.IsSorted \(an interface-dispatch scan on go1\.21, a one-line wrapper since go1\.22\); slices\.IsSorted checks the concrete \[\]int directly with the identical boolean result`
+	slices.Reverse(xs)
+	return ok
+}

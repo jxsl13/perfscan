@@ -1,0 +1,9 @@
+package ps3008
+
+import "sort"
+
+// A single non-parenthesized import declaration whose only user is the
+// rewritten call: the whole spec is swapped for "slices" in place.
+func single(ss []string) bool {
+	return sort.StringsAreSorted(ss) // want `sort\.StringsAreSorted is the legacy spelling of slices\.IsSorted \(an interface-dispatch scan on go1\.21, a one-line wrapper since go1\.22\); slices\.IsSorted checks the concrete \[\]string directly with the identical boolean result`
+}
