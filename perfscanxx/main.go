@@ -104,6 +104,7 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		baseline   = fs.String("baseline", "", "ratchet file: if it does not exist, write the current findings as the accepted baseline; if it exists, report only NEW findings (line-independent) so CI fails on regressions while the backlog is burned down")
 		buildDir   = fs.String("p", "", "build directory containing compile_commands.json (default: found by walking up from the cwd)")
 		jobs       = fs.Int("j", 0, "parallel clang-tidy workers for the analysis pass (0 = one per CPU; 1 = sequential). Ignored for an in-place -fix, which always runs as a single pass")
+		timeout    = fs.Duration("timeout", 0, "abort the whole run if it exceeds this duration (e.g. 90s, 5m); 0 = no limit. A CI safety valve — clang-tidy can run very long on a pathological TU, and a hung worker would otherwise block a -j run indefinitely")
 		tidyBin    = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
 		configPath = fs.String("config", "", "path to a .perfscanxx.yml supplying project defaults (level, checks, exclude, tidy, extra-args, baseline, fix-errors; auto-discovered in the current directory); command-line flags override it")
 		showVer    = fs.Bool("version", false, "print version and exit")
@@ -118,6 +119,15 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	fs.Usage = func() { printUsage(stderr, fs) }
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	// Optional overall deadline: derive it from the (signal-cancellable) context so
+	// -timeout and Ctrl-C compose — whichever fires first cancels the clang-tidy /
+	// cmake children. 0 leaves the context unbounded.
+	if *timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *timeout)
+		defer cancel()
 	}
 
 	if *showVer {
@@ -371,6 +381,10 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	res, err := runReport(ctx, opts, *jobs)
 	if err != nil {
+		if *timeout > 0 && errors.Is(err, context.DeadlineExceeded) {
+			fmt.Fprintf(stderr, "perfscanxx: run aborted — exceeded -timeout %s (clang-tidy was terminated)\n", *timeout)
+			return 2
+		}
 		fmt.Fprintln(stderr, "perfscanxx:", err)
 		return 2
 	}
