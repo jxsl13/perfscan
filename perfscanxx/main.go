@@ -84,8 +84,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		explain    = fs.String("explain", "", "print the documentation of a check (e.g. PX1001) and exit")
 		sel        = fs.String("checks", "all", "comma-separated check selector: all, PX1001, PX1*, -PX3003, performance-avoid-endl")
 		maxLevel   = fs.Int("level", 3, "report only checks whose fix level is <= N (1=idiomatic, 2=structured, 3=aggressive)")
-		jsonOut    = fs.Bool("json", false, "emit findings as JSON")
-		sarifOut   = fs.Bool("sarif", false, "emit findings as SARIF 2.1.0 (GitHub Code Scanning)")
+		jsonOut    = fs.Bool("json", false, "emit findings as JSON (mutually exclusive with -sarif)")
+		sarifOut   = fs.Bool("sarif", false, "emit findings as SARIF 2.1.0 (GitHub Code Scanning) (mutually exclusive with -json)")
 		baseline   = fs.String("baseline", "", "ratchet file: if it does not exist, write the current findings as the accepted baseline; if it exists, report only NEW findings (line-independent) so CI fails on regressions while the backlog is burned down")
 		buildDir   = fs.String("p", "", "build directory containing compile_commands.json (default: found by walking up from the cwd)")
 		tidyBin    = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
@@ -171,6 +171,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if *diff && *fix {
 		fmt.Fprintln(stderr, "perfscanxx: -diff and -fix are mutually exclusive")
+		return 2
+	}
+	if *jsonOut && *sarifOut {
+		// The findings-output switch picks SARIF first, so accepting both would
+		// silently drop the -json request; fail loudly instead (a caller wiring
+		// two output formats has a bug either way).
+		fmt.Fprintln(stderr, "perfscanxx: -json and -sarif are mutually exclusive")
 		return 2
 	}
 	if *fixSeq && !*fix {

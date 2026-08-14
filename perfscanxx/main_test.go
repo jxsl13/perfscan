@@ -1077,6 +1077,7 @@ func TestFlagValidationErrors(t *testing.T) {
 		{"level too high", []string{"-level", "4", "x.cpp"}, "-level must be 1, 2 or 3"},
 		{"fix-sequential without fix", []string{"-fix-sequential", "x.cpp"}, "-fix-sequential has no effect without -fix"},
 		{"fix-errors without fix", []string{"-fix-errors", "x.cpp"}, "-fix-errors has no effect without -fix"},
+		{"json and sarif together", []string{"-json", "-sarif", "x.cpp"}, "-json and -sarif are mutually exclusive"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
