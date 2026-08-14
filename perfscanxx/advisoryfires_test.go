@@ -126,3 +126,63 @@ func TestAdvisoryChecksFireOnTargetPattern(t *testing.T) {
 		}
 	}
 }
+
+// TestAdvisoryBuiltinsApplyNoFixIt is the drift tripwire for the HasFix:false
+// classification of the built-in (clang-tidy) advisory checks: they are marked
+// advisory precisely because clang-tidy emits NO fix-it for them (verified: as of
+// LLVM 22, none of performance-inefficient-string-concatenation, performance-
+// implicit-conversion-in-loop, cppcoreguidelines-rvalue-reference-param-not-moved,
+// performance-no-int-to-ptr, performance-enum-size, or performance-no-automatic-move
+// applies a fix). Running --fix over advisoryTriggerSrc (which
+// TestAdvisoryChecksFireOnTargetPattern proves triggers every one of them) with
+// ONLY those checks enabled must leave the source byte-for-byte. If a future
+// clang-tidy gains a fix-it for one of them, this fails — a signal to re-verify
+// and, if the fix is safe, upgrade the entry to HasFix:true (more -fix coverage).
+// The mirror of TestHasFixChecksActuallyApply, making the HasFix contract
+// bidirectional and LLVM-drift-resistant.
+func TestAdvisoryBuiltinsApplyNoFixIt(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+
+	var names []string
+	for _, e := range catalog.All() {
+		if !e.Custom && !e.HasFix {
+			names = append(names, e.TidyName)
+		}
+	}
+	if len(names) == 0 {
+		t.Fatal("no advisory built-in checks in catalog to validate")
+	}
+	checks := "-*," + strings.Join(names, ",")
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "t.cpp")
+	if err := os.WriteFile(src, []byte(advisoryTriggerSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--checks=" + checks, "--fix", "--"}
+	args = append(args, "-std=c++17")
+	if runtime.GOOS == "darwin" {
+		if out, err := exec.Command("xcrun", "--show-sdk-path").Output(); err == nil {
+			args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+		} else {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture headers; skipping:\n%s", output)
+	}
+
+	got, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != advisoryTriggerSrc {
+		t.Errorf("clang-tidy --fix mutated the source under the advisory-only checks — one of them now emits a fix-it. Re-verify and, if the fix is safe/applies, mark that entry HasFix:true:\n--- got ---\n%s", string(got))
+	}
+}
