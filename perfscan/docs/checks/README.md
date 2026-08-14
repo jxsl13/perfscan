@@ -86,6 +86,7 @@ checks' fixes.
 | [PS3104](PS3104.md) | indirect | L1 | yes | sort.Ints/sort.Strings are the legacy spelling of slices.Sort; call the generic sort directly |
 | [PS3105](PS3105.md) | indirect | L1 | yes | sort.Sort/sort.Stable over a sort.IntSlice/StringSlice adapter is slices.Sort spelled the long way; call the generic sort directly |
 | [PS3106](PS3106.md) | indirect | L2 |  | large value receivers and parameters copy on every call |
+| [PS3107](PS3107.md) | indirect | L1 | yes | slices.SortFunc with a bare cmp.Compare(a, b) comparator is slices.Sort spelled the slow way |
 | [PS4001](PS4001.md) | vector | L2 |  | a per-element binary decode (encoding/binary) in a loop |
 | [PS4002](PS4002.md) | vector | L3 |  | a scalar math transcendental in a loop beside a vectorized sibling kernel |
 | [PS4008](PS4008.md) | vector | L3 | yes | a matmul whose innermost loop is a serial scalar dot accumulator |
