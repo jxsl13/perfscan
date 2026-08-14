@@ -1405,11 +1405,19 @@ func runDoctor(ctx context.Context, stdout io.Writer, tidyBin, buildDir string) 
 				onDisk++
 			}
 		}
-		if onDisk == 0 {
+		switch {
+		case onDisk == 0:
 			fmt.Fprintf(stdout, "  ✗ compile database: %s (%d TU(s), 0 on disk)\n", dbPath, len(tus))
 			fmt.Fprintln(stdout, "      → none of the listed TUs exist on disk — the build dir is stale or from a different checkout; regenerate it")
 			ready = false
-		} else {
+		case onDisk < len(tus):
+			// Partially stale: some listed TUs are absent (files deleted/moved
+			// without regenerating the DB, or not-yet-generated sources). The scan
+			// still works on the present ones (expansion skips the missing), so this
+			// is a warning, not a blocker.
+			fmt.Fprintf(stdout, "  ⚠ compile database: %s (%d TU(s), %d on disk — %d missing)\n", dbPath, len(tus), onDisk, len(tus)-onDisk)
+			fmt.Fprintln(stdout, "      → some listed TUs are absent (deleted/moved, or build-time-generated) and will be skipped; regenerate the database (or run -cmake-build) to include them")
+		default:
 			fmt.Fprintf(stdout, "  ✓ compile database: %s (%d TU(s), %d on disk)\n", dbPath, len(tus), onDisk)
 		}
 	}

@@ -71,3 +71,45 @@ func TestDoctorMissingRequirements(t *testing.T) {
 		}
 	}
 }
+
+// TestDoctorPartialStaleDatabase pins the middle case: a compile database listing
+// some TUs that are absent on disk (files deleted/moved, or not-yet-generated) is
+// a ⚠ (warning) — the scan still works on the present ones — not a ✗, and -doctor
+// still exits 0.
+func TestDoctorPartialStaleDatabase(t *testing.T) {
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+	tidy.Executor = func(_ context.Context, argv []string, stdout, _ *bytes.Buffer) (int, error) {
+		if len(argv) >= 2 && argv[1] == "--version" {
+			stdout.WriteString("LLVM version 22.0.0\n")
+			return 0, nil
+		}
+		return 0, nil
+	}
+
+	dir := t.TempDir()
+	present := filepath.Join(dir, "a.cpp")
+	if err := os.WriteFile(present, []byte("int x;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ghost := filepath.Join(dir, "gone.cpp") // in the DB, never on disk
+	cc := `[{"directory":"` + dir + `","file":"` + present + `","command":"clang++ -std=c++17 -c a.cpp"},` +
+		`{"directory":"` + dir + `","file":"` + ghost + `","command":"clang++ -std=c++17 -c gone.cpp"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, _, code := runCLI("-tidy", "clang-tidy", "-doctor", "-p", dir)
+	if code != 0 {
+		t.Fatalf("partial-stale DB: exit=%d, want 0 (still scannable); output:\n%s", code, out)
+	}
+	for _, want := range []string{"⚠ compile database:", "2 TU(s), 1 on disk — 1 missing", "ready to scan."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("-doctor output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "✗ compile database") {
+		t.Errorf("a partially-stale DB must be ⚠, not ✗:\n%s", out)
+	}
+}
