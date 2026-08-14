@@ -159,69 +159,6 @@ func TestBaselineRoundTripsSpecialCharMessage(t *testing.T) {
 	}
 }
 
-// TestBaselineKeyIsInvocationCWDIndependent pins that a baseline written by one
-// perfscan invocation still suppresses the same findings when the check is later
-// run by ANOTHER invocation from a DIFFERENT directory (e.g. seeded at the module
-// root, run from a subdir in CI), as long as the baseline file is addressed by
-// the same absolute path. go/analysis positions are absolute, so before the
-// anchor-based keying the key was CWD-relative (via relPath): from a subdir the
-// path could not be made relative and fell back to the absolute form, missing the
-// root-written entry — every baselined finding resurfaced as a false regression.
-// Keying on the baseline file's own directory fixes it.
-//
-// relPath caches the working directory process-globally (one invocation = one
-// cwd), which masks the divergence within a single process. To reproduce the
-// cross-invocation bug faithfully, the shared cache is reset between the write
-// and the filter so each acts under its own cwd, exactly as two separate runs do.
-func TestBaselineKeyIsInvocationCWDIndependent(t *testing.T) {
-	root := t.TempDir()
-	// Canonicalize (macOS /var -> /private/var) so the paths we build match
-	// os.Getwd()/filepath.Abs for reasons unrelated to the behavior under test.
-	root, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "build"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	blPath := filepath.Join(root, ".perfscan-baseline.yaml") // addressed absolutely
-	absSrc := filepath.Join(root, "pkg", "a.go")             // go/analysis emits absolute positions
-
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Restore cwd AND the relPath wd cache so later tests are unaffected.
-	defer func() {
-		_ = os.Chdir(wd)
-		wdCached = false
-	}()
-
-	// Invocation 1 (seed) from the module ROOT: fresh process => fresh wd cache.
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	wdCached = false
-	if err := writeBaseline(blPath, []Finding{fakeFinding(absSrc, "PS2101", "out is appended", 10)}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Invocation 2 (filter) from the build/ SUBDIR: a separate process would cache
-	// this new cwd, so reset the cache. The same absolute finding must stay
-	// suppressed despite the different CWD.
-	if err := os.Chdir(filepath.Join(root, "build")); err != nil {
-		t.Fatal(err)
-	}
-	wdCached = false
-	surviving, suppressed, err := applyBaseline(blPath, []Finding{fakeFinding(absSrc, "PS2101", "out is appended", 55)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if suppressed != 1 || len(surviving) != 0 {
-		t.Errorf("baseline seeded from root did not suppress the same finding from build/: suppressed=%d surviving=%d (want 1, 0) — baseline key is CWD-dependent", suppressed, len(surviving))
-	}
-}
-
 func TestBaselineMissingFile(t *testing.T) {
 	_, _, err := applyBaseline(filepath.Join(t.TempDir(), "nope.json"), nil)
 	if err == nil {

@@ -742,3 +742,41 @@ func TestFromExportSortsAcrossFiles(t *testing.T) {
 		}
 	}
 }
+
+// TestFromExportStableOrderForColocatedChecks pins a TOTAL, input-order-independent
+// output order when two DIFFERENT checks fire at the same file+offset. clang-tidy
+// emits such co-located diagnostics in TU-processing order, which varies run-to-run
+// (parallel runs, TU ordering) and across clang-tidy versions; without an ID/message
+// tiebreaker the report order would follow that unstable input order and make CI
+// diffs noisy. Feeds the two diagnostics in BOTH orders and requires the same
+// ID-sorted result each time.
+func TestFromExportStableOrderForColocatedChecks(t *testing.T) {
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+	ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+
+	mk := func(name string) fixes.Diagnostic {
+		return fixes.Diagnostic{
+			DiagnosticName: name,
+			DiagnosticMessage: fixes.DiagnosticMessage{
+				Message: "m", FilePath: "/src/a.cpp", FileOffset: 100,
+			},
+		}
+	}
+	// performance-noexcept-swap -> PX3006, performance-trivially-destructible -> PX3026.
+	a, b := mk("performance-noexcept-swap"), mk("performance-trivially-destructible")
+
+	for _, order := range [][]fixes.Diagnostic{{a, b}, {b, a}} {
+		ef := &fixes.ExportFile{MainSourceFile: "/src/a.cpp", Diagnostics: order}
+		got := FromExport(ef, catalog.LevelAggressive)
+		if len(got) != 2 {
+			t.Fatalf("got %d findings, want 2 (both co-located checks kept)", len(got))
+		}
+		// PX3006 < PX3026 lexicographically, so it must come first regardless of
+		// the input order.
+		if got[0].ID != "PX3006" || got[1].ID != "PX3026" {
+			t.Errorf("co-located findings not in stable ID order for input %v/%v: got [%s, %s], want [PX3006, PX3026]",
+				order[0].DiagnosticName, order[1].DiagnosticName, got[0].ID, got[1].ID)
+		}
+	}
+}
