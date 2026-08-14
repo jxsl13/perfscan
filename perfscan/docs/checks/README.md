@@ -126,3 +126,4 @@ checks' fixes.
 | [PS5106](PS5106.md) | arith | L1 | yes | strings.Compare(a, b) compared to 0 where the direct operator is clearer and faster |
 | [PS6004](PS6004.md) | verify | L2 |  | a fast-path/fallback dual path whose bit-identity claim needs coverage on both arms |
 | [PS6010](PS6010.md) | verify | L3 | yes | an accumulator loop re-reading an operand invariant in the output index |
+| [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |

@@ -323,6 +323,7 @@ func missingVocab(c *lint.Check, cfg config.Config) []string {
 		"dtypeMethods":           len(cfg.DtypeMethods),
 		"outputBufferElemTypes":  len(cfg.OutputBufferElemTypes),
 		"compiledResourceFuncs":  len(cfg.CompiledResourceFuncs),
+		"gpuReductionKernels":    len(cfg.GPUReductionKernels),
 	}
 	missing := make([]string, 0, len(c.Vocab))
 	for _, v := range c.Vocab {
