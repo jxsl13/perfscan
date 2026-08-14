@@ -109,6 +109,7 @@ checks' fixes.
 | [PS5004](PS5004.md) | arith | L1 | yes | WriteString of a one-byte string runs the string-append machinery; WriteByte appends the byte directly |
 | [PS5005](PS5005.md) | alloc | L1 | yes | string(bytes.Trim([]byte(s), cutset)) pays two throwaway copies; strings.Trim(s, cutset) is the same trim with zero copies |
 | [PS5006](PS5006.md) | alloc | L1 | yes | string(bytes.TrimPrefix([]byte(s), []byte(p))) pays throwaway copies; strings.TrimPrefix(s, p) is the same trim with zero copies |
+| [PS5007](PS5007.md) | arith | L1 | yes | Index/LastIndex of a one-byte string runs the substring machinery; IndexByte/LastIndexByte scan for the byte directly |
 | [PS5008](PS5008.md) | arith | L1 | yes | math.Sin and math.Cos on the same argument (fusable to math.Sincos) |
 | [PS5009](PS5009.md) | arith | L2 |  | math.Pow with a small constant exponent |
 | [PS5010](PS5010.md) | alloc | L1 | yes | string(bytes.ToUpper([]byte(s))) pays two throwaway copies; strings.ToUpper(s) is the same case mapping with at most one allocation |

@@ -1056,7 +1056,7 @@ func pruneOrphanedImports(src []byte) []byte {
 		// Leaving a (rarely) genuinely-orphaned versioned import is far safer than
 		// deleting a live one; this runs BEFORE the stdlib-only gate below so it
 		// also covers stdlib /vN paths, which that gate (dot-in-path) misses.
-		if isVersionSegment(path[strings.LastIndex(path, "/")+1:]) {
+		if isVersionSegment(path[strings.LastIndexByte(path, '/')+1:]) {
 			continue
 		}
 		// Only STANDARD-LIBRARY imports (no dot in the path). For those the

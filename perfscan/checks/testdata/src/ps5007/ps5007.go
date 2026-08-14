@@ -1,0 +1,60 @@
+package ps5007
+
+import "strings"
+
+func basic(s string) int {
+	return strings.Index(s, "z") // want `strings\.Index of the single-byte string "z" runs the generic substring search; strings\.IndexByte\(s, "z"\[0\]\) finds the same byte directly`
+}
+
+// LastIndex is the bigger win: it has no single-byte fast path at all.
+func last(s string) int {
+	return strings.LastIndex(s, "/") // want `strings\.LastIndex of the single-byte string "/" runs the generic substring search; strings\.LastIndexByte\(s, "/"\[0\]\) finds the same byte directly`
+}
+
+func inControlFlow(s string) bool {
+	if i := strings.Index(s, ":"); i >= 0 { // want `strings\.Index of the single-byte string ":" runs the generic substring search`
+		return true
+	}
+	return strings.LastIndex(s, ".") > 0 // want `strings\.LastIndex of the single-byte string "\." runs the generic substring search`
+}
+
+// Escapes and raw literals carry over byte-verbatim: the ORIGINAL literal
+// token is reused and wrapped as lit[0], so no re-escaping ever happens.
+// "\xff" is one raw byte (not valid UTF-8) and still in scope — a one-byte
+// needle is matched byte-wise on both sides of the rewrite.
+func escapes(s string) {
+	_ = strings.Index(s, "\n")      // want `strings\.Index of the single-byte string "\\n" runs the generic substring search`
+	_ = strings.Index(s, "\xff")    // want `strings\.Index of the single-byte string "\\xff" runs the generic substring search`
+	_ = strings.Index(s, "'")       // want `strings\.Index of the single-byte string "'" runs the generic substring search`
+	_ = strings.LastIndex(s, "\\")  // want `strings\.LastIndex of the single-byte string "\\\\" runs the generic substring search`
+	_ = strings.LastIndex(s, "\"")  // want `strings\.LastIndex of the single-byte string "\\"" runs the generic substring search`
+	_ = strings.Index(s, `-`)       // want "strings\\.Index of the single-byte string `-` runs the generic substring search"
+	_ = strings.LastIndex(s, "\x00") // want `strings\.LastIndex of the single-byte string "\\x00" runs the generic substring search`
+}
+
+// Parentheses around the needle are looked through; the literal token is
+// rewritten in place inside them.
+func parens(s string) int {
+	return strings.Index(s, (";")) // want `strings\.Index of the single-byte string ";" runs the generic substring search`
+}
+
+// The haystack expression passes through verbatim, so a nested match
+// inside it is rewritten independently — the edits never overlap.
+func nested(s string) int {
+	return strings.Index(s[strings.Index(s, ":")+1:], ":") // want `strings\.Index of the single-byte string ":" runs the generic substring search` `strings\.Index of the single-byte string ":" runs the generic substring search`
+}
+
+// --- advisory: reported but never rewritten ---
+
+// A named constant (or any constant expression that is not a literal)
+// keeps its symbolic name: wrapping a spelled-out copy of its value would
+// discard it. Index the constant itself (colon[0]) when rewriting by hand.
+const colon = ":"
+
+func namedConst(s string) int {
+	return strings.Index(s, colon) // want `strings\.Index of the single-byte string colon runs the generic substring search; strings\.IndexByte\(s, colon\[0\]\) finds the same byte directly — identical index for every input; the needle is a constant expression, not a string literal — rewrite to strings\.IndexByte by hand`
+}
+
+func constExpr(s string) int {
+	return strings.LastIndex(s, ":"+"") // want `the needle is a constant expression, not a string literal — rewrite to strings\.LastIndexByte by hand`
+}
