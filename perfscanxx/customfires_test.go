@@ -259,6 +259,79 @@ func TestPX2102DoesNotFireOnParameterMove(t *testing.T) {
 	}
 }
 
+// px2103RefSrc pins PX2103's by-value scope: catching an exception BY VALUE
+// copies (and can slice), so it fires; but catch by CONST REFERENCE — the
+// idiomatic, recommended form — as well as plain reference and pointer, take no
+// copy and must NOT fire. The query keys on hasCanonicalType(recordType()): a
+// reference or pointer catch has a canonical type of reference/pointer, not
+// record, so it is excluded. This is the highest-stakes negative in the custom
+// set: a regression that dropped the reference exclusion would flag EVERY
+// well-written catch block.
+const px2103RefSrc = `#include <stdexcept>
+void byValue()    { try {} catch (std::runtime_error e) { (void)e; } }        // PX2103: copies
+void byConstRef() { try {} catch (const std::runtime_error& e) { (void)e; } } // idiomatic: NOT flagged
+void byRef()      { try {} catch (std::runtime_error& e) { (void)e; } }        // NOT flagged
+void byPointer()  { try {} catch (std::runtime_error* e) { (void)e; } }        // NOT flagged
+`
+
+// TestPX2103DoesNotFireOnCatchByReference pins that PX2103 fires only on the
+// by-value catch (line 2) and stays silent on const-ref / ref / pointer catches.
+func TestPX2103DoesNotFireOnCatchByReference(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	e, ok := catalog.ByID("PX2103")
+	if !ok || !e.Custom {
+		t.Fatal("PX2103 missing or not a custom check")
+	}
+	cfg := catalog.ClangTidyConfig([]catalog.Entry{e})
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".clang-tidy")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "catch.cpp")
+	if err := os.WriteFile(src, []byte(px2103RefSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--experimental-custom-checks", "--config-file=" + cfgPath, "--", "-std=c++17"}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+
+	if strings.Contains(output, "Unknown command line argument") && strings.Contains(output, "experimental-custom-checks") {
+		t.Skip("clang-tidy is too old for --experimental-custom-checks; skipping")
+	}
+	if strings.Contains(output, "[clang-tidy-config]") {
+		t.Fatalf("clang-tidy rejected the PX2103 query:\n%s", output)
+	}
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture; skipping:\n%s", output)
+	}
+
+	tag := "[" + e.TidyName + "]"
+	if n := strings.Count(output, tag); n != 1 {
+		t.Errorf("PX2103 fired %d time(s), want exactly 1 (the by-value catch only):\n%s", n, output)
+	}
+	if !strings.Contains(output, "catch.cpp:2:") {
+		t.Errorf("PX2103 must fire on the by-VALUE catch at line 2:\n%s", output)
+	}
+	for _, ln := range []string{"catch.cpp:3:", "catch.cpp:4:", "catch.cpp:5:"} {
+		if strings.Contains(output, ln) {
+			t.Errorf("PX2103 must NOT fire on a by-reference/pointer catch (%s):\n%s", ln, output)
+		}
+	}
+}
+
 // px2107TrivialSrc exercises PX2107's exponent scoping: the NON-actionable
 // integer exponents 0 (pow(x,0)==1) and 1 (pow(x,1)==x) must NOT fire — for
 // those "multiply directly" is wrong advice — while an actionable constant
