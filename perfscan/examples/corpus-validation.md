@@ -417,3 +417,28 @@ preview shows the import added exactly **once**, matching what `-fix` writes.
 Three end-to-end regression tests pin the composition — `TestFixPrunesCrossCheckOrphanImport`,
 `TestFixDedupesCrossCheckImportAdd`, and the widening's per-check `orphan.go`
 fixtures — so the whole batch is guarded, not just spot-checked here.
+
+## Full-catalog `-fix` re-validation on klauspost/compress (2026-08-15)
+
+The rows above changed only a handful of files because they targeted one check
+family (the PS3002/import-machinery batch). The catalog has grown considerably
+since, so this is a fresh whole-catalog datapoint on the same large,
+hand-optimized codec library. `perfscan -fix -level 3 ./...` on a git-clean
+`klauspost/compress` applied **82 fixes across 17 files** — an order of magnitude
+more than the v0.40.x rows — spanning the reserve/emplace-analog rewrites,
+`sort.Strings`→`slices.Sort` (PS3104), `fmt.Fprint(w, s)`→`io.WriteString(w, s)`
+(PS2118), the concatenation/`Sprintf`-in-loop family, and the `sort.Slice`→
+`slices.SortFunc` import-adding path. The whole module then **`go build`s clean**
+(zero `imported and not used`), and — the behavior proof — the hot codec
+packages' own test suites pass on the rewritten tree:
+
+```
+go test ./flate/ ./zstd/ ./s2/ ./gzhttp/
+  ok  flate   9.3s      ok  zstd  102.0s      ok  s2  22.0s      ok  gzhttp  1.4s
+```
+
+`zstd`'s 102 s suite (SIMD-heavy encoders, dictionary builder, fuzz corpora) is
+the strongest single behavior-equivalence signal in the Go corpus. So the current
+full catalog — not just the import-machinery subset — is compile- AND
+behavior-safe on a performance-critical real-world library. (Applied in place,
+then restored with `git checkout .`.)
