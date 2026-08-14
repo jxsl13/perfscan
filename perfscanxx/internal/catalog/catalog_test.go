@@ -186,6 +186,14 @@ func TestCustomCheckInvariants(t *testing.T) {
 		if e.Message == "" {
 			t.Errorf("%s: custom check has empty Message", e.ID)
 		}
+		// Every custom check is advisory (HasFix:false), and its Message must say
+		// so — the "no auto-fix" note is what tells a -fix user the finding will be
+		// reported but not rewritten. A missing note is an output inconsistency
+		// (PX2101 shipped without it); this guards the convention across all
+		// present and future custom checks.
+		if !strings.Contains(e.Message, "no auto-fix") {
+			t.Errorf("%s: custom check Message must contain the \"no auto-fix\" note (it is advisory), got: %q", e.ID, e.Message)
+		}
 
 		q := strings.TrimSpace(e.Query)
 		if !strings.HasPrefix(q, "match ") {

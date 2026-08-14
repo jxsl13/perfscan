@@ -381,7 +381,7 @@ var entries = []Entry{
 		Query: `match cxxMemberCallExpr(isExpansionInMainFile(), ` +
 			`callee(cxxMethodDecl(hasAnyName("push_back", "emplace_back"))), ` +
 			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("grow")`,
-		Message: "vector grown via push_back/emplace_back inside a loop; if the final size is known, reserve() it before the loop to avoid repeated reallocation — the query flags the pattern and cannot see whether a reserve is already present (perfscanxx PS2101 analog, query-based)",
+		Message: "vector grown via push_back/emplace_back inside a loop; if the final size is known, reserve() it before the loop to avoid repeated reallocation — the query flags the pattern and cannot see whether a reserve is already present (perfscanxx PS2101 analog, query-based, no auto-fix)",
 	},
 	{
 		ID: "PX2102", TidyName: "custom-pessimizing-move",
