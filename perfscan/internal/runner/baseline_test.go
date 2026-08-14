@@ -61,6 +61,31 @@ func TestBaselineRoundTrip(t *testing.T) {
 	}
 }
 
+// TestBaselineRoundTripsSpecialCharMessage pins that a finding message carrying
+// YAML-hostile characters survives writeBaseline -> applyBaseline intact, so its
+// line-independent key (relPath + ID + message) still matches and the finding
+// stays suppressed. TestBaselineRoundTrip uses only plain messages, so the
+// escaping/round-trip of a message with colons, quotes, apostrophes, a percent
+// sign, or a leading dash was untested. A one-byte change across the round-trip
+// would resurface the baselined finding as a false regression.
+func TestBaselineRoundTripsSpecialCharMessage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "baseline.json")
+	msg := `- 'variable' "x": copied, per #note: costs 100% more`
+	if err := writeBaseline(path, []Finding{fakeFinding("a.go", "PS2101", msg, 10)}); err != nil {
+		t.Fatal(err)
+	}
+	// The same finding at a shifted line: line-independent, so it must be
+	// suppressed — but only if the special-char message round-tripped exactly.
+	surviving, suppressed, err := applyBaseline(path, []Finding{fakeFinding("a.go", "PS2101", msg, 99)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suppressed != 1 || len(surviving) != 0 {
+		t.Errorf("a baselined finding with a special-char message must stay suppressed (message must round-trip exactly); surviving=%v suppressed=%d", surviving, suppressed)
+	}
+}
+
 func TestBaselineMissingFile(t *testing.T) {
 	_, _, err := applyBaseline(filepath.Join(t.TempDir(), "nope.json"), nil)
 	if err == nil {
