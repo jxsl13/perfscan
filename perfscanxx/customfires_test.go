@@ -399,6 +399,84 @@ func TestPX2103DoesNotFireOnCatchByReference(t *testing.T) {
 	}
 }
 
+// px2104StaticSrc distinguishes the in-loop-construction anti-pattern from its
+// idiomatic hoist: an AUTOMATIC std::regex / std::ostringstream declared in a
+// loop is re-created every iteration (PX2104 / PX2106 fire), but a STATIC or
+// thread_local one is initialized ONCE — `static const std::regex re(...)` inside
+// a function is in fact the recommended way to hoist a regex — so it does not
+// recompile/reallocate per iteration and must NOT fire (both queries carry
+// hasAutomaticStorageDuration()).
+const px2104StaticSrc = `#include <regex>
+#include <sstream>
+void rxPerIter() { for (int i=0;i<9;++i){ std::regex re("a+"); (void)re; } }             // PX2104
+void rxStatic()  { for (int i=0;i<9;++i){ static std::regex re("a+"); (void)re; } }       // NOT
+void rxThread()  { for (int i=0;i<9;++i){ thread_local std::regex re("a+"); (void)re; } } // NOT
+void ssPerIter() { for (int i=0;i<9;++i){ std::ostringstream ss; (void)ss; } }            // PX2106
+void ssStatic()  { for (int i=0;i<9;++i){ static std::ostringstream ss; (void)ss; } }      // NOT
+`
+
+// TestRegexAndStreamInLoopExcludeStaticStorage pins that PX2104 and PX2106 fire
+// only on the automatic (per-iteration) declarations, never on static/thread_local.
+func TestRegexAndStreamInLoopExcludeStaticStorage(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	var sel []catalog.Entry
+	for _, id := range []string{"PX2104", "PX2106"} {
+		e, ok := catalog.ByID(id)
+		if !ok || !e.Custom {
+			t.Fatalf("%s missing or not a custom check", id)
+		}
+		sel = append(sel, e)
+	}
+	cfg := catalog.ClangTidyConfig(sel)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".clang-tidy")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "loop.cpp")
+	if err := os.WriteFile(src, []byte(px2104StaticSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{src, "--experimental-custom-checks", "--config-file=" + cfgPath, "--", "-std=c++17"}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+		}
+		args = append(args, "-isysroot", strings.TrimSpace(string(out)))
+	}
+	out, _ := exec.Command(bin, args...).CombinedOutput()
+	output := string(out)
+
+	if strings.Contains(output, "Unknown command line argument") && strings.Contains(output, "experimental-custom-checks") {
+		t.Skip("clang-tidy is too old for --experimental-custom-checks; skipping")
+	}
+	if strings.Contains(output, "[clang-tidy-config]") {
+		t.Fatalf("clang-tidy rejected a PX2104/PX2106 query:\n%s", output)
+	}
+	if strings.Contains(output, "file not found") || strings.Contains(output, "fatal error:") {
+		t.Skipf("toolchain could not parse the fixture headers; skipping:\n%s", output)
+	}
+
+	total := strings.Count(output, "[custom-regex-in-loop]") + strings.Count(output, "[custom-stringstream-in-loop]")
+	if total != 2 {
+		t.Errorf("PX2104+PX2106 fired %d time(s), want 2 (the automatic regex + stream only):\n%s", total, output)
+	}
+	if !strings.Contains(output, "loop.cpp:3:") || !strings.Contains(output, "loop.cpp:6:") {
+		t.Errorf("must fire on the automatic declarations at lines 3 (regex) and 6 (stream):\n%s", output)
+	}
+	for _, ln := range []string{"loop.cpp:4:", "loop.cpp:5:", "loop.cpp:7:"} {
+		if strings.Contains(output, ln) {
+			t.Errorf("must NOT fire on a static/thread_local declaration (%s):\n%s", ln, output)
+		}
+	}
+}
+
 // px2107TrivialSrc exercises PX2107's exponent scoping: the NON-actionable
 // integer exponents 0 (pow(x,0)==1) and 1 (pow(x,1)==x) must NOT fire — for
 // those "multiply directly" is wrong advice — while an actionable constant

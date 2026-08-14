@@ -427,7 +427,12 @@ var entries = []Entry{
 		// canonical-type match sees through the std::regex typedef to
 		// basic_regex<>; isExpansionInMainFile keeps it off the <regex> header's
 		// own internal constructions. The C++ analog of perfscan's PS2005.
-		Query: `match varDecl(isExpansionInMainFile(), ` +
+		// hasAutomaticStorageDuration(): a `static`/`thread_local` regex in a loop
+		// is initialized ONCE (static-local init) — `static const std::regex re`
+		// inside the function is in fact the idiomatic hoist — so it does NOT
+		// recompile per iteration and must be excluded; only an automatic
+		// (per-iteration) variable is the anti-pattern.
+		Query: `match varDecl(isExpansionInMainFile(), hasAutomaticStorageDuration(), ` +
 			`hasType(hasCanonicalType(recordType(hasDeclaration(cxxRecordDecl(matchesName("basic_regex")))))), ` +
 			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("rx")`,
 		Message: "std::regex/std::wregex constructed inside a loop recompiles the pattern (an expensive parse + allocation) every iteration; declare it once outside the loop (query-based, no auto-fix)",
@@ -459,7 +464,10 @@ var entries = []Entry{
 		// re-done every iteration. isExpansionInMainFile keeps it off library
 		// headers. No safe mechanical fix — the remedy (hoist the stream out and
 		// reset it with .str("") each iteration) is a design change.
-		Query: `match varDecl(isExpansionInMainFile(), ` +
+		// hasAutomaticStorageDuration(): a static/thread_local stream is
+		// constructed ONCE, so it does not reallocate per iteration — only an
+		// automatic (per-iteration) variable is the anti-pattern (see PX2104).
+		Query: `match varDecl(isExpansionInMainFile(), hasAutomaticStorageDuration(), ` +
 			`hasType(hasCanonicalType(recordType(hasDeclaration(cxxRecordDecl(matchesName("::std::basic_(o|i)?stringstream")))))), ` +
 			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("ss")`,
 		Message: "std::stringstream constructed inside a loop heap-allocates a new buffer (and re-imbues the locale) every iteration; hoist the stream out of the loop and reset it with .str(\"\") each pass (query-based, no auto-fix)",
