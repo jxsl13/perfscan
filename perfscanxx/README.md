@@ -49,6 +49,7 @@ perfscanxx -list                      # the PX check table (with an auto-fix cov
 perfscanxx -list -fixable             # only the auto-fixable checks
 perfscanxx -list -json                # the catalog as machine-readable JSON
 perfscanxx -explain PX1001            # a check's documentation
+perfscanxx -doctor -p build           # diagnose setup (clang-tidy, LLVM version, compile db, sysroot); exit 0 if ready
 ```
 
 `-diff` is a non-destructive dry run: it snapshots the affected files, runs
