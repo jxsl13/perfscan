@@ -245,6 +245,15 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		fmt.Fprintln(stderr, "perfscanxx: -fix-errors has no effect without -fix")
 		return 2
 	}
+	// -changed takes a git ref value; a value starting with "-" means the ref was
+	// omitted and Go's flag parser swallowed the NEXT flag as the value (e.g.
+	// `-changed -fix` sets changed="-fix" and drops -fix). Git refs never start
+	// with "-", so this is unambiguous — fail loudly instead of running a full
+	// scan that silently ignores the flag the user meant.
+	if strings.HasPrefix(*changed, "-") {
+		fmt.Fprintf(stderr, "perfscanxx: -changed value %q looks like a flag, not a git ref — put the ref right after -changed (e.g. -changed origin/main)\n", *changed)
+		return 2
+	}
 	if *fixErrors {
 		fmt.Fprintln(stderr, "perfscanxx: -fix-errors: applying fix-its even to translation units that fail to compile — review the results (a missing build-time header is the usual reason; -cmake-build is the clean alternative).")
 	}
