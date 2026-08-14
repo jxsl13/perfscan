@@ -176,3 +176,48 @@ func TestParseRealClangTidyExport(t *testing.T) {
 		t.Errorf("Diagnostics[1] = %+v", d1)
 	}
 }
+
+// TestParseToleratesUnknownFields pins forward-compatibility: Parse must IGNORE
+// YAML keys it does not model, so a NEWER clang-tidy that adds fields to the
+// --export-fixes schema does not break perfscanxx. This is the deliberate INVERSE
+// of the config package (which uses KnownFields(true) for typo protection): here
+// rejecting unknown keys would make a single new upstream field fail EVERY export
+// parse — total breakage on a clang-tidy upgrade. A regression that added
+// KnownFields(true)/UnmarshalStrict to fixes.Parse is caught here. The known
+// fields must still be extracted correctly alongside the unknown ones.
+func TestParseToleratesUnknownFields(t *testing.T) {
+	const withFuture = `---
+MainSourceFile:  '/src/x.cpp'
+FutureTopLevelField: 'clang-tidy 99 added this'
+Diagnostics:
+  - DiagnosticName:  performance-for-range-copy
+    NewPerDiagnosticField: 42
+    DiagnosticMessage:
+      Message:  'msg'
+      FilePath: '/src/x.cpp'
+      FileOffset: 10
+      FutureMessageField: [1, 2, 3]
+      Replacements:
+        - FilePath: '/src/x.cpp'
+          Offset: 10
+          Length: 4
+          ReplacementText: 'const auto&'
+          FutureReplacementField: true
+...
+`
+	ef, err := Parse([]byte(withFuture))
+	if err != nil {
+		t.Fatalf("Parse must tolerate unknown fields (forward-compat), got error: %v", err)
+	}
+	if ef.MainSourceFile != "/src/x.cpp" || len(ef.Diagnostics) != 1 {
+		t.Fatalf("known top-level fields lost: %+v", ef)
+	}
+	d := ef.Diagnostics[0]
+	if d.DiagnosticName != "performance-for-range-copy" || d.DiagnosticMessage.FileOffset != 10 {
+		t.Errorf("known diagnostic fields lost around unknown ones: %+v", d)
+	}
+	if got := d.DiagnosticMessage.Replacements; len(got) != 1 ||
+		got[0] != (Replacement{FilePath: "/src/x.cpp", Offset: 10, Length: 4, ReplacementText: "const auto&"}) {
+		t.Errorf("known replacement fields lost around an unknown one: %+v", got)
+	}
+}
