@@ -603,7 +603,7 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 
 	switch {
 	case *sarifOut:
-		if err := report.SARIF(stdout, findings); err != nil {
+		if err := report.SARIF(stdout, findings, len(parseErrs) == 0); err != nil {
 			fmt.Fprintln(stderr, "perfscanxx:", err)
 			return 2
 		}
