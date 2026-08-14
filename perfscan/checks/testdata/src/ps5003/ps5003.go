@@ -1,0 +1,169 @@
+package ps5003
+
+import (
+	"bufio"
+	"bytes"
+	"strings"
+)
+
+func buffer(b *bytes.Buffer) {
+	b.Write([]byte{'\n'}) // want `Write of the one-element slice literal \[\]byte\{'\\n'\} builds and copies a throwaway slice; WriteByte\('\\n'\) appends the byte directly`
+	b.Write([]byte{0})    // want `Write of the one-element slice literal \[\]byte\{0\} builds and copies a throwaway slice; WriteByte\(0\) appends the byte directly`
+}
+
+func builder(sb *strings.Builder) {
+	sb.Write([]byte{' '}) // want `Write of the one-element slice literal \[\]byte\{' '\} builds and copies a throwaway slice; WriteByte\(' '\) appends the byte directly`
+}
+
+// A variable element is kept verbatim — evaluated once in both forms.
+func variable(b *bytes.Buffer, c byte) {
+	b.Write([]byte{c}) // want `Write of the one-element slice literal \[\]byte\{c\} builds and copies a throwaway slice; WriteByte\(c\) appends the byte directly`
+}
+
+// Any byte-typed expression works: indexing, calls with side effects.
+func expr(b *bytes.Buffer, p []byte, i int) {
+	b.Write([]byte{p[i]})      // want `Write of the one-element slice literal \[\]byte\{p\[i\]\} builds and copies a throwaway slice; WriteByte\(p\[i\]\) appends the byte directly`
+	b.Write([]byte{nextByte()}) // want `Write of the one-element slice literal \[\]byte\{nextByte\(\)\} builds and copies a throwaway slice; WriteByte\(nextByte\(\)\) appends the byte directly`
+}
+
+func nextByte() byte { return 'x' }
+
+// []uint8 is the identical type spelled differently.
+func uint8Spelling(b *bytes.Buffer, c byte) {
+	b.Write([]uint8{c}) // want `Write of the one-element slice literal \[\]byte\{c\} builds and copies a throwaway slice; WriteByte\(c\) appends the byte directly`
+}
+
+// An alias of []byte is the same type — the literal's "B{" and "}" go away.
+type byteSliceAlias = []byte
+
+func alias(b *bytes.Buffer, c byte) {
+	b.Write(byteSliceAlias{c}) // want `Write of the one-element slice literal \[\]byte\{c\} builds and copies a throwaway slice; WriteByte\(c\) appends the byte directly`
+}
+
+// A trailing comma is swallowed by the deleted closing range.
+func trailingComma(b *bytes.Buffer, c byte) {
+	b.Write([]byte{c,}) // want `Write of the one-element slice literal \[\]byte\{c\} builds and copies a throwaway slice; WriteByte\(c\) appends the byte directly`
+}
+
+// A value receiver works: the pointer-receiver Write already required the
+// variable to be addressable, so WriteByte is reachable the same way.
+func valueRecv() string {
+	var sb strings.Builder
+	sb.Write([]byte{'!'}) // want `Write of the one-element slice literal \[\]byte\{'!'\} builds and copies a throwaway slice; WriteByte\('!'\) appends the byte directly`
+	return sb.String()
+}
+
+// Promotion through an embedded std writer resolves both methods to the
+// std pair — the fix still applies.
+type wrapper struct {
+	*bytes.Buffer
+}
+
+func embedded(w wrapper, c byte) {
+	w.Write([]byte{c}) // want `Write of the one-element slice literal \[\]byte\{c\} builds and copies a throwaway slice; WriteByte\(c\) appends the byte directly`
+}
+
+// defer discards the results just like an expression statement.
+func deferred(b *bytes.Buffer, c byte) {
+	defer b.Write([]byte{c}) // want `Write of the one-element slice literal \[\]byte\{c\} builds and copies a throwaway slice; WriteByte\(c\) appends the byte directly`
+}
+
+// --- advisory: reported but never rewritten ---
+
+// A used result changes shape: Write returns (int, error), WriteByte only
+// error.
+func resultUsed(b *bytes.Buffer, c byte) error {
+	_, err := b.Write([]byte{c}) // want `Write of the one-element slice literal \[\]byte\{c\} builds and copies a throwaway slice; WriteByte\(c\) appends the byte directly; Write returns \(int, error\) but WriteByte returns only error — adjust the result handling by hand`
+	return err
+}
+
+// bufio.Writer is excluded from the fix: its Write may flush and surface an
+// error mid-stream, so the bit-identity proof does not carry.
+func buffered(w *bufio.Writer, c byte) {
+	w.Write([]byte{c}) // want `Write of the one-element slice literal \[\]byte\{c\} builds and copies a throwaway slice; WriteByte\(c\) appends the byte directly; this Write/WriteByte pair is not bytes\.Buffer's or strings\.Builder's — verify WriteByte appends identically before rewriting`
+}
+
+// A custom pair carries no proof the two methods agree.
+type customPair struct{}
+
+func (customPair) Write(p []byte) (int, error) { return len(p), nil }
+func (customPair) WriteByte(c byte) error      { return nil }
+
+func custom(w customPair, c byte) {
+	w.Write([]byte{c}) // want `Write of the one-element slice literal \[\]byte\{c\} builds and copies a throwaway slice; WriteByte\(c\) appends the byte directly; this Write/WriteByte pair is not bytes\.Buffer's or strings\.Builder's — verify WriteByte appends identically before rewriting`
+}
+
+// An interface pair is equally unproven.
+type byteWriter interface {
+	Write(p []byte) (int, error)
+	WriteByte(c byte) error
+}
+
+func iface(w byteWriter, c byte) {
+	w.Write([]byte{c}) // want `Write of the one-element slice literal \[\]byte\{c\} builds and copies a throwaway slice; WriteByte\(c\) appends the byte directly; this Write/WriteByte pair is not bytes\.Buffer's or strings\.Builder's — verify WriteByte appends identically before rewriting`
+}
+
+// A comment inside the deleted "[]byte{...}" text would be destroyed — the
+// report stays, the fix does not.
+func commented(b *bytes.Buffer, c byte) {
+	b.Write([]byte{ /* keep me */ c}) // want `Write of the one-element slice literal \[\]byte\{c\} builds and copies a throwaway slice; WriteByte\(c\) appends the byte directly`
+}
+
+// --- guards: none of the following may be reported ---
+
+// More or fewer than one element writes a different byte count.
+func multiElement(b *bytes.Buffer, x, y byte) {
+	b.Write([]byte{x, y})
+	b.Write([]byte{})
+}
+
+// A keyed element changes the length: []byte{5: c} has length 6.
+func keyed(b *bytes.Buffer, c byte) {
+	b.Write([]byte{5: c})
+}
+
+// A plain slice variable or a string conversion is not a one-element
+// literal (the conversion is PS2111's shape, not this check's).
+func notLiteral(b *bytes.Buffer, p []byte, s string) {
+	b.Write(p)
+	b.Write([]byte(s))
+}
+
+// A NAMED slice type is not exactly []byte.
+type namedBytes []byte
+
+func named(b *bytes.Buffer, c byte) {
+	b.Write(namedBytes{c})
+}
+
+// A receiver without WriteByte has nothing to rewrite to.
+type writeOnly struct{}
+
+func (writeOnly) Write(p []byte) (int, error) { return len(p), nil }
+
+func noWriteByte(w writeOnly, c byte) {
+	w.Write([]byte{c})
+}
+
+// A function-typed field named Write is not a method call.
+type fieldFunc struct {
+	Write     func(p []byte) (int, error)
+	WriteByte func(c byte) error
+}
+
+func field(f fieldFunc, c byte) {
+	f.Write([]byte{c})
+}
+
+// A pointer-receiver WriteByte is not in the method set of a value
+// returned by a call: the rewrite would not even compile.
+type mixed struct{}
+
+func (mixed) Write(p []byte) (int, error) { return len(p), nil }
+func (*mixed) WriteByte(c byte) error     { return nil }
+
+func makeMixed() mixed { return mixed{} }
+
+func mixedRecv(c byte) {
+	makeMixed().Write([]byte{c})
+}
