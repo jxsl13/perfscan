@@ -25,6 +25,7 @@ package fixes
 
 import (
 	"fmt"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 )
@@ -77,6 +78,21 @@ type FileByteRange struct {
 	Length     int    `yaml:"Length"`
 }
 
+// blockScalarIndicator matches a YAML block-scalar header that carries an
+// EXPLICIT indentation indicator digit — `ReplacementText: |4-` and friends.
+// LLVM's YAML emitter writes multi-line ReplacementText (e.g. the member-
+// initializer insertion of cppcoreguidelines-prefer-member-initializer) as a
+// literal block scalar with an explicit indentation indicator, and gopkg.in/
+// yaml.v3 mis-parses that form ("did not find expected key"), failing the whole
+// export — and, in a parallel run, the whole scan. The indicator is stripped so
+// go-yaml auto-detects the block indentation: `|4-` -> `|-`, `|4` -> `|`,
+// `>4-` -> `>-`. This only ever touches MULTI-LINE replacement text (single-line
+// replacements are plain/quoted scalars), which perfscanxx never consumes —
+// singleReplacement rejects multi-line fixes and -fix applies via clang-tidy
+// itself — so recovering the diagnostic (its name, message and location) is what
+// matters, and the exact leading whitespace of that unused text is not.
+var blockScalarIndicator = regexp.MustCompile(`(?m)([:\-]\s+[|>])[0-9]+([+-]?)[ \t]*$`)
+
 // Parse decodes one --export-fixes YAML document.
 // An empty input yields an empty ExportFile (clang-tidy writes nothing or an
 // empty file when there are no diagnostics).
@@ -86,6 +102,16 @@ func Parse(data []byte) (*ExportFile, error) {
 		return &f, nil
 	}
 	if err := yaml.Unmarshal(data, &f); err != nil {
+		// Retry once with LLVM's explicit block-scalar indentation indicators
+		// normalized away — the one construct go-yaml chokes on in a real
+		// clang-tidy export. If it still fails, report the original error.
+		normalized := blockScalarIndicator.ReplaceAll(data, []byte("$1$2"))
+		if len(normalized) != len(data) {
+			var f2 ExportFile
+			if err2 := yaml.Unmarshal(normalized, &f2); err2 == nil {
+				return &f2, nil
+			}
+		}
 		return nil, fmt.Errorf("fixes: invalid --export-fixes YAML: %w", err)
 	}
 	return &f, nil
