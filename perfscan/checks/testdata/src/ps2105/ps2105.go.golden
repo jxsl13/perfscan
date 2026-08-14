@@ -49,6 +49,17 @@ func lastRuneIndex(s string) int {
 	return last
 }
 
+// Blank key but the operand embeds a composite literal: the rewrite is withheld
+// CONSERVATIVELY, and the message must say WHY accurately — not the misleading
+// "the key is used here" (the key is blank). Advisory, no fix.
+func compositeLitOperand() int {
+	n := 0
+	for _, r := range []rune(string([]byte{72, 73})) { // want `ranging over \[\]rune\(string\(\[\]byte\{72, 73\}\)\) allocates a rune slice per loop entry; a direct range over string\(\[\]byte\{72, 73\}\) yields the same runes, but string\(\[\]byte\{72, 73\}\) embeds a composite literal, so the rewrite is left manual`
+		n += int(r)
+	}
+	return n
+}
+
 // Silent: already ranging the string directly.
 func direct(s string) int {
 	n := 0
