@@ -1,0 +1,30 @@
+package ps5011
+
+import (
+	"fmt"
+	"strings"
+)
+
+// These calls are the file's ONLY bytes references, so the fix also
+// drops the orphaned bytes import and inserts strings at its sorted
+// position ("fmt" orders between "bytes" and "strings", so an in-place
+// swap would unsort the group).
+func replaceBasic(s, old, new string) string {
+	return strings.ReplaceAll(s, old, new) // want `string\(bytes\.ReplaceAll\(\[\]byte\(s\), \[\]byte\(old\), \[\]byte\(new\)\)\) copies`
+}
+
+// Both siblings are matched and rewritten to their strings twin; the n
+// argument of Replace is kept verbatim.
+func replaceSiblings(s string, n int) (string, string) {
+	all := strings.ReplaceAll(s, "-", "_")     // want `string\(bytes\.ReplaceAll\(\[\]byte\(s\), \[\]byte\(old\), \[\]byte\(new\)\)\) copies`
+	some := strings.Replace(s, ".", "/", n+1) // want `string\(bytes\.Replace\(\[\]byte\(s\), \[\]byte\(old\), \[\]byte\(new\), n\)\) copies`
+	return all, some
+}
+
+// The operands are kept byte-verbatim, however they are spelled: field
+// selectors, compound expressions with calls, and calls producing the
+// operands (each evaluated exactly once in both forms).
+func replaceVerbatim(w struct{ line, from, to string }, f func() string) {
+	fmt.Println(strings.ReplaceAll(w.line, w.from, w.to))    // want `string\(bytes\.ReplaceAll\(\[\]byte\(s\), \[\]byte\(old\), \[\]byte\(new\)\)\) copies`
+	fmt.Println(strings.Replace("--"+f(), f(), "-"+f(), 1)) // want `string\(bytes\.Replace\(\[\]byte\(s\), \[\]byte\(old\), \[\]byte\(new\), n\)\) copies`
+}
