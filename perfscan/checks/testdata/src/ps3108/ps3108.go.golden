@@ -1,0 +1,52 @@
+package ps3108
+
+import (
+	"cmp"
+	"slices"
+)
+
+type point struct{ x, y int }
+
+// --- POSITIVES: bare == closure, fixable, rewritten to slices.Compact ---
+
+func ints(s []int) []int {
+	return slices.Compact(s) // want `slices\.CompactFunc with a bare x == y equality closure`
+}
+
+func strs(s []string) []string {
+	return slices.Compact(s) // want `slices\.CompactFunc with a bare x == y equality closure`
+}
+
+// Symmetric spelling (b == a) is matched too.
+func floats(s []float64) []float64 {
+	return slices.Compact(s) // want `slices\.CompactFunc with a bare x == y equality closure`
+}
+
+// A strictly-comparable struct element.
+func points(s []point) []point {
+	return slices.Compact(s) // want `slices\.CompactFunc with a bare x == y equality closure`
+}
+
+// --- NEGATIVES: not a bare == closure — never reported ---
+
+// A field selector, not the bare parameters.
+func byField(s []point) []point {
+	return slices.CompactFunc(s, func(a, b point) bool { return a.x == b.x })
+}
+
+// A real comparator body (uses cmp), not ==.
+func viaCmp(s []int) []int {
+	return slices.CompactFunc(s, func(a, b int) bool { return cmp.Compare(a, b) == 0 })
+}
+
+// A named func value, not a literal.
+func eq(a, b int) bool { return a == b }
+
+func named(s []int) []int {
+	return slices.CompactFunc(s, eq)
+}
+
+// Already the direct call — nothing to do.
+func direct(s []int) []int {
+	return slices.Compact(s)
+}
