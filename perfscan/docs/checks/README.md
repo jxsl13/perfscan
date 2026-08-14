@@ -106,6 +106,7 @@ checks' fixes.
 | [PS3107](PS3107.md) | indirect | L1 | yes | slices.SortFunc with a bare cmp.Compare(a, b) comparator is slices.Sort spelled the slow way |
 | [PS3108](PS3108.md) | indirect | L1 | yes | slices.CompactFunc with a bare x == y equality closure is slices.Compact spelled with a per-element indirect call |
 | [PS3109](PS3109.md) | indirect | L1 | yes | slices.BinarySearchFunc with a bare cmp.Compare comparator is slices.BinarySearch spelled the slow way |
+| [PS3110](PS3110.md) | indirect | L1 | yes | slices.IndexFunc/ContainsFunc with a bare x == target closure is slices.Index/Contains spelled with a per-element indirect call |
 | [PS4001](PS4001.md) | vector | L2 |  | a per-element binary decode (encoding/binary) in a loop |
 | [PS4002](PS4002.md) | vector | L3 |  | a scalar math transcendental in a loop beside a vectorized sibling kernel |
 | [PS4008](PS4008.md) | vector | L3 | yes | a matmul whose innermost loop is a serial scalar dot accumulator |
