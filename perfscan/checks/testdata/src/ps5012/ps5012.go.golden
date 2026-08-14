@@ -1,0 +1,53 @@
+package ps5012
+
+import (
+	"fmt"
+	"strings"
+)
+
+// The canonical shape: the explicit Count re-derives the cap Replace
+// computes internally, so s is scanned twice. Rewritten to ReplaceAll.
+func replaceBasic(s, old, new string) string {
+	return strings.ReplaceAll(s, old, new) // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+}
+
+// Literal operands: the pair must only be syntactically identical.
+func replaceLiterals(line string) string {
+	return strings.ReplaceAll(line, "//", "/") // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+}
+
+// Field selectors and index expressions are call-free re-reads: dropping
+// the second evaluation is unobservable, so the fix applies, keeping
+// every operand byte-verbatim.
+type conf struct{ body, sep string }
+
+func replaceSelectors(c conf, parts []string, seps [2]string, i int) {
+	fmt.Println(strings.ReplaceAll(c.body, c.sep, "-"))          // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+	fmt.Println(strings.ReplaceAll(parts[0], seps[i], "_"))      // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+	fmt.Println(strings.ReplaceAll(c.body, "x", c.sep+c.sep))    // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+	fmt.Println(len(strings.ReplaceAll(c.body, c.sep, "")))      // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+}
+
+// A parenthesized Count argument is the same shape.
+func replaceParenCount(s, old string) string {
+	return strings.ReplaceAll(s, old, "") // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+}
+
+// Operands containing calls stay ADVISORY: the Before evaluates s and
+// old twice, so a call could yield different values or lose a side
+// effect — reported (it is still a redundant double scan) but never
+// rewritten mechanically.
+func replaceImpure(s, old string, f func() string, bs []byte) {
+	_ = strings.Replace(f(), old, "-", strings.Count(f(), old))                 // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+	_ = strings.Replace(s, f(), "-", strings.Count(s, f()))                     // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+	_ = strings.Replace(s, old, f(), strings.Count(s, old))                     // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+	_ = strings.Replace(string(bs), old, "-", strings.Count(string(bs), old))   // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+}
+
+// A comment inside the replaced punctuation would be silently destroyed
+// by the rewrite — advisory.
+func replaceCommented(s, old string) {
+	_ = strings.Replace( /* keep me */ s, old, "-", strings.Count(s, old)) // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+	_ = strings.Replace(s /* mid */, old, "-", strings.Count(s, old))      // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+	_ = strings.Replace(s, old, "-", strings.Count(s, old) /* tail */)     // want `strings\.Replace\(s, old, new, strings\.Count\(s, old\)\) walks s twice`
+}
