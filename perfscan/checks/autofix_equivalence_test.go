@@ -3459,3 +3459,39 @@ func TestEquiv_PS3004BytesPredToStrings(t *testing.T) {
 	// string([]byte(s)) == s for every s, invalid UTF-8 included — is pinned
 	// by TestEquiv_StringByteRoundTrip.
 }
+
+// TestEquiv_PS2010BytesEqualStringConversions pins that
+// bytes.Equal([]byte(s1), []byte(s2)) is bit-identical to s1 == s2 for
+// every string pair: the stdlib defines Equal(a, b) as
+// string(a) == string(b), and string([]byte(x)) == x for any string x —
+// a string round-tripped through []byte is byte-identical, including
+// invalid UTF-8 and empty strings. Adversarial inputs: empties, embedded
+// NUL, invalid UTF-8 (\xff\xfe, surrogate-encoding bytes, truncated
+// multi-byte), long shared prefixes, and a length-mismatch prefix pair.
+func TestEquiv_PS2010BytesEqualStringConversions(t *testing.T) {
+	long := strings.Repeat("x", 4096)
+	vals := []string{
+		"", "a", "b", "ab", "ba", "\x00", "a\x00b", "\x00a",
+		"\xff", "\xff\xfe", "invalid\xc3(", "\xed\xa0\x80",
+		"日", "日本語", long, long + "y", long[:4095],
+	}
+	for _, a := range vals {
+		for _, b := range vals {
+			if bytes.Equal([]byte(a), []byte(b)) != (a == b) {
+				t.Errorf("bytes.Equal([]byte(%q), []byte(%q)) diverges from ==", a, b)
+			}
+		}
+	}
+	// Side effects: each operand is evaluated exactly once, left to
+	// right, in both forms.
+	var before, after []string
+	fb := func(s string) string { before = append(before, "f"); return s }
+	gb := func(s string) string { before = append(before, "g"); return s }
+	_ = bytes.Equal([]byte(fb("x")), []byte(gb("x")))
+	fa := func(s string) string { after = append(after, "f"); return s }
+	ga := func(s string) string { after = append(after, "g"); return s }
+	_ = fa("x") == ga("x")
+	if !slices.Equal(before, after) {
+		t.Errorf("operand evaluation order/count differs: before=%v after=%v", before, after)
+	}
+}
