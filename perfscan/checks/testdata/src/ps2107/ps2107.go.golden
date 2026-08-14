@@ -200,3 +200,28 @@ func fAltHex(n int) string   { return fmt.Sprintf("%#x", n) } // alternate form 
 func fCommentInCall(n int) string {
 	return fmt.Sprintf("%d" /* verb */, n) // want `fmt\.Sprintf of a single %d value boxes the argument`
 }
+
+// %x over a plain int: base-16 via FormatInt (%x on a negative prints the
+// sign then the hex magnitude, exactly as FormatInt does).
+func fx(i int) string {
+	return strconv.FormatInt(int64(i), 16) // want `fmt\.Sprintf of a single %x integer value boxes the argument and walks fmt's formatter state machine; strconv\.FormatInt/FormatUint with base 16 \(hexadecimal\) converts it directly`
+}
+
+// %x over an unsigned type: base-16 via FormatUint.
+func fxu(u uint) string {
+	return strconv.FormatUint(uint64(u), 16) // want `fmt\.Sprintf of a single %x integer value boxes the argument and walks fmt's formatter state machine; strconv\.FormatInt/FormatUint with base 16 \(hexadecimal\) converts it directly`
+}
+
+type Hex int
+
+// Named integer type could implement fmt.Formatter, which fmt honors for %x
+// and strconv would not: advisory, no fix.
+func fxn(h Hex) string {
+	return fmt.Sprintf("%x", h) // want `fmt\.Sprintf of a single %x integer value boxes the argument and walks fmt's formatter state machine; strconv\.FormatInt/FormatUint with base 16 \(hexadecimal\) converts it directly`
+}
+
+// %X prints UPPERCASE hex digits; strconv.FormatInt is lowercase-only, so the
+// uppercase verb must never be rewritten: silent.
+func fxUpper(i int) string {
+	return fmt.Sprintf("%X", i)
+}

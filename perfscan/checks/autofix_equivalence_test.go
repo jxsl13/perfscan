@@ -2326,6 +2326,36 @@ func TestEquiv_PS2107SprintfBinOctToFormat(t *testing.T) {
 	}
 }
 
+// TestEquiv_PS2107HexInt pins PS2107's %x-over-integer arm: base-16 integer
+// formatting via fmt is byte-identical to strconv.FormatInt/FormatUint with
+// base 16, for signed and unsigned across the full range incl. MinInt64/
+// MaxInt64/MaxUint64 (%x on a negative prints '-' then the hex magnitude,
+// exactly as FormatInt does), plus fixed-seed random values per width.
+// %X (uppercase digits) and %#x (0x prefix) differ and are never rewritten.
+func TestEquiv_PS2107HexInt(t *testing.T) {
+	rng := rand.New(rand.NewSource(2107))
+	ints := []int64{0, 1, -1, 255, -255, math.MaxInt64, math.MinInt64, math.MaxInt32, math.MinInt32}
+	for i := 0; i < 64; i++ {
+		v := int64(rng.Uint64())
+		ints = append(ints, v, -v, int64(int32(v)), int64(int16(v)), int64(int8(v)))
+	}
+	for _, i := range ints {
+		if got, want := fmt.Sprintf("%x", i), strconv.FormatInt(i, 16); got != want {
+			t.Errorf("%%x(%d): %q != FormatInt base16 %q", i, got, want)
+		}
+	}
+	uints := []uint64{0, 1, 255, math.MaxUint64, math.MaxUint32, 1 << 63, 1<<63 - 1}
+	for i := 0; i < 64; i++ {
+		v := rng.Uint64()
+		uints = append(uints, v, uint64(uint32(v)), uint64(uint16(v)), uint64(uint8(v)))
+	}
+	for _, u := range uints {
+		if got, want := fmt.Sprintf("%x", u), strconv.FormatUint(u, 16); got != want {
+			t.Errorf("%%x(uint %d): %q != FormatUint base16 %q", u, got, want)
+		}
+	}
+}
+
 // TestEquiv_PS2107SprintfQuote pins PS2107's %q arms: fmt.Sprintf("%q", s) over a
 // string equals strconv.Quote(s), and fmt.Sprintf("%q", r) over a rune equals
 // strconv.QuoteRune(r) — including control bytes, escapes, unicode, and the
