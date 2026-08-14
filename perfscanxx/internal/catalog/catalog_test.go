@@ -434,3 +434,26 @@ func TestAllReturnsSortedByID(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryIDIsPX4Digits pins the check-id format that TestAllReturnsSortedByID
+// and All()'s ascending-id sort DEPEND ON: a lexicographic (string) compare
+// equals a numeric compare only when every id is the same width. Every id must
+// be "PX" + exactly 4 digits. A malformed id (PX999, PX10001, a typo) would sort
+// wrong AND read inconsistently in -list/-json/-sarif; this catches it.
+func TestEveryIDIsPX4Digits(t *testing.T) {
+	for _, e := range All() {
+		id := e.ID
+		ok := len(id) == 6 && id[0] == 'P' && id[1] == 'X'
+		if ok {
+			for i := 2; i < 6; i++ {
+				if id[i] < '0' || id[i] > '9' {
+					ok = false
+					break
+				}
+			}
+		}
+		if !ok {
+			t.Errorf("id %q is not the required PX#### form (PX + exactly 4 digits); All()'s string sort assumes equal-width numeric ids", id)
+		}
+	}
+}
