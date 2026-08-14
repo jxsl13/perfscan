@@ -35,6 +35,7 @@ export PERFSCANXX_CLANG_TIDY="$(brew --prefix llvm)/bin/clang-tidy"
 ```bash
 perfscanxx -p build ./...             # analyse the whole project (like `perfscan ./...`)
 perfscanxx -j 8 -p build ./...        # analyse with 8 parallel clang-tidy workers (default: one per CPU; -j 1 = sequential)
+perfscanxx -timeout 5m -p build ./... # abort if the whole run exceeds 5m (CI safety valve; 0 = no limit)
 perfscanxx -p build ./src/game/...    # just a subtree
 perfscanxx -checks PX1* -p build ./... # only copy checks
 perfscanxx -level 1 -fix -p build ./... # apply only L1 (idiomatic) fix-its

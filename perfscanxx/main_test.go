@@ -1474,3 +1474,42 @@ func TestSplitFiles(t *testing.T) {
 		}
 	}
 }
+
+// TestTimeoutAbortsRun pins that -timeout bounds the analysis: with a tiny
+// deadline and a clang-tidy invocation that outlives it (the stub blocks until
+// the context is cancelled, as a hung clang-tidy would relative to a killing
+// exec.CommandContext), the run aborts with exit 2 and the timeout message —
+// never a false "clean" result.
+func TestTimeoutAbortsRun(t *testing.T) {
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "t.cpp")
+	if err := os.WriteFile(cpp, []byte("int x;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"clang++ -std=c++17 -c t.cpp"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+	tidy.Executor = func(ctx context.Context, argv []string, stdout, stderr *bytes.Buffer) (int, error) {
+		if len(argv) >= 2 && argv[1] == "--version" {
+			stdout.WriteString("LLVM version 22.0.0\n")
+			return 0, nil
+		}
+		// A "hung" analysis: block until the deadline cancels the context, then
+		// report the cancellation the way exec.CommandContext does.
+		<-ctx.Done()
+		return -1, ctx.Err()
+	}
+
+	_, errOut, code := runCLI("-timeout", "20ms", "-checks", "PX3008", "-p", dir, cpp)
+	if code != 2 {
+		t.Fatalf("timed-out run: exit=%d, want 2; stderr:\n%s", code, errOut)
+	}
+	if !strings.Contains(errOut, "exceeded -timeout") {
+		t.Errorf("expected the timeout message; stderr:\n%s", errOut)
+	}
+}
