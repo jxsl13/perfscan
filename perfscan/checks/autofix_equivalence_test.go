@@ -699,6 +699,67 @@ func TestEquiv_CountPlusOne(t *testing.T) {
 	}
 }
 
+// PS2009: strings.Split(s, sep)[0] -> strings.SplitN(s, sep, 2)[0] (and the
+// bytes analog). The head is identical for EVERY separator — including the
+// empty one, where both forms rune-explode and return the first rune (this is
+// exactly why Cut is NOT a safe rewrite: Cut(s, "") returns "" instead). The
+// test pins the head value across adversarial inputs (multibyte, invalid
+// UTF-8, NUL, absent/leading/trailing separators), the identical PANIC on the
+// single empty-result case Split("","")[0], and for bytes the identical len,
+// cap, nil-ness, and backing-array aliasing of the head subslice. It also pins
+// the Cut divergence so the SplitN choice stays load-bearing.
+func TestEquiv_SplitHeadN2(t *testing.T) {
+	inputs := []string{"", "a", "ab", "a,b,c", ",", ",,", "a,", ",a", "a,,b", "héllo", "日本,語", "x,y,z,", "\xff\xfe", "\xffa\xfe", "aépi\x00x"}
+	seps := []string{",", "", "a", ",,", "日", "xyz", "\x00", "é", "\xff"}
+	head := func(f func() string) (r string, panicked bool) {
+		defer func() {
+			if recover() != nil {
+				panicked = true
+			}
+		}()
+		return f(), false
+	}
+	for _, s := range inputs {
+		for _, sep := range seps {
+			got, gp := head(func() string { return strings.SplitN(s, sep, 2)[0] })
+			want, wp := head(func() string { return strings.Split(s, sep)[0] })
+			if got != want || gp != wp {
+				t.Errorf("strings: SplitN(%q,%q,2)[0]=%q/panic=%v != Split[0]=%q/panic=%v", s, sep, got, gp, want, wp)
+			}
+			bs, bsep := []byte(s), []byte(sep)
+			if len(bs) == 0 && len(bsep) == 0 {
+				continue // both panic; the strings arm above pins that case
+			}
+			bg, bw := bytes.SplitN(bs, bsep, 2)[0], bytes.Split(bs, bsep)[0]
+			if !bytes.Equal(bg, bw) || cap(bg) != cap(bw) || (bg == nil) != (bw == nil) {
+				t.Errorf("bytes: SplitN(%q,%q,2)[0] (len %d cap %d nil %v) != Split[0] (len %d cap %d nil %v)",
+					s, sep, len(bg), cap(bg), bg == nil, len(bw), cap(bw), bw == nil)
+			}
+		}
+	}
+	// The single empty-result shape panics IDENTICALLY in both forms.
+	if _, p := head(func() string { return strings.Split("", "")[0] }); !p {
+		t.Fatal("expected strings.Split(\"\",\"\")[0] to panic")
+	}
+	if _, p := head(func() string { return strings.SplitN("", "", 2)[0] }); !p {
+		t.Fatal("expected strings.SplitN(\"\",\"\",2)[0] to panic")
+	}
+	// bytes: the head aliases the SAME backing array in both forms — a write
+	// through one is visible in the original, identically.
+	src1, src2 := []byte("hello,world"), []byte("hello,world")
+	bytes.Split(src1, []byte(","))[0][0] = 'H'
+	bytes.SplitN(src2, []byte(","), 2)[0][0] = 'H'
+	if !bytes.Equal(src1, src2) || src1[0] != 'H' {
+		t.Fatalf("head aliasing differs: %q vs %q", src1, src2)
+	}
+	// strings.Cut is exactly the rewrite that would NOT be safe: it diverges on
+	// the empty separator. If this ever stops diverging, SplitN is still the
+	// only form that preserves Split's rune semantics pinned above.
+	if before, _, _ := strings.Cut("abc", ""); before == strings.Split("abc", "")[0] {
+		t.Fatal("expected Cut(s, \"\") to diverge from Split(s, \"\")[0] (SplitN choice would be arbitrary)")
+	}
+}
+
 // PS2110: the nil/empty truth table behind append([]T(nil), s...) and
 // append([]T{}, s...) -> slices.Clone(s) (bytes.Clone for []byte). The rewrite
 // is bit-identical only when the divergent input is provably impossible, which
