@@ -133,3 +133,70 @@ func TestChangedGitFailureFallsBackToFullScan(t *testing.T) {
 		t.Errorf("git failure should full-scan both TUs, scanned=%v", scanned())
 	}
 }
+
+// TestChangedBaselineNoFalseStale pins the -changed x -baseline interaction: on an
+// incremental scan, baseline entries for the UNSCANNED TUs are trivially unmatched,
+// but that is NOT staleness — the run just didn't look at them. The "stale baseline
+// entries" nudge (which only makes sense on a full scan) must be SUPPRESSED under
+// -changed, or every incremental CI run would cry wolf.
+func TestChangedBaselineNoFalseStale(t *testing.T) {
+	origLook, origExec, origGit := tidy.LookPath, tidy.Executor, gitOutput
+	defer func() { tidy.LookPath, tidy.Executor, gitOutput = origLook, origExec, origGit }()
+
+	dir := t.TempDir()
+	var files, entries []string
+	for _, n := range []string{"a.cpp", "b.cpp"} {
+		p := filepath.Join(dir, n)
+		if err := os.WriteFile(p, []byte("int x;\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, p)
+		entries = append(entries, `{"directory":"`+dir+`","file":"`+p+`","command":"clang++ -std=c++17 -c `+n+`"}`)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte("["+strings.Join(entries, ",")+"]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+	// Emit one PX3008 finding for whichever .cpp each invocation analyzes.
+	tidy.Executor = func(_ context.Context, argv []string, stdout, _ *bytes.Buffer) (int, error) {
+		if len(argv) >= 2 && argv[1] == "--version" {
+			stdout.WriteString("LLVM version 22.0.0\n")
+			return 0, nil
+		}
+		var cpp, export string
+		for _, a := range argv {
+			if strings.HasSuffix(a, ".cpp") {
+				cpp = a
+			}
+			if strings.HasPrefix(a, "--export-fixes=") {
+				export = strings.TrimPrefix(a, "--export-fixes=")
+			}
+		}
+		if export != "" && cpp != "" {
+			y := "MainSourceFile: '" + cpp + "'\nDiagnostics:\n" +
+				"  - DiagnosticName: readability-container-size-empty\n" +
+				"    DiagnosticMessage:\n      Message: 'm'\n      FilePath: '" + cpp + "'\n      FileOffset: 0\n      Replacements: []\n"
+			_ = os.WriteFile(export, []byte(y), 0o644)
+		}
+		return 0, nil
+	}
+
+	bl := filepath.Join(dir, "bl.yaml")
+	// Seed the baseline from a FULL scan (findings for a.cpp AND b.cpp).
+	if _, _, code := runCLI(append([]string{"-tidy", "clang-tidy", "-checks", "PX3008", "-baseline", bl, "-p", dir}, files...)...); code != 0 {
+		t.Fatalf("seeding baseline: exit=%d, want 0", code)
+	}
+
+	// Incremental run: only a.cpp changed -> b.cpp's baseline entry is unmatched,
+	// but -changed must NOT report it as stale.
+	gitOutput = func(_ context.Context, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "rev-parse" {
+			return dir + "\n", nil
+		}
+		return "a.cpp\n", nil
+	}
+	_, errOut, _ := runCLI(append([]string{"-tidy", "clang-tidy", "-changed", "origin/main", "-checks", "PX3008", "-baseline", bl, "-p", dir}, files...)...)
+	if strings.Contains(errOut, "stale baseline") {
+		t.Errorf("-changed run falsely reported a stale baseline entry (b.cpp was just not scanned):\n%s", errOut)
+	}
+}
