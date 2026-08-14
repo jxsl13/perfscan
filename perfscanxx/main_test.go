@@ -1574,3 +1574,83 @@ func TestTimeoutCancelsParallelWorkers(t *testing.T) {
 		t.Errorf("%d/%d workers observed cancellation — a worker ignoring the context would deadlock wg.Wait", c, e)
 	}
 }
+
+// TestParallelDedupsSharedHeaderFinding pins the correctness that runReport's
+// merge relies on: a diagnostic anchored in a SHARED HEADER is written to every
+// worker's --export-fixes (once per TU that includes it), and the merge must
+// collapse those to ONE finding. Without the (file, offset, check) dedup in
+// report.FromExport, a header-heavy project (fmt, abseil) would report the same
+// header finding once per TU and inflate the count. Hermetic: clang-tidy is
+// stubbed so each of the 4 workers emits its own cpp finding PLUS the identical
+// shared-header finding.
+func TestParallelDedupsSharedHeaderFinding(t *testing.T) {
+	dir := t.TempDir()
+	shared := filepath.Join(dir, "shared.h")
+	if err := os.WriteFile(shared, []byte("struct S { S(){} };\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	for _, name := range []string{"a.cpp", "b.cpp", "c.cpp", "d.cpp"} {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("#include \"shared.h\"\nint x;\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, p)
+	}
+
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+	tidy.Executor = func(_ context.Context, argv []string, stdout, stderr *bytes.Buffer) (int, error) {
+		if len(argv) >= 2 && argv[1] == "--version" {
+			stdout.WriteString("Homebrew LLVM version 22.1.8\n")
+			return 0, nil
+		}
+		var cpp, export string
+		for _, a := range argv {
+			if strings.HasSuffix(a, ".cpp") {
+				cpp = a
+			}
+			if strings.HasPrefix(a, "--export-fixes=") {
+				export = strings.TrimPrefix(a, "--export-fixes=")
+			}
+		}
+		if export != "" {
+			// One diagnostic unique to this TU, plus the SAME shared-header
+			// diagnostic every TU would carry (identical file + offset + check).
+			yaml := "MainSourceFile: '" + cpp + "'\n" +
+				"Diagnostics:\n" +
+				"  - DiagnosticName: performance-for-range-copy\n" +
+				"    DiagnosticMessage:\n" +
+				"      Message: 'copy'\n" +
+				"      FilePath: '" + cpp + "'\n" +
+				"      FileOffset: 0\n" +
+				"      Replacements: []\n" +
+				"  - DiagnosticName: modernize-use-equals-default\n" +
+				"    DiagnosticMessage:\n" +
+				"      Message: 'use = default'\n" +
+				"      FilePath: '" + shared + "'\n" +
+				"      FileOffset: 11\n" +
+				"      Replacements: []\n"
+			_ = os.WriteFile(export, []byte(yaml), 0o644)
+		}
+		return 0, nil
+	}
+
+	stdout, _, code := runCLI(append([]string{"-j", "4", "-json"}, files...)...)
+	if code != 1 {
+		t.Fatalf("exit=%d, want 1 (findings reported)", code)
+	}
+	// The shared-header finding must appear EXACTLY once despite 4 workers each
+	// exporting it. It is the only reference to shared.h in the output (the
+	// diagnostic carries no fix, so there is no edit path to it).
+	if n := strings.Count(stdout, shared); n != 1 {
+		t.Errorf("shared-header finding appears %d times, want 1 (cross-worker dedup failed):\n%s", n, stdout)
+	}
+	// The per-TU findings must all survive (dedup must not over-collapse distinct files).
+	for _, f := range files {
+		if !strings.Contains(stdout, f) {
+			t.Errorf("merged -json is missing the per-TU finding for %s", f)
+		}
+	}
+}
