@@ -28,11 +28,19 @@ The generic slices.SortFunc (Go 1.21+) sorts the concrete slice type with a
 direct call, and a sort.Sort on a concrete sort.Interface implementation
 avoids the reflect-based swaps too.
 
-The automatic fix (L2) handles the shape where the sorted value is a plain
-identifier xs and the comparator body is a run of ordered comparisons
-"xs[i]<CHAIN> < xs[j]<CHAIN>" (ascending) or "xs[i]<CHAIN> > xs[j]<CHAIN>"
-(descending) with the same selector chain on both sides of each comparison
-and an ordered basic element/field type. Three forms:
+The automatic fix (L2) handles the shape where the sorted value is a
+SIDE-EFFECT-FREE PATH xs — a plain identifier or a selector chain of
+identifiers (c.Kinds, s.inner.items; field access through a pointer
+included, since Go auto-derefs a selector) — and the comparator body is a
+run of ordered comparisons "xs[i]<CHAIN> < xs[j]<CHAIN>" (ascending) or
+"xs[i]<CHAIN> > xs[j]<CHAIN>" (descending) with the same selector chain on
+both sides of each comparison and an ordered basic element/field type. The
+comparator must index the very path being sorted (same root variable, same
+fields); a target containing a call, an index expression, a dereference or
+parentheses stays advisory — those could re-evaluate with side effects or
+yield a different slice, whereas a pure path evaluates to the identical
+slice header every time, so dropping the per-comparison re-evaluation is
+observably free. Three forms:
 
   - Whole element (empty chain, "return xs[i] < xs[j]") → slices.Sort(xs),
     which drops the comparator entirely. Needs only the "slices" package.
@@ -220,7 +228,9 @@ func ps3002FileImports(f *ast.File, path string) bool {
 //		return xs[i].g < xs[j].g
 //	})
 //
-// where xs is a plain identifier of slice type and the comparator body is a
+// where xs is a SIDE-EFFECT-FREE PATH of slice type — a plain identifier or
+// a selector chain of identifiers (c.Kinds, s.inner.items; see pathExpr) —
+// and the comparator body is a
 // run of zero or more tie-break guard UNITS — either a single `if xs[i]<CHAIN>
 // != xs[j]<CHAIN> { return xs[i]<CHAIN> OP xs[j]<CHAIN> }` guard (each guard
 // ordering the very field it tests) or the equivalent TWO-RETURN pair
@@ -236,7 +246,13 @@ func ps3002FileImports(f *ast.File, path string) bool {
 // call site: an existing import is reused (alias included), a missing one is
 // ADDED by the per-file import edits runPS3002 builds — only a dot/blank
 // import or a shadowing local keeps the site advisory, as does a cgo file,
-// whose import block must never be edited. Same-field guards only: both
+// whose import block must never be edited. The path target is safe because it
+// is evaluated exactly once as the first argument in BOTH spellings; the
+// rewrite only drops the per-comparison E[i]/E[j] re-evaluations, which for a
+// pure path yield the identical slice header every time — a call or index in
+// the target could re-evaluate with side effects or produce a different
+// slice, so those stay advisory, as does a comparator that indexes a
+// DIFFERENT path than the one being sorted. Same-field guards only: both
 // sorts share the same pdqsort, and under these guards the bool chain and
 // the cmp.Compare chain induce the identical total order —
 // cmp.Compare(b.f, a.f) < 0 ⟺ a.f > b.f — so the resulting permutation is
@@ -270,15 +286,18 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 	if len(call.Args) != 2 {
 		return nil, false
 	}
-	xs, ok := call.Args[0].(*ast.Ident)
+	xsRoot, xsFields, ok := pathExpr(call.Args[0])
 	if !ok {
 		return nil, false
 	}
-	xsObj := pass.TypesInfo.ObjectOf(xs)
+	xsObj := pass.TypesInfo.ObjectOf(xsRoot)
 	if xsObj == nil {
 		return nil, false
 	}
-	sliceType, ok := underlyingSlice(pass.TypesInfo.TypeOf(xs))
+	// The comparator's index bases must spell this exact path: same root
+	// object AND same field-name sequence (see ps3002SamePath).
+	target := ps3002Path{obj: xsObj, fields: xsFields}
+	sliceType, ok := underlyingSlice(pass.TypesInfo.TypeOf(call.Args[0]))
 	if !ok {
 		return nil, false
 	}
@@ -332,7 +351,7 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 		// way: its ifs test '<'/'>' and return bool LITERALS, a `!=` guard's
 		// if tests '!=' and returns an ordering comparison.
 		if i+1 < len(body) {
-			if suffix, desc, ok := ps3002TwoReturnPair(pass, body[i], body[i+1], xsObj, params[0], params[1]); ok {
+			if suffix, desc, ok := ps3002TwoReturnPair(pass, body[i], body[i+1], target, params[0], params[1]); ok {
 				fields = append(fields, fieldCmp{suffix, desc})
 				i += 2
 				continue
@@ -347,7 +366,7 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 			if ifs.Init != nil || ifs.Else != nil || len(ifs.Body.List) != 1 {
 				return nil, false
 			}
-			condSuffix, ok := neqField(pass, ifs.Cond, xsObj, params[0], params[1])
+			condSuffix, ok := neqField(pass, ifs.Cond, target, params[0], params[1])
 			if !ok {
 				return nil, false
 			}
@@ -355,7 +374,7 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 			if !ok || len(ret.Results) != 1 {
 				return nil, false
 			}
-			cmpSuffix, cmpDesc, ok := orderingCompare(pass, ret.Results[0], xsObj, params[0], params[1])
+			cmpSuffix, cmpDesc, ok := orderingCompare(pass, ret.Results[0], target, params[0], params[1])
 			// The guard must test the very field it then orders (an empty
 			// chain — a whole-element compare — never belongs in a guard):
 			// otherwise the bool chain and the cmp chain diverge on ties. The
@@ -385,7 +404,7 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 			}
 			tailZero = true
 		} else {
-			finalSuffix, finalDesc, ok := orderingCompare(pass, final.Results[0], xsObj, params[0], params[1])
+			finalSuffix, finalDesc, ok := orderingCompare(pass, final.Results[0], target, params[0], params[1])
 			if !ok {
 				return nil, false
 			}
@@ -416,6 +435,11 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 		return nil, false
 	}
 
+	// The rewrite splices the target's ORIGINAL source spelling back in as the
+	// first argument — a pure ident/selector path renders identically to its
+	// source text (no parens, no calls, no line breaks to lose).
+	targetText := exprTextRendered(call.Args[0])
+
 	// Whole-element ascending compare — the body is exactly `xs[i] < xs[j]`
 	// (empty selector chain) — becomes slices.Sort(xs), dropping the comparator
 	// entirely. For an ordered non-float element '<' is the total order
@@ -426,7 +450,7 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 		return &analysis.SuggestedFix{
 			Message: fmt.Sprintf("replace sort.%s with %s.Sort", name, slicesName),
 			TextEdits: []analysis.TextEdit{
-				{Pos: call.Pos(), End: call.End(), NewText: fmt.Appendf(nil, "%s.Sort(%s)", slicesName, xs.Name)},
+				{Pos: call.Pos(), End: call.End(), NewText: fmt.Appendf(nil, "%s.Sort(%s)", slicesName, targetText)},
 			},
 		}, false
 	}
@@ -462,7 +486,7 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 		return fmt.Sprintf("%s.Compare(a%s, b%s)", cmpName, f.suffix, f.suffix)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s.%s(%s, func(a, b %s) int { ", slicesName, fn, xs.Name, elemStr)
+	fmt.Fprintf(&b, "%s.%s(%s, func(a, b %s) int { ", slicesName, fn, targetText, elemStr)
 	if tailZero {
 		// The bare `return false` tail: EVERY collected field is a guard and
 		// the tail becomes `return 0` — both say "equal", and sort.Slice's
@@ -519,12 +543,12 @@ func ps3002CmpName(pass *analysis.Pass, f *ast.File, pos token.Pos) (name string
 // identical chains, xs = xsObj, i/j in that order, ordered non-float leaf
 // type — and returns the "."-prefixed selector suffix (empty for a
 // whole-element compare) plus which direction it saw.
-func orderingCompare(pass *analysis.Pass, expr ast.Expr, xsObj types.Object, iName, jName string) (suffix string, descending bool, ok bool) {
+func orderingCompare(pass *analysis.Pass, expr ast.Expr, target ps3002Path, iName, jName string) (suffix string, descending bool, ok bool) {
 	bin, isBin := expr.(*ast.BinaryExpr)
 	if !isBin || (bin.Op != token.LSS && bin.Op != token.GTR) {
 		return "", false, false
 	}
-	suffix, ok = comparisonSuffix(pass, bin, xsObj, iName, jName)
+	suffix, ok = comparisonSuffix(pass, bin, target, iName, jName)
 	return suffix, bin.Op == token.GTR, ok
 }
 
@@ -550,12 +574,12 @@ func ps3002BoolLiteral(pass *analysis.Pass, e ast.Expr) (val, ok bool) {
 // guards must name the field they order) and BOOL a bool literal, with no
 // Init, no Else and a single-statement body. greater reports OP == '>' and
 // retTrue the literal's value.
-func ps3002PairHalf(pass *analysis.Pass, stmt ast.Stmt, xsObj types.Object, iName, jName string) (suffix string, greater, retTrue, ok bool) {
+func ps3002PairHalf(pass *analysis.Pass, stmt ast.Stmt, target ps3002Path, iName, jName string) (suffix string, greater, retTrue, ok bool) {
 	ifs, isIf := stmt.(*ast.IfStmt)
 	if !isIf || ifs.Init != nil || ifs.Else != nil || len(ifs.Body.List) != 1 {
 		return "", false, false, false
 	}
-	suffix, greater, condOK := orderingCompare(pass, ifs.Cond, xsObj, iName, jName)
+	suffix, greater, condOK := orderingCompare(pass, ifs.Cond, target, iName, jName)
 	if !condOK || suffix == "" {
 		return "", false, false, false
 	}
@@ -585,12 +609,12 @@ func ps3002PairHalf(pass *analysis.Pass, stmt ast.Stmt, xsObj types.Object, iNam
 // direction (LSS+true → ascending, GTR+true → descending). Anything else —
 // same operator twice, same boolean twice, `<=`/`>=`, mismatched fields — is
 // a DIFFERENT predicate and keeps the site advisory.
-func ps3002TwoReturnPair(pass *analysis.Pass, first, second ast.Stmt, xsObj types.Object, iName, jName string) (suffix string, descending, ok bool) {
-	s1, gt1, true1, ok1 := ps3002PairHalf(pass, first, xsObj, iName, jName)
+func ps3002TwoReturnPair(pass *analysis.Pass, first, second ast.Stmt, target ps3002Path, iName, jName string) (suffix string, descending, ok bool) {
+	s1, gt1, true1, ok1 := ps3002PairHalf(pass, first, target, iName, jName)
 	if !ok1 {
 		return "", false, false
 	}
-	s2, gt2, true2, ok2 := ps3002PairHalf(pass, second, xsObj, iName, jName)
+	s2, gt2, true2, ok2 := ps3002PairHalf(pass, second, target, iName, jName)
 	if !ok2 || s1 != s2 || gt1 == gt2 || true1 == true2 {
 		return "", false, false
 	}
@@ -607,24 +631,24 @@ func ps3002TwoReturnPair(pass *analysis.Pass, first, second ast.Stmt, xsObj type
 // returns the same "."-prefixed selector suffix. `!=` is symmetric, so the
 // guard is direction-agnostic: it pairs equally with an ascending or a
 // descending return comparison on the same field.
-func neqField(pass *analysis.Pass, expr ast.Expr, xsObj types.Object, iName, jName string) (suffix string, ok bool) {
+func neqField(pass *analysis.Pass, expr ast.Expr, target ps3002Path, iName, jName string) (suffix string, ok bool) {
 	bin, isBin := expr.(*ast.BinaryExpr)
 	if !isBin || bin.Op != token.NEQ {
 		return "", false
 	}
-	return comparisonSuffix(pass, bin, xsObj, iName, jName)
+	return comparisonSuffix(pass, bin, target, iName, jName)
 }
 
 // comparisonSuffix validates a binary comparison (the operator itself was
 // already vetted by the caller) whose operands are identical selector chains
-// rooted at xsObj[iName] (left) and xsObj[jName] (right) over an ordered
+// rooted at target[iName] (left) and target[jName] (right) over an ordered
 // basic type, and returns the selector chain as a "."-prefixed suffix (""
 // for the empty whole-element chain). Floats are rejected: cmp.Compare and
 // slices.Sort order NaN as the smallest value, whereas the '<'/'>'
 // comparators treat NaN as incomparable, so the two disagree on any slice
 // that can contain a NaN — the same float exclusion PS3104/PS3105 apply for
 // exactly this reason.
-func comparisonSuffix(pass *analysis.Pass, bin *ast.BinaryExpr, xsObj types.Object, iName, jName string) (string, bool) {
+func comparisonSuffix(pass *analysis.Pass, bin *ast.BinaryExpr, target ps3002Path, iName, jName string) (string, bool) {
 	fieldsA, baseA, idxA, ok := indexSelectorChain(bin.X)
 	if !ok || idxA.Name != iName {
 		return "", false
@@ -633,9 +657,11 @@ func comparisonSuffix(pass *analysis.Pass, bin *ast.BinaryExpr, xsObj types.Obje
 	if !ok || idxB.Name != jName {
 		return "", false
 	}
-	// Both chains index the SAME variable as the first argument, and walk
-	// the same fields.
-	if pass.TypesInfo.ObjectOf(baseA) != xsObj || pass.TypesInfo.ObjectOf(baseB) != xsObj {
+	// Both chains index the SAME path as the first argument — same root
+	// object AND same field-name sequence: a comparator indexing a different
+	// slice (or a different field of the same struct) than the one being
+	// sorted would be dropped by the rewrite, so it must stay advisory.
+	if !ps3002SamePath(pass, baseA, target) || !ps3002SamePath(pass, baseB, target) {
 		return "", false
 	}
 	if len(fieldsA) != len(fieldsB) {
@@ -663,10 +689,11 @@ func comparisonSuffix(pass *analysis.Pass, bin *ast.BinaryExpr, xsObj types.Obje
 }
 
 // indexSelectorChain matches base[idx], base[idx].f, base[idx].f.g, ...
-// returning the selector names (outermost last), the indexed identifier and
-// the index identifier. Anything else — parens, calls, nested indexes —
-// does not match.
-func indexSelectorChain(e ast.Expr) (fields []string, base, index *ast.Ident, ok bool) {
+// returning the selector names AFTER the index (outermost last), the indexed
+// base expression (validated as a path by the caller via ps3002SamePath) and
+// the index identifier. Anything else — parens, calls, a non-identifier
+// index, nested indexes after the base — does not match.
+func indexSelectorChain(e ast.Expr) (fields []string, base ast.Expr, index *ast.Ident, ok bool) {
 	for {
 		sel, isSel := e.(*ast.SelectorExpr)
 		if !isSel {
@@ -679,12 +706,62 @@ func indexSelectorChain(e ast.Expr) (fields []string, base, index *ast.Ident, ok
 	if !isIx {
 		return nil, nil, nil, false
 	}
-	base, okBase := ix.X.(*ast.Ident)
 	index, okIdx := ix.Index.(*ast.Ident)
-	if !okBase || !okIdx {
+	if !okIdx {
 		return nil, nil, nil, false
 	}
-	return fields, base, index, true
+	return fields, ix.X, index, true
+}
+
+// ps3002Path identifies the sorted target: the root identifier's object plus
+// the selector field names (outermost last) leading from it to the slice —
+// `c.Kinds` is {obj(c), ["Kinds"]}, a plain `xs` is {obj(xs), nil}.
+type ps3002Path struct {
+	obj    types.Object
+	fields []string
+}
+
+// ps3002SamePath reports whether e spells exactly the target path: a
+// side-effect-free ident/selector chain whose root resolves to the same
+// types.Object and whose field-name sequence is identical. Resolving the
+// root through the type checker (not by name) keeps a shadowed name from
+// matching.
+func ps3002SamePath(pass *analysis.Pass, e ast.Expr, target ps3002Path) bool {
+	root, fields, ok := pathExpr(e)
+	if !ok || pass.TypesInfo.ObjectOf(root) != target.obj {
+		return false
+	}
+	if len(fields) != len(target.fields) {
+		return false
+	}
+	for i := range fields {
+		if fields[i] != target.fields[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// pathExpr matches a SIDE-EFFECT-FREE PATH — a plain identifier or a selector
+// chain of identifiers rooted at one (`xs`, `c.Kinds`, `s.inner.items`) —
+// and returns the root identifier plus the field names (outermost last, the
+// same convention as indexSelectorChain). Field access through a pointer is
+// fine: it is still just an *ast.SelectorExpr (Go auto-derefs) with no side
+// effect and no re-evaluation hazard. Any other node — a call, an index
+// expression, an explicit `*` dereference, parentheses — could re-evaluate
+// with side effects or yield a different value, so ok is false.
+func pathExpr(e ast.Expr) (root *ast.Ident, fields []string, ok bool) {
+	for {
+		switch x := e.(type) {
+		case *ast.Ident:
+			return x, fields, true
+		case *ast.SelectorExpr:
+			fields = append([]string{x.Sel.Name}, fields...)
+			e = x.X
+		default:
+			return nil, nil, false
+		}
+	}
 }
 
 // stdPkgInScope reports whether name resolves, at pos, to the imported

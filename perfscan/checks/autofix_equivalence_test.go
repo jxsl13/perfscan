@@ -313,6 +313,47 @@ func TestEquiv_SortSliceToSortFunc(t *testing.T) {
 	}
 }
 
+// PS3002: the SELECTOR-TARGET form — sort.Slice(c.Field, boolCmp) →
+// slices.SortFunc(c.Field, intCmp). The path c.Field is evaluated exactly
+// once as the call argument in BOTH spellings; the old comparator merely
+// re-evaluates it per comparison, which for a pure path yields the identical
+// slice header every time. With equal-order comparators the shared pdqsort
+// must therefore produce the identical permutation — pinned over shuffled
+// tie-heavy inputs (small value domain, an id field to expose any tie
+// reordering) so a selector-target rewrite that changed the order would be
+// caught.
+func TestEquiv_PS3002SelectorTarget(t *testing.T) {
+	type kv struct{ a, b, id int }
+	type holder struct{ items []kv }
+	r := rand.New(rand.NewSource(7))
+	for trial := 0; trial < 3000; trial++ {
+		n := r.Intn(40)
+		base := make([]kv, n)
+		for i := range base {
+			base[i] = kv{r.Intn(4), r.Intn(4), i} // small domain -> many ties
+		}
+		x := &holder{items: slices.Clone(base)}
+		y := &holder{items: slices.Clone(base)}
+		// original: multi-field bool comparator indexing the selector path
+		sort.Slice(x.items, func(i, j int) bool {
+			if x.items[i].a != x.items[j].a {
+				return x.items[i].a < x.items[j].a
+			}
+			return x.items[i].b < x.items[j].b
+		})
+		// rewritten: the emitted cmp.Compare tie-break chain over the same path
+		slices.SortFunc(y.items, func(p, q kv) int {
+			if p.a != q.a {
+				return cmp.Compare(p.a, q.a)
+			}
+			return cmp.Compare(p.b, q.b)
+		})
+		if !slices.Equal(x.items, y.items) {
+			t.Fatalf("selector target: sort.Slice != slices.SortFunc on trial %d: %v vs %v", trial, x.items, y.items)
+		}
+	}
+}
+
 // PS3002: the TWO-RETURN guard pair spelling
 //
 //	if x[i].a < x[j].a { return true }
