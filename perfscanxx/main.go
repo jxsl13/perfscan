@@ -968,6 +968,7 @@ func printList(w io.Writer, fixableOnly bool) {
 	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tLEVEL\tFIX\tCATEGORY\tCLANG-TIDY CHECK\tTITLE")
 	total, fixable := 0, 0
+	sawCaveat := false
 	for _, e := range catalog.All() {
 		total++
 		if e.HasFix {
@@ -979,11 +980,20 @@ func printList(w io.Writer, fixableOnly bool) {
 		fixMark := ""
 		if e.HasFix {
 			fixMark = "yes"
+			// Distinguish a fix that carries a safety caveat (unsafe to apply
+			// blindly) from a plain one, matching -explain/-json/-sarif/text.
+			if e.Caveat != "" {
+				fixMark = "yes ⚠"
+				sawCaveat = true
+			}
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			e.ID, e.Level, fixMark, e.Category, e.TidyName, e.Title)
 	}
 	tw.Flush()
+	if sawCaveat {
+		fmt.Fprintf(w, "\n⚠ = the fix carries a caveat; run -explain <ID> before applying it with -fix.\n")
+	}
 	if fixableOnly {
 		fmt.Fprintf(w, "\n%d auto-fixable check(s) of %d total (the rest are advisory: no clang-tidy fix-it).\n", fixable, total)
 	} else {

@@ -57,6 +57,15 @@ func TestListShowsEveryCheckAndSummary(t *testing.T) {
 	if !strings.Contains(out, itoa(total)) || !strings.Contains(out, itoa(fixable)) {
 		t.Errorf("-list footer must mention total=%d and fixable=%d; got:\n%s", total, fixable, out)
 	}
+	// A fix that carries a safety caveat is marked with ⚠ and explained by a
+	// legend, matching -explain/-json/-sarif/text. The catalog has caveated
+	// fixable checks (PX3015 etc.), so both must appear.
+	if !strings.Contains(out, "yes ⚠") {
+		t.Errorf("-list must mark a caveated fix with \"yes ⚠\"; got:\n%s", out)
+	}
+	if !strings.Contains(out, "⚠ = the fix carries a caveat") {
+		t.Errorf("-list must print the ⚠ caveat legend when a caveated fix is shown; got:\n%s", out)
+	}
 }
 
 func TestListFixableFiltersToAutoFixOnly(t *testing.T) {
