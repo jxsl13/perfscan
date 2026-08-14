@@ -1,0 +1,16 @@
+package ps3004
+
+import (
+	"strings"
+)
+
+// strings is already imported and stays used; the only two bytes
+// references in this FILE are the fixable calls themselves, so applying
+// both fixes orphans the bytes import and its spec is dropped.
+func dropBytes(s, sub string) bool {
+	if strings.ToLower(s) == sub {
+		return true
+	}
+	return strings.HasSuffix(s, sub) || // want `bytes\.HasSuffix\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.HasSuffix\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+		strings.Count(s, sub) > 1 // want `bytes\.Count\(\[\]byte\(s\), \[\]byte\(sub\)\) allocates two throwaway \[\]byte copies just to scan them; strings\.Count\(s, sub\) runs the same scan on the string bytes directly with zero allocations`
+}

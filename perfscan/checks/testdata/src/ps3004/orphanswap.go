@@ -1,0 +1,12 @@
+package ps3004
+
+import (
+	"bytes"
+)
+
+// The only bytes reference in this FILE is the fixable call itself and
+// strings is not imported: applying the fix orphans the bytes import, so
+// its spec is swapped for "strings" in place.
+func orphanSwap(s, chars string) int {
+	return bytes.IndexAny([]byte(s), chars) // want `bytes\.IndexAny\(\[\]byte\(s\), chars\) allocates a throwaway \[\]byte copy just to scan it; strings\.IndexAny\(s, chars\) runs the same scan on the string bytes directly with zero allocations`
+}

@@ -70,6 +70,7 @@ checks' fixes.
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
+| [PS3004](PS3004.md) | alloc | L1 | yes | a bytes.* predicate fed []byte(s) conversions of strings pays two throwaway copies; the strings.* twin scans the strings directly |
 | [PS3005](PS3005.md) | indirect | L2 | yes | an index-slice sort whose comparator dereferences into a 2-D structure |
 | [PS3007](PS3007.md) | indirect | L2 | yes | a membership set built from a slice the caller already owns, probed in a loop |
 | [PS3034](PS3034.md) | indirect | L3 |  | a serial nest whose every write names the outermost loop variable |
