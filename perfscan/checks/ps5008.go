@@ -132,12 +132,17 @@ func sincosFuseFix(info *types.Info, body *ast.BlockStmt, sinCall *ast.CallExpr,
 			if exprTextRendered(aCall.Args[0]) != argText || exprTextRendered(bCall.Args[0]) != argText {
 				continue
 			}
+			// Render the qualifier from the source Sin selector, not the literal
+			// "math": PkgFuncCall matches an aliased `import m "math"` too, and the
+			// fused call must reuse the same alias (`m.Sincos`) to compile
+			// bit-identically. sinCall.Fun is a *ast.SelectorExpr (a math.Sin call).
+			qual := exprTextRendered(sinCall.Fun.(*ast.SelectorExpr).X)
 			fix = &analysis.SuggestedFix{
 				Message: "fuse math.Sin and math.Cos into math.Sincos",
 				TextEdits: []analysis.TextEdit{{
 					Pos:     block.List[i].Pos(),
 					End:     block.List[i+1].End(),
-					NewText: []byte(sinName + ", " + cosName + " := math.Sincos(" + argText + ")"),
+					NewText: []byte(sinName + ", " + cosName + " := " + qual + ".Sincos(" + argText + ")"),
 				}},
 			}
 			return false

@@ -1,0 +1,10 @@
+package ps5008
+
+import m "math"
+
+// Aliased math import: the detector matches m.Sin/m.Cos and the fused call
+// must reuse the alias (m.Sincos) to compile.
+func aliased(x float64) (float64, float64) {
+	s, c := m.Sincos(x)
+	return s, c
+}

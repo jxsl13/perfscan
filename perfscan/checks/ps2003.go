@@ -147,7 +147,12 @@ func hoistStringsFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr, 
 	// Assume gofmt indentation (tabs): the loop starts at column loopPos.Column,
 	// i.e. loopPos.Column-1 tabs of indentation.
 	indent := strings.Repeat("\t", loopPos.Column-1)
-	binding := fmt.Sprintf("%s := strings.%s(%s)\n%s", name, fnName, strings.Join(args, ", "), indent)
+	// Render the qualifier from the source selector, not the literal "strings":
+	// PkgFuncCall matches an aliased `import s "strings"` too, and the hoisted
+	// binding must reuse the same alias (`s.ToUpper`) to compile bit-identically.
+	// call.Fun is guaranteed a *ast.SelectorExpr here (PkgFuncCall matched it).
+	sel := call.Fun.(*ast.SelectorExpr)
+	binding := fmt.Sprintf("%s := %s.%s(%s)\n%s", name, exprTextRendered(sel.X), fnName, strings.Join(args, ", "), indent)
 	return &analysis.SuggestedFix{
 		Message: fmt.Sprintf("hoist strings.%s out of the loop", fnName),
 		TextEdits: []analysis.TextEdit{

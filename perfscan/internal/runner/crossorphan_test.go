@@ -487,9 +487,15 @@ func TestFixTransformChecksReuseAliasedQualifier(t *testing.T) {
 			want: "s2.HasPrefix(s, p)", path: `"strings"`,
 		},
 		{
+			// The format carries literal text ("n=%d"), so PS2107's single-verb
+			// Sprintf->strconv rewrite does NOT apply and PS2113's Fprintf
+			// transform is unambiguously the fix — isolating the aliased-qualifier
+			// reuse this test pins. (A bare "%d" would now be pre-empted by PS2107,
+			// which — since astutil.PkgFuncCall matches aliased imports — composes
+			// on aliased sources exactly as it already does on canonical ones.)
 			name: "PS2113_fmt_fprintf",
-			src:  "package p\n\nimport (\n\t\"bytes\"\n\tf2 \"fmt\"\n)\n\nfunc f(w *bytes.Buffer, n int) { w.Write([]byte(f2.Sprintf(\"%d\", n))) }\n",
-			want: "f2.Fprintf(w, \"%d\", n)", path: `"fmt"`,
+			src:  "package p\n\nimport (\n\t\"bytes\"\n\tf2 \"fmt\"\n)\n\nfunc f(w *bytes.Buffer, n int) { w.Write([]byte(f2.Sprintf(\"n=%d\", n))) }\n",
+			want: "f2.Fprintf(w, \"n=%d\", n)", path: `"fmt"`,
 		},
 		{
 			name: "PS2109_fmt_appendf",

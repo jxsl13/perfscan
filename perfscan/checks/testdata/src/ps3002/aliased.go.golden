@@ -1,0 +1,17 @@
+package ps3002
+
+// The sort package is imported under an ALIAS: PkgFuncCall matches aliased
+// stdlib imports, and the whole s.Slice call is replaced by a slices.SortFunc
+// call that never references the alias, so the orphaned `s "sort"` import is
+// pruned exactly like the plain-named one in orphan.go.
+
+import (
+	"cmp"
+	"slices"
+)
+
+type aliasedItem struct{ key int }
+
+func sortAliased(xs []aliasedItem) {
+	slices.SortFunc(xs, func(a, b aliasedItem) int { return cmp.Compare(a.key, b.key) }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
