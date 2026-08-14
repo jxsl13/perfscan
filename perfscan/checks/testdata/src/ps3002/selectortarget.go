@@ -1,0 +1,77 @@
+package ps3002
+
+// SELECTOR-CHAIN sort targets: the sorted value may be any side-effect-free
+// PATH — a selector chain of identifiers like c.Kinds or s.inner.items —
+// not just a plain identifier. The path is evaluated exactly once as the
+// first argument in both spellings, so the rewrite is bit-identical.
+// Neither slices nor cmp is imported in this FILE: the rewrite ADDS both at
+// their sorted positions. The advisory-only negatives below keep surviving
+// sort references, so the golden compiles without orphan pruning.
+
+import (
+	"sort"
+)
+
+type kindInfo struct {
+	Group string
+	Kind  string
+	Score int
+}
+
+type catalog struct {
+	Kinds []kindInfo
+	Other []kindInfo
+}
+
+// Single-field over a selector target through a pointer receiver: c.Kinds is
+// just Ident+SelectorExpr (Go auto-derefs), no re-evaluation hazard. FIXED,
+// splicing the original path spelling as the first argument.
+func (c *catalog) sortByKind() {
+	sort.Slice(c.Kinds, func(i, j int) bool { return c.Kinds[i].Kind < c.Kinds[j].Kind }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
+
+// Multi-field tie-break over the same selector target. FIXED.
+func (c *catalog) sortByGroupKind() {
+	sort.Slice(c.Kinds, func(i, j int) bool { // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+		if c.Kinds[i].Group != c.Kinds[j].Group {
+			return c.Kinds[i].Group < c.Kinds[j].Group
+		}
+		return c.Kinds[i].Kind < c.Kinds[j].Kind
+	})
+}
+
+type inner struct{ items []kindInfo }
+
+type outer struct{ inner inner }
+
+// A deeper path s.inner.items. FIXED.
+func sortDeepPath(s *outer) {
+	sort.Slice(s.inner.items, func(i, j int) bool { return s.inner.items[i].Score < s.inner.items[j].Score }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
+
+func getKinds() []kindInfo { return nil }
+
+// Target is a CALL: each evaluation could have side effects or return a
+// different slice, so dropping the per-comparison re-evaluation is not
+// bit-identical. Advisory only.
+func sortCallTarget() {
+	sort.Slice(getKinds(), func(i, j int) bool { return getKinds()[i].Kind < getKinds()[j].Kind }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
+
+// Target is an INDEX expression m[k]: not a pure ident/selector path.
+// Advisory only.
+func sortIndexTarget(m map[string][]kindInfo, k string) {
+	sort.Slice(m[k], func(i, j int) bool { return m[k][i].Kind < m[k][j].Kind }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
+
+// The comparator indexes a DIFFERENT slice than the sorted one: the rewrite
+// would drop the b reference and change the order. Advisory only.
+func sortMismatch(a, b []kindInfo) {
+	sort.Slice(a, func(i, j int) bool { return b[i].Kind < b[j].Kind }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}
+
+// Same root object but a DIFFERENT field chain in the comparator (c.Other vs
+// the sorted c.Kinds). Advisory only.
+func (c *catalog) sortFieldMismatch() {
+	sort.Slice(c.Kinds, func(i, j int) bool { return c.Other[i].Kind < c.Other[j].Kind }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+}

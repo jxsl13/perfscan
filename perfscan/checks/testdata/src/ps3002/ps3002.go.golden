@@ -54,9 +54,11 @@ func sortShadowedCmp(xs []item) {
 
 type holder struct{ xs []item }
 
-// The sorted value is a selector, not a plain identifier. Advisory only.
+// The sorted value is a selector chain (h.xs) — a side-effect-free path,
+// evaluated once as the call argument in both spellings — so it is FIXED,
+// splicing the original path spelling back in.
 func sortField(h *holder) {
-	sort.Slice(h.xs, func(i, j int) bool { return h.xs[i].key < h.xs[j].key }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
+	slices.SortFunc(h.xs, func(a, b item) int { return cmp.Compare(a.key, b.key) }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
 }
 
 // Extra statement in the comparator body. Advisory only.
