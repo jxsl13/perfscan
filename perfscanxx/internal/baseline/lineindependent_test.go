@@ -23,7 +23,7 @@ func TestFilterIsLineIndependent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	kept, suppressed, err := Filter(path, []report.Finding{
+	kept, suppressed, _, err := Filter(path, []report.Finding{
 		fl("a.cpp", "PX1001", "copy", 99),        // same finding, shifted 10 -> 99: still suppressed
 		fl("a.cpp", "PX1002", "value param", 10), // a genuinely different finding: reported
 	})
