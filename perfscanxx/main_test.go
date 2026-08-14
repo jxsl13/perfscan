@@ -117,6 +117,45 @@ func TestListJSONIsValidAndComplete(t *testing.T) {
 	}
 }
 
+// TestExplainRendersForEveryCheck is the completeness backstop for the -explain
+// command: TestExplainBuildsCorrectUpstreamURLPerFamily only spot-checks one ID
+// per family, so a newly added check could break -explain (wrong/blank doc line,
+// non-zero exit, missing title) and slip through. This drives the REAL CLI path
+// (-explain <id> -> ByID -> printExplain -> DocURL) for EVERY catalog entry and
+// asserts: exit 0, the ID and Title are shown, and a doc line is present that is
+// EITHER the perfscanxx-defined note (custom checks) OR a family-specific upstream
+// URL (built-ins) — never the generic list-page fallback, which would mean DocURL
+// silently declined for a real check.
+func TestExplainRendersForEveryCheck(t *testing.T) {
+	for _, e := range catalog.All() {
+		out, _, code := runCLI("-explain", e.ID)
+		if code != 0 {
+			t.Errorf("-explain %s: exit = %d, want 0\n%s", e.ID, code, out)
+			continue
+		}
+		if !strings.Contains(out, e.ID) || !strings.Contains(out, e.Title) {
+			t.Errorf("-explain %s: output missing ID or Title:\n%s", e.ID, out)
+		}
+		if e.Custom {
+			if !strings.Contains(out, "perfscanxx-defined") {
+				t.Errorf("-explain %s (custom) must note it is perfscanxx-defined:\n%s", e.ID, out)
+			}
+			if strings.Contains(out, "clang.llvm.org") {
+				t.Errorf("-explain %s (custom) must not print an upstream URL:\n%s", e.ID, out)
+			}
+			continue
+		}
+		// Built-in: must point at its specific upstream page, not the generic
+		// fallback list (which signals DocURL declined for a real check).
+		if !strings.Contains(out, "clang.llvm.org/extra/clang-tidy/checks/") {
+			t.Errorf("-explain %s (built-in) must print an upstream doc URL:\n%s", e.ID, out)
+		}
+		if strings.Contains(out, "checks/list.html") {
+			t.Errorf("-explain %s (built-in) fell back to the generic check-list URL — DocURL declined for a real check:\n%s", e.ID, out)
+		}
+	}
+}
+
 func TestExplainBuildsCorrectUpstreamURLPerFamily(t *testing.T) {
 	cases := []struct{ id, want string }{
 		{"PX1001", "/checks/performance/for-range-copy.html"},
