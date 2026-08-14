@@ -790,6 +790,50 @@ func summarizeFindings(w io.Writer, findings []report.Finding) {
 		files[f.File] = true
 	}
 	fmt.Fprintf(w, "perfscanxx: %d finding(s) across %d file(s)\n", len(findings), len(files))
+	// Per-check tally: an aggregate view over the per-finding lines above — how
+	// many of each check, whether -fix would address it (fixable vs advisory), and
+	// a ⚠ on a caveated fix. Aids triage on a large result set.
+	for _, s := range checkSummary(findings) {
+		kind := "advisory"
+		if s.fixable {
+			kind = "fixable"
+		}
+		line := fmt.Sprintf("  %s %s: %d (%s)", s.id, s.tidyName, s.count, kind)
+		if s.caveat {
+			line += " ⚠"
+		}
+		fmt.Fprintln(w, line)
+	}
+}
+
+// checkStat is one row of the report-mode per-check tally.
+type checkStat struct {
+	id, tidyName    string
+	count           int
+	fixable, caveat bool
+}
+
+// checkSummary tallies findings by check id (ascending), annotating each with
+// whether it is auto-fixable and whether its fix carries a caveat.
+func checkSummary(findings []report.Finding) []checkStat {
+	idx := map[string]int{}
+	var out []checkStat
+	for _, f := range findings {
+		i, ok := idx[f.ID]
+		if !ok {
+			var fixable, caveat bool
+			if e, ok := catalog.ByID(f.ID); ok {
+				fixable = e.HasFix
+				caveat = e.Caveat != ""
+			}
+			i = len(out)
+			idx[f.ID] = i
+			out = append(out, checkStat{id: f.ID, tidyName: f.TidyName, fixable: fixable, caveat: caveat})
+		}
+		out[i].count++
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].id < out[b].id })
+	return out
 }
 
 // fixTargets counts the reported findings that carry at least one clang-tidy

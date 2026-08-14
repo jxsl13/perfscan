@@ -1349,3 +1349,70 @@ func TestFixBreakdownByCheck(t *testing.T) {
 		t.Errorf("non-caveated PX3008 line wrongly carries a caveat marker:\n%s", errOut)
 	}
 }
+
+// TestReportSummaryByCheck pins the report-mode per-check tally printed after the
+// finding lines: each check id (ascending) with its count and whether it is
+// fixable vs advisory, plus a ⚠ on a caveated fix. Complements the -fix breakdown
+// (TestFixBreakdownByCheck) for the default reporting path.
+func TestReportSummaryByCheck(t *testing.T) {
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "t.cpp")
+	if err := os.WriteFile(cpp, []byte("int x;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"clang++ -std=c++17 -c t.cpp"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+	// PX3008 x2 (fixable), PX3007 x1 (fixable+caveat), PX3021 x1 (advisory, no fix-it).
+	diag := func(name string, off int, withFix bool) string {
+		s := "  - DiagnosticName: " + name + "\n    DiagnosticMessage:\n      Message: 'm'\n      FilePath: '" +
+			cpp + "'\n      FileOffset: " + itoa(off) + "\n"
+		if withFix {
+			s += "      Replacements:\n        - FilePath: '" + cpp + "'\n          Offset: " +
+				itoa(off) + "\n          Length: 1\n          ReplacementText: 'x'\n"
+		} else {
+			s += "      Replacements: []\n"
+		}
+		return s
+	}
+	export := "MainSourceFile: '" + cpp + "'\nDiagnostics:\n" +
+		diag("readability-container-size-empty", 0, true) +
+		diag("readability-container-size-empty", 2, true) +
+		diag("modernize-pass-by-value", 4, true) +
+		diag("performance-no-int-to-ptr", 6, false)
+	tidy.Executor = func(_ context.Context, argv []string, stdout, stderr *bytes.Buffer) (int, error) {
+		if len(argv) >= 2 && argv[1] == "--version" {
+			stdout.WriteString("LLVM version 22.0.0\n")
+			return 0, nil
+		}
+		for _, a := range argv {
+			if strings.HasPrefix(a, "--export-fixes=") {
+				_ = os.WriteFile(strings.TrimPrefix(a, "--export-fixes="), []byte(export), 0o644)
+			}
+		}
+		return 0, nil
+	}
+
+	_, errOut, code := runCLI("-checks", "PX3008,PX3007,PX3021", "-p", dir, cpp)
+	if code != 1 {
+		t.Fatalf("exit=%d, want 1 (findings reported); stderr:\n%s", code, errOut)
+	}
+	for _, want := range []string{
+		"PX3007 modernize-pass-by-value: 1 (fixable) ⚠",
+		"PX3008 readability-container-size-empty: 2 (fixable)",
+		"PX3021 performance-no-int-to-ptr: 1 (advisory)",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("report summary missing %q:\n%s", want, errOut)
+		}
+	}
+	// The advisory line must NOT be tagged fixable, and PX3008 (no caveat) no ⚠.
+	if strings.Contains(errOut, "performance-no-int-to-ptr: 1 (fixable)") {
+		t.Errorf("advisory PX3021 wrongly tagged fixable:\n%s", errOut)
+	}
+}
