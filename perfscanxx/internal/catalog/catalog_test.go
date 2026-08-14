@@ -407,12 +407,42 @@ func TestCaveatsAreWellFormed(t *testing.T) {
 //     exclude). A pure-readability check with a NaN footgun does not meet the
 //     perf-catalog bar. If ever added, it MUST carry a Caveat.
 //
+// FAMILIES AUDIT (bugprone-*/cppcoreguidelines-*/misc-*): a full diff of these
+// families against the catalog found NO new bit-identical perf fix. They are
+// overwhelmingly correctness/style checks; the only perf-adjacent ones are either
+// ALIASES of already-catalogued performance-* checks or behavior-CHANGING fixes,
+// neither of which perfscanxx should add. Representative guards below so none is
+// mistaken for a fresh perf check:
+//   - cppcoreguidelines-noexcept-{move-operations,destructor,swap}: aliases of the
+//     performance-noexcept-* checks already catalogued as PX3004/PX3006/PX3027.
+//     Adding them would DUPLICATE those (same diagnostic, different name).
+//   - bugprone-inaccurate-erase: the erase-remove idiom missing its `, v.end()`.
+//     Its fix-it ADDS the end iterator — a behavior CHANGE (erase one element ->
+//     erase the range) that fixes a bug; not a behavior-preserving perf rewrite.
+//   - misc-const-correctness: adds `const` to locals — no codegen/perf effect, and
+//     it fires on nearly every local (noise). A style check, not perf.
+//   - misc-uniqueptr-reset-release: `p.reset(q.release())` -> `p = std::move(q)`.
+//     Equivalent work either way — readability, not a perf win.
+//   - bugprone-unused-local-non-trivial-variable: a real smell, but no SAFE fix (a
+//     "never used" RAII guard — lock_guard/scope_guard — is doing its job via its
+//     ctor/dtor, so removal is unsafe) and high false-positive rate. Advisory-noisy.
+//
 // Removing an entry here is a deliberate decision, not a mechanical bump: read
 // the rationale first.
 func TestAuditedExclusionsStayExcluded(t *testing.T) {
 	excluded := []string{
 		"modernize-min-max-use-initializer-list",
 		"performance-type-promotion-in-math-fn",
+		// bugprone-*/cppcoreguidelines-*/misc-* families audit (see comment above):
+		// aliases of catalogued performance-* checks, behavior-changing fixes, or
+		// non-perf style checks — none is a new bit-identical perf fix.
+		"cppcoreguidelines-noexcept-move-operations",
+		"cppcoreguidelines-noexcept-destructor",
+		"cppcoreguidelines-noexcept-swap",
+		"bugprone-inaccurate-erase",
+		"misc-const-correctness",
+		"misc-uniqueptr-reset-release",
+		"bugprone-unused-local-non-trivial-variable",
 	}
 	for _, name := range excluded {
 		if _, ok := ByTidyName(name); ok {
