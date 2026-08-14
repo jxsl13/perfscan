@@ -40,10 +40,15 @@ plain (unnamed) strings — those emit the argument verbatim, so the
 concatenation is bit-identical — and/or %d verbs over plain (unnamed)
 integers, rendered as strconv.Itoa(x) for int,
 strconv.FormatInt(int64(x), 10) for the other signed widths, and
-strconv.FormatUint(uint64(x), 10) for the unsigned kinds. Unlike %v,
-%d never consults fmt.Stringer or fmt.Formatter — it always prints the
-plain decimal — so the strconv form is bit-identical. A %d rewrite adds
-the strconv import when missing (honoring an existing strconv alias).
+strconv.FormatUint(uint64(x), 10) for the unsigned kinds. %d does not
+consult fmt.Stringer (a Stringer integer still prints plain decimal under
+%d), but it DOES honor a named type's fmt.Formatter — a Format method
+controls the output of every verb, %d included. The unnamed-predeclared-
+integer restriction is therefore load-bearing for bit-identity, not
+cosmetic: an unnamed type cannot carry a Format method, so its %d output is
+guaranteed plain decimal, equal to the strconv form. A named integer stays
+advisory. A %d rewrite adds the strconv import when missing (honoring an
+existing strconv alias).
 Other argument types (%d over a non-integer, %s over a named string),
 raw-string formats, a shadowed strconv name, and cgo files that would
 need an import edit stay advisory.`,
@@ -138,12 +143,13 @@ func runPS2103(pass *analysis.Pass) (any, error) {
 //     type would change the type of the resulting expression;
 //   - every %d argument is of an unnamed predeclared integer type,
 //     rendered through the shared strconvDecimalRepl (strconv.Itoa /
-//     FormatInt(int64(x), 10) / FormatUint(uint64(x), 10)). Unlike %v,
-//     %d never consults fmt.Stringer or fmt.Formatter — it always prints
-//     the plain decimal, so the strconv form is bit-identical for any
-//     integer; the unnamed-basic restriction just keeps the emitted
-//     expression compiling as-is (strconv.Itoa's parameter is exactly
-//     int) and mirrors PS2107/PS2137.
+//     FormatInt(int64(x), 10) / FormatUint(uint64(x), 10)). %d does not
+//     consult fmt.Stringer, but it DOES honor a named type's fmt.Formatter
+//     (a Format method controls every verb, %d included) — so the
+//     unnamed-predeclared restriction is LOAD-BEARING for bit-identity, not
+//     cosmetic: an unnamed integer cannot carry a Format method, so its %d
+//     output is guaranteed plain decimal == the strconv form. (It also keeps
+//     strconv.Itoa's exactly-int parameter compiling.) Mirrors PS2107/PS2137.
 //
 // A %d rewrite needs the strconv import: ps2107PkgUsable resolves how to
 // reference it (reusing an existing import's name, e.g. an alias), and the

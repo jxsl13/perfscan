@@ -2176,8 +2176,10 @@ func TestEquiv_PS2103SprintfSpliceToConcat(t *testing.T) {
 }
 
 // TestEquiv_PS2103SprintfDecimalToStrconv pins the %d arm of PS2103's
-// concatenation rewrite: %d NEVER consults fmt.Stringer or fmt.Formatter —
-// it always prints the operand's plain decimal — so splicing the
+// concatenation rewrite: %d does not consult fmt.Stringer, but it DOES honor
+// a named type's fmt.Formatter (see TestPS2103DFormatterDiverges) — so the arm
+// is restricted to UNNAMED predeclared integers, which cannot carry a Format
+// method and therefore print plain decimal. For those, splicing the
 // strconvDecimalRepl form (Itoa / FormatInt(int64(x), 10) /
 // FormatUint(uint64(x), 10)) into the concatenation is byte-identical.
 // Mirrors the fixed golden shapes ("%s:%d" mixed, "item-%d", the int64 and
@@ -2224,6 +2226,36 @@ func TestEquiv_PS2103SprintfDecimalToStrconv(t *testing.T) {
 		if got, want := fmt.Sprintf("u=%d", u), "u="+strconv.FormatUint(uint64(u), 10); got != want {
 			t.Errorf("u=%%d (uint64 %d): sprintf=%q concat=%q", u, got, want)
 		}
+	}
+}
+
+type ps2103FmtInt int
+
+func (f ps2103FmtInt) Format(s fmt.State, verb rune) { fmt.Fprintf(s, "F<%d>", int(f)) }
+
+type ps2103StrInt int
+
+func (s ps2103StrInt) String() string { return "STR" }
+
+// TestPS2103DFormatterDiverges is the load-bearing reason PS2103's %d arm (and
+// PS2107's / PS2137's) is restricted to UNNAMED predeclared integers. %d does
+// NOT consult fmt.Stringer — a named Stringer integer still prints plain decimal
+// under %d, so it would be safe — but %d DOES honor fmt.Formatter: a named
+// integer with a Format method controls its own %d output. Rewriting such a
+// value to strconv.Itoa would silently change the string. Pinning the divergence
+// keeps a future maintainer from "simplifying" the checks to accept named
+// integers, and documents WHY the unnamed guard is not cosmetic.
+func TestPS2103DFormatterDiverges(t *testing.T) {
+	var f ps2103FmtInt = 42
+	if got, direct := fmt.Sprintf("%d", f), strconv.Itoa(int(f)); got == direct {
+		t.Errorf("expected a named fmt.Formatter int to DIVERGE under %%d: Sprintf=%q strconv=%q — the unnamed-integer guard would be unnecessary if these matched", got, direct)
+	}
+	// Contrast: a named Stringer (no Format method) prints plain decimal under
+	// %d, confirming %d does not consult Stringer. It is still excluded by the
+	// unnamed restriction, but for the compiling-expression reason, not safety.
+	var s ps2103StrInt = 7
+	if got := fmt.Sprintf("%d", s); got != strconv.Itoa(int(s)) {
+		t.Errorf("a named Stringer int should print plain decimal under %%d (%%d ignores Stringer), got %q", got)
 	}
 }
 
