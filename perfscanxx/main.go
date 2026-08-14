@@ -108,6 +108,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "perfscanxx", version)
 		return 0
 	}
+	// Stamp the build version into the SARIF tool.driver.version so GitHub Code
+	// Scanning can track results across perfscanxx versions.
+	report.ToolVersion = version
 	if *list {
 		if *jsonOut {
 			if err := printListJSON(stdout, *fixable); err != nil {

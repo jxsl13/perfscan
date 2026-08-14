@@ -17,6 +17,12 @@ import (
 	"github.com/jxsl13/perfscan/perfscanxx/internal/fixes"
 )
 
+// ToolVersion is stamped into the SARIF tool.driver.version so GitHub Code
+// Scanning can track and dedup results across perfscanxx versions. main sets it
+// from its ldflags-injected version; it defaults to "dev" for tests and
+// go-run builds.
+var ToolVersion = "dev"
+
 // Finding is one reportable diagnostic, enriched with catalog metadata.
 type Finding struct {
 	// ID is the PX catalog id, or the raw clang-tidy name for
@@ -339,7 +345,7 @@ func SARIF(w io.Writer, findings []Finding) error {
 		Schema:  "https://json.schemastore.org/sarif-2.1.0.json",
 		Version: "2.1.0",
 		Runs: []sarifRun{{
-			Tool:    sarifTool{Driver: sarifDriver{Name: "perfscanxx", InformationURI: "https://github.com/jxsl13/perfscan/perfscanxx", Rules: rules}},
+			Tool:    sarifTool{Driver: sarifDriver{Name: "perfscanxx", InformationURI: "https://github.com/jxsl13/perfscan/perfscanxx", Version: ToolVersion, Rules: rules}},
 			Results: results,
 		}},
 	})
