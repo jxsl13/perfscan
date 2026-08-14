@@ -750,6 +750,34 @@ var entries = []Entry{
 			`cxxConstructExpr(argumentCountIs(1), hasArgument(0, ignoringImplicit(cxxMemberCallExpr(callee(cxxMethodDecl(hasAnyName("begin", "cbegin")))))))))).bind("ins")`,
 		Message: "inserting at the front of a std::vector/std::string shifts every existing element up one slot (O(n) per insert, O(n^2) to prepend a sequence); prepend with std::deque/std::list, or build with push_back and one std::reverse (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2116", TidyName: "custom-unordered-reserve",
+		Level: LevelStructured, Category: "allocation",
+		Title:  "an unordered_map/unordered_set grown in a loop rehashes as it crosses load-factor thresholds; reserve() the expected size before the loop",
+		HasFix: false,
+		Custom: true,
+		Bind:   "grow",
+		// The hash-container sibling of PX2101 (vector reserve). insert/emplace/
+		// try_emplace/insert_or_assign into a std::unordered_{map,set,multimap,
+		// multiset} inside a loop rehashes — reallocating the bucket array and
+		// re-inserting every element — each time the size crosses a load-factor
+		// threshold, O(n) amortized allocations across the loop. m.reserve(n)
+		// (or bucket-count construction) sizes the table once. clang-tidy's
+		// performance-inefficient-vector-operation covers ONLY vector push_back,
+		// never the unordered containers, so this is uncovered. Ordered std::map/
+		// std::set are excluded: they are node-based, have no rehash and no
+		// reserve(). operator[] is deliberately NOT matched (it is ambiguous —
+		// a read of an existing key vs an inserting write — and would flag
+		// read-only lookup loops); only the unambiguous growth calls are.
+		// Like PX2101, an AST matcher cannot see a reserve() in a preceding
+		// sibling statement, so the message flags the PATTERN (a "confirm you
+		// reserved" nudge). isExpansionInMainFile keeps it off headers.
+		Query: `match cxxMemberCallExpr(isExpansionInMainFile(), ` +
+			`callee(cxxMethodDecl(hasAnyName("insert", "emplace", "try_emplace", "insert_or_assign", "emplace_hint"))), ` +
+			`on(hasType(hasCanonicalType(hasDeclaration(cxxRecordDecl(hasAnyName("::std::unordered_map", "::std::unordered_set", "::std::unordered_multimap", "::std::unordered_multiset")))))), ` +
+			`hasAncestor(stmt(anyOf(forStmt(), cxxForRangeStmt(), whileStmt(), doStmt())))).bind("grow")`,
+		Message: "unordered_map/unordered_set grown via insert/emplace inside a loop rehashes (reallocates the bucket array and re-inserts every element) as it crosses load-factor thresholds; if the final size is known, reserve() it before the loop — the query flags the pattern and cannot see whether a reserve is already present (query-based, no auto-fix)",
+	},
 }
 
 // Deliberately NOT in the catalog (do not re-add on a future audit):
