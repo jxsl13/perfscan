@@ -14,7 +14,10 @@
 // exactly the reported checks' fix-its.
 package catalog
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // Level classifies the maintainability cost of a check's remedy.
 type Level int
@@ -656,6 +659,11 @@ var entries = []Entry{
 func All() []Entry {
 	out := make([]Entry, len(entries))
 	copy(out, entries)
+	// Return in ascending PX-id order so -list/-json/-sarif and every selector
+	// render checks predictably. The source literal groups related checks, which
+	// leaves some ids out of numeric order (e.g. PX2002 after PX2005). Every id
+	// is "PX"+4 digits, so a lexicographic compare is a numeric compare.
+	slices.SortFunc(out, func(a, b Entry) int { return strings.Compare(a.ID, b.ID) })
 	return out
 }
 
