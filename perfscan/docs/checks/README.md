@@ -77,7 +77,7 @@ checks' fixes.
 | [PS3082](PS3082.md) | indirect | L2 | yes | math.Min or math.Max called inside a loop |
 | [PS3083](PS3083.md) | indirect | L3 |  | an integer-keyed map allocated per outer iteration and probed in a nested loop |
 | [PS3101](PS3101.md) | indirect | L1 | yes | a loop-invariant string↔[]byte conversion inside a loop |
-| [PS3102](PS3102.md) | indirect | L1 | yes | deleting every key in a range loop is O(n) with rehashing; clear(m) is the direct idiom |
+| [PS3102](PS3102.md) | indirect | L1 | yes | a map emptied with a range-delete loop where clear(m) is the direct idiom |
 | [PS3103](PS3103.md) | indirect | L2 |  | ranging by value over large elements copies each one |
 | [PS3104](PS3104.md) | indirect | L1 | yes | sort.Ints/sort.Strings are the legacy spelling of slices.Sort; call the generic sort directly |
 | [PS3105](PS3105.md) | indirect | L1 | yes | sort.Sort/sort.Stable over a sort.IntSlice/StringSlice adapter is slices.Sort spelled the long way; call the generic sort directly |
