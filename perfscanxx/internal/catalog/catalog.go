@@ -567,6 +567,35 @@ var entries = []Entry{
 			`allOf(hasOperatorName(">="), hasEitherOperand(ignoringImpCasts(integerLiteral(equals(1))))))).bind("cnt")`,
 		Message: "std::count scans the entire range to answer an existence question; std::find(first, last, v) != last stops at the first match (or, C++20, std::ranges::any_of / C++23 std::ranges::contains) — and for a sorted range std::binary_search is O(log n) (query-based, no auto-fix)",
 	},
+	{
+		ID: "PX2111", TidyName: "custom-map-double-lookup",
+		Level: LevelStructured, Category: "containers",
+		Title:  "an associative container is looked up twice — m.count(k) then m[k] on the same key; find() returns an iterator you can test and reuse",
+		HasFix: false,
+		Custom: true,
+		Bind:   "dl",
+		// The classic double lookup: `if (m.count(k)) { ... m[k] ... }` hashes/compares
+		// the key TWICE — once for count(), again for operator[] — where a single
+		// find() answers both: `auto it = m.find(k); if (it != m.end()) use(it->second);`.
+		// PRECISION: the map object and the key must be the SAME declared variable in
+		// both the condition and the body — equalsBoundNode on the map's varDecl and on
+		// the key's valueDecl — so `if (m.count(a)) use(m[b])` (different keys) is NOT
+		// flagged. The condition's count() is a MEMBER call on the object (on(...)), so
+		// the free std::count algorithm (PX2110) can never match here. The body access
+		// is operator[] on the same map and key. ignoringParenImpCasts sees through the
+		// const-ref binding of the key argument. isExpansionInMainFile keeps it off
+		// library headers. clang-tidy ships no equivalent. NO auto-fix: the rewrite
+		// restructures the if around a find() iterator — a human call (and for a
+		// count()>0-then-write it may be a try_emplace/insert-or-assign instead).
+		Query: `match ifStmt(isExpansionInMainFile(), ` +
+			`hasCondition(forEachDescendant(cxxMemberCallExpr(on(declRefExpr(to(varDecl().bind("m")))), ` +
+			`callee(cxxMethodDecl(hasName("count"))), ` +
+			`hasArgument(0, ignoringParenImpCasts(declRefExpr(to(valueDecl().bind("key")))))))), ` +
+			`hasThen(forEachDescendant(cxxOperatorCallExpr(hasOverloadedOperatorName("[]"), ` +
+			`hasArgument(0, declRefExpr(to(varDecl(equalsBoundNode("m"))))), ` +
+			`hasArgument(1, ignoringParenImpCasts(declRefExpr(to(valueDecl(equalsBoundNode("key")))))))))).bind("dl")`,
+		Message: "the key is looked up twice on this map — m.count(k) in the condition and m[k] in the body hash/compare the same key again; hold the iterator instead: auto it = m.find(k); if (it != m.end()) use(it->second); (query-based, no auto-fix)",
+	},
 }
 
 // Deliberately NOT in the catalog (do not re-add on a future audit):
