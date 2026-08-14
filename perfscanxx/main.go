@@ -618,8 +618,11 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		}
 		// Stale entries (baselined findings that no longer occur) still hold
 		// suppression credit, so they would MASK the same finding if it were
-		// reintroduced. Nudge the user to regenerate and tighten the ratchet.
-		if stale > 0 {
+		// reintroduced. Nudge the user to regenerate and tighten the ratchet — but
+		// ONLY on a full scan: with -changed the run deliberately analyzes a subset,
+		// so every baseline entry for an unscanned TU is trivially "unmatched" and
+		// the count would be a false alarm. A partial scan cannot judge staleness.
+		if stale > 0 && *changed == "" {
 			word := "entries"
 			if stale == 1 {
 				word = "entry"
