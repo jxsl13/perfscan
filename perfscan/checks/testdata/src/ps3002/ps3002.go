@@ -245,8 +245,8 @@ func sortStableDescending(xs []item) {
 	sort.SliceStable(xs, func(i, j int) bool { return xs[i].key > xs[j].key }) // want `sort\.SliceStable swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
 }
 
-// Whole-element DESCENDING stays advisory: slices.Sort is ascending only and
-// there is no comparator whose operands could be swapped.
+// Whole-element DESCENDING is fixed via slices.SortFunc with the operands
+// swapped: cmp.Compare(b, a) < 0 iff a > b, the comparator's exact result.
 func sortIntsWholeDescending(xs []int) {
 	sort.Slice(xs, func(i, j int) bool { return xs[i] > xs[j] }) // want `sort\.Slice swaps through reflection and calls its comparator indirectly; slices\.SortFunc sorts the concrete type directly`
 }

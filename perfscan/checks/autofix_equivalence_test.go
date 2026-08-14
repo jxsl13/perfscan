@@ -507,6 +507,60 @@ func TestEquiv_SortSliceTwoReturnPair(t *testing.T) {
 	}
 }
 
+// PS3002: the DESCENDING WHOLE-ELEMENT form — sort.Slice(xs, func(i,j) bool {
+// return xs[i] > xs[j] }) → slices.SortFunc(xs, func(a, b T) int { return
+// cmp.Compare(b, a) }). cmp.Compare(b, a) < 0 ⟺ b < a ⟺ a > b, the
+// identical descending predicate; both run the same unstable pdqsort, and
+// equal basic elements are bitwise-identical, so the descending arrangement
+// of the multiset is unique — the permutation must be byte-for-byte the same.
+// The SliceStable spelling collapses to the SAME unstable SortFunc (stability
+// unobservable over basic elements). Pinned over shuffled tie-heavy []int and
+// []string inputs (small value domain guarantees ties).
+func TestEquiv_PS3002DescWholeElem(t *testing.T) {
+	r := rand.New(rand.NewSource(11))
+	for trial := 0; trial < 3000; trial++ {
+		n := r.Intn(40)
+		base := make([]int, n)
+		for i := range base {
+			base[i] = r.Intn(5) // small domain -> many ties
+		}
+		a := slices.Clone(base)
+		b := slices.Clone(base)
+		sort.Slice(a, func(i, j int) bool { return a[i] > a[j] })
+		slices.SortFunc(b, func(x, y int) int { return cmp.Compare(y, x) })
+		if !slices.Equal(a, b) {
+			t.Fatalf("desc whole-element: sort.Slice != slices.SortFunc on %v: %v vs %v", base, a, b)
+		}
+		// SliceStable collapses to the SAME unstable SortFunc: for []int the
+		// descending arrangement is unique, stability is unobservable.
+		c := slices.Clone(base)
+		sort.SliceStable(c, func(i, j int) bool { return c[i] > c[j] })
+		if !slices.Equal(a, c) {
+			t.Fatalf("desc whole-element: sort.SliceStable diverged on %v: %v vs %v", base, a, c)
+		}
+	}
+	pool := []string{"", "a", "aa", "ab", "b", "ba", "bb", "abc"} // duplicates guaranteed
+	for trial := 0; trial < 3000; trial++ {
+		n := r.Intn(40)
+		base := make([]string, n)
+		for i := range base {
+			base[i] = pool[r.Intn(len(pool))]
+		}
+		a := slices.Clone(base)
+		b := slices.Clone(base)
+		sort.Slice(a, func(i, j int) bool { return a[i] > a[j] })
+		slices.SortFunc(b, func(x, y string) int { return cmp.Compare(y, x) })
+		if !slices.Equal(a, b) {
+			t.Fatalf("desc whole-element strings: sort.Slice != slices.SortFunc on %v: %v vs %v", base, a, b)
+		}
+		c := slices.Clone(base)
+		sort.SliceStable(c, func(i, j int) bool { return c[i] > c[j] })
+		if !slices.Equal(a, c) {
+			t.Fatalf("desc whole-element strings: sort.SliceStable diverged on %v: %v vs %v", base, a, c)
+		}
+	}
+}
+
 // PS2116 / PS3102: a zeroing loop -> clear(s); a delete loop -> clear(m).
 func TestEquiv_Clear(t *testing.T) {
 	r := rand.New(rand.NewSource(3))
