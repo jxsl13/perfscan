@@ -357,6 +357,68 @@ func TestSARIFEmptyFindingsIsValid(t *testing.T) {
 	}
 }
 
+// TestSARIFOmitsRegionForUnreadableOffset pins that a finding whose byte offset
+// could not be resolved to a line (Line == 0, e.g. the file is unreadable) emits
+// a SARIF location with NO region at all — never a region with startLine 0.
+// GitHub Code Scanning rejects a startLine below 1 and can fail the whole upload,
+// so the omitempty + nil-region path is a hard contract. TestJSONAndSARIF only
+// covers readable findings (it asserts startLine >= 1), so the no-region branch
+// was untested.
+func TestSARIFOmitsRegionForUnreadableOffset(t *testing.T) {
+	origRead := ReadFile
+	defer func() { ReadFile = origRead }()
+	ReadFile = func(string) ([]byte, error) { return nil, os.ErrNotExist } // lineCol -> 0
+
+	ef := &fixes.ExportFile{
+		MainSourceFile: "/src/a.cpp",
+		Diagnostics: []fixes.Diagnostic{{
+			DiagnosticName: "performance-for-range-copy",
+			DiagnosticMessage: fixes.DiagnosticMessage{
+				Message: "m", FilePath: "/src/a.cpp", FileOffset: 100,
+			},
+		}},
+	}
+	findings := FromExport(ef, catalog.LevelAggressive)
+	if len(findings) != 1 || findings[0].Line != 0 {
+		t.Fatalf("want 1 finding with Line 0 (unreadable offset), got %+v", findings)
+	}
+
+	var buf bytes.Buffer
+	if err := SARIF(&buf, findings); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Runs []struct {
+			Results []struct {
+				Locations []struct {
+					PhysicalLocation struct {
+						ArtifactLocation struct {
+							URI string `json:"uri"`
+						} `json:"artifactLocation"`
+						Region *struct {
+							StartLine int `json:"startLine"`
+						} `json:"region"`
+					} `json:"physicalLocation"`
+				} `json:"locations"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("SARIF is not valid JSON: %v\n%s", err, buf.Bytes())
+	}
+	if len(doc.Runs) != 1 || len(doc.Runs[0].Results) != 1 {
+		t.Fatalf("want 1 run with 1 result, got %+v", doc.Runs)
+	}
+	loc := doc.Runs[0].Results[0].Locations[0].PhysicalLocation
+	if loc.ArtifactLocation.URI == "" {
+		t.Error("location must still carry the file URI even without a region")
+	}
+	if loc.Region != nil {
+		t.Errorf("unreadable-offset finding must emit NO region, got startLine=%d — a startLine below 1 breaks GitHub ingestion:\n%s",
+			loc.Region.StartLine, buf.Bytes())
+	}
+}
+
 func TestJSONAndSARIF(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("SARIF/JSON fixtures use POSIX absolute paths; path handling is filepath-based, covered on unix")
