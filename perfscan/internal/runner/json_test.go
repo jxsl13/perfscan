@@ -4,12 +4,72 @@ import (
 	"bytes"
 	"encoding/json"
 	"go/token"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/analysis"
 
+	"github.com/jxsl13/perfscan/perfscan/checks"
 	"github.com/jxsl13/perfscan/perfscan/lint"
 )
+
+// TestFixJSONAppliesAndEmitsJSON pins the -fix + -json COMBINATION through Run():
+// -fix applies its fixes and then falls through to the output switch (only -diff
+// short-circuits), so -fix -json must both rewrite the file on disk AND print
+// valid findings JSON. The -fix tests only inspect the file and emitJSON is unit
+// tested in isolation — neither exercises the two together.
+func TestFixJSONAppliesAndEmitsJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(corpusGoMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A version-gate-free fixable finding: fmt.Sprintf("%d", n) -> strconv.Itoa(n).
+	const src = "package main\n\nimport \"fmt\"\n\nfunc F(n int) string { return fmt.Sprintf(\"%d\", n) }\n"
+	mainGo := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(mainGo, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(wd) }()
+
+	var out, errBuf bytes.Buffer
+	Run(checks.All(), Options{
+		Patterns: []string{"./..."},
+		MaxLevel: lint.LevelAggressive,
+		Fix:      true,
+		JSON:     true,
+		Stdout:   &out,
+		Stderr:   &errBuf,
+	})
+
+	// (a) the fix was applied on disk.
+	got, err := os.ReadFile(mainGo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "strconv.Itoa(n)") {
+		t.Errorf("-fix should have rewritten the fmt.Sprintf to strconv.Itoa(n):\n%s\nstderr: %s", got, errBuf.String())
+	}
+
+	// (b) stdout is valid findings JSON listing PS2107 — -fix must not suppress it.
+	var findings []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &findings); err != nil {
+		t.Fatalf("-fix -json stdout is not valid JSON: %v\n%s", err, out.String())
+	}
+	if len(findings) != 1 || findings[0].ID != "PS2107" {
+		t.Errorf("-fix -json must emit the PS2107 finding as JSON, got:\n%s", out.String())
+	}
+}
 
 // TestJSONOutputStructure covers emitJSON (the -json output consumed by tooling
 // and editors): parse the array and assert each finding's fields — id, category,
