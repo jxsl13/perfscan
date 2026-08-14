@@ -1281,3 +1281,71 @@ func TestRunContextRespectsCancellation(t *testing.T) {
 		t.Error("the cancelled context never reached the clang-tidy invocation — child processes would be orphaned on Ctrl-C")
 	}
 }
+
+// TestFixBreakdownByCheck pins the per-check breakdown a plain -fix prints after
+// its summary: the applied fix-its grouped by check id (ascending) with counts,
+// and a caveat marker on a caveated check (PX3007) so a reviewer knows a
+// behavior-affecting fix landed. The in-place edits are otherwise invisible.
+func TestFixBreakdownByCheck(t *testing.T) {
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "t.cpp")
+	if err := os.WriteFile(cpp, []byte("int x;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"clang++ -std=c++17 -c t.cpp"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origLook, origExec := tidy.LookPath, tidy.Executor
+	defer func() { tidy.LookPath, tidy.Executor = origLook, origExec }()
+	tidy.LookPath = func(string) (string, error) { return "/usr/bin/clang-tidy", nil }
+	// Emit a synthetic export: two PX3008 fixes + one caveated PX3007 fix.
+	rep := func(off int) string {
+		return "      Replacements:\n        - FilePath: '" + cpp + "'\n          Offset: " +
+			itoa(off) + "\n          Length: 1\n          ReplacementText: 'x'\n"
+	}
+	diag := func(name string, off int) string {
+		return "  - DiagnosticName: " + name + "\n    DiagnosticMessage:\n      Message: 'm'\n      FilePath: '" +
+			cpp + "'\n      FileOffset: " + itoa(off) + "\n" + rep(off)
+	}
+	export := "MainSourceFile: '" + cpp + "'\nDiagnostics:\n" +
+		diag("readability-container-size-empty", 0) +
+		diag("readability-container-size-empty", 2) +
+		diag("modernize-pass-by-value", 4)
+	tidy.Executor = func(_ context.Context, argv []string, stdout, stderr *bytes.Buffer) (int, error) {
+		if len(argv) >= 2 && argv[1] == "--version" {
+			stdout.WriteString("LLVM version 22.0.0\n")
+			return 0, nil
+		}
+		for _, a := range argv {
+			if strings.HasPrefix(a, "--export-fixes=") {
+				_ = os.WriteFile(strings.TrimPrefix(a, "--export-fixes="), []byte(export), 0o644)
+			}
+		}
+		return 0, nil
+	}
+
+	_, errOut, _ := runCLI("-checks", "PX3008,PX3007", "-fix", "-p", dir, cpp)
+	// The breakdown lines, ascending by id, with counts.
+	if !strings.Contains(errOut, "PX3007 modernize-pass-by-value: 1") {
+		t.Errorf("missing PX3007 breakdown line:\n%s", errOut)
+	}
+	if !strings.Contains(errOut, "PX3008 readability-container-size-empty: 2") {
+		t.Errorf("missing PX3008 breakdown line with count 2:\n%s", errOut)
+	}
+	// PX3007 is caveated -> the marker must appear on its line.
+	i3007 := strings.Index(errOut, "PX3007 modernize-pass-by-value: 1")
+	tail := errOut[i3007:]
+	if nl := strings.IndexByte(tail, '\n'); nl >= 0 {
+		if !strings.Contains(tail[:nl], "⚠ caveat") {
+			t.Errorf("caveated PX3007 line lacks the ⚠ caveat marker:\n%s", errOut)
+		}
+	}
+	// PX3008 is NOT caveated -> its line must not carry the marker.
+	i3008 := strings.Index(errOut, "PX3008 readability-container-size-empty: 2")
+	tail8 := errOut[i3008:]
+	if nl := strings.IndexByte(tail8, '\n'); nl >= 0 && strings.Contains(tail8[:nl], "caveat") {
+		t.Errorf("non-caveated PX3008 line wrongly carries a caveat marker:\n%s", errOut)
+	}
+}

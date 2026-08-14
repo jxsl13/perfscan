@@ -482,6 +482,15 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		default:
 			fmt.Fprintf(stderr, "perfscanxx: -fix: applied fix-its for %d finding(s) across %d file(s)\n", n, files)
 		}
+		// Per-check breakdown: the in-place edits are otherwise invisible, so show
+		// WHICH checks were applied (and flag any caveated one to double-check).
+		for _, c := range fixBreakdown(findings) {
+			line := fmt.Sprintf("  %s %s: %d", c.id, c.tidyName, c.count)
+			if c.caveat {
+				line += "  ⚠ caveat — see -explain " + c.id
+			}
+			fmt.Fprintln(stderr, line)
+		}
 		// L1 checks are idiomatic/behavior-preserving; L2 (structured) and L3
 		// (aggressive) fixes CAN change behavior and are meant to be reviewed —
 		// a plain -fix defaults to -level 3. Remind the user once when any
@@ -794,6 +803,39 @@ func fixTargets(findings []report.Finding) (n, files int) {
 		}
 	}
 	return n, len(seen)
+}
+
+// checkCount is one row of the per-check -fix breakdown.
+type checkCount struct {
+	id, tidyName string
+	count        int
+	caveat       bool
+}
+
+// fixBreakdown tallies the fixable findings by check id (ascending), so a -fix
+// run can report WHICH optimizations it applied — not just a total — and flag any
+// caveated check (e.g. PX3007) whose fix a reviewer should double-check.
+func fixBreakdown(findings []report.Finding) []checkCount {
+	idx := map[string]int{}
+	var out []checkCount
+	for _, f := range findings {
+		if f.Fixes == 0 {
+			continue
+		}
+		i, ok := idx[f.ID]
+		if !ok {
+			caveat := false
+			if e, ok := catalog.ByID(f.ID); ok && e.Caveat != "" {
+				caveat = true
+			}
+			i = len(out)
+			idx[f.ID] = i
+			out = append(out, checkCount{id: f.ID, tidyName: f.TidyName, caveat: caveat})
+		}
+		out[i].count++
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].id < out[b].id })
+	return out
 }
 
 // countMissingHeaderErrors counts clang compile errors caused by a header that
