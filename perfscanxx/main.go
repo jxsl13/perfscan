@@ -993,6 +993,13 @@ func printListJSON(w io.Writer, fixableOnly bool) error {
 		Title    string `json:"title"`
 		HasFix   bool   `json:"autoFix"`
 		Custom   bool   `json:"queryBased"`
+		// Caveat surfaces the same safety warning -explain prints: on some
+		// fixable checks the upstream fix-it is unsafe to apply blindly
+		// (PX3004/PX3007/PX3015/PX3027). A tool consuming -json to decide
+		// whether to auto-apply fixes needs it, so it is emitted here too
+		// (omitted when empty). Without it the machine-readable output silently
+		// dropped a safety signal the human output shows.
+		Caveat string `json:"caveat,omitempty"`
 	}
 	out := make([]check, 0, len(catalog.All()))
 	for _, e := range catalog.All() {
@@ -1002,6 +1009,7 @@ func printListJSON(w io.Writer, fixableOnly bool) error {
 		out = append(out, check{
 			ID: e.ID, Level: int(e.Level), Category: e.Category,
 			TidyName: e.TidyName, Title: e.Title, HasFix: e.HasFix, Custom: e.Custom,
+			Caveat: e.Caveat,
 		})
 	}
 	enc := json.NewEncoder(w)

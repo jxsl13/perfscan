@@ -85,9 +85,22 @@ func TestListJSONIsValidAndComplete(t *testing.T) {
 		Level    int    `json:"level"`
 		TidyName string `json:"tidyCheck"`
 		AutoFix  bool   `json:"autoFix"`
+		Caveat   string `json:"caveat"`
 	}
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("-list -json is not valid JSON: %v", err)
+	}
+	// The safety caveat must reach the machine-readable output too, not just
+	// -explain: a check with a Caveat in the catalog must expose it in -json
+	// (PX3015 is one such fixable-but-caveated check).
+	caveated := map[string]bool{}
+	for _, c := range got {
+		if c.Caveat != "" {
+			caveated[c.ID] = true
+		}
+	}
+	if !caveated["PX3015"] {
+		t.Errorf("-json must surface the safety caveat (PX3015 has one in the catalog but it is missing from -json); got caveated=%v", caveated)
 	}
 	total, fixable := catalogCounts()
 	if len(got) != total {
