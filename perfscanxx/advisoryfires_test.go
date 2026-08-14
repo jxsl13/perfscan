@@ -73,6 +73,32 @@ std::string advConstParamReturn(const std::string s) {
 // typo'd TidyName, or a clang-tidy release that renames/drops a check, is
 // caught rather than silently surfacing nothing. Self-maintaining: a new
 // advisory built-in with no trigger here fails the test.
+// TestAdvisoryTriggerSrcCoversEveryAdvisoryBuiltin is the pure-Go completeness
+// backstop for the two clang-tidy-gated advisory tests below
+// (TestAdvisoryChecksFireOnTargetPattern and TestAdvisoryBuiltinsApplyNoFixIt),
+// both of which SKIP when clang-tidy is absent (common in CI). Without a
+// clang-tidy binary a newly added advisory built-in that forgot its trigger
+// snippet in advisoryTriggerSrc would slip through both skipped tests. This
+// asserts — with no clang-tidy needed — that advisoryTriggerSrc carries a marker
+// (the check's TidyName) for every advisory built-in in the catalog, so the
+// "self-maintaining" property holds everywhere. Mirrors the custom-check backstop
+// TestCustomTriggerSrcCoversEveryCustomCheck.
+func TestAdvisoryTriggerSrcCoversEveryAdvisoryBuiltin(t *testing.T) {
+	advisory := 0
+	for _, e := range catalog.All() {
+		if e.Custom || e.HasFix {
+			continue
+		}
+		advisory++
+		if !strings.Contains(advisoryTriggerSrc, e.TidyName) {
+			t.Errorf("%s (%s) has no trigger snippet in advisoryTriggerSrc — add code exhibiting its anti-pattern with a `// %s` marker, or the clang-tidy-gated advisory tests silently lose coverage when clang-tidy is absent", e.ID, e.TidyName, e.TidyName)
+		}
+	}
+	if advisory == 0 {
+		t.Fatal("no advisory built-in checks found in the catalog")
+	}
+}
+
 func TestAdvisoryChecksFireOnTargetPattern(t *testing.T) {
 	bin := findClangTidyForTest()
 	if bin == "" {
