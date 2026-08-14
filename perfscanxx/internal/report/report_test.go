@@ -304,6 +304,32 @@ func TestTextMetaWithoutLevel(t *testing.T) {
 	}
 }
 
+// TestTextFlagsCaveatOnFixableCheck pins that the DEFAULT text output warns when
+// a fix-available check carries a safety caveat (PX3004/PX3007/PX3015/PX3027) —
+// the place a user decides whether to -fix. A fixable check WITHOUT a caveat
+// (PX1001) shows "fix available" but no marker. This is the terminal counterpart
+// to the caveat surfaced in -explain / -json / -sarif.
+func TestTextFlagsCaveatOnFixableCheck(t *testing.T) {
+	cav, ok := catalog.ByID("PX3015")
+	if !ok || cav.Caveat == "" {
+		t.Fatal("PX3015 is expected to be a caveated check; catalog changed?")
+	}
+	var buf bytes.Buffer
+	Text(&buf, []Finding{
+		{ID: "PX3015", Level: cav.Level.String(), Message: "m", File: "a.cpp", Line: 1, Col: 1, Fixes: 1},
+		{ID: "PX1001", Level: "L1", Message: "m", File: "b.cpp", Line: 2, Col: 1, Fixes: 1}, // fixable, no caveat
+	})
+	out := buf.String()
+	if !strings.Contains(out, "⚠ caveat — see -explain PX3015") {
+		t.Errorf("a caveated fix-available check must flag its caveat in the text output:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "PX1001") && strings.Contains(line, "caveat") {
+			t.Errorf("a non-caveated check must not show a caveat marker:\n%s", line)
+		}
+	}
+}
+
 func TestLineColAndText(t *testing.T) {
 	origRead := ReadFile
 	defer func() { ReadFile = origRead }()
