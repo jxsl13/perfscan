@@ -20,7 +20,7 @@ var PS3102 = register(&lint.Check{
 	Level:    lint.LevelIdiomatic,
 	AutoFix:  true,
 	Doc: lint.Documentation{
-		Title: "deleting every key in a range loop is O(n) with rehashing; clear(m) is the direct idiom",
+		Title: "a map emptied with a range-delete loop where clear(m) is the direct idiom",
 		Text: `The loop for k := range m { delete(m, k) } empties a map
 key-by-key: every iteration hashes the key a second time to find and
 remove its entry. The Go 1.21 builtin clear(m) says the same thing
@@ -81,7 +81,11 @@ func runPS3102(pass *analysis.Pass) (any, error) {
 				return true
 			}
 			repl := "clear(" + name + ")"
-			msg := name + " is emptied key-by-key by a range-delete loop, hashing every key a second time; " + repl + " empties the map in one call"
+			// No "re-hashes every key" runtime claim: gc lowers this exact loop to
+			// runtime.mapclear (since Go 1.11), so on gc there is no per-key second
+			// hash — the win is clarity + robustness (clear always takes the fast
+			// path; the loop shape is fragile). See the Doc's honesty note.
+			msg := name + " is emptied with a range-delete loop; " + repl + " empties the map in one call"
 			diag := analysis.Diagnostic{
 				Pos:     rs.Pos(),
 				End:     rs.End(),

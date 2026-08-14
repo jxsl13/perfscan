@@ -9,5 +9,5 @@ package ps3102
 // files, leaving an uncompilable clear() out of reach. The clear-builtin checks
 // otherwise have no file-version testdata.
 func clearAtBoundary(m map[string]int) {
-	for k := range m { delete(m, k) } // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call`
+	for k := range m { delete(m, k) } // want `m is emptied with a range-delete loop; clear\(m\) empties the map in one call`
 }

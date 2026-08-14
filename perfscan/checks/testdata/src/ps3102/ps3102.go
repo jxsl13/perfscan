@@ -2,14 +2,14 @@ package ps3102
 
 // The exact idiom over a local map is rewritten to clear(m).
 func clearLocal(m map[string]int) {
-	for k := range m { delete(m, k) } // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call`
+	for k := range m { delete(m, k) } // want `m is emptied with a range-delete loop; clear\(m\) empties the map in one call`
 }
 
 // Any key/value shapes work as long as the key cannot hold NaN; only the
 // loop statement is replaced, surrounding statements stay.
 func clearSet(seen map[int]struct{}) int {
 	before := len(seen)
-	for k := range seen { delete(seen, k) } // want `seen is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(seen\) empties the map in one call`
+	for k := range seen { delete(seen, k) } // want `seen is emptied with a range-delete loop; clear\(seen\) empties the map in one call`
 	return before
 }
 
@@ -17,7 +17,7 @@ var cache = map[string][]byte{}
 
 // A package-level map variable is matched by object identity too.
 func resetCache() {
-	for k := range cache { delete(cache, k) } // want `cache is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(cache\) empties the map in one call`
+	for k := range cache { delete(cache, k) } // want `cache is emptied with a range-delete loop; clear\(cache\) empties the map in one call`
 }
 
 // --- advisory: reported but never rewritten ---
@@ -25,7 +25,7 @@ func resetCache() {
 // A float key can be NaN; delete(m, k) cannot remove a NaN key (NaN != NaN)
 // but clear does, so the rewrite is not bit-identical.
 func floatKeys(m map[float64]int) {
-	for k := range m { // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
+	for k := range m { // want `m is emptied with a range-delete loop; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
 		delete(m, k)
 	}
 }
@@ -34,14 +34,14 @@ func floatKeys(m map[float64]int) {
 type coord struct{ x, y float64 }
 
 func structFloatKeys(m map[coord]bool) {
-	for k := range m { // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
+	for k := range m { // want `m is emptied with a range-delete loop; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
 		delete(m, k)
 	}
 }
 
 // An interface key may dynamically hold a float NaN.
 func anyKeys(m map[any]int) {
-	for k := range m { // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
+	for k := range m { // want `m is emptied with a range-delete loop; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
 		delete(m, k)
 	}
 }
@@ -49,7 +49,7 @@ func anyKeys(m map[any]int) {
 // A complex key can hold a NaN in either component (complex(NaN, 0) != itself),
 // so the IsComplex exclusion keeps this advisory, like floats.
 func complexKeys(m map[complex128]int) {
-	for k := range m { // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
+	for k := range m { // want `m is emptied with a range-delete loop; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
 		delete(m, k)
 	}
 }
@@ -57,7 +57,7 @@ func complexKeys(m map[complex128]int) {
 // An array-of-floats key can hold a NaN element; the guard recurses into the
 // array element type, so this stays advisory too.
 func arrayFloatKeys(m map[[2]float64]int) {
-	for k := range m { // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
+	for k := range m { // want `m is emptied with a range-delete loop; clear\(m\) empties the map in one call — advisory: the key type can hold NaN, which delete cannot remove but clear does, so the rewrite is not bit-identical`
 		delete(m, k)
 	}
 }
@@ -66,7 +66,7 @@ func arrayFloatKeys(m map[[2]float64]int) {
 // cannot arise and the rewrite IS applied — a positive exercising the Pointer
 // branch of the key-type guard.
 func pointerKeys(m map[*int]int) {
-	for k := range m { delete(m, k) } // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call`
+	for k := range m { delete(m, k) } // want `m is emptied with a range-delete loop; clear\(m\) empties the map in one call`
 }
 
 // A user declaration named clear captures the rewritten call: the loop is
@@ -74,7 +74,7 @@ func pointerKeys(m map[*int]int) {
 func shadowedClear(m map[string]int) {
 	clear := 0
 	_ = clear
-	for k := range m { delete(m, k) } // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call`
+	for k := range m { delete(m, k) } // want `m is emptied with a range-delete loop; clear\(m\) empties the map in one call`
 }
 
 // --- guards: none of the following may be reported or rewritten ---
@@ -140,7 +140,7 @@ func assignedKey(m map[string]int) string {
 // the whole range-delete loop, so PS3102 reports it WITHOUT a fix (the
 // ps3102CommentsOverlap guard). Sibling of PS2116's interiorComment negative.
 func interiorComment(m map[string]int) {
-	for k := range m { // want `m is emptied key-by-key by a range-delete loop, hashing every key a second time; clear\(m\) empties the map in one call`
+	for k := range m { // want `m is emptied with a range-delete loop; clear\(m\) empties the map in one call`
 		// drop every entry so the map's backing store can be reused
 		delete(m, k)
 	}
