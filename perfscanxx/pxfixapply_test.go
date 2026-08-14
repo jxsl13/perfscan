@@ -134,3 +134,61 @@ func TestFixWithAdvisoryCustomCheckReportsButAppliesNothing(t *testing.T) {
 		t.Errorf("exit code = %d, want 0 (-fix completed; nothing to apply)", code)
 	}
 }
+
+// TestDiffWithAdvisoryCustomCheckShowsNoChange is the -diff analog of the -fix
+// advisory pin: -diff previews what -fix would change and exits 1 iff anything
+// WOULD change. With only an advisory (HasFix:false) custom check selected there
+// is no fix-it, so -diff must produce no diff, print "no fixes to apply", leave
+// the file byte-for-byte, and exit 0 — NOT 1. This locks the subtle contract that
+// -diff's exit code keys on "would change", not on "found a finding": an advisory
+// finding exists here yet the correct diff-mode exit is 0.
+func TestDiffWithAdvisoryCustomCheckShowsNoChange(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "v.cpp")
+	const src = "#include <vector>\nstruct S { std::vector<bool> flags; };\n"
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile := "clang++ -std=c++17"
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("xcrun", "--show-sdk-path").Output()
+		if err != nil {
+			t.Skipf("xcrun --show-sdk-path failed (%v); cannot locate the C++ sysroot", err)
+		}
+		compile += " -isysroot " + strings.TrimSpace(string(out))
+	}
+	compile += " -c v.cpp"
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI("-tidy", bin, "-diff", "-checks", "PX2108", "-p", dir, cpp)
+	if strings.Contains(stderr, "file not found") || strings.Contains(stderr, "fatal error") {
+		t.Skipf("toolchain could not parse <vector>; skipping. stderr:\n%s", stderr)
+	}
+
+	// No diff body was emitted (nothing would change).
+	if !strings.Contains(stderr, "no fixes to apply") {
+		t.Errorf("-diff with only an advisory check should report 'no fixes to apply':\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if strings.Contains(stdout, "@@") || strings.Contains(stdout, "---") {
+		t.Errorf("-diff emitted a hunk for an advisory-only check; there is nothing to change:\n%s", stdout)
+	}
+	// File untouched — -diff never writes.
+	got, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != src {
+		t.Errorf("-diff mutated the file; it must never write:\n%s", got)
+	}
+	// Nothing would change -> exit 0, even though an advisory finding exists.
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0 (-diff exits 1 only when something WOULD change)", code)
+	}
+}
