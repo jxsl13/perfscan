@@ -239,6 +239,55 @@ func TestPX3027DoesNotFireOnNoexceptDestructor(t *testing.T) {
 	}
 }
 
+// TestPX3004DoesNotFireOnNoexceptMoveConstructor pins the SAFETY BOUNDARY of the
+// noexcept-move-constructor fix (PX3004), the twin of PX3027's boundary: PX3004
+// carries the same std::terminate footgun (its Caveat) — clang-tidy adds
+// `noexcept` to a move constructor without proving the move body cannot throw,
+// so a move that throws at runtime becomes terminate. The fix must therefore
+// fire ONLY on a move constructor that is not already noexcept; a move
+// constructor ALREADY marked `noexcept` has nothing to add, so clang-tidy must
+// stay silent and leave the source byte-for-byte. This is the exact positive
+// shape (a member-moving move ctor) EXCEPT it is already noexcept, isolating that
+// single dimension against the LIVE toolchain — so a re-annotation is never
+// applied where the author already committed to noexcept. Complements the
+// un-noexcept positive in hasFixFixtures/PX3004.
+func TestPX3004DoesNotFireOnNoexceptMoveConstructor(t *testing.T) {
+	bin := findClangTidyForTest()
+	if bin == "" {
+		t.Skip("clang-tidy not found")
+	}
+	// Already noexcept: the move ctor moves its std::string member and commits to
+	// noexcept. There is nothing for performance-noexcept-move-constructor to add.
+	const src = "#include <string>\nstruct S {\n  std::string s;\n  S(S&& o) noexcept : s(static_cast<std::string&&>(o.s)) {}\n};\n"
+	dir := t.TempDir()
+	cpp := filepath.Join(dir, "s.cpp")
+	if err := os.WriteFile(cpp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile, ok := cppCompileCmdForTest("s.cpp")
+	if !ok {
+		t.Skip("xcrun --show-sdk-path failed; cannot locate the C++ sysroot")
+	}
+	cc := `[{"directory":"` + dir + `","file":"` + cpp + `","command":"` + compile + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, _ := runCLI("-tidy", bin, "-fix", "-checks", "PX3004", "-p", dir, cpp)
+	if strings.Contains(stderr, "file not found") || strings.Contains(stderr, "fatal error") {
+		t.Skipf("toolchain could not parse the fixture; skipping. stderr:\n%s", stderr)
+	}
+	gotB, err := os.ReadFile(cpp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotB) != src {
+		t.Errorf("PX3004 re-annotated a move constructor that is already noexcept — it must fire ONLY when a move ctor lacks noexcept:\n%s", string(gotB))
+	}
+	if strings.Contains(out, "PX3004") {
+		t.Errorf("PX3004 reported on an already-noexcept move constructor; it must stay silent:\n%s", out)
+	}
+}
+
 // TestFixWithArgumentsFormCompdb pins the FULL pipeline against a compilation
 // database that uses the "arguments" ARRAY form instead of the "command" STRING
 // form. The JSON Compilation Database spec allows either and real generators
