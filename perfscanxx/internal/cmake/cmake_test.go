@@ -2,9 +2,11 @@ package cmake
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -36,8 +38,14 @@ func TestConfigureBuildArgs(t *testing.T) {
 	var gotArgv []string
 	origRunner, origAvail := Runner, Available
 	defer func() { Runner, Available = origRunner, origAvail }()
+	// Real dirs so Configure's post-condition (the database was written) can be
+	// satisfied by the stub — a successful cmake configure writes the DB.
+	src := t.TempDir()
+	build := filepath.Join(src, "build")
 	Runner = func(_ context.Context, dir string, argv []string) ([]byte, error) {
 		gotDir, gotArgv = dir, argv
+		_ = os.MkdirAll(build, 0o755)
+		_ = os.WriteFile(filepath.Join(build, "compile_commands.json"), []byte("[]"), 0o644)
 		return nil, nil
 	}
 	// Stub Available (not skip): the arg-construction contract must be pinned
@@ -45,20 +53,58 @@ func TestConfigureBuildArgs(t *testing.T) {
 	Available = func() bool { return true }
 
 	// Configure runs in the SOURCE dir and requests the compile database.
-	if err := Configure(context.Background(), "/src", "/src/build"); err != nil {
+	if err := Configure(context.Background(), src, build); err != nil {
 		t.Fatal(err)
 	}
-	wantCfg := []string{"cmake", "-S", "/src", "-B", "/src/build", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"}
-	if gotDir != "/src" || !slices.Equal(gotArgv, wantCfg) {
-		t.Errorf("configure argv=%v dir=%q\n want argv=%v dir=/src", gotArgv, gotDir, wantCfg)
+	wantCfg := []string{"cmake", "-S", src, "-B", build, "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"}
+	if gotDir != src || !slices.Equal(gotArgv, wantCfg) {
+		t.Errorf("configure argv=%v dir=%q\n want argv=%v dir=%s", gotArgv, gotDir, wantCfg, src)
 	}
 
 	// Build (no targets) runs in the BUILD dir. (Multi-target argv and the
 	// not-available / failure branches are covered by TestConfigureBuildErrorPaths.)
-	if err := Build(context.Background(), "/src/build"); err != nil {
+	if err := Build(context.Background(), build); err != nil {
 		t.Fatal(err)
 	}
-	if gotDir != "/src/build" || !slices.Equal(gotArgv, []string{"cmake", "--build", "/src/build"}) {
+	if gotDir != build || !slices.Equal(gotArgv, []string{"cmake", "--build", build}) {
 		t.Errorf("build (no target) argv=%v dir=%q", gotArgv, gotDir)
+	}
+}
+
+// TestConfigureVerifiesDatabaseWritten pins the post-configure check: cmake can
+// exit 0 yet write no compile_commands.json when the active generator ignores
+// CMAKE_EXPORT_COMPILE_COMMANDS (Xcode / Visual Studio). Configure must then return
+// ErrNoDatabaseProduced — carrying the switch-generator fix — rather than a nil
+// "success" that only surfaces as a confusing "no compile_commands.json" later.
+func TestConfigureVerifiesDatabaseWritten(t *testing.T) {
+	origRunner, origAvail := Runner, Available
+	defer func() { Runner, Available = origRunner, origAvail }()
+	Available = func() bool { return true }
+
+	// cmake "succeeds" but writes nothing (generator ignored the flag).
+	src := t.TempDir()
+	build := filepath.Join(src, "build")
+	Runner = func(context.Context, string, []string) ([]byte, error) { return []byte("-- Configuring done"), nil }
+	err := Configure(context.Background(), src, build)
+	if !errors.Is(err, ErrNoDatabaseProduced) {
+		t.Fatalf("Configure with no DB written = %v, want ErrNoDatabaseProduced", err)
+	}
+	// The message must name the real cause (the ignored flag) and the supported
+	// generators. (The copy-paste `-G Ninja` command line is printed by main.go,
+	// mirroring how the tests/deps advice lives in the caller, not the error.)
+	for _, want := range []string{"CMAKE_EXPORT_COMPILE_COMMANDS", "Ninja"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+
+	// The happy path: cmake writes the DB -> nil.
+	Runner = func(context.Context, string, []string) ([]byte, error) {
+		_ = os.MkdirAll(build, 0o755)
+		_ = os.WriteFile(filepath.Join(build, "compile_commands.json"), []byte("[]"), 0o644)
+		return nil, nil
+	}
+	if err := Configure(context.Background(), src, build); err != nil {
+		t.Errorf("Configure that wrote the DB = %v, want nil", err)
 	}
 }

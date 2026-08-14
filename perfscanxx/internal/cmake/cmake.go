@@ -7,11 +7,24 @@ package cmake
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 )
+
+// ErrNoDatabaseProduced is returned by Configure when cmake exits successfully
+// but writes no compile_commands.json — the signature of a CMake generator that
+// silently ignores CMAKE_EXPORT_COMPILE_COMMANDS (only the Makefile and Ninja
+// generators honor it; the Xcode and Visual Studio generators do not). The caller
+// distinguishes it (errors.Is) from a genuine configure failure so it can offer
+// the right fix (switch generator) instead of the wrong one (disable test targets).
+var ErrNoDatabaseProduced = errors.New("cmake produced no compilation database")
+
+// dbName is the compilation-database filename cmake emits with
+// CMAKE_EXPORT_COMPILE_COMMANDS=ON (kept local to avoid importing compdb).
+const dbName = "compile_commands.json"
 
 // Runner executes argv in dir and returns combined output; a package variable
 // so tests run without cmake installed.
@@ -68,6 +81,16 @@ func Configure(ctx context.Context, src, build string) error {
 	})
 	if err != nil {
 		return fmt.Errorf("cmake configure failed: %w\n%s", err, out)
+	}
+	// cmake exited 0, but CMAKE_EXPORT_COMPILE_COMMANDS is silently IGNORED by the
+	// Xcode and Visual Studio generators — only the Makefile and Ninja generators
+	// honor it. Verify the database was actually written, so a "successful"
+	// configure that produced nothing usable surfaces its real cause HERE (with the
+	// fix) instead of as a confusing "no compile_commands.json" far downstream.
+	db := filepath.Join(build, dbName)
+	if _, statErr := os.Stat(db); statErr != nil {
+		return fmt.Errorf("%w: cmake configured %s but wrote no %s in %s (the Xcode and Visual Studio generators ignore CMAKE_EXPORT_COMPILE_COMMANDS; only the Makefile and Ninja generators honor it)",
+			ErrNoDatabaseProduced, src, dbName, build)
 	}
 	return nil
 }
