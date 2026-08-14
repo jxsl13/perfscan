@@ -72,6 +72,27 @@ func advisoryShadowed() []int {
 	return append([]int(nil), src...) // want `append\(\[\]int\(nil\), src\.\.\.\) is a hand-rolled clone; slices\.Clone\(src\) says it directly`
 }
 
+type cloneBuf struct {
+	data  []byte
+	items []int
+}
+
+// A struct-field source is a selector, not a plain local ident: its
+// nil-ness is observable (a field can be nil or non-nil empty), so the
+// []T(nil) form's nil/empty divergence from bytes.Clone cannot be ruled
+// out — reported, no fix. Mirrors the fasthttp corpus shape
+// append([]byte(nil), u.scheme...).
+func advisoryFieldNil(c *cloneBuf) []byte {
+	return append([]byte(nil), c.data...) // want `append\(\[\]byte\(nil\), c\.data\.\.\.\) is a hand-rolled clone; bytes\.Clone\(c\.data\) says it directly`
+}
+
+// The []T{} form over a struct field is equally advisory: a nil field
+// diverges from slices.Clone (non-nil empty vs nil). Mirrors the fasthttp
+// shape append([]*clientConn{}, c.conns...).
+func advisoryFieldEmpty(c *cloneBuf) []int {
+	return append([]int{}, c.items...) // want `append\(\[\]int\{\}, c\.items\.\.\.\) is a hand-rolled clone; slices\.Clone\(c\.items\) says it directly`
+}
+
 // Appending onto a non-empty destination is not a clone: silent.
 func silentDst(dst, s []int) []int {
 	return append(dst, s...)
