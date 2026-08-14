@@ -182,3 +182,74 @@ func TestSARIFOutputIsStructurallyValid(t *testing.T) {
 		t.Errorf("PX3021 (L3) SARIF level = %q, want note", levelOf["PX3021"])
 	}
 }
+
+// TestSARIFResolvesCustomCheckToPXID pins that a CUSTOM-check finding serializes
+// in SARIF under its perfscanxx PX id, not clang-tidy's raw "custom-<name>" tag.
+// clang-tidy emits `custom-vector-bool` for PX2108; report.FromExport resolves it
+// via catalog.ByTidyName, so the SARIF ruleId (and rules[].id) must be PX2108 —
+// a note (L3). Custom checks are half the catalog yet the main SARIF test only
+// exercises built-ins; a regression in the tidy-name->PX mapping would silently
+// mis-attribute every custom finding to a GitHub-unknown rule id.
+func TestSARIFResolvesCustomCheckToPXID(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.cpp")
+	if err := os.WriteFile(src, []byte("int f() { return 0; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	export := "MainSourceFile: '" + src + "'\n" +
+		"Diagnostics:\n" +
+		"  - DiagnosticName: custom-vector-bool\n" +
+		"    DiagnosticMessage:\n" +
+		"      Message: 'x'\n" +
+		"      FilePath: '" + src + "'\n" +
+		"      FileOffset: 4\n" +
+		"      Replacements: []\n"
+	defer stubTidy(t, export, nil, nil)()
+
+	out, errOut, code := runCLI("-sarif", src)
+	if code == 2 {
+		t.Fatalf("-sarif exited 2 (error)\nstderr: %s", errOut)
+	}
+
+	var log struct {
+		Runs []struct {
+			Tool struct {
+				Driver struct {
+					Rules []struct {
+						ID                   string `json:"id"`
+						Name                 string `json:"name"`
+						DefaultConfiguration *struct {
+							Level string `json:"level"`
+						} `json:"defaultConfiguration"`
+					} `json:"rules"`
+				} `json:"driver"`
+			} `json:"tool"`
+			Results []struct {
+				RuleID string `json:"ruleId"`
+				Level  string `json:"level"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(out), &log); err != nil {
+		t.Fatalf("SARIF is not valid JSON: %v\n%s", err, out)
+	}
+	if len(log.Runs) != 1 || len(log.Runs[0].Results) != 1 {
+		t.Fatalf("want exactly 1 run/1 result for the custom finding:\n%s", out)
+	}
+	res := log.Runs[0].Results[0]
+	if res.RuleID != "PX2108" {
+		t.Errorf("custom-vector-bool result ruleId = %q, want PX2108 (resolved via ByTidyName)", res.RuleID)
+	}
+	if res.Level != "note" {
+		t.Errorf("PX2108 is L3, so its SARIF level must be %q, got %q", "note", res.Level)
+	}
+	rules := log.Runs[0].Tool.Driver.Rules
+	// The stable SARIF id is the perfscanxx PX id (what GitHub keys on); the rule's
+	// human-readable `name` carries the clang-tidy check the finding came from.
+	if len(rules) == 1 && rules[0].Name != "custom-vector-bool" {
+		t.Errorf("PX2108 rule name = %q, want the clang-tidy check custom-vector-bool (SARIF id/name split)", rules[0].Name)
+	}
+	if len(rules) != 1 || rules[0].ID != "PX2108" {
+		t.Errorf("rules[] must contain exactly the PX2108 rule, got %+v", rules)
+	}
+}
