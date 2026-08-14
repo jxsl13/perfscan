@@ -82,6 +82,12 @@ func TestListFixableFiltersToAutoFixOnly(t *testing.T) {
 			t.Errorf("-fixable leaked advisory check %s", e.ID)
 		}
 	}
+	// A caveated fix (PX3015 etc.) is fixable, so it appears under -fixable —
+	// and must still carry the ⚠ marker + legend, since -fixable is exactly the
+	// view a user consults before a bulk -fix.
+	if !strings.Contains(out, "yes ⚠") || !strings.Contains(out, "⚠ = the fix carries a caveat") {
+		t.Errorf("-list -fixable must still mark caveated fixes with ⚠ and print the legend; got:\n%s", out)
+	}
 }
 
 func TestListJSONIsValidAndComplete(t *testing.T) {
