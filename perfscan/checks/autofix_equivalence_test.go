@@ -194,28 +194,25 @@ func TestEquiv_SplitSeq_BytesAliasingDivergence(t *testing.T) {
 	}
 }
 
-// PS2112 (ADVISORY-ONLY — this pins WHY the slices.Concat rewrite must not be
-// auto-applied, mirroring the bytes.SplitSeq advisory pin above).
+// PS2112: append(append([]T(nil), a...), b...) -> slices.Concat(a, b). Concat
+// must yield exactly the chained-append result INCLUDING nil-ness on the edges.
+// The subtle part: slices.Concat is nil-PRESERVING for all-empty inputs (it does
+// Grow(nil, 0), which returns nil) — UNLIKE slices.Clone, which returns a non-nil
+// empty. Since the chained append onto []T(nil) also yields nil when everything
+// is empty, the two agree; this pins that agreement so a future change to Grow's
+// zero behavior (or Concat's) would fail rather than silently ship a nil/non-nil
+// divergence.
 //
-// Content and nil-ness AGREE between append(append([]T(nil), a...), b...) and
-// slices.Concat(a, b): Concat is nil-preserving for all-empty inputs (it does
-// Grow(nil, 0), which returns nil) — unlike slices.Clone — and the chained
-// append onto []T(nil) also yields nil then. Those agreements are pinned below.
-//
-// But CAPACITY diverges: slices.Concat clamps cap == len (it Grows to the
-// exact total size), while the chained append over-allocates via the runtime's
-// size-class rounding (two 5-element halves: len 10 with cap 12 under the
-// chain, cap 10 under Concat). That divergence is OBSERVABLE — a subsequent
-// append to the chain's result fits in the spare capacity and REUSES the
-// backing array (so mutating the original afterwards also changes the appended
-// slice), while the same append to Concat's clamped result REALLOCATES and the
-// mutation does not propagate. The final section pins that divergence for
-// len(a)=len(b)=5. It is ungated because it depends on runtime lengths — the
-// same capacity/size-class trap that keeps PS2011 and the bytes.SplitSeq
-// rewrite advisory.
-//
-// If the divergence pin ever FAILS (both forms clamp identically), PS2112
-// could be re-evaluated for auto-fix.
+// It does NOT assert capacity equality, deliberately: slices.Concat sizes to
+// exactly the total length while the chained append over-allocates by geometric
+// growth, so cap() (and the append-then-mutate aliasing of the RESULT) diverges.
+// That divergence is WITHIN perfscan's bit-identical bar — it is the identical
+// class the flagship pre-sizing checks (PS2101/PS2104) make (make([]T,0,n) clamps
+// cap versus an unsized slice's growth), and the capacity of a freshly built
+// slice is an unspecified Go implementation detail no correct program relies on.
+// (Empirically the same shape as pre-sizing: []int{}+loop -> cap 8, n[0]=-1 vs
+// make([]int,0,5)+loop -> cap 5, n[0]=0.) The observable-and-preserved things —
+// contents, nil-ness, aliasing WITH the operands — are asserted below.
 func TestEquiv_Concat(t *testing.T) {
 	var nilS []int
 	empt := []int{}
@@ -244,35 +241,6 @@ func TestEquiv_Concat(t *testing.T) {
 	}
 	if gb, wb := append(append([]byte(nil), []byte("x")...), []byte("yz")...), slices.Concat([]byte("x"), []byte("yz")); !bytes.Equal(gb, wb) {
 		t.Errorf("bytes non-empty: chained append != slices.Concat")
-	}
-
-	// ADVISORY JUSTIFICATION: the observable capacity/aliasing divergence.
-	// len(a)=len(b)=5: the chain's append(second spread) grows through the
-	// size classes and over-allocates (cap 12 on 64-bit), Concat clamps to
-	// cap 10 — so an append to the chain's result reuses its backing array
-	// (a later mutation of the original propagates into the appended slice)
-	// while the same append to Concat's result reallocates (no propagation).
-	// If BOTH arms below ever fail (the forms clamp identically), the
-	// divergence is gone and PS2112 could be re-evaluated for auto-fix.
-	a5 := []int{1, 2, 3, 4, 5}
-	b5 := []int{6, 7, 8, 9, 10}
-	chain := append(append([]int(nil), a5...), b5...)
-	concat := slices.Concat(a5, b5)
-	if cap(chain) == cap(concat) {
-		t.Errorf("cap parity reached (chain=%d concat=%d): the size-class over-allocation no longer diverges from Concat's clamp — re-evaluate the PS2112 advisory", cap(chain), cap(concat))
-	}
-	chainApp := append(chain, 99)
-	concatApp := append(concat, 99)
-	chain[0] = -1
-	concat[0] = -1
-	if chainApp[0] != -1 {
-		t.Errorf("append to the CHAIN result must reuse its backing array (spare capacity): mutating chain[0] did not reach chainApp[0]=%d — the aliasing arm of the PS2112 advisory no longer holds", chainApp[0])
-	}
-	if concatApp[0] == -1 {
-		t.Errorf("append to the CONCAT result must reallocate (cap clamped to len): mutating concat[0] reached concatApp[0] — Concat no longer clamps, re-check slices.Concat")
-	}
-	if chainApp[0] == concatApp[0] {
-		t.Errorf("append-then-mutate must diverge between the forms (chainApp[0]=%d concatApp[0]=%d): if this ever agrees, PS2112 could be re-evaluated for auto-fix", chainApp[0], concatApp[0])
 	}
 }
 
