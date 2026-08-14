@@ -42,7 +42,7 @@ checks' fixes.
 | [PS2109](PS2109.md) | alloc | L1 | yes | []byte(fmt.Sprintf(...)) allocates a string then copies it; fmt.Appendf writes bytes directly |
 | [PS2110](PS2110.md) | alloc | L1 | yes | append([]T(nil), s...) is a hand-rolled clone; slices.Clone/bytes.Clone say it directly |
 | [PS2111](PS2111.md) | alloc | L1 | yes | w.Write([]byte(s)) allocates; w.WriteString(s) writes the string directly |
-| [PS2112](PS2112.md) | alloc | L1 | yes | append(append([]T(nil), a...), b...) is a hand-rolled concat; slices.Concat says it |
+| [PS2112](PS2112.md) | alloc | L1 |  | append(append([]T(nil), a...), b...) is a hand-rolled concat; slices.Concat says it (advisory) |
 | [PS2113](PS2113.md) | alloc | L1 | yes | w.Write([]byte(fmt.Sprintf(...))) builds a throwaway string+slice; fmt.Fprintf writes straight to w |
 | [PS2114](PS2114.md) | alloc | L2 |  | sync.Pool stores a non-pointer value, boxing it on every Put |
 | [PS2115](PS2115.md) | alloc | L1 |  | []rune(s)[i] allocates and decodes the whole string to read one rune |
