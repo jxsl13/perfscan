@@ -272,3 +272,55 @@ func TestParseLLVMBlockScalarReplacementText(t *testing.T) {
 		t.Errorf("got %d replacements, want 2", n)
 	}
 }
+
+// TestParseBlockScalarIndicatorVariants pins that Parse recovers from EVERY
+// explicit block-scalar indentation-indicator form go-yaml chokes on — the
+// digit before or after the chomping indicator, a bare digit, and the folded
+// (>) style — since LLVM's exact spelling can vary by version. A header with no
+// digit already parses and must be left alone, and a fully valid export must not
+// be perturbed by the recovery path at all.
+func TestParseBlockScalarIndicatorVariants(t *testing.T) {
+	mk := func(header string) []byte {
+		return []byte("MainSourceFile: x.cc\n" +
+			"Diagnostics:\n" +
+			"  - DiagnosticName: c\n" +
+			"    DiagnosticMessage:\n" +
+			"      Message: 'm'\n" +
+			"      FilePath: x.cc\n" +
+			"      FileOffset: 1\n" +
+			"      Replacements:\n" +
+			"          - FilePath: x.cc\n" +
+			"            Offset: 1\n" +
+			"            Length: 0\n" +
+			"            ReplacementText: " + header + "\n" +
+			"               : a(b)\n" +
+			"                    c\n" +
+			"    Level: Warning\n")
+	}
+	for _, header := range []string{"|4-", "|-4", "|4", "|4+", ">4-", ">-4"} {
+		f, err := Parse(mk(header))
+		if err != nil {
+			t.Errorf("header %q: Parse failed: %v", header, err)
+			continue
+		}
+		if len(f.Diagnostics) != 1 || f.Diagnostics[0].DiagnosticMessage.FileOffset != 1 {
+			t.Errorf("header %q: diagnostic not recovered: %+v", header, f.Diagnostics)
+		}
+	}
+
+	// A valid export (no explicit indicator) must round-trip untouched by the
+	// recovery path — the first parse already succeeds.
+	valid := []byte("MainSourceFile: x.cc\n" +
+		"Diagnostics:\n" +
+		"  - DiagnosticName: performance-for-range-copy\n" +
+		"    DiagnosticMessage:\n" +
+		"      Message: 'copy'\n" +
+		"      FilePath: x.cc\n" +
+		"      FileOffset: 7\n" +
+		"      Replacements: []\n" +
+		"    Level: Warning\n")
+	f, err := Parse(valid)
+	if err != nil || len(f.Diagnostics) != 1 || f.Diagnostics[0].DiagnosticName != "performance-for-range-copy" {
+		t.Fatalf("valid export not parsed cleanly: %v, %+v", err, f)
+	}
+}
