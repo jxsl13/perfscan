@@ -304,6 +304,18 @@ func TestPS3090SilentWithoutVocabulary(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS3090.Analyzer, "ps3090silent")
 }
 
+func TestPS3091(t *testing.T) {
+	defer config.SetForTesting(config.Config{CompiledResourceFuncs: []string{"compileGraph", "newPipeline"}})()
+	analysistest.Run(t, analysistest.TestData(), PS3091.Analyzer, "ps3091")
+}
+
+func TestPS3091SilentWithoutVocabulary(t *testing.T) {
+	defer config.SetForTesting(config.Config{})()
+	// The fixture has a single-slot compile cache; with no compiledResourceFuncs
+	// vocabulary the check must stay silent (no expectation comments).
+	analysistest.Run(t, analysistest.TestData(), PS3091.Analyzer, "ps3091silent")
+}
+
 func TestPS2001SilentWithoutVocabulary(t *testing.T) {
 	restore := config.SetForTesting(config.Config{})
 	defer restore()

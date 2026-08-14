@@ -2,11 +2,11 @@ version: 1
 entries:
     - file: config/config.go
       id: PS3106
-      message: parameter c of type Config is 288 bytes; passing it by value copies 288 bytes on every call — take a *Config for large values (advisory)
+      message: parameter c of type Config is 312 bytes; passing it by value copies 312 bytes on every call — take a *Config for large values (advisory)
       count: 1
     - file: config/config.go
       id: PS3106
-      message: receiver c of type Config is 288 bytes; passing it by value copies 288 bytes on every call — take a *Config for large values (advisory)
+      message: receiver c of type Config is 312 bytes; passing it by value copies 312 bytes on every call — take a *Config for large values (advisory)
       count: 1
     - file: internal/runner/baseline.go
       id: PS3103
@@ -34,7 +34,7 @@ entries:
       count: 5
     - file: internal/runner/runner.go
       id: PS3106
-      message: parameter cfg of type github.com/jxsl13/perfscan/perfscan/config.Config is 288 bytes; passing it by value copies 288 bytes on every call — take a *github.com/jxsl13/perfscan/perfscan/config.Config for large values (advisory)
+      message: parameter cfg of type github.com/jxsl13/perfscan/perfscan/config.Config is 312 bytes; passing it by value copies 312 bytes on every call — take a *github.com/jxsl13/perfscan/perfscan/config.Config for large values (advisory)
       count: 1
     - file: internal/runner/runner.go
       id: PS3106

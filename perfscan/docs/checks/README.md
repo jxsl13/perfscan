@@ -95,6 +95,7 @@ checks' fixes.
 | [PS3082](PS3082.md) | indirect | L2 | yes | math.Min or math.Max called inside a loop |
 | [PS3083](PS3083.md) | indirect | L3 |  | an integer-keyed map allocated per outer iteration and probed in a nested loop |
 | [PS3090](PS3090.md) | indirect | L2 |  | a capturing closure passed to a fan-out helper allocates per dispatch |
+| [PS3091](PS3091.md) | indirect | L2 |  | a one-entry compiled-graph/pipeline cache thrashes under alternating signatures; key a bounded cache by the full signature |
 | [PS3101](PS3101.md) | indirect | L1 | yes | a loop-invariant string↔[]byte conversion inside a loop |
 | [PS3102](PS3102.md) | indirect | L1 | yes | a map emptied with a range-delete loop where clear(m) is the direct idiom |
 | [PS3103](PS3103.md) | indirect | L2 |  | ranging by value over large elements copies each one |

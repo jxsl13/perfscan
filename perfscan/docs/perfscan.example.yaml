@@ -84,8 +84,17 @@ outputBufferElemTypes:
   - float64
   - float32
 
+# Constructor/bridge calls that build an EXPENSIVE compiled artifact (a graph,
+# pipeline, shader, plan, kernel or executable). PS3091 flags a single-slot cache
+# that recompiles whenever a stored signature changes (thrashing under
+# alternating shapes); list the names so the check can tell a costly compile from
+# cheap last-value memoization. Empty -> PS3091 stays silent.
+compiledResourceFuncs:
+  - compileGraph
+  - newPipeline
+
 # ---------------------------------------------------------------------------
-# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 12
+# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 13
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the
 # names:
 #
@@ -101,4 +110,5 @@ outputBufferElemTypes:
 #   fanOutHelpers:          [parallel.For]
 #   dtypeMethods:           [Dtype]
 #   outputBufferElemTypes:  [float64, float32]
+#   compiledResourceFuncs:  [NewMPSGraph, compilePipeline, buildProgram]
 # ---------------------------------------------------------------------------
