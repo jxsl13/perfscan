@@ -91,6 +91,52 @@ func TestRunStubbed(t *testing.T) {
 	}
 }
 
+// TestRunRejectsEmptyChecks pins that Run fails loudly rather than silently
+// scanning nothing when no checks are selected and no config file supplies them.
+// Argv would build --checks=-* (all checks disabled), so clang-tidy would run to
+// completion and report zero diagnostics — indistinguishable from a clean tree.
+// The Executor must never be invoked in that case. A ConfigFile (which supplies
+// its own checks) makes an empty Checks list legitimate, so that must still pass
+// the guard.
+func TestRunRejectsEmptyChecks(t *testing.T) {
+	origLook, origExec := LookPath, Executor
+	defer func() { LookPath, Executor = origLook, origExec }()
+	LookPath = func(string) (string, error) { return "/fake/clang-tidy", nil }
+
+	executed := false
+	Executor = func(context.Context, []string, *bytes.Buffer, *bytes.Buffer) (int, error) {
+		executed = true
+		return 0, nil
+	}
+
+	_, err := Run(context.Background(), Options{
+		Files:  []string{"/src/a.cpp"},
+		Checks: nil, // empty + no ConfigFile
+	})
+	if err == nil || !strings.Contains(err.Error(), "no checks selected") {
+		t.Errorf("Run with empty Checks and no ConfigFile: err = %v, want a 'no checks selected' error", err)
+	}
+	if executed {
+		t.Error("Executor must not be invoked when no checks are selected")
+	}
+
+	// A ConfigFile supplies checks, so empty Checks is legitimate and must NOT be
+	// rejected by this guard (it fails later trying to run the fake binary, but
+	// past the guard — proven by the Executor being reached).
+	executed = false
+	Executor = func(context.Context, []string, *bytes.Buffer, *bytes.Buffer) (int, error) {
+		executed = true
+		return 0, nil
+	}
+	_, _ = Run(context.Background(), Options{
+		Files:      []string{"/src/a.cpp"},
+		ConfigFile: "/some/.clang-tidy",
+	})
+	if !executed {
+		t.Error("Run with a ConfigFile and empty Checks must pass the guard (Executor should be reached)")
+	}
+}
+
 func TestRunMissingBinary(t *testing.T) {
 	origLook := LookPath
 	defer func() { LookPath = origLook }()
@@ -126,7 +172,7 @@ func TestRunExecutorError(t *testing.T) {
 	Executor = func(context.Context, []string, *bytes.Buffer, *bytes.Buffer) (int, error) {
 		return -1, errors.New("boom")
 	}
-	_, err := Run(context.Background(), Options{Files: []string{"a.cpp"}})
+	_, err := Run(context.Background(), Options{Files: []string{"a.cpp"}, Checks: []string{"performance-avoid-endl"}})
 	if err == nil || !strings.Contains(err.Error(), "invoking clang-tidy") {
 		t.Fatalf("Run with a failing Executor: err = %v, want it wrapped with \"invoking clang-tidy\"", err)
 	}
