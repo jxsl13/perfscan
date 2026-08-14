@@ -7,22 +7,43 @@ import (
 
 // fmt.Sprint over a plain int: fixed to strconv.Itoa.
 func sprintInt(n int) string {
-	return strconv.Itoa(n) // want `fmt\.Sprint\(i\) / fmt\.Sprintf\("%v", i\) on an integer pays fmt's reflection and boxing for a plain decimal; strconv\.Itoa/FormatInt/FormatUint converts it directly`
+	return strconv.Itoa(n) // want `fmt\.Sprint\(x\) / fmt\.Sprintf\("%v", x\) on a bool/int/float pays fmt's reflection for a value strconv formats directly`
 }
 
 // fmt.Sprintf("%v", ...) over a plain int: fixed to strconv.Itoa.
 func sprintfVInt(n int) string {
-	return strconv.Itoa(n) // want `fmt\.Sprint\(i\) / fmt\.Sprintf\("%v", i\) on an integer pays fmt's reflection and boxing for a plain decimal; strconv\.Itoa/FormatInt/FormatUint converts it directly`
+	return strconv.Itoa(n) // want `fmt\.Sprint\(x\) / fmt\.Sprintf\("%v", x\) on a bool/int/float pays fmt's reflection for a value strconv formats directly`
 }
 
 // A signed non-int width: fixed to strconv.FormatInt with the int64 widening.
 func sprintInt64(n int64) string {
-	return strconv.FormatInt(int64(n), 10) // want `fmt\.Sprint\(i\) / fmt\.Sprintf\("%v", i\) on an integer pays fmt's reflection and boxing for a plain decimal; strconv\.Itoa/FormatInt/FormatUint converts it directly`
+	return strconv.FormatInt(int64(n), 10) // want `fmt\.Sprint\(x\) / fmt\.Sprintf\("%v", x\) on a bool/int/float pays fmt's reflection for a value strconv formats directly`
 }
 
 // An unsigned width: fixed to strconv.FormatUint with the uint64 widening.
 func sprintUint(u uint) string {
-	return strconv.FormatUint(uint64(u), 10) // want `fmt\.Sprint\(i\) / fmt\.Sprintf\("%v", i\) on an integer pays fmt's reflection and boxing for a plain decimal; strconv\.Itoa/FormatInt/FormatUint converts it directly`
+	return strconv.FormatUint(uint64(u), 10) // want `fmt\.Sprint\(x\) / fmt\.Sprintf\("%v", x\) on a bool/int/float pays fmt's reflection for a value strconv formats directly`
+}
+
+// A plain bool: fixed to strconv.FormatBool.
+func sprintBool(b bool) string {
+	return strconv.FormatBool(b) // want `fmt\.Sprint\(x\) / fmt\.Sprintf\("%v", x\) on a bool/int/float pays fmt's reflection for a value strconv formats directly`
+}
+
+// A plain float64 under "%v": fixed to the shortest-'g' FormatFloat form.
+func sprintfVFloat64(f float64) string {
+	return strconv.FormatFloat(f, 'g', -1, 64) // want `fmt\.Sprint\(x\) / fmt\.Sprintf\("%v", x\) on a bool/int/float pays fmt's reflection for a value strconv formats directly`
+}
+
+// A plain float32: FormatFloat takes a float64, so the operand is widened
+// (value-preserving) while bitSize 32 keeps the float32 rounding.
+func sprintFloat32(f32 float32) string {
+	return strconv.FormatFloat(float64(f32), 'g', -1, 32) // want `fmt\.Sprint\(x\) / fmt\.Sprintf\("%v", x\) on a bool/int/float pays fmt's reflection for a value strconv formats directly`
+}
+
+// A plain float64 under Sprint: fixed like the "%v" spelling.
+func sprintFloat(f float64) string {
+	return strconv.FormatFloat(f, 'g', -1, 64) // want `fmt\.Sprint\(x\) / fmt\.Sprintf\("%v", x\) on a bool/int/float pays fmt's reflection for a value strconv formats directly`
 }
 
 // A string operand is the IDENTITY, owned by PS2130 — silent here.
@@ -55,16 +76,27 @@ func sprintNamed(p port) string {
 	return fmt.Sprintf("%v", p)
 }
 
+// THE SAME GUARD FOR FLOATS: a named float type with a String() method
+// prints via String() under %v/Sprint — NOT the FormatFloat digits — so
+// named floats must stay silent too.
+type Celsius float64
+
+func (c Celsius) String() string { return "warm" }
+
+func sprintFloatStringer(c Celsius) string {
+	return fmt.Sprint(c)
+}
+
+// A complex operand is out of scope (no strconv one-call equivalent of
+// fmt's (re+imi) rendering) — silent.
+func sprintComplex(c complex128) string {
+	return fmt.Sprint(c)
+}
+
 // Two operands: Sprint would need its operand handling (and %v twice would
 // be a different format) — silent.
 func sprintPair(a, b int) string {
 	return fmt.Sprint(a, b)
-}
-
-// A float operand is not an integer (its decimal form is FormatFloat's
-// business, with entirely different formatting) — silent.
-func sprintFloat(f float64) string {
-	return fmt.Sprint(f)
 }
 
 // A variadic spread is not a single operand — silent.
@@ -82,11 +114,11 @@ func sprintfLabeled(n int) string {
 func shadowed(n int) string {
 	strconv := n
 	_ = strconv
-	return fmt.Sprint(n) // want `fmt\.Sprint\(i\) / fmt\.Sprintf\("%v", i\) on an integer pays fmt's reflection and boxing for a plain decimal; strconv\.Itoa/FormatInt/FormatUint converts it directly`
+	return fmt.Sprint(n) // want `fmt\.Sprint\(x\) / fmt\.Sprintf\("%v", x\) on a bool/int/float pays fmt's reflection for a value strconv formats directly`
 }
 
 // COMMENT-SAFETY: a comment inside the replaced range would be silently
 // deleted by the rewrite — reported, no fix, call left intact.
 func commentInCall(n int) string {
-	return fmt.Sprint(n /* the id */) // want `fmt\.Sprint\(i\) / fmt\.Sprintf\("%v", i\) on an integer pays fmt's reflection and boxing`
+	return fmt.Sprint(n /* the id */) // want `fmt\.Sprint\(x\) / fmt\.Sprintf\("%v", x\) on a bool/int/float pays fmt's reflection`
 }
