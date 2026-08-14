@@ -97,6 +97,16 @@ type Config struct {
 	// silent (there is no language-level signal for "this is a hot
 	// operation output"; the set is the opt-in).
 	OutputBufferElemTypes []string `json:"outputBufferElemTypes,omitempty" yaml:"outputBufferElemTypes"`
+
+	// CompiledResourceFuncs are the constructor/bridge calls that produce an
+	// EXPENSIVE compiled artifact — a graph, pipeline, shader, plan, kernel or
+	// executable (e.g. NewMPSGraph, compilePipeline, buildProgram). PS3091 uses
+	// them to flag a single-slot cache that recompiles whenever a stored
+	// signature changes (`if sig != lastSig { lastGraph = compile(sig); lastSig
+	// = sig }`), which thrashes when the working set alternates among a few
+	// shapes. With none listed PS3091 stays silent — the set is the opt-in that
+	// distinguishes an expensive compile from cheap last-value memoization.
+	CompiledResourceFuncs []string `json:"compiledResourceFuncs,omitempty" yaml:"compiledResourceFuncs"`
 }
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
@@ -113,6 +123,7 @@ type Sets struct {
 	FanOutHelpers          map[string]bool
 	DtypeMethods           map[string]bool
 	OutputBufferElemTypes  map[string]bool
+	CompiledResourceFuncs  map[string]bool
 }
 
 func toSet(xs []string) map[string]bool {
@@ -141,6 +152,7 @@ func (c Config) Compile() Sets {
 		FanOutHelpers:          toSet(c.FanOutHelpers),
 		DtypeMethods:           toSet(c.DtypeMethods),
 		OutputBufferElemTypes:  toSet(c.OutputBufferElemTypes),
+		CompiledResourceFuncs:  toSet(c.CompiledResourceFuncs),
 	}
 }
 
