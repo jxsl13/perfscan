@@ -148,7 +148,7 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   flagged. No auto-fix: which replacement fits is a human call. **PX2111**
   map-double-lookup (`if (m.count(k)) { … m[k] … }` or `if (m.find(k) != m.end())
   { … m[k] … }` hashes/compares the key twice — once for the existence check, again
-  for `operator[]` — where one `find()` answers both:
+  for `operator[]` or `.at()` in the body — where one `find()` answers both:
   `auto it = m.find(k); if (it != m.end()) use(it->second);`). Precise: the map and
   key must be the SAME declared variables in the condition and the body
   (`equalsBoundNode`), so `if (m.count(a)) use(m[b])` is not flagged; the `count()`
