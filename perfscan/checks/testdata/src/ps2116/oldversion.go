@@ -1,0 +1,15 @@
+//go:build go1.20
+
+package ps2116
+
+// VERSION GUARD, pinned semantics: per-file version pinning exists only from
+// go1.21 on, so go/types CLAMPS a //go:build go1.20 line to go1.21 — the very
+// version that has the clear builtin. A file below go1.21 is therefore
+// unrepresentable inside a modern module, so this file IS flagged and fixed; the
+// go1.21 gate blocks the rewrite only via pass.Pkg.GoVersion() when a whole
+// MODULE still declares go < 1.21. Mirrors ps3104/ps3105's oldversion fixture.
+func oldVersion(s []int) {
+	for i := range s { // want `the loop writes the zero value to every element of s; clear\(s\) states that directly \(Go 1\.21\)`
+		s[i] = 0
+	}
+}
