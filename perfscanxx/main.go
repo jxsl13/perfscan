@@ -1567,7 +1567,22 @@ func printExplain(stdout, stderr io.Writer, id string) int {
 		fmt.Fprintf(stdout, "\n  ⚠ caveat: %s\n", e.Caveat)
 	}
 	fmt.Fprintf(stdout, "\n  %s\n", explainDocLine(e))
+	// A query-based custom check has no upstream page, so show the actual
+	// clang-query matcher — the precise, auditable definition of what it flags.
+	if e.Custom && e.Query != "" {
+		fmt.Fprintf(stdout, "\n  clang-query matcher:\n%s\n", indentLines(e.Query, "    "))
+	}
 	return 0
+}
+
+// indentLines prefixes every line of s with indent, so a multi-line matcher
+// prints as an indented block under its heading.
+func indentLines(s, indent string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = indent + l
+	}
+	return strings.Join(lines, "\n")
 }
 
 // explainDocLine points at the correct upstream clang-tidy page. The doc URL is

@@ -1152,6 +1152,40 @@ func TestExplainShowsCaveat(t *testing.T) {
 	}
 }
 
+// TestExplainShowsCustomMatcher pins that -explain surfaces the clang-query
+// matcher for a query-based custom check (its precise, auditable definition,
+// since these have no upstream clang-tidy page) and does NOT print one for a
+// built-in check (which links its upstream doc instead).
+func TestExplainShowsCustomMatcher(t *testing.T) {
+	sawCustom := false
+	for _, e := range catalog.All() {
+		out, _, code := runCLI("-explain", e.ID)
+		if code != 0 {
+			t.Errorf("-explain %s exit = %d", e.ID, code)
+			continue
+		}
+		if e.Custom && e.Query != "" {
+			sawCustom = true
+			if !strings.Contains(out, "clang-query matcher:") {
+				t.Errorf("-explain %s is a query-based check but shows no 'clang-query matcher:' block:\n%s", e.ID, out)
+			}
+			// A distinctive slice of the actual matcher must be reproduced.
+			head := e.Query
+			if len(head) > 30 {
+				head = head[:30]
+			}
+			if !strings.Contains(out, head) {
+				t.Errorf("-explain %s: matcher text %q not reproduced:\n%s", e.ID, head, out)
+			}
+		} else if strings.Contains(out, "clang-query matcher:") {
+			t.Errorf("-explain %s is not a query-based check but printed a matcher block:\n%s", e.ID, out)
+		}
+	}
+	if !sawCustom {
+		t.Fatal("no query-based custom checks found — the matcher-display path is unexercised")
+	}
+}
+
 // TestParallelReportRun pins the -j parallel analysis path: with more than one TU
 // and -j >= 2, perfscanxx splits the files across concurrent clang-tidy workers
 // (each analyzing a disjoint subset into its own export) and MERGES the results,
