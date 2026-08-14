@@ -80,7 +80,10 @@ reporting / `-json` / `-sarif` / `-diff` / `-baseline` runs that dominate CI.
 **best-effort**: a changed **header** is reported, but the TUs that include it are
 *not* scanned (perfscanxx has no include-dependency graph), so schedule a periodic
 full scan to catch header-driven regressions. A git failure falls back to a full
-scan, so a hiccup never turns the lint into a no-op.
+scan, so a hiccup never turns the lint into a no-op. Because the run is partial,
+`-changed -sarif` marks its SARIF `executionSuccessful=false` and the stale-baseline
+nudge is suppressed — so GitHub Code Scanning won't close alerts in files the
+incremental run never analyzed, and `-baseline` won't cry wolf about them.
 
 ### Exit codes
 

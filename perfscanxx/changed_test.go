@@ -200,3 +200,41 @@ func TestChangedBaselineNoFalseStale(t *testing.T) {
 		t.Errorf("-changed run falsely reported a stale baseline entry (b.cpp was just not scanned):\n%s", errOut)
 	}
 }
+
+// TestChangedSARIFNotAuthoritative pins the -changed x -sarif x GitHub interaction:
+// a -changed run is a PARTIAL scan, so its SARIF must set
+// invocations[].executionSuccessful=false. Otherwise GitHub Code Scanning would
+// treat the run as authoritative and CLOSE alerts in files the incremental scan
+// never analyzed — silently resolving real issues. A full scan stays true.
+func TestChangedSARIFNotAuthoritative(t *testing.T) {
+	origLook, origExec, origGit := tidy.LookPath, tidy.Executor, gitOutput
+	defer func() { tidy.LookPath, tidy.Executor, gitOutput = origLook, origExec, origGit }()
+
+	dir, files, _ := changedProject(t, "a.cpp", "b.cpp")
+	gitOutput = func(_ context.Context, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "rev-parse" {
+			return dir + "\n", nil
+		}
+		return "a.cpp\n", nil
+	}
+	execSuccessful := func(sarif string) bool {
+		// crude but sufficient: the field appears once in our single-run output.
+		i := strings.Index(sarif, `"executionSuccessful"`)
+		if i < 0 {
+			t.Fatalf("SARIF missing executionSuccessful:\n%s", sarif)
+		}
+		return strings.Contains(sarif[i:i+40], "true")
+	}
+
+	// -changed -> partial -> executionSuccessful=false.
+	out, _, _ := runCLI(append([]string{"-tidy", "clang-tidy", "-changed", "origin/main", "-checks", "PX3008", "-sarif", "-p", dir}, files...)...)
+	if execSuccessful(out) {
+		t.Errorf("-changed -sarif: executionSuccessful must be false (partial scan must not authoritatively close alerts):\n%s", out)
+	}
+
+	// Full scan (no -changed) -> executionSuccessful=true.
+	full, _, _ := runCLI(append([]string{"-tidy", "clang-tidy", "-checks", "PX3008", "-sarif", "-p", dir}, files...)...)
+	if !execSuccessful(full) {
+		t.Errorf("full -sarif run: executionSuccessful should be true:\n%s", full)
+	}
+}

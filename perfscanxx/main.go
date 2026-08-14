@@ -634,7 +634,12 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 
 	switch {
 	case *sarifOut:
-		if err := report.SARIF(stdout, findings, len(parseErrs) == 0); err != nil {
+		// executionSuccessful marks a COMPLETE run: false when TUs failed to parse
+		// OR when -changed deliberately analyzed only a subset — in either case the
+		// absence of a finding in an un-analyzed file means "not analyzed", not
+		// "resolved", so GitHub Code Scanning must NOT close its alerts.
+		complete := len(parseErrs) == 0 && *changed == ""
+		if err := report.SARIF(stdout, findings, complete); err != nil {
 			fmt.Fprintln(stderr, "perfscanxx:", err)
 			return 2
 		}
