@@ -376,8 +376,13 @@ func TestDiffDryRunPrintsPatchLeavesFileUnchanged(t *testing.T) {
 	if !strings.Contains(out, "-for (auto x : items) {}") || !strings.Contains(out, "+for (const auto& x : items) {}") {
 		t.Errorf("-diff stdout missing expected patch lines:\n%s", out)
 	}
-	if !strings.HasPrefix(out, "--- a/") {
-		t.Errorf("-diff stdout should start with a unified-diff header, got:\n%s", out)
+	// src is an absolute temp path, so the header is bare (no git a/ b/ prefix,
+	// which git apply rejects on absolute paths) and never double-slashed.
+	if !strings.HasPrefix(out, "--- "+src+"\n+++ "+src+"\n") {
+		t.Errorf("-diff stdout should start with a bare absolute unified-diff header, got:\n%s", out)
+	}
+	if strings.Contains(out, "a//") || strings.Contains(out, "b//") {
+		t.Errorf("-diff header must not double-slash an absolute path:\n%s", out)
 	}
 	if !strings.Contains(errOut, "would change") {
 		t.Errorf("-diff should print a summary to stderr, got %q", errOut)
