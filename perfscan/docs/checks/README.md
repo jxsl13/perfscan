@@ -30,6 +30,7 @@ checks' fixes.
 | [PS2008](PS2008.md) | alloc | L2 | yes | a loop that allocates one uniform slice per iteration into ARR[i] |
 | [PS2009](PS2009.md) | alloc | L1 | yes | strings.Split(s, sep)[0] allocates every piece just to read the head; strings.SplitN(s, sep, 2)[0] stops at the first separator |
 | [PS2010](PS2010.md) | alloc | L1 | yes | bytes.Equal of two []byte(string) conversions is the string comparison with two extra allocations |
+| [PS2011](PS2011.md) | alloc | L1 |  | []byte(strings.Repeat(s, n)) builds the repetition twice; bytes.Repeat([]byte(s), n) fills one buffer |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
