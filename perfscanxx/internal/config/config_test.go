@@ -3,7 +3,9 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func write(t *testing.T, dir, name, content string) string {
@@ -122,6 +124,39 @@ func TestLoadBaselineAndFixErrors(t *testing.T) {
 	f2, _ := Load(p2)
 	if f2.Baseline != nil || f2.FixErrors != nil {
 		t.Errorf("omitted keys should be nil: %+v", f2)
+	}
+}
+
+// TestLoadJobsAndTimeout pins the -j / -timeout config keys: jobs round-trips as
+// an int, timeout as a Go duration string exposed via TimeoutDuration, and a
+// malformed timeout is REJECTED by Load (fail loud, like an out-of-range level)
+// rather than silently ignored.
+func TestLoadJobsAndTimeout(t *testing.T) {
+	p := write(t, t.TempDir(), "c.yml", "jobs: 8\ntimeout: 5m\n")
+	f, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Jobs == nil || *f.Jobs != 8 {
+		t.Errorf("Jobs = %v, want 8", f.Jobs)
+	}
+	if d, ok := f.TimeoutDuration(); !ok || d != 5*time.Minute {
+		t.Errorf("TimeoutDuration = (%v, %v), want (5m, true)", d, ok)
+	}
+
+	// Omitted -> nil / not-set.
+	f2, _ := Load(write(t, t.TempDir(), "c.yml", "level: 1\n"))
+	if f2.Jobs != nil || f2.Timeout != nil {
+		t.Errorf("omitted jobs/timeout should be nil: %+v", f2)
+	}
+	if _, ok := f2.TimeoutDuration(); ok {
+		t.Error("TimeoutDuration on an unset timeout should report false")
+	}
+
+	// A malformed duration is a loud error.
+	if _, err := Load(write(t, t.TempDir(), "c.yml", "timeout: 5years\n")); err == nil ||
+		!strings.Contains(err.Error(), "invalid timeout") {
+		t.Errorf("Load with a bad timeout = %v, want an 'invalid timeout' error", err)
 	}
 }
 

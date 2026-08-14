@@ -106,7 +106,7 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		jobs       = fs.Int("j", 0, "parallel clang-tidy workers for the analysis pass (0 = one per CPU; 1 = sequential). Ignored for an in-place -fix, which always runs as a single pass")
 		timeout    = fs.Duration("timeout", 0, "abort the whole run if it exceeds this duration (e.g. 90s, 5m); 0 = no limit. A CI safety valve — clang-tidy can run very long on a pathological TU, and a hung worker would otherwise block a -j run indefinitely")
 		tidyBin    = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
-		configPath = fs.String("config", "", "path to a .perfscanxx.yml supplying project defaults (level, checks, exclude, tidy, extra-args, baseline, fix-errors; auto-discovered in the current directory); command-line flags override it")
+		configPath = fs.String("config", "", "path to a .perfscanxx.yml supplying project defaults (level, checks, exclude, tidy, extra-args, baseline, fix-errors, jobs, timeout; auto-discovered in the current directory); command-line flags override it")
 		showVer    = fs.Bool("version", false, "print version and exit")
 		verbose    = fs.Bool("v", false, "verbose: list the translation units that did not fully parse (instead of only their count)")
 		cmakeCfg   = fs.Bool("cmake", false, "if no compile_commands.json is found, auto-configure a detected CMake project to generate one (runs cmake configure; only use on trusted code)")
@@ -119,15 +119,6 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	fs.Usage = func() { printUsage(stderr, fs) }
 	if err := fs.Parse(args); err != nil {
 		return 2
-	}
-
-	// Optional overall deadline: derive it from the (signal-cancellable) context so
-	// -timeout and Ctrl-C compose — whichever fires first cancels the clang-tidy /
-	// cmake children. 0 leaves the context unbounded.
-	if *timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, *timeout)
-		defer cancel()
 	}
 
 	if *showVer {
@@ -206,7 +197,23 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		if cf.FixErrors != nil && !set["fix-errors"] {
 			*fixErrors = *cf.FixErrors
 		}
+		if cf.Jobs != nil && !set["j"] {
+			*jobs = *cf.Jobs
+		}
+		if d, ok := cf.TimeoutDuration(); ok && !set["timeout"] {
+			*timeout = d
+		}
 		fmt.Fprintf(stderr, "perfscanxx: using config %s\n", cfgPath)
+	}
+
+	// Optional overall deadline (resolved AFTER the config merge, so a config
+	// `timeout:` takes effect): derive it from the signal-cancellable context so
+	// -timeout and Ctrl-C compose — whichever fires first cancels the clang-tidy /
+	// cmake children. 0 leaves the context unbounded.
+	if *timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *timeout)
+		defer cancel()
 	}
 
 	if *maxLevel < 1 || *maxLevel > 3 {
@@ -1124,8 +1131,8 @@ Examples:
 	perfscanxx -explain PX1001           one check's documentation
 
 A .perfscanxx.yml in the working directory supplies project defaults
-(level, checks, exclude, tidy, extra-args) that command-line flags override,
-e.g.:
+(level, checks, exclude, tidy, extra-args, baseline, fix-errors, jobs, timeout)
+that command-line flags override, e.g.:
 
 	level: 2
 	checks: performance-*,PX21*
@@ -1134,6 +1141,8 @@ e.g.:
 	extra-args: [-isysroot, /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk]
 	baseline: .perfscanxx-baseline.yaml
 	fix-errors: false
+	jobs: 8
+	timeout: 5m
 
 Fix levels (the maintainability cost of a check's remedy):
 

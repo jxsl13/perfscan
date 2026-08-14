@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -35,6 +36,11 @@ type File struct {
 	// build-time-generated headers) its fix-errors policy once.
 	Baseline  *string `yaml:"baseline"`
 	FixErrors *bool   `yaml:"fix-errors"`
+	// Jobs is the -j worker count; Timeout is the -timeout deadline as a Go
+	// duration string (e.g. "5m"). Both let a CI config commit its parallelism and
+	// its run-time budget once. Timeout is validated in Load.
+	Jobs    *int    `yaml:"jobs"`
+	Timeout *string `yaml:"timeout"`
 }
 
 // Discover returns the path of the first config filename that exists in dir,
@@ -69,5 +75,23 @@ func Load(path string) (*File, error) {
 	if f.Level != nil && (*f.Level < 1 || *f.Level > 3) {
 		return nil, fmt.Errorf("%s: level %d out of range (want 1, 2, or 3)", filepath.Base(path), *f.Level)
 	}
+	if f.Timeout != nil {
+		if _, err := time.ParseDuration(*f.Timeout); err != nil {
+			return nil, fmt.Errorf("%s: invalid timeout %q (want a Go duration like 90s or 5m): %w", filepath.Base(path), *f.Timeout, err)
+		}
+	}
 	return &f, nil
+}
+
+// TimeoutDuration returns the parsed -timeout value and whether one was set. The
+// string was already validated in Load, so a parse error here is treated as unset.
+func (f *File) TimeoutDuration() (time.Duration, bool) {
+	if f.Timeout == nil {
+		return 0, false
+	}
+	d, err := time.ParseDuration(*f.Timeout)
+	if err != nil {
+		return 0, false
+	}
+	return d, true
 }
