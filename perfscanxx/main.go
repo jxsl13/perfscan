@@ -107,6 +107,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	if *showVer {
 		fmt.Fprintln(stdout, "perfscanxx", version)
+		// perfscanxx is a thin orchestrator over clang-tidy, so WHICH clang-tidy it
+		// resolves — and its LLVM major, which gates the query-based custom checks —
+		// is the single biggest variable in its behavior. Surface it here so a bug
+		// report or a "why did it find nothing" is self-diagnosing (e.g. an LLVM < 20
+		// that silently drops the custom checks, or the wrong keg-only brew binary).
+		switch path, err := tidy.Check(*tidyBin); {
+		case err != nil:
+			fmt.Fprintln(stdout, "clang-tidy: not found in PATH (install: brew install llvm)")
+		default:
+			if major, ok := tidy.MajorVersion(context.Background(), *tidyBin); ok {
+				fmt.Fprintf(stdout, "clang-tidy: %s (LLVM %d)\n", path, major)
+			} else {
+				fmt.Fprintf(stdout, "clang-tidy: %s (version unknown)\n", path)
+			}
+		}
 		return 0
 	}
 	// Stamp the build version into the SARIF tool.driver.version so GitHub Code
