@@ -707,6 +707,28 @@ func TestEquiv_WriteStringOfBytes(t *testing.T) {
 	}
 }
 
+// PS2129: fmt.Fprintf(w, "%s", s) / fmt.Fprint(w, s) over a plain string ->
+// io.WriteString(w, s). All three write exactly s's bytes to w and return the
+// same (n, err): %s writes a string operand verbatim, Fprint with one string
+// operand writes it verbatim, and io.WriteString writes s directly. The format
+// string is the only thing parsed — operand bytes (including %-signs and verb
+// bytes) are never re-interpreted. Completes the fmt-writer family's bit-identity
+// coverage alongside PS2113 and PS2118.
+func TestEquiv_FprintfStringToWriteString(t *testing.T) {
+	for _, s := range []string{"", "a", "hello", "100% done", "%d %s %v", "a\tb\n", "日本語", "a\x00b"} {
+		var a, b, c bytes.Buffer
+		nA, eA := fmt.Fprintf(&a, "%s", s)
+		nB, eB := fmt.Fprint(&b, s)
+		nC, eC := io.WriteString(&c, s)
+		if a.String() != c.String() || nA != nC || (eA == nil) != (eC == nil) {
+			t.Errorf("Fprintf(%%s, %q) vs io.WriteString: bytes %q/%q n %d/%d", s, a.String(), c.String(), nA, nC)
+		}
+		if b.String() != c.String() || nB != nC || (eB == nil) != (eC == nil) {
+			t.Errorf("Fprint(%q) vs io.WriteString: bytes %q/%q n %d/%d", s, b.String(), c.String(), nB, nC)
+		}
+	}
+}
+
 // PS2125: len([]rune(s)) -> utf8.RuneCountInString(s); len([]byte(s)) -> len(s).
 // Invalid UTF-8 is included: []rune decodes each bad byte to U+FFFD and
 // RuneCountInString counts it identically, so the identity must still hold.
