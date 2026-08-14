@@ -790,6 +790,64 @@ func TestEquiv_LoopCopy(t *testing.T) {
 	}()
 }
 
+// PS3066: 3+ sibling loops over the same bound touching one buffer -> one fused
+// loop. Fusion is bit-identical ONLY when each loop's body is index-LOCAL (touches
+// only buffer[i]) — then interleaving the stages per index preserves the exact
+// per-row order the passes already ran in. A CROSS-index read (a later loop
+// reading buffer[i-1] that an earlier loop wrote) makes the fused loop see a
+// half-updated buffer, so the check declines the fix there (stays advisory). This
+// pins both semantics.
+func TestEquiv_LoopFusion(t *testing.T) {
+	// Index-local: three passes each touching only [i] -> fused == unfused.
+	su := []float64{1, 2, 3, 4}
+	var accU float64
+	for i := range su {
+		su[i] *= 0.5
+	}
+	for i := range su {
+		accU += su[i]
+	}
+	for i := range su {
+		su[i] += 1
+	}
+	sf := []float64{1, 2, 3, 4}
+	var accF float64
+	for i := range sf {
+		sf[i] *= 0.5
+		accF += sf[i]
+		sf[i] += 1
+	}
+	if !slices.Equal(su, sf) || accU != accF {
+		t.Errorf("index-local fusion diverged: unfused %v/%v vs fused %v/%v", su, accU, sf, accF)
+	}
+
+	// Cross-index: loop 2 reads [i+1] that loop 1 doubles. Unfused, loop 1 doubles
+	// the WHOLE buffer before loop 2 runs, so cu[i+1] is doubled when read; fused,
+	// cf[i+1] has NOT been doubled yet when cf[i] reads it (fusion processes i
+	// before i+1) -> a different result. PS3066 conservatively declines the fix on
+	// ANY cross-index read (backward or forward, since it cannot prove which are
+	// safe); this forward case shows one that genuinely breaks fusion.
+	cu := []float64{1, 2, 3, 4}
+	for i := range cu {
+		cu[i] *= 2
+	}
+	for i := range cu {
+		if i < len(cu)-1 {
+			cu[i] += cu[i+1]
+		}
+	}
+	cf := []float64{1, 2, 3, 4}
+	for i := range cf {
+		cf[i] *= 2
+		if i < len(cf)-1 {
+			cf[i] += cf[i+1]
+		}
+	}
+	if slices.Equal(cu, cf) {
+		t.Errorf("expected cross-index fusion to DIVERGE (unfused %v vs fused %v) — this is why the check declines the fix on a cross-index read", cu, cf)
+	}
+}
+
 // PS2125: len([]rune(s)) -> utf8.RuneCountInString(s); len([]byte(s)) -> len(s).
 // Invalid UTF-8 is included: []rune decodes each bad byte to U+FFFD and
 // RuneCountInString counts it identically, so the identity must still hold.
