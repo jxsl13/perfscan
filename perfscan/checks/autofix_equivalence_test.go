@@ -2240,3 +2240,120 @@ func TestEquiv_PS2135WriteBytesEquivalent(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS2136StrconvBytesToAppend pins that PS2136's rewrite of
+// []byte(strconv.FOO(args...)) to strconv.AppendFOO(nil, args...) is
+// byte-identical for every matched verb. In the standard library each
+// Format*/Quote*/Itoa is implemented as string(Append*(nil, ...)), so the
+// Append form yields exactly the bytes the []byte conversion copies out of
+// the string — and every output is at least one byte long (a digit,
+// "true"/"false", or the opening quote), so there is no nil-vs-empty-slice
+// corner: the equivalence holds including nil-ness.
+func TestEquiv_PS2136StrconvBytesToAppend(t *testing.T) {
+	t.Run("Itoa", func(t *testing.T) {
+		ints := []int{0, 1, -1, 9, 10, -10, 123456, -123456, math.MaxInt, math.MinInt, math.MaxInt32, math.MinInt32}
+		for i := -1100; i <= 1100; i++ {
+			ints = append(ints, i)
+		}
+		for _, n := range ints {
+			orig := []byte(strconv.Itoa(n))             // original
+			got := strconv.AppendInt(nil, int64(n), 10) // rewritten (Itoa special case)
+			if !bytes.Equal(orig, got) || got == nil {
+				t.Errorf("Itoa(%d): []byte=%q != AppendInt=%q", n, orig, got)
+			}
+		}
+	})
+	t.Run("FormatInt", func(t *testing.T) {
+		ints := []int64{0, 1, -1, math.MaxInt64, math.MinInt64, math.MaxInt32, math.MinInt32, 255, -255, 1 << 40}
+		for _, x := range ints {
+			for _, base := range []int{2, 8, 10, 16, 36} {
+				orig := []byte(strconv.FormatInt(x, base))
+				got := strconv.AppendInt(nil, x, base)
+				if !bytes.Equal(orig, got) || got == nil {
+					t.Errorf("FormatInt(%d,%d): %q != %q", x, base, orig, got)
+				}
+			}
+		}
+	})
+	t.Run("FormatUint", func(t *testing.T) {
+		uints := []uint64{0, 1, math.MaxUint64, math.MaxUint32, 255, 1 << 63, 1<<63 - 1}
+		for _, u := range uints {
+			for _, base := range []int{2, 8, 10, 16, 36} {
+				orig := []byte(strconv.FormatUint(u, base))
+				got := strconv.AppendUint(nil, u, base)
+				if !bytes.Equal(orig, got) || got == nil {
+					t.Errorf("FormatUint(%d,%d): %q != %q", u, base, orig, got)
+				}
+			}
+		}
+	})
+	t.Run("FormatFloat", func(t *testing.T) {
+		floats := []float64{
+			0, math.Copysign(0, -1), 1.5, -1.5, math.Pi, 1e300, -1e-300,
+			math.NaN(), math.Inf(1), math.Inf(-1),
+			math.MaxFloat64, math.SmallestNonzeroFloat64, 3.4028235e38, // ~MaxFloat32
+		}
+		type shape struct {
+			fmt  byte
+			prec int
+			bits int
+		}
+		shapes := []shape{
+			{'g', -1, 64}, {'g', -1, 32}, {'e', 6, 64}, {'f', 3, 64},
+			{'b', -1, 64}, {'x', -1, 64}, {'E', 2, 32}, {'G', 10, 64},
+		}
+		for _, f := range floats {
+			for _, s := range shapes {
+				orig := []byte(strconv.FormatFloat(f, s.fmt, s.prec, s.bits))
+				got := strconv.AppendFloat(nil, f, s.fmt, s.prec, s.bits)
+				if !bytes.Equal(orig, got) || got == nil {
+					t.Errorf("FormatFloat(%v,%q,%d,%d): %q != %q", f, s.fmt, s.prec, s.bits, orig, got)
+				}
+			}
+		}
+	})
+	t.Run("FormatBool", func(t *testing.T) {
+		for _, v := range []bool{true, false} {
+			orig := []byte(strconv.FormatBool(v))
+			got := strconv.AppendBool(nil, v)
+			if !bytes.Equal(orig, got) || got == nil {
+				t.Errorf("FormatBool(%v): %q != %q", v, orig, got)
+			}
+		}
+	})
+	t.Run("QuoteStrings", func(t *testing.T) {
+		strs := []string{
+			"", "a", "hello\tworld", "quote\"me", "back\\slash", "line\nbreak",
+			"日本語", "emoji😀", "\x00\x01\x1f", "\x7f", "\xff\xfe", // invalid UTF-8
+			" ", " ", "mixed 日本 ascii", "'single'",
+		}
+		for _, s := range strs {
+			if orig, got := []byte(strconv.Quote(s)), strconv.AppendQuote(nil, s); !bytes.Equal(orig, got) || got == nil {
+				t.Errorf("Quote(%q): %q != %q", s, orig, got)
+			}
+			if orig, got := []byte(strconv.QuoteToASCII(s)), strconv.AppendQuoteToASCII(nil, s); !bytes.Equal(orig, got) || got == nil {
+				t.Errorf("QuoteToASCII(%q): %q != %q", s, orig, got)
+			}
+			if orig, got := []byte(strconv.QuoteToGraphic(s)), strconv.AppendQuoteToGraphic(nil, s); !bytes.Equal(orig, got) || got == nil {
+				t.Errorf("QuoteToGraphic(%q): %q != %q", s, orig, got)
+			}
+		}
+	})
+	t.Run("QuoteRunes", func(t *testing.T) {
+		runes := []rune{
+			'A', '0', '日', 0, 1, '\t', '\n', '\'', '\\', 0x7f, 0x80,
+			utf8.RuneError, -1, -100, 0x10FFFF, 0x110000, 0x1F600, 0x2028, 0x00a0,
+		}
+		for _, r := range runes {
+			if orig, got := []byte(strconv.QuoteRune(r)), strconv.AppendQuoteRune(nil, r); !bytes.Equal(orig, got) || got == nil {
+				t.Errorf("QuoteRune(%d): %q != %q", r, orig, got)
+			}
+			if orig, got := []byte(strconv.QuoteRuneToASCII(r)), strconv.AppendQuoteRuneToASCII(nil, r); !bytes.Equal(orig, got) || got == nil {
+				t.Errorf("QuoteRuneToASCII(%d): %q != %q", r, orig, got)
+			}
+			if orig, got := []byte(strconv.QuoteRuneToGraphic(r)), strconv.AppendQuoteRuneToGraphic(nil, r); !bytes.Equal(orig, got) || got == nil {
+				t.Errorf("QuoteRuneToGraphic(%d): %q != %q", r, orig, got)
+			}
+		}
+	})
+}
