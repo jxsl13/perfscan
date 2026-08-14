@@ -3119,3 +3119,54 @@ func (equivNamedStringerInt) String() string { return "custom" }
 type equivNamedStringerFloat float64
 
 func (equivNamedStringerFloat) String() string { return "customf" }
+
+// PS2138: len(bytes.Runes(b)) -> utf8.RuneCount(b). The identity holds by
+// construction — bytes.Runes sizes its result exactly as
+// make([]rune, utf8.RuneCount(s)) — but this pins it at runtime over
+// adversarial inputs: nil, empty, ASCII, multi-byte widths 2/3/4,
+// truncated sequences, bare continuation bytes, overlong encodings,
+// surrogate encodings, > MaxRune encodings, NUL bytes and random garbage.
+// Both walk the input with utf8.DecodeRune semantics (each erroneous byte
+// counts as one rune of width 1), so the integers must agree on EVERY
+// input; a stdlib change breaking that fails here before an unsafe fix
+// could ship.
+func TestEquiv_PS2138LenBytesRunes(t *testing.T) {
+	inputs := [][]byte{
+		nil,
+		{},
+		[]byte("a"),
+		[]byte("hello world"),
+		[]byte("héllo wörld …"),
+		[]byte("日本語"),
+		[]byte("😀🇩🇪👍🏼"),          // 4-byte encodings incl. flag + skin-tone sequences
+		{0x80},                   // bare continuation byte
+		{0x80, 0x80, 0x80},       // run of continuation bytes
+		{0xC0},                   // truncated 2-byte starter
+		{0xC2},                   // truncated valid starter
+		{0xC2, 0xA9},             // complete 2-byte rune
+		{0xE2, 0x82},             // truncated 3-byte sequence
+		{0xE2, 0x82, 0xAC},       // complete 3-byte rune (€)
+		{0xF0, 0x9F, 0x98},       // truncated 4-byte sequence
+		{0xF0, 0x9F, 0x98, 0x80}, // complete 4-byte rune
+		{0xFF, 0xFE, 0xFD},       // invalid starters
+		{0xC0, 0x80},             // overlong NUL
+		{0xE0, 0x80, 0x80},       // overlong 3-byte
+		{0xED, 0xA0, 0x80},       // encoded UTF-16 surrogate
+		{0xF4, 0x90, 0x80, 0x80}, // above MaxRune
+		{0x00},                   // NUL
+		[]byte("\x00\x00mixed\x80\xC2ascii日本\xF0\x9F"),
+	}
+	rng := rand.New(rand.NewSource(2138))
+	for i := 0; i < 2000; i++ {
+		b := make([]byte, rng.Intn(80))
+		rng.Read(b)
+		inputs = append(inputs, b)
+	}
+	for _, b := range inputs {
+		before := len(bytes.Runes(b))
+		after := utf8.RuneCount(b)
+		if before != after {
+			t.Fatalf("len(bytes.Runes(%q)) = %d, utf8.RuneCount = %d — the PS2138 identity is broken", b, before, after)
+		}
+	}
+}

@@ -1,0 +1,96 @@
+package ps2138
+
+import (
+	"bytes"
+)
+
+func process(int) {}
+
+func next() []byte { return nil }
+
+// Basic assignment; the file has no unicode/utf8 import yet, so the
+// first fix adds it. The bytes import survives: other functions below
+// keep genuine bytes references.
+func runeCount(b []byte) int {
+	n := len(bytes.Runes(b)) // want `len\(bytes\.Runes\(b\)\) allocates a throwaway \[\]rune of every decoded rune just to count them; utf8\.RuneCount\(b\) is the direct, bit-identical count \(allocation-free\)`
+	return n
+}
+
+// Inside a larger expression: the replacement is a call — a primary
+// expression — so no parentheses are ever needed.
+func runeCountExpr(b []byte) int {
+	return len(bytes.Runes(b)) + 1 // want `len\(bytes\.Runes\(b\)\) allocates a throwaway \[\]rune of every decoded rune just to count them; utf8\.RuneCount\(b\) is the direct, bit-identical count \(allocation-free\)`
+}
+
+// Call-argument context.
+func runeArg(b []byte) {
+	process(len(bytes.Runes(b))) // want `len\(bytes\.Runes\(b\)\) allocates a throwaway \[\]rune of every decoded rune just to count them; utf8\.RuneCount\(b\) is the direct, bit-identical count \(allocation-free\)`
+}
+
+// A parenthesized inner call: the parens belong to the replaced
+// scaffolding and vanish with it.
+func parenthesized(b []byte) int {
+	return len((bytes.Runes(b))) // want `len\(bytes\.Runes\(b\)\) allocates a throwaway \[\]rune of every decoded rune just to count them; utf8\.RuneCount\(b\) is the direct, bit-identical count \(allocation-free\)`
+}
+
+// The argument is kept verbatim, in place, evaluated exactly once —
+// side effects preserved in count and order.
+func sideEffect() int {
+	return len(bytes.Runes(next())) // want `len\(bytes\.Runes\(next\(\)\)\) allocates a throwaway \[\]rune of every decoded rune just to count them; utf8\.RuneCount\(next\(\)\) is the direct, bit-identical count \(allocation-free\)`
+}
+
+// The argument may itself reference bytes: that reference is inside the
+// preserved argument text and keeps the import alive.
+func nested(b []byte) int {
+	return len(bytes.Runes(bytes.ToUpper(b))) // want `len\(bytes\.Runes\(bytes\.ToUpper\(b\)\)\) allocates a throwaway \[\]rune of every decoded rune just to count them; utf8\.RuneCount\(bytes\.ToUpper\(b\)\) is the direct, bit-identical count \(allocation-free\)`
+}
+
+// Reported but NOT fixed: a comment inside the rewritten scaffolding
+// would be destroyed by the edits.
+func commented(b []byte) int {
+	return len( // keep me // want `len\(bytes\.Runes\(b\)\) allocates a throwaway \[\]rune of every decoded rune just to count them; utf8\.RuneCount\(b\) is the direct, bit-identical count \(allocation-free\)`
+		bytes.Runes(b))
+}
+
+// The utf8 qualifier is shadowed at the call site: the rewrite could
+// not reference the package — reported, no fix.
+func shadowedUtf8(b []byte) int {
+	utf8 := 0
+	_ = utf8
+	return len(bytes.Runes(b)) // want `len\(bytes\.Runes\(b\)\) allocates a throwaway \[\]rune of every decoded rune just to count them; utf8\.RuneCount\(b\) is the direct, bit-identical count \(allocation-free\)`
+}
+
+// --- guards: none of the following may be reported ---
+
+// The conversion stored in a variable first may have other consumers.
+func storedFirst(b []byte) int {
+	r := bytes.Runes(b)
+	return len(r)
+}
+
+// The outer call is not the builtin len.
+func notLen(b []byte) int {
+	return cap(bytes.Runes(b))
+}
+
+// A shadowed len is not the builtin.
+func shadowedLen(b []byte) int {
+	len := func([]rune) int { return 0 }
+	return len(bytes.Runes(b))
+}
+
+// The argument of len is not DIRECTLY the bytes.Runes call.
+func sliced(b []byte) int {
+	return len(bytes.Runes(b)[1:])
+}
+
+// A local value named bytes with a Runes method is not the stdlib
+// package; the type-pinned qualifier match rejects it.
+type fakeBytes struct{}
+
+func (fakeBytes) Runes(b []byte) []rune { return nil }
+
+func localShadow(b []byte) int {
+	bytes := fakeBytes{}
+	return len(bytes.Runes(b))
+}
