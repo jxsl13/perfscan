@@ -87,6 +87,16 @@ type Config struct {
 	// per-element accessor while a sibling case takes typed storage
 	// (n-dimensional-data libraries only).
 	DtypeMethods []string `json:"dtypeMethods,omitempty" yaml:"dtypeMethods"`
+
+	// OutputBufferElemTypes are the element type names of a project's hot
+	// operation-result buffers (e.g. float64, float32, or a named scalar
+	// type). PS2140 uses them to flag operation functions that allocate an
+	// input-sized []T result, fully overwrite it, and return it — a shape
+	// that denies hot callers buffer reuse and is better served by a
+	// caller-owned Into/out variant. With no types listed PS2140 stays
+	// silent (there is no language-level signal for "this is a hot
+	// operation output"; the set is the opt-in).
+	OutputBufferElemTypes []string `json:"outputBufferElemTypes,omitempty" yaml:"outputBufferElemTypes"`
 }
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
@@ -102,6 +112,7 @@ type Sets struct {
 	VectorizedSiblingFuncs map[string]bool
 	FanOutHelpers          map[string]bool
 	DtypeMethods           map[string]bool
+	OutputBufferElemTypes  map[string]bool
 }
 
 func toSet(xs []string) map[string]bool {
@@ -129,6 +140,7 @@ func (c Config) Compile() Sets {
 		VectorizedSiblingFuncs: toSet(c.VectorizedSiblingFuncs),
 		FanOutHelpers:          toSet(c.FanOutHelpers),
 		DtypeMethods:           toSet(c.DtypeMethods),
+		OutputBufferElemTypes:  toSet(c.OutputBufferElemTypes),
 	}
 }
 

@@ -321,6 +321,7 @@ func missingVocab(c *lint.Check, cfg config.Config) []string {
 		"vectorizedSiblingFuncs": len(cfg.VectorizedSiblingFuncs),
 		"fanOutHelpers":          len(cfg.FanOutHelpers),
 		"dtypeMethods":           len(cfg.DtypeMethods),
+		"outputBufferElemTypes":  len(cfg.OutputBufferElemTypes),
 	}
 	missing := make([]string, 0, len(c.Vocab))
 	for _, v := range c.Vocab {
