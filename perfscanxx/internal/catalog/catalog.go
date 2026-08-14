@@ -610,31 +610,31 @@ var entries = []Entry{
 		Message: "the key is looked up twice on this map — the condition (m.count(k) or m.find(k) != m.end()) and m[k]/m.at(k) in the body hash/compare the same key again; hold the iterator instead: auto it = m.find(k); if (it != m.end()) use(it->second); (query-based, no auto-fix)",
 	},
 	{
-		ID: "PX2112", TidyName: "custom-return-move-temporary",
+		ID: "PX2112", TidyName: "custom-redundant-move-temporary",
 		Level: LevelStructured, Category: "moves",
-		Title:  "return std::move(<temporary>) turns a prvalue into an xvalue and blocks the copy elision that would construct the value directly; drop the std::move",
+		Title:  "std::move on a temporary (prvalue) is redundant and turns it into an xvalue, blocking the copy elision that would construct the value in place; drop the std::move",
 		HasFix: false,
 		Custom: true,
 		Bind:   "mv",
 		// std::move applied to a TEMPORARY (a prvalue — a by-value function/method
-		// call or a constructor temporary) inside a return statement. The prvalue is
-		// already an rvalue, so the std::move is redundant; worse, it makes the
-		// return an xvalue, defeating the guaranteed copy elision that would have
-		// constructed the return value in place — a strict pessimization (an extra
-		// move). The argument is matched as a cxxBindTemporaryExpr: a materialized
-		// prvalue temporary whose type has a non-trivial destructor (the resource-
-		// owning, move-relevant types — std::string/vector/unique_ptr/…). This is the
-		// distinguishing signal — an lvalue-reference argument (std::move(getRef()),
-		// a REAL move) has no bound temporary and is NOT flagged, and moving a NAMED
-		// LOCAL is PX2102's job (declRefExpr, no temporary). forEachDescendant also
-		// covers `return sink(std::move(makeX()))`, where the move likewise blocks the
-		// argument's elision. isExpansionInMainFile keeps it off library headers.
-		// clang-tidy's performance-move-const-arg does NOT catch this (verified). NO
-		// auto-fix: dropping the std::move wrapper is a trivial but human edit.
-		Query: `match returnStmt(isExpansionInMainFile(), forEachDescendant(` +
-			`callExpr(callee(functionDecl(hasName("::std::move"))), ` +
-			`hasArgument(0, cxxBindTemporaryExpr())).bind("mv")))`,
-		Message: "std::move on a temporary here is redundant (a prvalue is already an rvalue) and blocks the guaranteed copy elision that would construct the value in place — a strict pessimization; return the expression without std::move (query-based, no auto-fix)",
+		// call or a constructor temporary) in ANY position: `return std::move(f())`,
+		// `auto x = std::move(f())`, `sink(std::move(f()))`, `v.push_back(std::move(
+		// f()))`. The prvalue is already an rvalue, so the std::move is always
+		// redundant; worse, it makes the expression an xvalue, defeating the
+		// (guaranteed, in a return/initializer) copy elision that would have
+		// constructed the value in place — a pessimization (an extra move) wherever
+		// elision applied. The argument is matched as a cxxBindTemporaryExpr: a
+		// materialized prvalue temporary whose type has a non-trivial destructor (the
+		// resource-owning, move-relevant types — std::string/vector/unique_ptr/…).
+		// This is the distinguishing signal — an lvalue-reference argument
+		// (std::move(getRef()), a REAL move) has no bound temporary and is NOT
+		// flagged, and moving a NAMED LOCAL is PX2102's job (a declRefExpr, no
+		// temporary). isExpansionInMainFile keeps it off library headers. clang-tidy's
+		// performance-move-const-arg does NOT catch this (verified). NO auto-fix:
+		// dropping the std::move wrapper is a trivial but human edit.
+		Query: `match callExpr(isExpansionInMainFile(), callee(functionDecl(hasName("::std::move"))), ` +
+			`hasArgument(0, cxxBindTemporaryExpr())).bind("mv")`,
+		Message: "std::move on a temporary here is redundant — a prvalue is already an rvalue — and turns it into an xvalue, defeating the copy elision that would construct the value in place (a pessimization in a return or initializer); drop the std::move (query-based, no auto-fix)",
 	},
 }
 
