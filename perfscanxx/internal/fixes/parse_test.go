@@ -324,3 +324,56 @@ func TestParseBlockScalarIndicatorVariants(t *testing.T) {
 		t.Fatalf("valid export not parsed cleanly: %v, %+v", err, f)
 	}
 }
+
+// TestMarshalRoundTripMultiLineReplacement pins the parallel-worker MERGE
+// contract: a worker export carrying a multi-line ReplacementText (LLVM's
+// block-scalar form, e.g. a prefer-member-initializer fix) must survive
+// Parse -> Marshal -> Parse, because runReport merges the per-worker exports by
+// Marshalling the combined ExportFile and the rest of the pipeline re-Parses it.
+// A regression in Marshal (or in the block-scalar recovery on the re-parse)
+// would silently drop that worker's findings from a -j run — the failure mode
+// that made a full abseil scan abort before #573.
+func TestMarshalRoundTripMultiLineReplacement(t *testing.T) {
+	doc := []byte("MainSourceFile: x.cc\n" +
+		"Diagnostics:\n" +
+		"  - DiagnosticName: cppcoreguidelines-prefer-member-initializer\n" +
+		"    DiagnosticMessage:\n" +
+		"      Message: 'init in member initializer'\n" +
+		"      FilePath: x.cc\n" +
+		"      FileOffset: 42\n" +
+		"      Replacements:\n" +
+		"          - FilePath: x.cc\n" +
+		"            Offset: 30\n" +
+		"            Length: 0\n" +
+		"            ReplacementText: |4-\n" +
+		"               : a_(new Rep(\n" +
+		"                    arg))\n" +
+		"          - FilePath: x.cc\n" +
+		"            Offset: 42\n" +
+		"            Length: 12\n" +
+		"            ReplacementText: \"\"\n" +
+		"    Level: Warning\n")
+
+	ef, err := Parse(doc)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	y, err := Marshal(ef)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	ef2, err := Parse(y)
+	if err != nil {
+		t.Fatalf("re-Parse of the marshalled merge failed (worker findings would be dropped): %v\n%s", err, y)
+	}
+	if len(ef2.Diagnostics) != 1 {
+		t.Fatalf("round-trip lost the diagnostic: got %d", len(ef2.Diagnostics))
+	}
+	d := ef2.Diagnostics[0]
+	if d.DiagnosticName != "cppcoreguidelines-prefer-member-initializer" || d.DiagnosticMessage.FileOffset != 42 {
+		t.Errorf("round-trip corrupted the diagnostic: %+v", d)
+	}
+	if n := len(d.DiagnosticMessage.Replacements); n != 2 {
+		t.Errorf("round-trip lost replacements: got %d, want 2", n)
+	}
+}
