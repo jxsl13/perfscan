@@ -193,6 +193,31 @@ func TestUnifiedDiffMergesNearbyChangesAndMarksNoNewline(t *testing.T) {
 	}
 }
 
+// TestUnifiedDiffAsymmetricNoNewlineOnChangedLine pins the real perfscan case the
+// symmetric test above misses: the ORIGINAL file lacks a final newline, but the
+// fixed output has one because format.Source always terminates the file. When a
+// fix rewrites that last line, the diff must attach `\ No newline at end of file`
+// ONLY to the removed (unterminated) side and leave the added (terminated) side
+// unmarked — exactly how git/patch represent gaining a trailing newline. A
+// regression that keyed the marker off the wrong side, or emitted it for both,
+// would produce a patch git apply rejects.
+func TestUnifiedDiffAsymmetricNoNewlineOnChangedLine(t *testing.T) {
+	a := []byte("keep\nold")   // no final newline; last line "old"
+	b := []byte("keep\nnew\n") // format.Source added the newline; last line "new"
+	got := unifiedDiff("f.txt", a, b)
+	want := `--- a/f.txt
++++ b/f.txt
+@@ -1,2 +1,2 @@
+ keep
+-old
+\ No newline at end of file
++new
+`
+	if got != want {
+		t.Errorf("asymmetric no-newline diff mismatch\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestUnifiedDiffSplitsFarApartChangesIntoSeparateHunks pins the multi-hunk path:
 // two changes separated by more than 2*diffContext (6) equal lines must render as
 // TWO independent @@ hunks, each with its own correct start line and count. This
