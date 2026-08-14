@@ -155,10 +155,11 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   form is a member call so the free `std::count` (PX2110) never collides; and the
   `find(k) == m.end()` **absence** form is deliberately not matched (there `m[k]` is
   an insert, a `try_emplace` case, not a redundant lookup). No auto-fix: the rewrite
-  restructures the `if` around the iterator. **PX2112** return-move-temporary
-  (`return std::move(makeThing())` — `std::move` on a **prvalue temporary** is
-  redundant and turns the return into an xvalue, defeating the guaranteed copy
-  elision that would construct the value in place: a strict pessimization). The
+  restructures the `if` around the iterator. **PX2112** redundant-move-temporary
+  (`std::move` on a **prvalue temporary** — `return std::move(makeThing())`,
+  `auto x = std::move(f())`, `sink(std::move(f()))` — is always redundant, and
+  turns the prvalue into an xvalue that defeats the copy elision which would
+  construct the value in place: a pessimization wherever elision applied). The
   temporary is matched as a `cxxBindTemporaryExpr`, so a move of an **lvalue
   reference** (`std::move(getRef())`, a real move) and a move of a named **local**
   (that's PX2102) are not flagged; `performance-move-const-arg` does not catch this.

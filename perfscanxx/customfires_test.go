@@ -17,7 +17,7 @@ import (
 //	PX2101 reserve-before-loop, PX2102 pessimizing-move, PX2103 catch-by-value,
 //	PX2104 regex-in-loop, PX2105 dynamic-cast-in-loop, PX2106 stringstream-in-loop,
 //	PX2107 pow-const-exponent, PX2108 vector-bool, PX2109 std-list,
-//	PX2110 count-for-existence, PX2111 map-double-lookup, PX2112 return-move-temporary.
+//	PX2110 count-for-existence, PX2111 map-double-lookup, PX2112 redundant-move-temporary.
 const customTriggerSrc = `#include <vector>
 #include <regex>
 #include <sstream>
@@ -635,20 +635,24 @@ func TestPX2111DoesNotFireOnDifferentKeyOrNoAccess(t *testing.T) {
 	}
 }
 
-// px2112MoveTempSrc pins PX2112's scope: it fires on `return std::move(<prvalue
-// temporary>)` (a by-value call or ctor temporary), but NOT on std::move of an
-// lvalue reference (a real move), NOT on std::move of a named local (PX2102's
-// job), and NOT on a plain `return call();` with no move.
+// px2112MoveTempSrc pins PX2112's scope: it fires on std::move of a prvalue
+// temporary (a by-value call or ctor temporary) in ANY position — return, an
+// initializer, or a call argument — but NOT on std::move of an lvalue reference
+// (a real move), NOT on std::move of a named local (PX2102's job), and NOT on a
+// plain `return call();` with no move.
 const px2112MoveTempSrc = `#include <utility>
 #include <string>
 #include <vector>
 std::string byVal();
 std::string& byRef();
-std::string prvalueCall(){ return std::move(byVal()); }                 // MATCH line 6
-std::vector<int> ctorTemp(){ return std::move(std::vector<int>{1,2}); }  // MATCH line 7
+std::string prvalueCall(){ return std::move(byVal()); }                 // MATCH line 6 (return)
+std::vector<int> ctorTemp(){ return std::move(std::vector<int>{1,2}); }  // MATCH line 7 (ctor temp)
 std::string lvalueRef(){ return std::move(byRef()); }                    // NO line 8 (real move of an lvalue)
 std::string namedLocal(){ std::string s; return std::move(s); }          // NO line 9 (PX2102, a local)
 std::string noMove(){ return byVal(); }                                  // NO line 10 (no move)
+void sink(std::string);
+void initForm(){ auto x = std::move(byVal()); (void)x; }                 // MATCH line 12 (initializer)
+void argForm(){ sink(std::move(byVal())); }                              // MATCH line 13 (call argument)
 `
 
 // TestPX2112DoesNotFireOnLvalueOrLocal pins that PX2112 fires on the two
@@ -697,8 +701,8 @@ func TestPX2112DoesNotFireOnLvalueOrLocal(t *testing.T) {
 	}
 
 	tag := "[" + e.TidyName + "]"
-	if n := strings.Count(output, tag); n != 2 {
-		t.Errorf("PX2112 fired %d time(s), want exactly 2 (the prvalue call and the ctor temporary):\n%s", n, output)
+	if n := strings.Count(output, tag); n != 4 {
+		t.Errorf("PX2112 fired %d time(s), want exactly 4 (return prvalue, ctor temp, initializer, call arg):\n%s", n, output)
 	}
 	for _, bad := range []string{"mv.cpp:8:", "mv.cpp:9:", "mv.cpp:10:"} {
 		if strings.Contains(output, bad) {
