@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
@@ -108,6 +109,7 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		tidyBin    = fs.String("tidy", os.Getenv("PERFSCANXX_CLANG_TIDY"), "path to the clang-tidy binary (default: $PERFSCANXX_CLANG_TIDY or search PATH; on keg-only brew llvm use /opt/homebrew/opt/llvm/bin/clang-tidy)")
 		configPath = fs.String("config", "", "path to a .perfscanxx.yml supplying project defaults (level, checks, exclude, tidy, extra-args, baseline, fix-errors, jobs, timeout; auto-discovered in the current directory); command-line flags override it")
 		showVer    = fs.Bool("version", false, "print version and exit")
+		doctor     = fs.Bool("doctor", false, "diagnose the environment (clang-tidy presence + LLVM version, query-custom-check support, compile database, macOS sysroot) with remediation, then exit — 0 if ready to scan, 1 otherwise")
 		verbose    = fs.Bool("v", false, "verbose: list the translation units that did not fully parse (instead of only their count)")
 		cmakeCfg   = fs.Bool("cmake", false, "if no compile_commands.json is found, auto-configure a detected CMake project to generate one (runs cmake configure; only use on trusted code)")
 		cmakeBuild = fs.Bool("cmake-build", false, "implies -cmake and also runs 'cmake --build' to generate build-time headers so TUs parse (executes the project build; incremental)")
@@ -139,6 +141,9 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			}
 		}
 		return 0
+	}
+	if *doctor {
+		return runDoctor(ctx, stdout, *tidyBin, *buildDir)
 	}
 	// Stamp the build version into the SARIF tool.driver.version so GitHub Code
 	// Scanning can track results across perfscanxx versions.
@@ -1129,6 +1134,7 @@ Examples:
 	perfscanxx -list -fixable            only the auto-fixable checks
 	perfscanxx -list -json               the catalog as machine-readable JSON
 	perfscanxx -explain PX1001           one check's documentation
+	perfscanxx -doctor                   diagnose the environment (exit 0 if ready to scan)
 
 A .perfscanxx.yml in the working directory supplies project defaults
 (level, checks, exclude, tidy, extra-args, baseline, fix-errors, jobs, timeout)
@@ -1342,6 +1348,87 @@ func splitFiles(files []string, n int) [][]string {
 		chunks[i%n] = append(chunks[i%n], f)
 	}
 	return chunks
+}
+
+// runDoctor diagnoses the environment perfscanxx needs and prints each check with
+// a status marker plus a remediation on failure. clang-tidy and a compilation
+// database are the two HARD requirements to scan; their absence exits 1. An LLVM
+// too old for the query-based custom checks, and a missing macOS sysroot, are
+// WARNINGS that still exit 0. It is the end-to-end form of the -version backend
+// probe — the canonical "why isn't this working?" answer for a tool that
+// orchestrates an external binary with several setup requirements.
+func runDoctor(ctx context.Context, stdout io.Writer, tidyBin, buildDir string) int {
+	fmt.Fprintln(stdout, "perfscanxx doctor:")
+	ready := true // all HARD requirements satisfied
+
+	// 1. clang-tidy binary + LLVM version.
+	tidyOK, tidyMajor := false, 0
+	switch path, err := tidy.Check(tidyBin); {
+	case err != nil:
+		fmt.Fprintln(stdout, "  ✗ clang-tidy: not found")
+		fmt.Fprintln(stdout, "      → brew install llvm  (then: export PERFSCANXX_CLANG_TIDY=\"$(brew --prefix llvm)/bin/clang-tidy\"); on Linux: apt install clang-tidy")
+		ready = false
+	default:
+		tidyOK = true
+		if major, ok := tidy.MajorVersion(ctx, tidyBin); ok {
+			tidyMajor = major
+			fmt.Fprintf(stdout, "  ✓ clang-tidy: %s (LLVM %d)\n", path, major)
+		} else {
+			fmt.Fprintf(stdout, "  ✓ clang-tidy: %s (version unknown)\n", path)
+		}
+	}
+
+	// 2. Query-based custom checks need LLVM >= MinExperimentalMajor.
+	if tidyOK {
+		switch {
+		case tidyMajor == 0:
+			fmt.Fprintln(stdout, "  ⚠ custom checks: LLVM version unparsed — the query-based checks may be skipped")
+		case tidyMajor < tidy.MinExperimentalMajor:
+			fmt.Fprintf(stdout, "  ⚠ custom checks: unsupported (LLVM %d < %d) — query-based checks skipped; built-ins still run. Upgrade LLVM to enable them.\n", tidyMajor, tidy.MinExperimentalMajor)
+		default:
+			fmt.Fprintf(stdout, "  ✓ custom checks: supported (LLVM %d >= %d)\n", tidyMajor, tidy.MinExperimentalMajor)
+		}
+	}
+
+	// 3. Compilation database (found + has TUs that exist on disk).
+	if dbPath, err := compdb.Find(buildDir, "."); err != nil {
+		fmt.Fprintln(stdout, "  ✗ compile database: not found")
+		fmt.Fprintln(stdout, "      → cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON  (or pass -p <build-dir>, or run with -cmake; bear/compdb also work)")
+		ready = false
+	} else if tus, lerr := compdb.Load(dbPath); lerr != nil {
+		fmt.Fprintf(stdout, "  ✗ compile database: %s is unreadable (%v)\n", dbPath, lerr)
+		ready = false
+	} else {
+		onDisk := 0
+		for _, tu := range tus {
+			if fi, e := os.Stat(tu); e == nil && !fi.IsDir() {
+				onDisk++
+			}
+		}
+		if onDisk == 0 {
+			fmt.Fprintf(stdout, "  ✗ compile database: %s (%d TU(s), 0 on disk)\n", dbPath, len(tus))
+			fmt.Fprintln(stdout, "      → none of the listed TUs exist on disk — the build dir is stale or from a different checkout; regenerate it")
+			ready = false
+		} else {
+			fmt.Fprintf(stdout, "  ✓ compile database: %s (%d TU(s), %d on disk)\n", dbPath, len(tus), onDisk)
+		}
+	}
+
+	// 4. macOS sysroot (so system headers parse; passed via -extra-arg).
+	if runtime.GOOS == "darwin" {
+		if out, err := exec.CommandContext(ctx, "xcrun", "--show-sdk-path").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
+			fmt.Fprintf(stdout, "  ✓ macOS sysroot: %s\n", strings.TrimSpace(string(out)))
+		} else {
+			fmt.Fprintln(stdout, "  ⚠ macOS sysroot: xcrun --show-sdk-path failed — pass -extra-arg=-isysroot -extra-arg=<sdk> so system headers parse (xcode-select --install)")
+		}
+	}
+
+	if ready {
+		fmt.Fprintln(stdout, "ready to scan.")
+		return 0
+	}
+	fmt.Fprintln(stdout, "not ready — fix the ✗ item(s) above.")
+	return 1
 }
 
 func printExplain(stdout, stderr io.Writer, id string) int {
