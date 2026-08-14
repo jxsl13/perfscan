@@ -139,11 +139,12 @@ Every catalog entry maps to a real clang-tidy check. Two mechanisms, both with
   list is occasionally right for O(1) splice or reference/iterator stability). No
   auto-fix: swapping to `std::vector` changes invalidation/splice semantics — a
   human must confirm nothing relies on them. **PX2110** count-for-existence
-  (`std::count(first, last, v)` compared `> 0` / `!= 0` / `>= 1` scans the WHOLE
-  range to answer a yes/no; `std::find(...) != last`, C++20 `std::ranges::any_of`,
-  or C++23 `std::ranges::contains` stop at the first match — and a sorted range
-  wants `std::binary_search`; the C++ analog of perfscan's PS5104). The
-  operator/literal pairing is exact, so `count(...) > 1` and `count(...) == k`
+  (`std::count`/`std::count_if(first, last, …)` compared `> 0` / `!= 0` / `>= 1`
+  scans the WHOLE range to answer a yes/no; `std::find`/`std::find_if(...) != last`,
+  C++20 `std::ranges::any_of`, or C++23 `std::ranges::contains` stop at the first
+  match — and a sorted range wants `std::binary_search`; the C++ analog of
+  perfscan's PS5104). The operator/literal pairing is exact, so `count(...) > 1`
+  and `count(...) == k`
   (which genuinely need the count) and a member `.count()` on a set/map are NOT
   flagged. No auto-fix: which replacement fits is a human call. **PX2111**
   map-double-lookup (`if (m.count(k)) { … m[k] … }` or `if (m.find(k) != m.end())
