@@ -1,0 +1,141 @@
+package ps2135
+
+import (
+	"bytes"
+	"io"
+	"strings"
+)
+
+func direct(buf *bytes.Buffer, b []byte) {
+	buf.WriteString(string(b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the byte slice; the receiver implements io\.Writer, so w\.Write\(b\) writes it directly`
+}
+
+// Both return (int, error): the results survive the rewrite.
+func withResults(buf *bytes.Buffer, b []byte) (int, error) {
+	return buf.WriteString(string(b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the byte slice; the receiver implements io\.Writer, so w\.Write\(b\) writes it directly`
+}
+
+// A *strings.Builder receiver has both methods on the pointer type.
+func viaBuilder(sb *strings.Builder, b []byte) {
+	sb.WriteString(string(b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the byte slice; the receiver implements io\.Writer, so w\.Write\(b\) writes it directly`
+}
+
+// Pointer-receiver WriteString on an addressable value: the auto-address
+// that made WriteString callable makes Write callable too.
+func valueBuilder(b []byte) string {
+	var sb strings.Builder
+	sb.WriteString(string(b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the byte slice; the receiver implements io\.Writer, so w\.Write\(b\) writes it directly`
+	return sb.String()
+}
+
+// A NAMED byte slice is still assignable to Write's []byte parameter.
+type payload []byte
+
+func namedBytes(buf *bytes.Buffer, p payload) {
+	buf.WriteString(string(p)) // want `w\.WriteString\(string\(b\)\) allocates and copies the byte slice; the receiver implements io\.Writer, so w\.Write\(b\) writes it directly`
+}
+
+// The argument expression is left in place untouched.
+func sliced(buf *bytes.Buffer, b []byte) {
+	buf.WriteString(string(b[1:])) // want `w\.WriteString\(string\(b\)\) allocates and copies the byte slice; the receiver implements io\.Writer, so w\.Write\(b\) writes it directly`
+}
+
+type bothWriter interface {
+	io.Writer
+	io.StringWriter
+}
+
+// An interface receiver declaring both methods qualifies.
+func viaInterface(w bothWriter, b []byte) {
+	w.WriteString(string(b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the byte slice; the receiver implements io\.Writer, so w\.Write\(b\) writes it directly`
+}
+
+// Reported but NOT fixed: a comment inside the dropped conversion text
+// would be destroyed by the rewrite.
+func commented(buf *bytes.Buffer, b []byte) {
+	buf.WriteString(string( /* keep me */ b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the byte slice; the receiver implements io\.Writer, so w\.Write\(b\) writes it directly`
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// A plain string argument is not a conversion of a byte slice.
+func literal(buf *bytes.Buffer, s string) {
+	buf.WriteString("literal")
+	buf.WriteString(s)
+}
+
+// string(rs) of a []rune is a real transformation (UTF-8 encoding), not a
+// byte copy — and Write(rs) would not compile.
+func runes(buf *bytes.Buffer, rs []rune) {
+	buf.WriteString(string(rs))
+}
+
+// io.StringWriter alone has no Write.
+type stringOnly struct{}
+
+func (*stringOnly) WriteString(s string) (int, error) { return len(s), nil }
+
+func noWriter(w *stringOnly, b []byte) {
+	w.WriteString(string(b))
+}
+
+// Write exists but not in io.Writer shape: the results would change type.
+type oddSig struct{}
+
+func (*oddSig) WriteString(s string) (int, error) { return len(s), nil }
+func (*oddSig) Write(p []byte) error              { return nil }
+
+func wrongSignature(w *oddSig, b []byte) {
+	w.WriteString(string(b))
+}
+
+// Value-receiver WriteString, pointer-receiver Write: on a non-addressable
+// receiver Write is not callable.
+type lopsided struct{}
+
+func (lopsided) WriteString(s string) (int, error) { return len(s), nil }
+func (*lopsided) Write(p []byte) (int, error)      { return len(p), nil }
+
+func mkLopsided() lopsided { return lopsided{} }
+
+func nonAddressable(b []byte) (int, error) {
+	return mkLopsided().WriteString(string(b))
+}
+
+// Conservatively skipped even on an addressable value: callability of the
+// pointer-receiver Write is not proven when WriteString itself did not
+// need the auto-address.
+func addressableButUnproven(b []byte) {
+	var l lopsided
+	l.WriteString(string(b))
+}
+
+// The classic Write-delegates-to-WriteString implementation: rewriting
+// w.WriteString(string(p)) to w.Write(p) here would make Write call
+// ITSELF — unbounded recursion that still compiles. The delegation is the
+// correct code; nothing is reported.
+type selfW struct{ sb strings.Builder }
+
+func (w *selfW) WriteString(s string) (int, error) {
+	return w.sb.WriteString(s)
+}
+
+func (w *selfW) Write(p []byte) (int, error) {
+	return w.WriteString(string(p))
+}
+
+// Writing to a DIFFERENT object inside Write is still reported: a field of
+// the receiver is not the receiver.
+type wrapW struct{ buf *bytes.Buffer }
+
+func (w *wrapW) WriteString(s string) (int, error) { return w.buf.WriteString(s) }
+
+func (w *wrapW) Write(p []byte) (int, error) {
+	return w.buf.WriteString(string(p)) // want `w\.WriteString\(string\(b\)\) allocates and copies the byte slice; the receiver implements io\.Writer, so w\.Write\(b\) writes it directly`
+}
+
+// A method OTHER than Write writing to the receiver is still reported: the
+// rewrite dispatches to Write, not to the enclosing method.
+func (w *wrapW) dump(b []byte) {
+	w.WriteString(string(b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the byte slice; the receiver implements io\.Writer, so w\.Write\(b\) writes it directly`
+}

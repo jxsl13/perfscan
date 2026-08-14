@@ -2197,3 +2197,46 @@ func TestEquiv_PS2134TemplateReuseEquivalent(t *testing.T) {
 		}
 	}
 }
+
+// TestEquiv_PS2135WriteBytesEquivalent pins the bit-identity PS2135's fix
+// relies on: per the io.StringWriter contract, w.WriteString(s) behaves like
+// w.Write([]byte(s)), so for a []byte b, WriteString(string(b)) and Write(b)
+// write exactly b's bytes and return the same (n, err). Verified over edge
+// cases — nil, empty, non-UTF8 bytes (string(b) does NOT sanitize invalid
+// UTF-8; the bytes pass through verbatim), and embedded NULs — on both
+// bytes.Buffer and strings.Builder, the receivers the fix most often hits.
+func TestEquiv_PS2135WriteBytesEquivalent(t *testing.T) {
+	cases := [][]byte{
+		nil,
+		{},
+		[]byte("plain ascii"),
+		{0xff, 0xfe},                     // invalid UTF-8: copied verbatim, not replaced
+		{'a', 0x00, 'b', 0x00},           // embedded NULs survive both paths
+		[]byte("héllo, 日本語"),             // multi-byte UTF-8
+		bytes.Repeat([]byte{0x80}, 1024), // long run of continuation bytes
+	}
+	for _, b := range cases {
+		var viaString, viaWrite bytes.Buffer
+		n1, err1 := viaString.WriteString(string(b))
+		n2, err2 := viaWrite.Write(b)
+		if n1 != n2 || (err1 == nil) != (err2 == nil) {
+			t.Errorf("Buffer %x: WriteString(string(b))=(%d,%v) != Write(b)=(%d,%v)", b, n1, err1, n2, err2)
+		}
+		if n1 != len(b) {
+			t.Errorf("Buffer %x: n=%d, want len(b)=%d", b, n1, len(b))
+		}
+		if !bytes.Equal(viaString.Bytes(), viaWrite.Bytes()) {
+			t.Errorf("Buffer %x: contents diverge: %x != %x", b, viaString.Bytes(), viaWrite.Bytes())
+		}
+
+		var sbString, sbWrite strings.Builder
+		m1, serr1 := sbString.WriteString(string(b))
+		m2, serr2 := sbWrite.Write(b)
+		if m1 != m2 || (serr1 == nil) != (serr2 == nil) {
+			t.Errorf("Builder %x: WriteString(string(b))=(%d,%v) != Write(b)=(%d,%v)", b, m1, serr1, m2, serr2)
+		}
+		if sbString.String() != sbWrite.String() {
+			t.Errorf("Builder %x: contents diverge: %q != %q", b, sbString.String(), sbWrite.String())
+		}
+	}
+}

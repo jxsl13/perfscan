@@ -61,6 +61,7 @@ checks' fixes.
 | [PS2132](PS2132.md) | alloc | L2 | yes | strings.NewReplacer with constant pairs built and discarded on every call |
 | [PS2133](PS2133.md) | alloc | L2 |  | time.LoadLocation with a constant zone name re-reads the tzdata on every call |
 | [PS2134](PS2134.md) | alloc | L2 | yes | text/template or html/template New().Parse() of a constant template built inline every call |
+| [PS2135](PS2135.md) | alloc | L1 | yes | w.WriteString(string(b)) allocates; w.Write(b) writes the bytes directly |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
