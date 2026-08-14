@@ -65,6 +65,7 @@ checks' fixes.
 | [PS2136](PS2136.md) | alloc | L1 | yes | []byte(strconv.Itoa(...)) allocates a string then copies it; strconv.AppendInt writes the bytes directly |
 | [PS2137](PS2137.md) | alloc | L1 | yes | fmt.Sprint / fmt.Sprintf("%v") of a plain integer, bool or float has a direct strconv equivalent |
 | [PS2138](PS2138.md) | alloc | L1 | yes | len(bytes.Runes(b)) allocates a full []rune just to count it; utf8.RuneCount(b) counts allocation-free |
+| [PS2139](PS2139.md) | alloc | L1 | yes | w.WriteString(string(r)) allocates a one-rune string; w.WriteRune(r) encodes into the buffer directly |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |

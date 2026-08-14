@@ -9,9 +9,11 @@ package checks_test
 // rather than silently shipping a behavior-changing fix.
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	htmltemplate "html/template"
 	"io"
@@ -3241,3 +3243,99 @@ func TestEquiv_PS2138LenBytesRunes(t *testing.T) {
 		}
 	}
 }
+
+// PS2139: b.WriteString(string(r)) -> b.WriteRune(r) on strings.Builder and
+// bytes.Buffer. The rewrite claims BIT-identity — same buffer bytes, same
+// (int, error) results — for EVERY int32 value, so the whole rune space plus
+// adversarial margins outside it is swept: negatives, the surrogate range
+// 0xD800-0xDFFF and values above 0x10FFFF must all encode as U+FFFD in both
+// forms. Also pinned: the two divergences whose gates are load-bearing —
+// wider-than-int32 operands (the rewrite's rune() truncation would change
+// the output) and bufio.Writer's flush-error path (partial-count results).
+func TestEquiv_PS2139WriteStringRune(t *testing.T) {
+	for r := rune(-2050); r <= 0x110800; r++ {
+		var sb1, sb2 strings.Builder
+		n1, err1 := sb1.WriteString(string(r))
+		n2, err2 := sb2.WriteRune(r)
+		if sb1.String() != sb2.String() || n1 != n2 || err1 != err2 {
+			t.Fatalf("Builder %#x: WriteString(string(r))=%q(%d,%v) != WriteRune(r)=%q(%d,%v)",
+				r, sb1.String(), n1, err1, sb2.String(), n2, err2)
+		}
+		var bb1, bb2 bytes.Buffer
+		m1, ferr1 := bb1.WriteString(string(r))
+		m2, ferr2 := bb2.WriteRune(r)
+		if !bytes.Equal(bb1.Bytes(), bb2.Bytes()) || m1 != m2 || ferr1 != ferr2 {
+			t.Fatalf("Buffer %#x: WriteString(string(r))=%q(%d,%v) != WriteRune(r)=%q(%d,%v)",
+				r, bb1.String(), m1, ferr1, bb2.String(), m2, ferr2)
+		}
+	}
+	// The narrower widths PS2139 wraps in rune(...) are value-preserving:
+	// string(x) of an integer depends only on x's VALUE (the spec's
+	// integer-to-string conversion — go vet's stringintconv forbids spelling
+	// the narrow forms here, which is exactly that value semantics stated as
+	// a check), so with the whole rune value space swept above, the per-width
+	// claim reduces to rune(x) being lossless over each admitted width.
+	for i := -32768; i <= 65535; i++ {
+		if i >= -128 && i <= 127 {
+			if x := int8(i); int64(rune(x)) != int64(x) {
+				t.Fatalf("rune(int8 %d) not value-preserving", i)
+			}
+		}
+		if i >= 0 && i <= 255 {
+			x := uint8(i)
+			if int64(rune(x)) != int64(x) {
+				t.Fatalf("rune(uint8 %d) not value-preserving", i)
+			}
+			// byte is vet-exempt, so the direct identity is pinned for it.
+			if string(x) != string(rune(x)) {
+				t.Fatalf("uint8 %d: string(x)=%q != string(rune(x))=%q", i, string(x), string(rune(x)))
+			}
+		}
+		if i >= -32768 && i <= 32767 {
+			if x := int16(i); int64(rune(x)) != int64(x) {
+				t.Fatalf("rune(int16 %d) not value-preserving", i)
+			}
+		}
+		if i >= 0 {
+			if x := uint16(i); int64(rune(x)) != int64(x) {
+				t.Fatalf("rune(uint16 %d) not value-preserving", i)
+			}
+		}
+	}
+	// The WIDTH gate is load-bearing: for an int64 above the rune space the
+	// spec makes string(x) yield "�" (out-of-range code points convert
+	// to the replacement character — the exhaustive sweep above pinned that
+	// for every rune-typed out-of-range value), while the rewrite's rune(x)
+	// TRUNCATES 0x100000041 to 'A' and would emit "A" instead. go vet's
+	// stringintconv (part of `go test`) rightly rejects spelling the wide
+	// conversion here, so the divergence is pinned via its two halves.
+	wide := int64(0x100000041)
+	if got := string(rune(wide)); got != "A" {
+		t.Fatalf("string(rune(int64(0x100000041)))=%q, expected the truncated %q", got, "A")
+	}
+	if got := string(rune(0x110000)); got != "�" {
+		t.Fatalf("string(out-of-range rune)=%q, expected %q — the spec's U+FFFD conversion changed?!", got, "�")
+	}
+	// The RECEIVER gate is load-bearing: bufio.Writer's flush-error path
+	// makes the two forms observably diverge — WriteString copies a partial
+	// rune into the buffer and reports a partial count where WriteRune
+	// reports (0, err) — so PS2139 keeps bufio advisory.
+	bw1 := bufio.NewWriterSize(equivFailWriter{}, 4)
+	bw1.WriteString("abc")
+	n1, err1 := bw1.WriteString(string('é'))
+	bw2 := bufio.NewWriterSize(equivFailWriter{}, 4)
+	bw2.WriteString("abc")
+	n2, err2 := bw2.WriteRune('é')
+	if err1 == nil || err2 == nil {
+		t.Fatal("expected both bufio writes to fail through the failing underlying writer")
+	}
+	if n1 == n2 && bw1.Buffered() == bw2.Buffered() {
+		t.Fatalf("expected bufio WriteString/WriteRune to diverge on the flush-error path (got identical (%d, buffered %d)); PS2139's advisory-only bufio gate would be obsolete", n1, bw1.Buffered())
+	}
+}
+
+// equivFailWriter fails every write — the underlying-writer error path that
+// makes bufio.Writer's WriteString and WriteRune diverge (PS2139).
+type equivFailWriter struct{}
+
+func (equivFailWriter) Write(p []byte) (int, error) { return 0, errors.New("equivFailWriter: boom") }
