@@ -222,6 +222,7 @@ func SARIF(w io.Writer, findings []Finding) error {
 		ID                   string       `json:"id"`
 		Name                 string       `json:"name,omitempty"`
 		ShortDescription     *sarifText   `json:"shortDescription,omitempty"`
+		FullDescription      *sarifText   `json:"fullDescription,omitempty"`
 		HelpURI              string       `json:"helpUri,omitempty"`
 		DefaultConfiguration *sarifConfig `json:"defaultConfiguration,omitempty"`
 	}
@@ -297,6 +298,14 @@ func SARIF(w io.Writer, findings []Finding) error {
 			if e, ok := catalog.ByID(f.ID); ok {
 				if e.Title != "" {
 					r.ShortDescription = &sarifText{Text: e.Title}
+				}
+				// Surface the safety caveat (some fix-its are unsafe to apply
+				// blindly: PX3004/PX3007/PX3015/PX3027) in fullDescription, which
+				// GitHub Code Scanning renders in the rule details — so a reviewer
+				// triaging a finding sees the warning that -explain and -json show,
+				// not just the one-line title. Only caveated rules get one.
+				if e.Caveat != "" {
+					r.FullDescription = &sarifText{Text: e.Title + " Caveat: " + e.Caveat}
 				}
 				// Link each rule to its upstream clang-tidy page so GitHub Code
 				// Scanning offers a "learn more" per rule (custom checks have none).

@@ -586,6 +586,54 @@ func TestJSONAndSARIF(t *testing.T) {
 	}
 }
 
+// TestSARIFRuleCarriesCaveatInFullDescription pins that a check's safety caveat
+// (the "this fix-it is unsafe to apply blindly" warning on PX3004/PX3007/PX3015/
+// PX3027) reaches the SARIF rule's fullDescription, which GitHub Code Scanning
+// renders in the rule details. Without it a reviewer triaging a finding sees only
+// the one-line title and misses the warning that -explain and -json surface. A
+// rule with no caveat must carry no fullDescription.
+func TestSARIFRuleCarriesCaveatInFullDescription(t *testing.T) {
+	cav, ok := catalog.ByID("PX3015")
+	if !ok || cav.Caveat == "" {
+		t.Fatal("PX3015 is expected to be a caveated check; catalog changed?")
+	}
+	findings := []Finding{
+		{ID: "PX3015", TidyName: cav.TidyName, Level: cav.Level.String(), Message: "m", File: "a.cpp", Line: 1},
+		{ID: "PX1001", TidyName: "performance-for-range-copy", Level: "L1", Message: "m", File: "a.cpp", Line: 2},
+	}
+	var buf bytes.Buffer
+	if err := SARIF(&buf, findings); err != nil {
+		t.Fatalf("SARIF: %v", err)
+	}
+	var log struct {
+		Runs []struct {
+			Tool struct {
+				Driver struct {
+					Rules []struct {
+						ID              string `json:"id"`
+						FullDescription struct {
+							Text string `json:"text"`
+						} `json:"fullDescription"`
+					} `json:"rules"`
+				} `json:"driver"`
+			} `json:"tool"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &log); err != nil {
+		t.Fatalf("SARIF not valid JSON: %v", err)
+	}
+	full := map[string]string{}
+	for _, r := range log.Runs[0].Tool.Driver.Rules {
+		full[r.ID] = r.FullDescription.Text
+	}
+	if !strings.Contains(full["PX3015"], cav.Caveat) {
+		t.Errorf("PX3015 SARIF rule.fullDescription must carry the caveat %q, got %q", cav.Caveat, full["PX3015"])
+	}
+	if full["PX1001"] != "" {
+		t.Errorf("PX1001 has no caveat, so its SARIF rule must have no fullDescription, got %q", full["PX1001"])
+	}
+}
+
 // TestSARIFLevelMapping pins the catalog-level -> SARIF triage-level mapping:
 // L1/L2 (actionable) -> "warning", L3 (aggressive/niche) -> "note", on both the
 // rule's defaultConfiguration and each result. GitHub Code Scanning reads these.
