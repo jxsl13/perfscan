@@ -1,0 +1,24 @@
+package ps2012
+
+import (
+	"bytes"
+	"strings"
+)
+
+// The file keeps ANOTHER bytes reference and already imports strings, so
+// the fixes leave the import block untouched.
+func trimForms(s string, b []byte) []string {
+	// A nested match: both sites are rewritten (the operand of the outer
+	// site is kept verbatim, so the inner rewrite composes with it).
+	twice := string(bytes.TrimSpace([]byte(string(bytes.TrimSpace([]byte(s)))))) // want `string\(bytes\.TrimSpace\(\[\]byte\(s\)\)\) copies` `string\(bytes\.TrimSpace\(\[\]byte\(s\)\)\) copies`
+
+	// Extra parentheses around the trim call and the conversion are part
+	// of the replaced punctuation.
+	parens := string((bytes.TrimSpace(([]byte(s))))) // want `string\(bytes\.TrimSpace\(\[\]byte\(s\)\)\) copies`
+
+	// An untyped constant operand is a plain string too; neither form is
+	// a constant expression, so nothing changes at compile time.
+	konst := string(bytes.TrimSpace([]byte("  padded  "))) // want `string\(bytes\.TrimSpace\(\[\]byte\(s\)\)\) copies`
+
+	return []string{twice, parens, konst, string(bytes.ToLower(b)), strings.ToUpper(s)}
+}
