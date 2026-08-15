@@ -116,6 +116,7 @@ checks' fixes.
 | [PS3022](PS3022.md) | indirect | L1 | yes | slices.MaxFunc/MinFunc with a hand-rolled three-way comparator (a<b/a>b/-1/1/0) is slices.Max/Min spelled the slow way |
 | [PS3023](PS3023.md) | indirect | L1 | yes | slices.CompareFunc with a bare cmp.Compare comparator is slices.Compare spelled the slow way |
 | [PS3024](PS3024.md) | indirect | L2 | yes | sort.SliceIsSorted with an ascending whole-element closure is slices.IsSorted spelled through reflection |
+| [PS3025](PS3025.md) | indirect | L1 | yes | fmt.Appendf of a verbless constant format runs fmt's formatter to append bytes the builtin append writes directly |
 | [PS3034](PS3034.md) | indirect | L3 |  | a serial nest whose every write names the outermost loop variable |
 | [PS3059](PS3059.md) | indirect | L3 |  | a serial nest writing through a base derived from the outermost loop variable |
 | [PS3060](PS3060.md) | indirect | L3 |  | a serial loop over calls to a function that itself fans out |
