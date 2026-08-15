@@ -114,6 +114,7 @@ checks' fixes.
 | [PS3020](PS3020.md) | indirect | L1 | yes | slices.MaxFunc/MinFunc with a swapped cmp.Compare(b, a) comparator is the opposite extremum — slices.Min/Max spelled the slow way |
 | [PS3021](PS3021.md) | indirect | L2 | yes | a map looked up in a comma-ok guard and then re-read in the body for the same key hashes the key twice; bind the value once |
 | [PS3022](PS3022.md) | indirect | L1 | yes | slices.MaxFunc/MinFunc with a hand-rolled three-way comparator (a<b/a>b/-1/1/0) is slices.Max/Min spelled the slow way |
+| [PS3023](PS3023.md) | indirect | L1 | yes | slices.CompareFunc with a bare cmp.Compare comparator is slices.Compare spelled the slow way |
 | [PS3034](PS3034.md) | indirect | L3 |  | a serial nest whose every write names the outermost loop variable |
 | [PS3059](PS3059.md) | indirect | L3 |  | a serial nest writing through a base derived from the outermost loop variable |
 | [PS3060](PS3060.md) | indirect | L3 |  | a serial loop over calls to a function that itself fans out |
