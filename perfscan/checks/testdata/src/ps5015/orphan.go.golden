@@ -1,0 +1,12 @@
+package ps5015
+
+// The only fmt reference in this FILE is the fixable Appendf itself: the
+// rewrite orphans the import, and the fix pipeline prunes the now-unused
+// fmt import afterwards, so the fix applies (non-cgo file) and adds the
+// strconv import it needs.
+
+import "strconv"
+
+func orphanQuote(buf []byte, s string) []byte {
+	return strconv.AppendQuote(buf, s) // want `fmt\.Appendf\(buf, "%q", s\) on a string`
+}
