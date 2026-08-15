@@ -1,0 +1,16 @@
+package ps3022
+
+import (
+	"fmt"
+	"slices"
+)
+
+// Explicit instantiation brackets SURVIVE the rewrite: slices.Max/Min take
+// the same two type parameters as slices.MaxFunc/MinFunc (and every fixable
+// element type satisfies their cmp.Ordered constraint), so only the selector
+// name changes and the comparator goes.
+func maxInstantiated(xs []int) {
+	m := slices.Max[[]int, int](xs) // want `slices\.Max computes the extremal int value with the identical result and the comparison inlined`
+	n := slices.Min[[]int](xs)      // want `slices\.Min computes the extremal int value with the identical result and the comparison inlined`
+	fmt.Println(m, n)
+}
