@@ -1,0 +1,15 @@
+package ps5023
+
+import (
+	buf "bytes"
+	str "strings"
+)
+
+// An aliased strings/bytes import keeps its qualifier verbatim; the only
+// edited span is the selected IndexRune identifier — IndexByte lives in
+// the same package, so no import surgery is ever needed.
+func aliased(s string, b []byte) int {
+	i := str.IndexRune(s, '@') // want `strings\.IndexRune of the constant ASCII rune '@' pays a non-inlined range-check wrapper`
+	j := buf.IndexRune(b, '#') // want `bytes\.IndexRune of the constant ASCII rune '#' pays a non-inlined range-check wrapper`
+	return i + j
+}
