@@ -1,0 +1,12 @@
+package ps3031
+
+import (
+	by "bytes"
+)
+
+// Aliased imports: the bytes qualifier is kept verbatim (by stays
+// by), and the aliased unicode spec is dropped when its only reference
+// is the deleted predicate argument.
+func aliased(b []byte) []byte {
+	return by.TrimSpace(b) // want `bytes\.TrimFunc\(b, unicode\.IsSpace\) decodes`
+}
