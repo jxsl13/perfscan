@@ -1,0 +1,33 @@
+package ps2016
+
+import (
+	"bytes"
+	"strings"
+	"unicode"
+)
+
+// The file keeps ANOTHER bytes reference and already imports strings, so
+// the fixes leave the import block untouched.
+func trimForms(s string, b []byte) []string {
+	// A nested match: both sites are rewritten (the operand of the outer
+	// site is kept verbatim, so the inner rewrite composes with it).
+	twice := strings.TrimFunc(strings.TrimFunc(s, unicode.IsPunct), unicode.IsSpace) // want `string\(bytes\.TrimFunc\(\[\]byte\(s\), f\)\) copies` `string\(bytes\.TrimFunc\(\[\]byte\(s\), f\)\) copies`
+
+	// A match nested in the PREDICATE argument is rewritten too: the
+	// predicate expression is kept verbatim, so the inner rewrite
+	// composes (the closure captures its own trimmed string).
+	nestedPred := strings.TrimFunc(s, func(r rune) bool { // want `string\(bytes\.TrimFunc\(\[\]byte\(s\), f\)\) copies`
+		cut := strings.TrimLeftFunc(s, unicode.IsSpace) // want `string\(bytes\.TrimLeftFunc\(\[\]byte\(s\), f\)\) copies`
+		return strings.ContainsRune(cut, r)
+	})
+
+	// Extra parentheses around the trim call and the conversion are part
+	// of the replaced punctuation.
+	parens := strings.TrimRightFunc(s, unicode.IsControl) // want `string\(bytes\.TrimRightFunc\(\[\]byte\(s\), f\)\) copies`
+
+	// An untyped constant operand is a plain string too; neither form is
+	// a constant expression, so nothing changes at compile time.
+	konst := strings.TrimFunc("__padded__", func(r rune) bool { return r == '_' }) // want `string\(bytes\.TrimFunc\(\[\]byte\(s\), f\)\) copies`
+
+	return []string{twice, nestedPred, parens, konst, string(bytes.ToLower(b)), strings.ToUpper(s)}
+}
