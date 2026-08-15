@@ -1,0 +1,138 @@
+package ps5029
+
+import (
+	"fmt"
+	"strings"
+)
+
+func sink(string) {}
+
+// Assignment context: no parentheses needed.
+func twoArgs(a, b string) string {
+	s := fmt.Sprintln(a, b) // want `fmt\.Sprintln over only plain strings writes exactly one space between operands and one trailing newline, boxing every operand through fmt's reflection machinery; direct \+ concatenation with " " and "\\n" builds the identical string`
+	return s
+}
+
+// Three string operands: one space between each adjacent pair.
+func threeArgs(a, b, c string) string {
+	return fmt.Sprintln(a, b, c) // want `fmt\.Sprintln over only plain strings writes exactly one space between operands and one trailing newline, boxing every operand through fmt's reflection machinery; direct \+ concatenation with " " and "\\n" builds the identical string`
+}
+
+// A single string operand: fmt.Sprintln appends only the newline.
+func single(a string) string {
+	return fmt.Sprintln(a) // want `fmt\.Sprintln over only plain strings writes exactly one space between operands and one trailing newline, boxing every operand through fmt's reflection machinery; direct \+ concatenation with " " and "\\n" builds the identical string`
+}
+
+// Even a single operand becomes a + chain (a + "\n"): under an index the
+// whole replacement must be parenthesized.
+func singleIndexed(a string) byte {
+	return fmt.Sprintln(a)[0] // want `fmt\.Sprintln over only plain strings writes exactly one space between operands and one trailing newline, boxing every operand through fmt's reflection machinery; direct \+ concatenation with " " and "\\n" builds the identical string`
+}
+
+// An argument that is itself a call stays verbatim.
+func callArg(x, y string) string {
+	return fmt.Sprintln(strings.ToUpper(x), y) // want `fmt\.Sprintln over only plain strings writes exactly one space between operands and one trailing newline, boxing every operand through fmt's reflection machinery; direct \+ concatenation with " " and "\\n" builds the identical string`
+}
+
+// An argument that is itself a + concatenation needs no parentheses:
+// string + is associative and the only string-producing binary operator.
+func concatArg(a, b, c string) string {
+	return fmt.Sprintln(a+b, c) // want `fmt\.Sprintln over only plain strings writes exactly one space between operands and one trailing newline, boxing every operand through fmt's reflection machinery; direct \+ concatenation with " " and "\\n" builds the identical string`
+}
+
+// An untyped constant string argument defaults to plain string.
+func literalArg(b string) string {
+	return fmt.Sprintln("pre", b) // want `fmt\.Sprintln over only plain strings writes exactly one space between operands and one trailing newline, boxing every operand through fmt's reflection machinery; direct \+ concatenation with " " and "\\n" builds the identical string`
+}
+
+// Call-argument context is self-delimiting: no parentheses needed.
+func asArg(a, b string) {
+	sink(fmt.Sprintln(a, b)) // want `fmt\.Sprintln over only plain strings writes exactly one space between operands and one trailing newline, boxing every operand through fmt's reflection machinery; direct \+ concatenation with " " and "\\n" builds the identical string`
+}
+
+// PRECEDENCE: indexing binds tighter than + — the whole replacement must
+// be parenthesized or the index would apply to the trailing "\n" only.
+func indexed(a, b string) byte {
+	return fmt.Sprintln(a, b)[0] // want `fmt\.Sprintln over only plain strings writes exactly one space between operands and one trailing newline, boxing every operand through fmt's reflection machinery; direct \+ concatenation with " " and "\\n" builds the identical string`
+}
+
+// Operand of a further +: parenthesized as well — redundant but harmless.
+func merged(a, b, c string) string {
+	return fmt.Sprintln(a, b) + c // want `fmt\.Sprintln over only plain strings writes exactly one space between operands and one trailing newline, boxing every operand through fmt's reflection machinery; direct \+ concatenation with " " and "\\n" builds the identical string`
+}
+
+// Reported but NOT fixed: a comment inside the rewritten scaffolding
+// would be destroyed by the edits.
+func commented(a, b string) string {
+	return fmt.Sprintln( // keep me // want `fmt\.Sprintln over only plain strings writes exactly one space between operands and one trailing newline, boxing every operand through fmt's reflection machinery; direct \+ concatenation with " " and "\\n" builds the identical string`
+		a, b)
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// A non-string operand is not formatted by identity: reject the whole
+// call.
+func intArg(a string, n int) string {
+	return fmt.Sprintln(a, n)
+}
+
+// Mixed with an untyped int constant: the constant is not string-typed.
+func mixedConst(a string) string {
+	return fmt.Sprintln(a, 1)
+}
+
+func boolArg(a string, ok bool) string {
+	return fmt.Sprintln(a, ok)
+}
+
+func byteSliceArg(a string, b []byte) string {
+	return fmt.Sprintln(a, b)
+}
+
+// A NAMED string type may implement fmt.Stringer/fmt.Formatter, which
+// Sprintln's %v formatting would honor and + would not.
+type name string
+
+func (n name) String() string { return "Mx. " + string(n) }
+
+func namedStringArg(a string, n name) string {
+	return fmt.Sprintln(a, n)
+}
+
+func errorArg(a string, err error) string {
+	return fmt.Sprintln(a, err)
+}
+
+func stringerArg(a string, s fmt.Stringer) string {
+	return fmt.Sprintln(a, s)
+}
+
+// fmt.Sprintf belongs to PS2122/PS2107, not here.
+func sprintf(a, b string) string {
+	return fmt.Sprintf("%s %s\n", a, b)
+}
+
+// fmt.Sprint inserts NO separators and no newline — PS2123's territory.
+func sprint(a, b string) string {
+	return fmt.Sprint(a, b)
+}
+
+// Zero operands: fmt.Sprintln() is "\n", but out of scope.
+func empty() string {
+	return fmt.Sprintln()
+}
+
+// A shadowed fmt is not the fmt package.
+type fakeFmt struct{}
+
+func (fakeFmt) Sprintln(args ...any) string { return "" }
+
+func shadowedFmt(a, b string) string {
+	fmt := fakeFmt{}
+	return fmt.Sprintln(a, b)
+}
+
+// A spread call passes an unknown number of arguments.
+func spread(args ...any) string {
+	return fmt.Sprintln(args...)
+}

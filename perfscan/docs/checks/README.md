@@ -173,6 +173,7 @@ checks' fixes.
 | [PS5026](PS5026.md) | arith | L1 | yes | bytes.ContainsRune of a constant ASCII rune chains two wrapper frames before the byte scan; IndexByte >= 0 answers the same membership question directly |
 | [PS5027](PS5027.md) | alloc | L1 | yes | fmt.Sprintf of a verbless constant string is the literal itself paid at fmt prices |
 | [PS5028](PS5028.md) | indirect | L1 | yes | fmt.Fprintf of a verbless constant format pays fmt's format scan and pooled-buffer copy; io.WriteString writes the bytes directly |
+| [PS5029](PS5029.md) | alloc | L1 | yes | fmt.Sprintln over plain strings is a reflection-priced + with " " and "\n"; concatenate directly |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
