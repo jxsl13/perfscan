@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -103,7 +102,7 @@ func runPS3059(pass *analysis.Pass) (any, error) {
 				pass.Report(analysis.Diagnostic{
 					Pos:     nest.Pos(),
 					End:     body.Lbrace,
-					Message: fmt.Sprintf("every write in this serial nest lands through a base derived from outer variable %s — bandable, and a fan-out helper exists in this package; check the band owns disjoint output, then gate with BOTH a bit-exact digest and -race", outerVar),
+					Message: "every write in this serial nest lands through a base derived from outer variable " + outerVar + " — bandable, and a fan-out helper exists in this package; check the band owns disjoint output, then gate with BOTH a bit-exact digest and -race",
 				})
 			})
 		}

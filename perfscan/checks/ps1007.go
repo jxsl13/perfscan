@@ -121,7 +121,7 @@ func runPS1007(pass *analysis.Pass) (any, error) {
 			diag := analysis.Diagnostic{
 				Pos:     hit.Pos(),
 				End:     hit.End(),
-				Message: fmt.Sprintf("this inner loop accumulates into an output row invariant in outer variable %s — all of it is loaded and stored once per outer step; the remedy depends on whether the input is contiguous in %s (strip-mine the gather, outer-unroll the rank-1 update, register-tile a band) — see PS1007 docs", ov, iv),
+				Message: "this inner loop accumulates into an output row invariant in outer variable " + ov + " — all of it is loaded and stored once per outer step; the remedy depends on whether the input is contiguous in " + iv + " (strip-mine the gather, outer-unroll the rank-1 update, register-tile a band) — see PS1007 docs",
 			}
 			if fix := ps1007Fix(pass, outerLoop, n); fix != nil {
 				diag.SuggestedFixes = []analysis.SuggestedFix{*fix}

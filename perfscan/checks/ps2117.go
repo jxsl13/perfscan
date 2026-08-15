@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -115,10 +114,9 @@ func runPS2117(pass *analysis.Pass) (any, error) {
 				return true
 			}
 			diag := analysis.Diagnostic{
-				Pos: as.Pos(),
-				End: as.End(),
-				Message: fmt.Sprintf("%s := string(%s) allocates a string used only as a map key; the compiler elides the allocation when the conversion is inline in the index: m[string(%s)]",
-					kIdent.Name, bIdent.Name, bIdent.Name),
+				Pos:     as.Pos(),
+				End:     as.End(),
+				Message: kIdent.Name + " := string(" + bIdent.Name + ") allocates a string used only as a map key; the compiler elides the allocation when the conversion is inline in the index: m[string(" + bIdent.Name + ")]",
 			}
 			if fix := ps2117Fix(pass, f, stack, as, bIdent, uses); fix != nil {
 				diag.SuggestedFixes = []analysis.SuggestedFix{*fix}

@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/types"
 	"go/version"
@@ -150,11 +149,9 @@ func runPS2119(pass *analysis.Pass) (any, error) {
 			}
 			funText := exprTextRendered(sel)
 			diag := analysis.Diagnostic{
-				Pos: rng.X.Pos(),
-				End: rng.X.End(),
-				Message: fmt.Sprintf(
-					"ranging directly over %s allocates the whole result slice per loop entry; %s.%s yields the same pieces in the same order with no slice allocation (go1.24)",
-					funText, pkgPath, m.seq),
+				Pos:     rng.X.Pos(),
+				End:     rng.X.End(),
+				Message: "ranging directly over " + funText + " allocates the whole result slice per loop entry; " + pkgPath + "." + m.seq + " yields the same pieces in the same order with no slice allocation (go1.24)",
 			}
 			if pkgPath == "bytes" {
 				// ADVISORY ONLY for bytes: the rewrite is NOT bit-identical
@@ -193,7 +190,7 @@ func runPS2119(pass *analysis.Pass) (any, error) {
 			}
 			if fixable {
 				diag.SuggestedFixes = []analysis.SuggestedFix{{
-					Message:   fmt.Sprintf("range over %s.%s instead", pkgPath, m.seq),
+					Message:   "range over " + pkgPath + "." + m.seq + " instead",
 					TextEdits: edits,
 				}}
 			}

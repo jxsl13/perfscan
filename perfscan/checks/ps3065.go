@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -100,7 +99,7 @@ func runPS3065(pass *analysis.Pass) (any, error) {
 				pass.Report(analysis.Diagnostic{
 					Pos:     n.Pos(),
 					End:     body.Lbrace,
-					Message: fmt.Sprintf("each iteration writes its own slot from %s, which itself loops — depth-1 but expensive per item, and a fan-out helper exists in this package; band the loop (bit-identical; expect Amdahl, gate with -race)", callee),
+					Message: "each iteration writes its own slot from " + callee + ", which itself loops — depth-1 but expensive per item, and a fan-out helper exists in this package; band the loop (bit-identical; expect Amdahl, gate with -race)",
 				})
 				return false
 			})

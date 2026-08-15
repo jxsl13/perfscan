@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/types"
 
@@ -115,7 +114,7 @@ func runPS4001(pass *analysis.Pass) (any, error) {
 				pass.Report(analysis.Diagnostic{
 					Pos:     call.Pos(),
 					End:     call.End(),
-					Message: fmt.Sprintf("binary.%s decodes one scalar per iteration; on a little-endian host a same-layout bulk copy moves the whole buffer once — keep this loop as the big-endian/strided fallback", name),
+					Message: "binary." + name + " decodes one scalar per iteration; on a little-endian host a same-layout bulk copy moves the whole buffer once — keep this loop as the big-endian/strided fallback",
 				})
 				return true
 			})

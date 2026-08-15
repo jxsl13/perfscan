@@ -155,7 +155,7 @@ func runPS2121(pass *analysis.Pass) (any, error) {
 					open, closing = "(", " + 1)"
 				}
 				diag.SuggestedFixes = []analysis.SuggestedFix{{
-					Message: fmt.Sprintf("replace with %s.Count(...) + 1", pkgPath),
+					Message: "replace with " + pkgPath + ".Count(...) + 1",
 					TextEdits: []analysis.TextEdit{
 						{Pos: lenCall.Pos(), End: inner.Pos(), NewText: []byte(open)},
 						{Pos: sel.Sel.Pos(), End: sel.Sel.End(), NewText: []byte("Count")},

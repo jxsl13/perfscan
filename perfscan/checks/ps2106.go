@@ -235,7 +235,7 @@ func ps2106Report(pass *analysis.Pass, f *ast.File, run []*ast.AssignStmt, name 
 	n := len(run)
 	msg := fmt.Sprintf("%d consecutive appends to %s can be combined into one append call — a single length/growth check instead of %d", n, name, n)
 	if !fixable {
-		msg += fmt.Sprintf(" (left advisory: an appended argument may have side effects or read shared memory; combine manually only if it cannot observe %s)", name)
+		msg += " (left advisory: an appended argument may have side effects or read shared memory; combine manually only if it cannot observe " + name + ")"
 	}
 	diag := analysis.Diagnostic{
 		Pos:     run[0].Pos(),

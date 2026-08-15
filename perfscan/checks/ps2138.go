@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/types"
 
@@ -127,8 +126,7 @@ func runPS2138(pass *analysis.Pass) (any, error) {
 				return true
 			}
 			x := inner.Args[0]
-			msg := fmt.Sprintf("len(%s) allocates a throwaway []rune of every decoded rune just to count them; utf8.RuneCount(%s) is the direct, bit-identical count (allocation-free)",
-				ps2125ExprText(inner), ps2125ExprText(x))
+			msg := "len(" + ps2125ExprText(inner) + ") allocates a throwaway []rune of every decoded rune just to count them; utf8.RuneCount(" + ps2125ExprText(x) + ") is the direct, bit-identical count (allocation-free)"
 			fix := ps2138Fix(pass, f, lenCall, x, &importAdded)
 			if fix != nil {
 				fixable++

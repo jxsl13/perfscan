@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/constant"
 	"go/token"
@@ -232,7 +231,7 @@ func ps2134HoistFix(pass *analysis.Pass, stack []ast.Node, parse *ast.CallExpr, 
 	if fn.Doc != nil {
 		insertPos = fn.Doc.Pos()
 	}
-	binding := fmt.Sprintf("var %s = %s\n\n", varName, exprTextRendered(mustCall))
+	binding := "var " + varName + " = " + exprTextRendered(mustCall) + "\n\n"
 	return analysis.SuggestedFix{
 		Message: "hoist the template parse to a package-level var",
 		TextEdits: []analysis.TextEdit{

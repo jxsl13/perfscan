@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/constant"
 	"go/token"
@@ -247,7 +246,7 @@ func checkSetMapFunc(pass *analysis.Pass, f *ast.File, fn *ast.FuncDecl) {
 		diag := analysis.Diagnostic{
 			Pos:     idx.Pos(),
 			End:     idx.End(),
-			Message: fmt.Sprintf("set %s is built from slice %s and only probed; for a small source, scanning %s directly beats the map build plus a hash per probe (crossover ≈8–16 elements)", m.Name, src, src),
+			Message: "set " + m.Name + " is built from slice " + src + " and only probed; for a small source, scanning " + src + " directly beats the map build plus a hash per probe (crossover ≈8–16 elements)",
 		}
 		if fix := ps3007Fix(pass, f, fn, b.loop, m, setNames); fix != nil {
 			diag.SuggestedFixes = []analysis.SuggestedFix{*fix}
@@ -628,7 +627,7 @@ func ps3007Fix(pass *analysis.Pass, file *ast.File, fn *ast.FuncDecl, loop *ast.
 		edits = append(edits, analysis.TextEdit{Pos: idx.Pos(), End: idx.End(), NewText: []byte(newText)})
 	}
 	return &analysis.SuggestedFix{
-		Message:   fmt.Sprintf("replace set %s with slices.Contains scans of %s", setObj.Name(), srcName),
+		Message:   "replace set " + setObj.Name() + " with slices.Contains scans of " + srcName,
 		TextEdits: edits,
 	}
 }

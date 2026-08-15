@@ -123,7 +123,7 @@ func runPS2009(pass *analysis.Pass) (any, error) {
 					"%[1]s.Split(...)[0] scans the whole input and allocates every piece just to read the head; %[1]s.SplitN(..., 2)[0] stops at the first separator and is bit-identical",
 					pkgPath),
 				SuggestedFixes: []analysis.SuggestedFix{{
-					Message: fmt.Sprintf("replace with %s.SplitN(..., 2)[0]", pkgPath),
+					Message: "replace with " + pkgPath + ".SplitN(..., 2)[0]",
 					TextEdits: []analysis.TextEdit{
 						{Pos: sel.Sel.Pos(), End: sel.Sel.End(), NewText: []byte("SplitN")},
 						{Pos: call.Args[1].End(), End: call.Args[1].End(), NewText: []byte(", 2")},

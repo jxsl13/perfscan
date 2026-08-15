@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -96,7 +95,7 @@ func runPS3060(pass *analysis.Pass) (any, error) {
 				pass.Report(analysis.Diagnostic{
 					Pos:     call.Pos(),
 					End:     call.End(),
-					Message: fmt.Sprintf("%s fans out internally but this loop runs its calls strictly one after another — each pays its own fork and join; band the outer loop (hoist caller-supplied callbacks into a serial pass first, gate with -race)", name),
+					Message: name + " fans out internally but this loop runs its calls strictly one after another — each pays its own fork and join; band the outer loop (hoist caller-supplied callbacks into a serial pass first, gate with -race)",
 				})
 				return true
 			})

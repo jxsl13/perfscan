@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -132,7 +131,7 @@ func runPS2127(pass *analysis.Pass) (any, error) {
 			pass.Report(analysis.Diagnostic{
 				Pos:     call.Pos(),
 				End:     call.End(),
-				Message: fmt.Sprintf("regexp.%s of a constant pattern inside %s recompiles the same matcher on every call; hoist it to a package-level var compiled once at init", fnName, ps2127FuncLabel(fn)),
+				Message: "regexp." + fnName + " of a constant pattern inside " + ps2127FuncLabel(fn) + " recompiles the same matcher on every call; hoist it to a package-level var compiled once at init",
 				SuggestedFixes: []analysis.SuggestedFix{
 					ps2127HoistFix(pass, fn, call, fnName, lit, used),
 				},
@@ -255,9 +254,9 @@ func ps2127HoistFix(pass *analysis.Pass, fn *ast.FuncDecl, call *ast.CallExpr, f
 	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
 		qualifier = exprTextRendered(sel.X)
 	}
-	binding := fmt.Sprintf("var %s = %s.%s(%s)\n\n", varName, qualifier, fnName, lit.Value)
+	binding := "var " + varName + " = " + qualifier + "." + fnName + "(" + lit.Value + ")\n\n"
 	return analysis.SuggestedFix{
-		Message: fmt.Sprintf("hoist regexp.%s to a package-level var", fnName),
+		Message: "hoist regexp." + fnName + " to a package-level var",
 		TextEdits: []analysis.TextEdit{
 			{Pos: insertPos, End: insertPos, NewText: []byte(binding)},
 			{Pos: call.Pos(), End: call.End(), NewText: []byte(varName)},

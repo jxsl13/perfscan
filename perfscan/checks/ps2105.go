@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/printer"
 	"go/token"
@@ -94,17 +93,17 @@ func runPS2105(pass *analysis.Pass) (any, error) {
 			case !ps2105KeyIsBlank(rng.Key):
 				// The key is used: over []rune(s) it is the rune index, over the
 				// string it is the byte offset — not interchangeable, so manual.
-				diag.Message = fmt.Sprintf("ranging over %s allocates a rune slice per loop entry; a direct range over %s yields the same runes, but its key is the byte offset, not the rune index — the key is used here, so the rewrite is manual", callText, argText)
+				diag.Message = "ranging over " + callText + " allocates a rune slice per loop entry; a direct range over " + argText + " yields the same runes, but its key is the byte offset, not the rune index — the key is used here, so the rewrite is manual"
 			case ps2105ContainsCompositeLit(call.Args[0]):
 				// Blank key, so the key semantics are fine — but the operand embeds
 				// a composite literal, which the rewrite is withheld on
 				// conservatively (rather than reason about re-printing it in a
 				// range header). Report why accurately: NOT "the key is used".
-				diag.Message = fmt.Sprintf("ranging over %s allocates a rune slice per loop entry; a direct range over %s yields the same runes, but %s embeds a composite literal, so the rewrite is left manual", callText, argText, argText)
+				diag.Message = "ranging over " + callText + " allocates a rune slice per loop entry; a direct range over " + argText + " yields the same runes, but " + argText + " embeds a composite literal, so the rewrite is left manual"
 			default:
-				diag.Message = fmt.Sprintf("ranging over %s allocates a rune slice per loop entry; range %s directly — a string range yields the same runes", callText, argText)
+				diag.Message = "ranging over " + callText + " allocates a rune slice per loop entry; range " + argText + " directly — a string range yields the same runes"
 				diag.SuggestedFixes = []analysis.SuggestedFix{{
-					Message: fmt.Sprintf("range %s directly", argText),
+					Message: "range " + argText + " directly",
 					TextEdits: []analysis.TextEdit{
 						{Pos: call.Pos(), End: call.End(), NewText: []byte(argText)},
 					},

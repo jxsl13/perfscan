@@ -284,7 +284,7 @@ func ps5002TriangleFix(pass *analysis.Pass, outer ast.Node, inner ast.Stmt, accu
 		if ibText != obText {
 			return nil
 		}
-		outerHeader = fmt.Sprintf("for %s := 0; %s < %s; %s++ {", i, i, obText, i)
+		outerHeader = "for " + i + " := 0; " + i + " < " + obText + "; " + i + "++ {"
 		bound = obText
 	default:
 		return nil

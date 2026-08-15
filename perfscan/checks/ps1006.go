@@ -316,7 +316,7 @@ func ps1006InterchangeFix(pass *analysis.Pass, file *ast.File, outerNode, innerN
 	fmt.Fprintf(&b, "%s\t%s[%s] = %s[%s]\n", ind, outID.Name, cVar, sums, cVar)
 	fmt.Fprintf(&b, "%s}", ind)
 	return &analysis.SuggestedFix{
-		Message: fmt.Sprintf("interchange the loops so %s is walked contiguously", arrID.Name),
+		Message: "interchange the loops so " + arrID.Name + " is walked contiguously",
 		TextEdits: []analysis.TextEdit{
 			{Pos: outer.Pos(), End: outer.End(), NewText: []byte(b.String())},
 		},

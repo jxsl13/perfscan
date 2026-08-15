@@ -18,7 +18,11 @@ import (
 //
 // This is the partial-retention counterpart to the fully-orphaned cases
 // (TestFixPrunesCrossCheckOrphanImport): here fmt is used by exactly one
-// non-rewritten call, so over-pruning would break the build.
+// non-rewritten call, so over-pruning would break the build. The surviving
+// Sprintf uses a %d verb: the cobra original's "__%s_flag" splice is by now
+// itself rewritten to a concatenation (and fmt then correctly pruned) by
+// PS2034, so a %d over a plain int — which no non-loop check rewrites —
+// keeps fmt live instead.
 func TestFixCobraWriteStringPartialFmtRetention(t *testing.T) {
 	const src = `package p
 
@@ -27,10 +31,10 @@ import (
 	"io"
 )
 
-func usage(w io.Writer, example, name string) {
+func usage(w io.Writer, example string, n int) {
 	fmt.Fprint(w, "Usage:")
 	fmt.Fprintf(w, "%s", example)
-	_ = fmt.Sprintf("__%s_flag", name)
+	_ = fmt.Sprintf("__%d_flag", n)
 }
 `
 	got := string(runFixMode(t, src))

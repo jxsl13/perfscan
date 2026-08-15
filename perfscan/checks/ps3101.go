@@ -85,7 +85,7 @@ func runPS3101(pass *analysis.Pass) (any, error) {
 			diag := analysis.Diagnostic{
 				Pos:     call.Pos(),
 				End:     call.End(),
-				Message: fmt.Sprintf("%s(%s) copies its operand on every iteration but %s is loop-invariant; hoist the conversion above the loop", convType, arg.Name, arg.Name),
+				Message: convType + "(" + arg.Name + ") copies its operand on every iteration but " + arg.Name + " is loop-invariant; hoist the conversion above the loop",
 			}
 			if fix := hoistConvFix(pass, stack, call, arg); fix != nil {
 				diag.SuggestedFixes = []analysis.SuggestedFix{*fix}
@@ -261,9 +261,9 @@ func hoistConvFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr, arg
 	// Assume gofmt indentation (tabs): the loop starts at column
 	// loopPos.Column, i.e. loopPos.Column-1 tabs of indentation.
 	indent := strings.Repeat("\t", loopPos.Column-1)
-	binding := fmt.Sprintf("%s := %s(%s)\n%s", name, convText, arg.Name, indent)
+	binding := name + " := " + convText + "(" + arg.Name + ")\n" + indent
 	return &analysis.SuggestedFix{
-		Message: fmt.Sprintf("hoist %s(%s) above the loop", convText, arg.Name),
+		Message: "hoist " + convText + "(" + arg.Name + ") above the loop",
 		TextEdits: []analysis.TextEdit{
 			{Pos: outer.Pos(), End: outer.Pos(), NewText: []byte(binding)},
 			{Pos: call.Pos(), End: call.End(), NewText: []byte(name)},
