@@ -1,0 +1,8 @@
+package ps2021
+
+import str "strings"
+
+// An aliased strings import keeps its qualifier in the rewrite.
+func aliased(s string) string {
+	return s[str.LastIndexByte(s, ',')+1:]
+}
