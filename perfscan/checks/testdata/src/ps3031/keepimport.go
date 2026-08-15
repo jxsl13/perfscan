@@ -1,0 +1,15 @@
+package ps3031
+
+import (
+	"bytes"
+	"unicode"
+)
+
+// This file keeps another unicode reference (IsDigit), so the rewrites
+// do NOT orphan the import and no import surgery happens.
+func keepImport(b []byte) []byte {
+	if len(b) > 0 && unicode.IsDigit(rune(b[0])) {
+		b = b[1:]
+	}
+	return bytes.TrimFunc(b, unicode.IsSpace) // want `bytes\.TrimFunc\(b, unicode\.IsSpace\) decodes`
+}
