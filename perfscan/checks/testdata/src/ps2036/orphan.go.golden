@@ -1,0 +1,12 @@
+package ps2036
+
+// The only fmt reference in this FILE is the fixable Append itself: the
+// rewrite orphans the import, and the fix pipeline prunes the now-unused
+// fmt import afterwards, so the fix applies (non-cgo file) and adds the
+// strconv import it needs.
+
+import "strconv"
+
+func orphanAppend(buf []byte, f float64) []byte {
+	return strconv.AppendFloat(buf, f, 'g', -1, 64) // want `fmt\.Append with a single int/uint/bool/float operand`
+}
