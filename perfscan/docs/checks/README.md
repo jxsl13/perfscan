@@ -110,6 +110,7 @@ checks' fixes.
 | [PS3017](PS3017.md) | indirect | L1 | yes | slices.SortStableFunc with a hand-rolled three-way comparator (a<b/a>b/-1/1/0) is slices.Sort spelled the slow, stable way |
 | [PS3018](PS3018.md) | indirect | L1 | yes | slices.SortedStableFunc with a bare strings.Compare(a, b) comparator is slices.Sorted spelled the slow, stable way |
 | [PS3019](PS3019.md) | indirect | L1 | yes | slices.IsSortedFunc with a hand-rolled three-way comparator (a<b/a>b/-1/1/0) is slices.IsSorted spelled the slow way |
+| [PS3020](PS3020.md) | indirect | L1 | yes | slices.MaxFunc/MinFunc with a swapped cmp.Compare(b, a) comparator is the opposite extremum — slices.Min/Max spelled the slow way |
 | [PS3021](PS3021.md) | indirect | L2 | yes | a map looked up in a comma-ok guard and then re-read in the body for the same key hashes the key twice; bind the value once |
 | [PS3022](PS3022.md) | indirect | L1 | yes | slices.MaxFunc/MinFunc with a hand-rolled three-way comparator (a<b/a>b/-1/1/0) is slices.Max/Min spelled the slow way |
 | [PS3034](PS3034.md) | indirect | L3 |  | a serial nest whose every write names the outermost loop variable |
