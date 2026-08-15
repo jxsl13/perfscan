@@ -21,6 +21,7 @@ checks' fixes.
 | [PS1008](PS1008.md) | indirect | L1 | yes | slices.EqualFunc with a bare x == y equality closure is slices.Equal spelled with a per-element indirect call |
 | [PS1009](PS1009.md) | access | L2 |  | a named dtype-switch case on the per-element accessor beside a typed sibling case |
 | [PS1010](PS1010.md) | access | L2 | yes | an inner loop reading one column of a [][]T (a row-jumping walk) |
+| [PS1011](PS1011.md) | access | L1 | yes | for range m { n++ } walks every map bucket just to count entries; len(m) reads the stored count in O(1) |
 | [PS2001](PS2001.md) | alloc | L2 |  | a project allocation entry point called inside a loop |
 | [PS2002](PS2002.md) | alloc | L1 | yes | a strings.Builder/bytes.Buffer written in a loop with no Grow |
 | [PS2003](PS2003.md) | alloc | L1 | yes | an allocating strings transform (Replace/Map/Repeat) in a loop |
