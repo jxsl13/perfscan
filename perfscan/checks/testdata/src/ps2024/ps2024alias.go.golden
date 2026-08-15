@@ -1,0 +1,13 @@
+package ps2024
+
+import u "unicode/utf8"
+
+// The import alias is preserved verbatim: only the selected name is
+// renamed to the sibling.
+func aliased(s string) int {
+	return u.RuneCountInString(s) // want `utf8\.RuneCount\(\[\]byte\(s\)\) copies s into a throwaway \[\]byte just to count its runes; utf8\.RuneCountInString\(s\) is the bit-identical, zero-copy count`
+}
+
+func aliasedMirror(b []byte) int {
+	return u.RuneCount(b) // want `utf8\.RuneCountInString\(string\(b\)\) copies b into a throwaway string just to count its runes; utf8\.RuneCount\(b\) is the bit-identical, zero-copy count`
+}
