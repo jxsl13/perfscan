@@ -31,12 +31,19 @@ builtin max). slices.MinFunc/slices.Min are the symmetric pair. Passing
 cmp.Compare itself as the comparator is the same anti-pattern minus one layer and
 is matched too.
 
-The fix is offered only when the element type's underlying type is an integer or
-string kind. There any two elements that compare equal are bitwise-identical
-values, so which of a tie the scan keeps is unobservable and slices.Max is
-byte-for-byte identical: both panic on an empty slice, and for integers and
-strings cmp.Compare and the builtin max induce the same order. Named element
-types (type Priority int) are fixed too.
+The fix is offered only when the element type's underlying type is an INTEGER
+kind. There any two elements that compare equal are bitwise-identical values, so
+which of a tie the scan keeps is unobservable and slices.Max is byte-for-byte
+identical (both panic on an empty slice, and cmp.Compare and the builtin max
+induce the same order), AND the builtin max inlines to a CMP/CSEL that is at
+least as fast as MaxFunc. Named element types (type Priority int) are fixed too.
+
+STRING elements are bit-identical too but reported ADVISORY only, never
+auto-fixed: slices.Max/Min on a []string fold via an outlined runtime.strmax/
+strmin call per element, which benchmarks ~10-25% SLOWER on gc than the
+devirtualized MaxFunc(cmp.Compare) loop (verified on go1.26). Auto-fixing it
+would trade a hand-recognizable idiom for provably slower code, so the report
+stays advisory and the human decides.
 
 FLOAT elements are reported ADVISORY only, never auto-fixed — the same policy as
 PS3107. slices.Max is defined via the builtin max, which PROPAGATES NaN (any NaN
@@ -159,11 +166,16 @@ func runPS3111(pass *analysis.Pass) (any, error) {
 }
 
 // ps3111Elem classifies the extremum's element type (the comparator's first
-// parameter type): fixable for an integer or string kind (equal values are
+// parameter type): fixable only for an integer kind (equal values are
 // bitwise-identical, so tie selection is unobservable and slices.Max/Min match
-// byte-for-byte), advisory for floats (slices.Max/Min use the builtin max/min,
-// which PROPAGATE NaN, whereas cmp.Compare orders NaN first and never selects
-// it) and for type parameters (instantiations may include floats).
+// byte-for-byte, AND the builtin max/min inlines to a CMP/CSEL that is at least
+// as fast). String is bit-identical too but stays ADVISORY: slices.Max/Min on a
+// string slice fold via an outlined runtime.strmax/strmin call per element,
+// which benchmarks ~10-25% SLOWER on gc than the devirtualized
+// MaxFunc(cmp.Compare) loop — so auto-fixing it would recommend slower code.
+// Floats are advisory (slices.Max/Min use the builtin max/min, which PROPAGATE
+// NaN, whereas cmp.Compare orders NaN first and never selects it) and so are
+// type parameters (instantiations may include floats).
 func ps3111Elem(pass *analysis.Pass, comparator ast.Expr) (elem string, fixable bool, why string) {
 	sig, ok := pass.TypesInfo.TypeOf(comparator).(*types.Signature)
 	if !ok || sig.Params().Len() != 2 {
@@ -179,8 +191,10 @@ func ps3111Elem(pass *analysis.Pass, comparator ast.Expr) (elem string, fixable 
 		return elem, false, " (no auto-fix: element type unresolved)"
 	}
 	switch {
-	case b.Info()&(types.IsInteger|types.IsString) != 0:
+	case b.Info()&types.IsInteger != 0:
 		return elem, true, ""
+	case b.Info()&types.IsString != 0:
+		return elem, false, " (no auto-fix: slices.Max/Min on a string slice fold to an outlined runtime.strmax/strmin call per element, ~10-25% slower on gc than the devirtualized MaxFunc(cmp.Compare); bit-identical but a measured perf regression)"
 	case b.Info()&types.IsFloat != 0:
 		return elem, false, " (no auto-fix: slices.Max/Min propagate NaN via the builtin max/min while cmp.Compare orders NaN first, so they differ on a NaN element)"
 	default:
