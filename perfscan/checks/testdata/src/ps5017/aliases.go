@@ -1,0 +1,13 @@
+package ps5017
+
+import (
+	bt "bytes"
+	u "unicode"
+)
+
+// Aliased imports: the bytes qualifier is kept verbatim (bt stays bt),
+// and the aliased unicode spec is dropped when its only reference is
+// the deleted mapping argument.
+func aliased(b []byte) []byte {
+	return bt.Map(u.ToLower, b) // want `bytes\.Map\(unicode\.ToLower, b\) pays`
+}
