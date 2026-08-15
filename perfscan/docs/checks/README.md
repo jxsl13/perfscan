@@ -45,6 +45,7 @@ checks' fixes.
 | [PS2022](PS2022.md) | alloc | L1 | yes | bytes.Equal of a []byte and one []byte(string) conversion is string(b) == s with a conversion deleted |
 | [PS2023](PS2023.md) | alloc | L1 | yes | fmt.Errorf("%s", s) on a plain string formats the identity and hands it to errors.New; errors.New(s) is the same error without the printer |
 | [PS2024](PS2024.md) | alloc | L1 | yes | utf8.RuneCount([]byte(s)) copies the whole string just to count runes; utf8.RuneCountInString(s) counts it in place |
+| [PS2025](PS2025.md) | alloc | L1 | yes | utf8.Valid([]byte(s)) copies the whole string just to validate it; utf8.ValidString(s) validates in place |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
