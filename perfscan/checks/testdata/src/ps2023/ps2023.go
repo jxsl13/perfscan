@@ -1,0 +1,148 @@
+package ps2023
+
+import (
+	"errors"
+	"fmt"
+)
+
+type S string
+
+func (S) String() string { return "stringer" }
+
+// %s over a plain string variable → errors.New (errors already imported).
+func basicS(msg string) error {
+	return fmt.Errorf("%s", msg) // want `fmt\.Errorf\("%s", s\) on a plain string`
+}
+
+// %v is the same verbatim copy for a string operand.
+func basicV(msg string) error {
+	return fmt.Errorf("%v", msg) // want `fmt\.Errorf\("%v", s\) on a plain string`
+}
+
+// A raw-string format with the same one-verb value also qualifies.
+func rawFormat(msg string) error {
+	return fmt.Errorf(`%s`, msg) // want `fmt\.Errorf\("%s", s\) on a plain string`
+}
+
+// The operand is kept byte-verbatim in place: a concatenation stays a
+// concatenation, evaluated once, inside errors.New's parens.
+func concat(a, b string) error {
+	return fmt.Errorf("%s", a+b) // want `fmt\.Errorf\("%s", s\) on a plain string`
+}
+
+// A call operand is evaluated exactly once, in its original position.
+func viaCall(f func() string) error {
+	return fmt.Errorf("%v", f()) // want `fmt\.Errorf\("%v", s\) on a plain string`
+}
+
+// An untyped string constant defaults to string and matches.
+func untypedConst() error {
+	return fmt.Errorf("%s", "boom") // want `fmt\.Errorf\("%s", s\) on a plain string`
+}
+
+// A comment inside the operand survives verbatim — still fixed.
+func commentInsideOperand(f func() string) error {
+	return fmt.Errorf("%s", f( /* keep me */ )) // want `fmt\.Errorf\("%s", s\) on a plain string`
+}
+
+// A comment in the replaced scaffolding around the operand would be
+// destroyed: reported but NOT fixed.
+func commentInScaffolding(msg string) error {
+	return fmt.Errorf( /* dropped */ "%s", msg) // want `fmt\.Errorf\("%s", s\) on a plain string`
+}
+
+// A shadowed errors identifier makes errors.New unusable at the call
+// site: reported but NOT fixed.
+func shadowedErrors(msg string) error {
+	errors := 3
+	_ = errors
+	return fmt.Errorf("%s", msg) // want `fmt\.Errorf\("%s", s\) on a plain string`
+}
+
+// Keep fmt referenced so this file's import is not orphaned (the orphan
+// path is exercised by orphan.go).
+func other() {
+	fmt.Println("side effect")
+}
+
+// Keep errors referenced independently of the fixes.
+var _ = errors.New
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// A defined string type carries a String() method fmt calls; errors.New
+// would also reject it. Not an identity.
+func definedType(s S) error {
+	return fmt.Errorf("%s", s)
+}
+
+// A fmt.Stringer is formatted through String(), not copied.
+func stringer(s fmt.Stringer) error {
+	return fmt.Errorf("%v", s)
+}
+
+// An error operand is formatted through Error() — and %s of it is not a
+// verbatim copy of anything errors.New accepts.
+func errOperand(err error) error {
+	return fmt.Errorf("%s", err)
+}
+
+// []byte is formatted by fmt, and errors.New would reject it.
+func byteSlice(b []byte) error {
+	return fmt.Errorf("%s", b)
+}
+
+// Any format beyond the bare verb formats differently.
+func withNewline(msg string) error {
+	return fmt.Errorf("%s\n", msg)
+}
+
+func quoted(msg string) error {
+	return fmt.Errorf("%q", msg)
+}
+
+func plusV(msg string) error {
+	return fmt.Errorf("%+v", msg)
+}
+
+func width(msg string) error {
+	return fmt.Errorf("%5s", msg)
+}
+
+func indexed(msg string) error {
+	return fmt.Errorf("%[1]s", msg)
+}
+
+func escapedPercent(msg string) error {
+	return fmt.Errorf("%%s", msg)
+}
+
+// %w wraps — fmt returns a *wrapError, never errors.New.
+func wrapped(err error) error {
+	return fmt.Errorf("%w", err)
+}
+
+// A non-literal format proves nothing.
+func varFormat(format, msg string) error {
+	return fmt.Errorf(format, msg)
+}
+
+// Extra arguments append %!(EXTRA ...).
+func extraArgs(msg string, x int) error {
+	return fmt.Errorf("%s", msg, x)
+}
+
+// A spread passes an unknown number of operands.
+func spread(args ...any) error {
+	return fmt.Errorf("%s", args...)
+}
+
+// A shadowed fmt is not the fmt package.
+type fakeFmt struct{}
+
+func (fakeFmt) Errorf(format string, a ...any) error { return errors.New(format) }
+
+func shadowedFmt(msg string) error {
+	fmt := fakeFmt{}
+	return fmt.Errorf("%s", msg)
+}
