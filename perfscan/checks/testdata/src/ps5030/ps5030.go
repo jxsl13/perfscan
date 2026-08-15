@@ -1,0 +1,68 @@
+package ps5030
+
+import "strings"
+
+// --- IndexAny form: 2-, 3- and 4-byte encodings all rewrite to the
+// equivalent rune literal; the replacement is still a call returning the
+// same int, so it drops into every syntactic position.
+
+func indexBasics(s string) int {
+	i := strings.IndexAny(s, "—") // want `strings\.IndexAny of the one-multi-byte-rune cutset "—" falls into the fallback that decodes every rune of the haystack; strings\.IndexRune\(s, '—'\) is a single substring scan over the rune's UTF-8 encoding — identical index for every input`
+	j := strings.IndexAny(s, "é") // want `strings\.IndexRune\(s, 'é'\) is a single substring scan`
+	k := strings.IndexAny(s, "😀") // want `strings\.IndexRune\(s, '😀'\) is a single substring scan`
+	return i + j + k
+}
+
+// Every source spelling of the same rune — the direct character, a \u
+// escape, the raw byte escapes of its UTF-8 encoding, a raw backquoted
+// literal — lands on the same rune literal: the fix renders the DECODED
+// rune with strconv.QuoteRune, so no re-escaping subtleties exist. A
+// non-printable rune is rendered as a backslash escape.
+func indexSpellings(s string) {
+	_ = strings.IndexAny(s, "\u2014") // want `strings\.IndexAny of the one-multi-byte-rune cutset "\\u2014" falls into the fallback that decodes every rune of the haystack; strings\.IndexRune\(s, '—'\) is a single substring scan`
+	_ = strings.IndexAny(s, "\xe2\x80\x94") // want `strings\.IndexRune\(s, '—'\) is a single substring scan`
+	_ = strings.IndexAny(s, `—`) // want "strings\\.IndexRune\\(s, '—'\\) is a single substring scan"
+	_ = strings.IndexAny(s, "\u00a0") // want `strings\.IndexRune\(s, '\\u00a0'\) is a single substring scan`
+	_ = strings.IndexAny(s, "\U0010FFFF") // want `strings\.IndexRune\(s, '\\U0010ffff'\) is a single substring scan`
+}
+
+// --- ContainsAny form: ContainsRune is the same call-for-call rename
+// (bool -> bool), so conditions, ! operands, && / || chains and
+// comparisons all need no extra syntax.
+
+func containsContexts(s string, ok bool) bool {
+	if strings.ContainsAny(s, "€") { // want `strings\.ContainsAny of the one-multi-byte-rune cutset "€" falls into the fallback that decodes every rune of the haystack; strings\.ContainsRune\(s, '€'\) is a single substring scan over the rune's UTF-8 encoding — identical boolean for every input`
+		return true
+	}
+	found := !strings.ContainsAny(s, "…") // want `strings\.ContainsRune\(s, '…'\) is a single substring scan`
+	return ok && found || strings.ContainsAny(s, "あ") // want `strings\.ContainsRune\(s, 'あ'\) is a single substring scan`
+}
+
+// Positions that force the ContainsAny siblings of OTHER checks into
+// advisory mode are all fixable here, because the replacement stays a
+// call expression: go/defer statements, a bare call statement, and
+// comparison operands.
+func callPositions(s string, m map[int]int) {
+	_ = strings.IndexAny(s, ("»")) // want `strings\.IndexRune\(s, '»'\) is a single substring scan`
+	_ = (strings.ContainsAny(s, "ø")) // want `strings\.ContainsRune\(s, 'ø'\) is a single substring scan`
+	_ = m[strings.IndexAny(s, "ß")] // want `strings\.IndexRune\(s, 'ß'\) is a single substring scan`
+	go strings.IndexAny(s, "Ω") // want `strings\.IndexRune\(s, 'Ω'\) is a single substring scan`
+	defer strings.ContainsAny(s, "λ") // want `strings\.ContainsRune\(s, 'λ'\) is a single substring scan`
+	strings.ContainsAny(s, "π") // want `strings\.ContainsRune\(s, 'π'\) is a single substring scan`
+	if x := strings.ContainsAny(s, "µ"); x == strings.ContainsAny(s, "¶") { // want `strings\.ContainsRune\(s, 'µ'\) is a single substring scan` `strings\.ContainsRune\(s, '¶'\) is a single substring scan`
+		return
+	}
+}
+
+// --- advisory: reported but never rewritten ---
+
+// A named string constant (or any constant expression that is not a
+// literal) keeps its symbolic name: spelling out a copy of its value as a
+// rune literal would discard it. Decode the constant by hand.
+const dash = "—"
+
+func namedConst(s string) {
+	_ = strings.IndexAny(s, dash) // want `the cutset is a constant expression, not a string literal — rewrite to strings\.IndexRune by hand`
+	_ = strings.ContainsAny(s, dash) // want `the cutset is a constant expression, not a string literal — rewrite to strings\.ContainsRune by hand`
+	_ = strings.ContainsAny(s, "€"+"") // want `the cutset is a constant expression, not a string literal — rewrite to strings\.ContainsRune by hand`
+}

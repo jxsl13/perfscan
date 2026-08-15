@@ -1,0 +1,12 @@
+package ps5030
+
+import str "strings"
+
+// An aliased strings import keeps its qualifier verbatim; only the
+// selected name and the cutset literal change — IndexRune and
+// ContainsRune live in the same package, so no import surgery is ever
+// needed.
+func aliased(s string) bool {
+	i := str.IndexAny(s, "—") // want `strings\.IndexAny of the one-multi-byte-rune cutset "—" falls into the fallback`
+	return i >= 0 && str.ContainsAny(s, "€") // want `strings\.ContainsAny of the one-multi-byte-rune cutset "€" falls into the fallback`
+}
