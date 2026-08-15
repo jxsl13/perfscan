@@ -1,0 +1,55 @@
+package ps5025
+
+import (
+	"bytes"
+	"strings"
+)
+
+// The replacement stays a call returning the same int, so it drops into
+// every syntactic position with no parenthesization, statement, or
+// go/defer concerns.
+
+func basics(s string, b []byte) int {
+	i := strings.LastIndexByte(s, "/"[0]) // want `strings\.LastIndexAny of the one-ASCII-byte cutset "/" pays the cutset dispatch and the ASCII-set/rune-decoding machinery before the backward scan; strings\.LastIndexByte\(s, "/"\[0\]\) runs the same backward byte scan directly — identical index for every input`
+	j := bytes.LastIndexByte(b, "="[0]) // want `bytes\.LastIndexAny of the one-ASCII-byte cutset "=" pays the cutset dispatch and the ASCII-set/rune-decoding machinery before the backward scan; bytes\.LastIndexByte\(b, "="\[0\]\) runs the same backward byte scan directly — identical index for every input`
+	return i + j
+}
+
+// Escapes and raw literals carry over byte-verbatim: the ORIGINAL string
+// literal token is reused and wrapped as lit[0], so no re-escaping ever
+// happens. Every ASCII byte — control characters and NUL included — is in
+// scope; only the < 0x80 bound matters.
+func escapes(s string, b []byte) {
+	_ = strings.LastIndexByte(s, "\t"[0]) // want `strings\.LastIndexByte\(s, "\\t"\[0\]\) runs the same backward byte scan`
+	_ = strings.LastIndexByte(s, "\x00"[0]) // want `strings\.LastIndexByte\(s, "\\x00"\[0\]\) runs the same backward byte scan`
+	_ = strings.LastIndexByte(s, "\x7f"[0]) // want `strings\.LastIndexByte\(s, "\\x7f"\[0\]\) runs the same backward byte scan`
+	_ = strings.LastIndexByte(s, "\\"[0]) // want `strings\.LastIndexByte\(s, "\\\\"\[0\]\) runs the same backward byte scan`
+	_ = bytes.LastIndexByte(b, `-`[0]) // want "bytes\\.LastIndexByte\\(b, `-`\\[0\\]\\) runs the same backward byte scan"
+}
+
+// Parentheses around the cutset literal or the whole call are looked
+// through / left alone; the literal token is wrapped in place. A call in
+// a comparison, an index bracket, or a go/defer statement is still a call
+// after the rewrite — every position is safe.
+func contexts(s string, b []byte, m map[int]int) {
+	_ = strings.LastIndexByte(s, ("!"[0])) // want `strings\.LastIndexByte\(s, "!"\[0\]\) runs the same backward byte scan`
+	_ = (bytes.LastIndexByte(b, ";"[0])) // want `bytes\.LastIndexByte\(b, ";"\[0\]\) runs the same backward byte scan`
+	if strings.LastIndexByte(s, ","[0]) >= 0 { // want `strings\.LastIndexByte\(s, ","\[0\]\) runs the same backward byte scan`
+		_ = m[bytes.LastIndexByte(b, ":"[0])] // want `bytes\.LastIndexByte\(b, ":"\[0\]\) runs the same backward byte scan`
+	}
+	go strings.LastIndexByte(s, "g"[0]) // want `strings\.LastIndexByte\(s, "g"\[0\]\) runs the same backward byte scan`
+	defer bytes.LastIndexByte(b, "d"[0]) // want `bytes\.LastIndexByte\(b, "d"\[0\]\) runs the same backward byte scan`
+}
+
+// --- advisory: reported but never rewritten ---
+
+// A named string constant (or any constant expression that is not a
+// literal) keeps its symbolic name: wrapping a spelled-out copy of its
+// value would discard it. Index the constant itself (sep[0]) by hand.
+const sep = "/"
+
+func namedConst(s string, b []byte) {
+	_ = strings.LastIndexAny(s, sep) // want `the cutset is a constant expression, not a string literal — rewrite to strings\.LastIndexByte by hand`
+	_ = bytes.LastIndexAny(b, sep) // want `the cutset is a constant expression, not a string literal — rewrite to bytes\.LastIndexByte by hand`
+	_ = strings.LastIndexAny(s, ":"+"") // want `the cutset is a constant expression, not a string literal — rewrite to strings\.LastIndexByte by hand`
+}
