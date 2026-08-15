@@ -1,0 +1,221 @@
+package ps5036
+
+import (
+	"bytes"
+	stdbytes "bytes"
+	"strings"
+)
+
+// --- the six membership forms ---
+
+func hasNE(b, sub []byte) bool {
+	return bytes.LastIndex(b, sub) != -1 // want `bytes\.LastIndex\(\.\.\.\) != -1 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func hasGT(b, sub []byte) bool {
+	return bytes.LastIndex(b, sub) > -1 // want `bytes\.LastIndex\(\.\.\.\) > -1 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func hasGE(b, sub []byte) bool {
+	return bytes.LastIndex(b, sub) >= 0 // want `bytes\.LastIndex\(\.\.\.\) >= 0 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func noneEQ(b, sub []byte) bool {
+	return bytes.LastIndex(b, sub) == -1 // want `bytes\.LastIndex\(\.\.\.\) == -1 tests membership only; !bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func noneLT(b, sub []byte) bool {
+	return bytes.LastIndex(b, sub) < 0 // want `bytes\.LastIndex\(\.\.\.\) < 0 tests membership only; !bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func noneLE(b, sub []byte) bool {
+	return bytes.LastIndex(b, sub) <= -1 // want `bytes\.LastIndex\(\.\.\.\) <= -1 tests membership only; !bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// Literal on the left: `-1 != LastIndex` is `LastIndex != -1`,
+// `0 > LastIndex` is `LastIndex < 0`.
+
+func reversed(b, sub []byte) bool {
+	return -1 != bytes.LastIndex(b, sub) // want `bytes\.LastIndex\(\.\.\.\) != -1 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func reversedNeg(b, sub []byte) bool {
+	return 0 > bytes.LastIndex(b, sub) // want `bytes\.LastIndex\(\.\.\.\) < 0 tests membership only; !bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// Mirrored membership beyond the two above: `-1 < LastIndex` normalizes
+// to `LastIndex > -1` (member), `0 <= LastIndex` to `LastIndex >= 0`
+// (member), `-1 >= LastIndex` to `LastIndex <= -1` (absent).
+func reversedGT(b, sub []byte) bool {
+	return -1 < bytes.LastIndex(b, sub) // want `bytes\.LastIndex\(\.\.\.\) > -1 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func reversedGE(b, sub []byte) bool {
+	return 0 <= bytes.LastIndex(b, sub) // want `bytes\.LastIndex\(\.\.\.\) >= 0 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func reversedLE(b, sub []byte) bool {
+	return -1 >= bytes.LastIndex(b, sub) // want `bytes\.LastIndex\(\.\.\.\) <= -1 tests membership only; !bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// A parenthesized literal is still the literal (the whole side is
+// deleted either way).
+func parenLit(b, sub []byte) bool {
+	return bytes.LastIndex(b, sub) != (-1) // want `bytes\.LastIndex\(\.\.\.\) != -1 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// An aliased import keeps its qualifier: only the selected name changes.
+func aliased(b, sub []byte) bool {
+	return stdbytes.LastIndex(b, sub) != -1 // want `bytes\.LastIndex\(\.\.\.\) != -1 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// Composed into a larger condition: unary ! binds tighter than &&, so
+// the rewrite needs no extra parentheses.
+func composed(b, sub, t []byte) bool {
+	return len(t) > 0 && bytes.LastIndex(b, sub) == -1 // want `bytes\.LastIndex\(\.\.\.\) == -1 tests membership only; !bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// In an if condition — the canonical shape.
+func inIf(b, sub []byte) int {
+	if bytes.LastIndex(b, sub) != -1 { // want `bytes\.LastIndex\(\.\.\.\) != -1 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+		return 1
+	}
+	return 0
+}
+
+// A conversion of a one-byte NAMED string constant keeps the plain
+// Contains rewrite: PS5013 and PS5014 both report that shape
+// advisory-only, so nothing churns, and the symbolic name survives.
+const sep = "/"
+
+func namedConstNeedle(b []byte) bool {
+	return bytes.LastIndex(b, []byte(sep)) != -1 // want `bytes\.LastIndex\(\.\.\.\) != -1 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// The nil/empty-needle edges stay bit-identical: LastIndex(b, nil) is
+// len(b) (always >= 0), exactly like Contains(b, nil) — constant true
+// either way, and the rewrite preserves it. PS5013/PS5014 exclude the
+// empty needle, so no other check claims these sites.
+func nilNeedle(b []byte) bool {
+	return bytes.LastIndex(b, nil) != -1 // want `bytes\.LastIndex\(\.\.\.\) != -1 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func emptyConvNeedle(b []byte) bool {
+	return bytes.LastIndex(b, []byte("")) != -1 // want `bytes\.LastIndex\(\.\.\.\) != -1 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// A multi-byte conversion needle is in scope (PS5013/PS5014 only claim
+// the one-byte shapes) — the argument text passes through verbatim.
+func convNeedle(b []byte, s string) bool {
+	return bytes.LastIndex(b, []byte(s)) == -1 // want `bytes\.LastIndex\(\.\.\.\) == -1 tests membership only; !bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// A named byte-slice type is assignable to []byte (the parameter type is
+// unnamed), so the haystack spelling is irrelevant to the rewrite.
+type payload []byte
+
+func namedSlice(p payload, sub []byte) bool {
+	return bytes.LastIndex(p, sub) != -1 // want `bytes\.LastIndex\(\.\.\.\) != -1 tests membership only; bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// Arguments pass through untouched — side effects stay evaluated exactly
+// once, in the same order.
+func sideEffects(f func() []byte, g func() []byte) bool {
+	return bytes.LastIndex(f(), g()) == -1 // want `bytes\.LastIndex\(\.\.\.\) == -1 tests membership only; !bytes\.Contains\(b, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// --- negatives: everything below stays silent ---
+
+// A statically one-byte needle is PS5013's territory (LastIndex ->
+// LastIndexByte on the call itself); a Contains spelling here would be
+// PS5014's Before-shape — churn either way.
+func oneByteComposite(b []byte) bool {
+	return bytes.LastIndex(b, []byte{'/'}) != -1
+}
+
+func oneByteConvLiteral(b []byte) bool {
+	return bytes.LastIndex(b, []byte("/")) != -1
+}
+
+func oneByteConvRawLiteral(b []byte) bool {
+	return bytes.LastIndex(b, []byte(`z`)) != -1
+}
+
+func oneByteConvEscape(b []byte) bool {
+	return bytes.LastIndex(b, []byte("\xff")) != -1
+}
+
+// Comparisons that genuinely use the position.
+func positionEQ(b, sub []byte) bool  { return bytes.LastIndex(b, sub) == 0 }
+func positionNEQ(b, sub []byte) bool { return bytes.LastIndex(b, sub) != 0 }
+func positionGT(b, sub []byte) bool  { return bytes.LastIndex(b, sub) > 0 }
+func positionGE(b, sub []byte) bool  { return bytes.LastIndex(b, sub) >= 1 }
+func alwaysTrue(b, sub []byte) bool  { return bytes.LastIndex(b, sub) >= -1 }
+func alwaysFalse(b, sub []byte) bool { return bytes.LastIndex(b, sub) < -1 }
+
+// Mirrored NON-membership: `0 < LastIndex` normalizes to `LastIndex > 0`,
+// which uses the position — silent, exactly like its call-on-left twin.
+func reversedNonMembership(b, sub []byte) bool {
+	return 0 < bytes.LastIndex(b, sub)
+}
+
+// The result bound to a variable or used as an index is a genuine
+// position use.
+func bound(b, sub []byte) bool {
+	i := bytes.LastIndex(b, sub)
+	return i != -1
+}
+
+func indexed(b, sub []byte) []byte {
+	return b[bytes.LastIndex(b, sub)+1:]
+}
+
+// Compared against a variable or named constant holding -1: only the
+// direct literal spelling is provably a membership test.
+func varRHS(b, sub []byte, notFound int) bool {
+	return bytes.LastIndex(b, sub) != notFound
+}
+
+const missing = -1
+
+func namedConstRHS(b, sub []byte) bool {
+	return bytes.LastIndex(b, sub) != missing
+}
+
+// A named bool context: Contains returns the basic type bool, which
+// would not compile here without a conversion.
+type tri bool
+
+func namedBoolContext(b, sub []byte) tri {
+	var f tri = bytes.LastIndex(b, sub) != -1
+	return f
+}
+
+// strings.LastIndex is PS5031's territory — out of scope.
+func stringsTwin(s, sub string) bool {
+	return strings.LastIndex(s, sub) != -1
+}
+
+// LastIndexByte's membership sibling is deliberately not shipped:
+// PS5013's fix output would be its input, re-fixed on the next pass.
+func lastIndexByte(b []byte) bool {
+	return bytes.LastIndexByte(b, '/') != -1
+}
+
+// A shadowed bytes identifier or a same-named method never matches:
+// the callee is pinned by type information.
+type fake struct{}
+
+func (fake) LastIndex(a, b []byte) int { return -1 }
+
+func shadowed(b, sub []byte) bool {
+	bytes := fake{}
+	return bytes.LastIndex(b, sub) != -1
+}
+
+// Other bytes members with the same comparison shape stay silent
+// (Index != -1 -> Contains is a rejected readability-only rewrite:
+// Contains wraps that very Index call).
+func plainIndex(b, sub []byte) bool {
+	return bytes.Index(b, sub) != -1
+}
