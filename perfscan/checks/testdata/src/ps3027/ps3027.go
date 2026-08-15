@@ -1,0 +1,51 @@
+package ps3027
+
+import (
+	"fmt"
+	"slices"
+)
+
+type Rank int
+
+// The hand-rolled exact -1/+1/0 three-way ladder is slices.Compare spelled
+// the slow way; both slice expressions are kept verbatim. (The fixture
+// comparators are one-liners because the `want` comment must share the
+// call's line, and a comment INSIDE the deleted span keeps a report advisory
+// — see advisory.go; the AST shapes are identical to the multi-line
+// spellings.)
+func compareInts(a, b []int) int {
+	return slices.CompareFunc(a, b, func(x, y int) int { if x < y { return -1 }; if x > y { return 1 }; return 0 }) // want `slices\.CompareFunc with a hand-rolled three-way comparator \(a<b/a>b/-1/1/0\) pays an indirect comparator call plus up to two relational comparisons per element pair; slices\.Compare compares the int elements with the identical lexicographic result and the comparison inlined`
+}
+
+// The if/else-if chain with a trailing return is the same three-way.
+func compareChain(a, b []uint64) int {
+	return slices.CompareFunc(a, b, func(x, y uint64) int { if x < y { return -1 } else if x > y { return 1 }; return 0 }) // want `slices\.Compare compares the uint64 elements with the identical lexicographic result and the comparison inlined`
+}
+
+// The fully chained if/else-if/else spelling maps identically, and a NAMED
+// integer element is fixed too: ~int satisfies cmp.Ordered and no method of
+// the element is ever consulted.
+func compareRanks(a, b []Rank) int {
+	return slices.CompareFunc(a, b, func(x, y Rank) int { if x < y { return -1 } else if x > y { return 1 } else { return 0 } }) // want `slices\.Compare compares the Rank elements with the identical lexicographic result and the comparison inlined`
+}
+
+// An expressionless switch with a default clause is the same three-way; the
+// two-field parameter spelling func(a T, b T) matches like func(a, b T).
+func compareSwitch(a []int32, b []int32) int {
+	return slices.CompareFunc(a, b, func(x int32, y int32) int { switch { case x < y: return -1; case x > y: return 1; default: return 0 } }) // want `slices\.Compare compares the int32 elements with the identical lexicographic result and the comparison inlined`
+}
+
+// A switch without a default clause plus the trailing return matches too;
+// parameter names are matched by object identity, not spelling, the b</b>
+// operand spellings mean the same directions, and a unary -(1)/+1 is read
+// from the constant value. The slice operands are kept verbatim, however
+// they are spelled.
+func compareFields(w struct{ xs, ys []uint8 }) int {
+	return slices.CompareFunc(w.xs, w.ys, func(a, b uint8) int { switch { case b > a: return -(1); case b < a: return +1 }; return 0 }) // want `slices\.Compare compares the uint8 elements with the identical lexicographic result and the comparison inlined`
+}
+
+// A statement-position call rewrites the same way.
+func compareDiscarded(a, b []int8) {
+	slices.CompareFunc(a, b, func(x, y int8) int { if x < y { return -1 }; if x > y { return 1 }; return 0 }) // want `slices\.Compare compares the int8 elements with the identical lexicographic result and the comparison inlined`
+	fmt.Println(a, b)
+}
