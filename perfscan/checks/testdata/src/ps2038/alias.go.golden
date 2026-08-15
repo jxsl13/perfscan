@@ -1,0 +1,10 @@
+package ps2038
+
+import enc "unicode/utf8"
+
+// An aliased import keeps its qualifier verbatim — only the member
+// identifier is renamed.
+func aliased(s string, b []byte) {
+	use(enc.DecodeRune(b))  // want `utf8\.DecodeRune\(b\) decodes the identical \(r, size\) in place`
+	use(enc.DecodeLastRuneInString(s))      // want `utf8\.DecodeLastRuneInString\(s\) decodes the identical \(r, size\) in place`
+}
