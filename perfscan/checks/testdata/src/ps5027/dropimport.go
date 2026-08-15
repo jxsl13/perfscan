@@ -1,0 +1,9 @@
+package ps5027
+
+import "fmt"
+
+// The sole fmt reference in this file is the fixable call, so the fix
+// drops the orphaned fmt import — there is no import to add in its place.
+func dropFmt() string {
+	return fmt.Sprintf("standalone constant") // want `fmt\.Sprintf on a verbless constant string`
+}
