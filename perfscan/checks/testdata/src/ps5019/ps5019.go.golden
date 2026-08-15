@@ -1,0 +1,57 @@
+package ps5019
+
+import (
+	"bytes"
+	"fmt"
+)
+
+// The canonical shape: the explicit Count re-derives the cap Replace
+// computes internally, so b is scanned twice. Rewritten to ReplaceAll.
+func replaceBasic(b, old, new []byte) []byte {
+	return bytes.ReplaceAll(b, old, new) // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+}
+
+// Byte-slice literal operands: the pair must only be syntactically
+// identical.
+func replaceLiterals(line []byte) []byte {
+	return bytes.ReplaceAll(line, []byte{'/', '/'}, []byte{'/'}) // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+}
+
+// Field selectors, index and slice expressions are call-free re-reads:
+// dropping the second evaluation is unobservable, so the fix applies,
+// keeping every operand byte-verbatim.
+type conf struct{ body, sep []byte }
+
+func replaceSelectors(c conf, parts [][]byte, seps [2][]byte, i int) {
+	fmt.Println(bytes.ReplaceAll(c.body, c.sep, nil))          // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+	fmt.Println(bytes.ReplaceAll(parts[0], seps[i], nil))      // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+	fmt.Println(bytes.ReplaceAll(c.body[1:], c.sep, c.body))   // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+	fmt.Println(len(bytes.ReplaceAll(c.body, c.sep, nil)))     // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+}
+
+// A parenthesized Count argument is the same shape.
+func replaceParenCount(b, old []byte) []byte {
+	return bytes.ReplaceAll(b, old, nil) // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+}
+
+// Operands containing calls or conversions stay ADVISORY: the Before
+// evaluates b and old twice, so a call could yield different values or
+// lose a side effect — reported (it is still a redundant double scan)
+// but never rewritten mechanically.
+func replaceImpure(b, old []byte, f func() []byte, s string) {
+	_ = bytes.Replace(f(), old, nil, bytes.Count(f(), old))                 // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+	_ = bytes.Replace(b, f(), nil, bytes.Count(b, f()))                     // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+	_ = bytes.Replace(b, old, f(), bytes.Count(b, old))                     // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+	_ = bytes.Replace([]byte(s), old, nil, bytes.Count([]byte(s), old))     // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+	_ = bytes.Replace(b, []byte("x"), nil, bytes.Count(b, []byte("x")))     // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+	_ = bytes.Replace(b, old, []byte("y"), bytes.Count(b, old))             // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+	_ = bytes.Replace(bytes.TrimSpace(b), old, nil, bytes.Count(bytes.TrimSpace(b), old)) // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+}
+
+// A comment inside the replaced punctuation would be silently destroyed
+// by the rewrite — advisory.
+func replaceCommented(b, old []byte) {
+	_ = bytes.Replace( /* keep me */ b, old, nil, bytes.Count(b, old)) // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+	_ = bytes.Replace(b /* mid */, old, nil, bytes.Count(b, old))      // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+	_ = bytes.Replace(b, old, nil, bytes.Count(b, old) /* tail */)     // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+}
