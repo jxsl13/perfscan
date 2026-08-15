@@ -49,6 +49,7 @@ checks' fixes.
 | [PS2026](PS2026.md) | alloc | L1 | yes | len(buf.String()) copies the whole bytes.Buffer just to measure it; buf.Len() is the same int in O(1) |
 | [PS2027](PS2027.md) | alloc | L1 | yes | buf.String() == "" copies the whole bytes.Buffer just to test emptiness; buf.Len() == 0 answers it in O(1) |
 | [PS2028](PS2028.md) | alloc | L1 | yes | len(strings.Fields(s)) == 0 allocates every field just to test blankness; strings.TrimSpace(s) == "" is allocation-free |
+| [PS2029](PS2029.md) | alloc | L1 | yes | len(strings.SplitN(s, sep, 2)) compared against 1 or 2 allocates the piece slice just to test for the separator; strings.Contains is allocation-free |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
