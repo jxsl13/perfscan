@@ -1,0 +1,15 @@
+package ps5034
+
+import (
+	"strings"
+	u "unicode"
+)
+
+// An aliased unicode import still pins the predicate by type info; the
+// whole ", u.IsSpace" tail is deleted. The keeper below holds another
+// u reference, so the import survives the rewrite.
+func aliasedUnicode(s string) []string {
+	return strings.Fields(s) // want `strings\.FieldsFunc\(s, unicode\.IsSpace\) decodes every rune`
+}
+
+var _ = u.IsPunct
