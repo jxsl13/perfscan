@@ -1,0 +1,12 @@
+package ps3019
+
+import (
+	sl "slices"
+)
+
+// The package is resolved by IMPORT PATH, not spelling: an aliased slices
+// keeps its alias in the rewrite. The comparator references nothing but its
+// own parameters and literals, so no import is ever orphaned.
+func checkAliased(xs []int) bool {
+	return sl.IsSorted(xs) // want `slices\.IsSortedFunc with a hand-rolled three-way comparator \(a<b/a>b/-1/1/0\) pays an indirect comparator call plus up to two relational comparisons per adjacent pair; slices\.IsSorted answers the identical bool over the int elements with a single inlined comparison`
+}
