@@ -1069,7 +1069,7 @@ func pruneOrphanedImports(src []byte) []byte {
 		// UsesImport would wrongly report it unused and prune a live import
 		// (observed on kubernetes). The cross-check orphan bug this guards against
 		// is a stdlib one (sort), so restricting to stdlib loses nothing.
-		if strings.Contains(path, ".") {
+		if strings.IndexByte(path, "."[0]) >= 0 {
 			continue
 		}
 		if astutil.UsesImport(f, path) {

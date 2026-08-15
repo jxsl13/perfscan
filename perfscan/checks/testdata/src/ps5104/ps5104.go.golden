@@ -88,6 +88,42 @@ func emptySub(s string) bool {
 	return strings.Contains(s, "") // want `strings\.Count\(\.\.\.\) > 0 tests membership only; strings\.Contains\(s, sub\) is faster and stops at the first match`
 }
 
+// --- chained fast path: a direct ONE-BYTE string literal needle ---
+//
+// The Contains spelling would be PS5016's exact Before-shape, so the fix
+// jumps straight to the fixed point: IndexByte compared against 0, the
+// original literal token reused byte-for-byte. Present maps to >= 0,
+// absent to < 0; the literal-on-left spellings fold their lead away; a
+// raw one-byte escape like "\xff" is in scope, a two-byte rune is not.
+func oneByte(s string) bool {
+	return strings.IndexByte(s, "x"[0]) >= 0 // want `strings\.Count\(\.\.\.\) > 0 tests membership of a single byte only; strings\.IndexByte\(s, "x"\[0\]\) >= 0 is faster, stops at the first match, and skips the substring machinery`
+}
+
+func oneByteAbsent(s string) bool {
+	return strings.IndexByte(s, "="[0]) < 0 // want `strings\.Count\(\.\.\.\) == 0 tests membership of a single byte only; strings\.IndexByte\(s, "="\[0\]\) < 0 is faster, stops at the first match, and skips the substring machinery`
+}
+
+func oneByteMirrored(s string, ok bool) bool {
+	return ok && strings.IndexByte(s, "/"[0]) >= 0 // want `strings\.Count\(\.\.\.\) > 0 tests membership of a single byte only; strings\.IndexByte\(s, "/"\[0\]\) >= 0 is faster, stops at the first match, and skips the substring machinery`
+}
+
+func oneByteMirroredAbsent(s string) bool {
+	return strings.IndexByte(s, "\xff"[0]) < 0 // want `strings\.Count\(\.\.\.\) < 1 tests membership of a single byte only; strings\.IndexByte\(s, "\\xff"\[0\]\) < 0 is faster, stops at the first match, and skips the substring machinery`
+}
+
+// A named one-byte constant keeps the plain Contains rewrite (its
+// symbolic name survives; PS5016 reports it advisory-only, so no churn).
+const pipe = "|"
+
+func oneByteNamedConst(s string) bool {
+	return strings.Contains(s, pipe) // want `strings\.Count\(\.\.\.\) > 0 tests membership only; strings\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
+// A one-byte bytes needle keeps the plain Contains rewrite too.
+func oneByteBytes(b []byte) bool {
+	return bytes.Contains(b, []byte("x")) // want `bytes\.Count\(\.\.\.\) > 0 tests membership only; bytes\.Contains\(s, sub\) is faster and stops at the first match`
+}
+
 // --- guards: none of the following may be reported or rewritten ---
 
 // Thresholds other than the six membership forms genuinely need the tally.

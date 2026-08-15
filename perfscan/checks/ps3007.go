@@ -529,7 +529,7 @@ func ps3007Fix(pass *analysis.Pass, file *ast.File, fn *ast.FuncDecl, loop *ast.
 	}
 	for _, idx := range probes {
 		keyText := exprTextRendered(idx.Index)
-		if keyText == "" || strings.Contains(keyText, "\n") {
+		if keyText == "" || strings.IndexByte(keyText, "\n"[0]) >= 0 {
 			return nil
 		}
 		// A key mentioning any tracked set could nest another rewrite's

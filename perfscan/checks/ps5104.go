@@ -56,6 +56,20 @@ be orphaned. When the comparison flips (== 0, < 1, <= 0) the result is
 prefixed with !, which binds tighter than any binary operator — safe
 inside a larger && / || condition without extra parentheses.
 
+One shape chains further: a strings.Count needle that is a direct
+ONE-BYTE string literal. There the Contains spelling is itself PS5016's
+Before-shape (strings.Contains of a one-byte needle -> IndexByte), so
+emitting it would make the next -fix pass rewrite this fix's own output.
+The fix emits the final fixed point directly instead —
+strings.Count(s, "z") > 0 becomes strings.IndexByte(s, "z"[0]) >= 0 and
+the negated shapes become < 0 — reusing the original literal token
+byte-for-byte exactly as PS5016 does, with the same one-BYTE length rule
+("é" is out, "\xff" is in, "" is out). A comparison replaces a
+comparison, so every position stays legal with no parenthesization. A
+named constant or constant-expression needle keeps the plain Contains
+rewrite (PS5016 reports those advisory-only, so no churn), as do all
+bytes.Count needles and multi-byte needles.
+
 Comparisons that genuinely need the count are left alone: Count(...) > 1,
 == 2, >= 2, <= 1 and friends, a Count result bound to a variable or used
 arithmetically, and any comparison against a non-literal (a variable or
@@ -122,6 +136,58 @@ func runPS5104(pass *analysis.Pass) (any, error) {
 				}
 			}
 			sel := call.Fun.(*ast.SelectorExpr)
+
+			// Chain-aware fast path: a strings.Count needle that is a
+			// direct ONE-BYTE string literal. Emitting Contains here would
+			// hand PS5016 its exact Before-shape, so the NEXT -fix pass
+			// would rewrite this fix's own output — a two-pass churn the
+			// idempotence pin (internal/runner) forbids. Emit the final
+			// fixed point directly instead: strings.IndexByte(s, "z"[0])
+			// compared against 0, which no check rewrites further. The
+			// membership mapping is the same six shapes with the boolean
+			// carried by the comparison direction (present -> >= 0, absent
+			// -> < 0), and the replacement is a comparison standing where a
+			// comparison already stood — every position stays legal. Needles
+			// that are named constants or constant expressions keep the
+			// plain Contains rewrite (PS5016 reports those advisory-only,
+			// so no churn), as do all bytes needles and multi-byte needles.
+			if pkg == "strings" {
+				if lit := ps5104OneByteLit(pass, call.Args[1]); lit != nil {
+					byteOp := ">= 0"
+					if negate {
+						byteOp = "< 0"
+					}
+					repl := "strings.IndexByte(s, " + lit.Value + "[0]) " + byteOp
+					var edits []analysis.TextEdit
+					if litOnLeft {
+						// `0 < Count(...)`: drop the leading literal and
+						// operator, append the comparison after the call.
+						edits = append(edits,
+							analysis.TextEdit{Pos: bin.Pos(), End: call.Pos()},
+							analysis.TextEdit{Pos: sel.Sel.Pos(), End: sel.Sel.End(), NewText: []byte("IndexByte")},
+							analysis.TextEdit{Pos: lit.Pos(), End: lit.End(), NewText: []byte(lit.Value + "[0]")},
+							analysis.TextEdit{Pos: bin.End(), End: bin.End(), NewText: []byte(" " + byteOp)},
+						)
+					} else {
+						edits = append(edits,
+							analysis.TextEdit{Pos: sel.Sel.Pos(), End: sel.Sel.End(), NewText: []byte("IndexByte")},
+							analysis.TextEdit{Pos: lit.Pos(), End: lit.End(), NewText: []byte(lit.Value + "[0]")},
+							analysis.TextEdit{Pos: call.End(), End: bin.End(), NewText: []byte(" " + byteOp)},
+						)
+					}
+					pass.Report(analysis.Diagnostic{
+						Pos:     bin.Pos(),
+						End:     bin.End(),
+						Message: "strings.Count(...) " + op.String() + " " + litVal.ExactString() + " tests membership of a single byte only; " + repl + " is faster, stops at the first match, and skips the substring machinery",
+						SuggestedFixes: []analysis.SuggestedFix{{
+							Message:   "replace with " + repl,
+							TextEdits: edits,
+						}},
+					})
+					return true
+				}
+			}
+
 			repl := pkg + ".Contains(s, sub)"
 			if negate {
 				repl = "!" + repl
@@ -249,6 +315,30 @@ func ps5104CountCall(pass *analysis.Pass, e ast.Expr) (*ast.CallExpr, string) {
 		return nil, ""
 	}
 	return call, pkg
+}
+
+// ps5104OneByteLit returns the needle as a direct (possibly
+// parenthesized) string literal whose constant value is EXACTLY one byte
+// long, or nil. The length rule is bytes, not runes — the same rule as
+// PS5016/PS5007, whose IndexByte target the chained fast path emits: "é"
+// (two bytes of UTF-8) is out, "\xff" (one raw byte) is in, and the
+// empty needle is out (Count(s, "") >= 1 always, like Contains(s, "")
+// — semantics IndexByte cannot express). A named constant or constant
+// expression is not a literal and returns nil: the plain Contains
+// rewrite keeps its symbolic name.
+func ps5104OneByteLit(pass *analysis.Pass, e ast.Expr) *ast.BasicLit {
+	lit, ok := ps2108Unparen(e).(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return nil
+	}
+	tv, ok := pass.TypesInfo.Types[lit]
+	if !ok || tv.Value == nil || tv.Value.Kind() != constant.String {
+		return nil
+	}
+	if len(constant.StringVal(tv.Value)) != 1 {
+		return nil
+	}
+	return lit
 }
 
 // ps5104ZeroOneLit reports whether e is (possibly parenthesized) the
