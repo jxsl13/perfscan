@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -67,7 +66,7 @@ func runPS3001(pass *analysis.Pass) (any, error) {
 			pass.Report(analysis.Diagnostic{
 				Pos:     call.Pos(),
 				End:     call.End(),
-				Message: fmt.Sprintf("fmt.%s in a loop pays format parsing and reflection per iteration; use strconv or manual parsing", name),
+				Message: "fmt." + name + " in a loop pays format parsing and reflection per iteration; use strconv or manual parsing",
 			})
 			return true
 		})

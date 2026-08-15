@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/constant"
 	"go/printer"
@@ -107,9 +106,9 @@ func runPS2115(pass *analysis.Pass) (any, error) {
 			argText := ps2115ExprText(conv.Args[0])
 			var msg string
 			if ps2115IsConstZero(pass, ix.Index) {
-				msg = fmt.Sprintf("%s[%s] decodes and allocates every rune of the string to read the first; utf8.DecodeRuneInString(%s) decodes only that rune — note it returns (rune, size) and yields (U+FFFD, 0) instead of panicking on an empty string", convText, idxText, argText)
+				msg = convText + "[" + idxText + "] decodes and allocates every rune of the string to read the first; utf8.DecodeRuneInString(" + argText + ") decodes only that rune — note it returns (rune, size) and yields (U+FFFD, 0) instead of panicking on an empty string"
 			} else {
-				msg = fmt.Sprintf("%s[%s] decodes and allocates every rune of the string to read one; decode forward with utf8.DecodeRuneInString or a counted for-range over %s to stop at that rune", convText, idxText, argText)
+				msg = convText + "[" + idxText + "] decodes and allocates every rune of the string to read one; decode forward with utf8.DecodeRuneInString or a counted for-range over " + argText + " to stop at that rune"
 			}
 			pass.Report(analysis.Diagnostic{
 				Pos:     ix.Pos(),

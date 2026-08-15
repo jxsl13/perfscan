@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/printer"
 	"go/token"
@@ -102,7 +101,7 @@ func runPS2102(pass *analysis.Pass) (any, error) {
 			diag := analysis.Diagnostic{
 				Pos:     as.Pos(),
 				End:     as.End(),
-				Message: fmt.Sprintf("string %s grows by concatenation in a loop — O(n²) copy traffic; build it with a strings.Builder", id.Name),
+				Message: "string " + id.Name + " grows by concatenation in a loop — O(n²) copy traffic; build it with a strings.Builder",
 			}
 			if fix := fixes[as]; fix != nil {
 				diag.SuggestedFixes = []analysis.SuggestedFix{*fix}

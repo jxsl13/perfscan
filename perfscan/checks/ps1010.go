@@ -143,7 +143,7 @@ func runPS1010(pass *analysis.Pass) (any, error) {
 			diag := analysis.Diagnostic{
 				Pos:     hit.Pos(),
 				End:     hit.End(),
-				Message: fmt.Sprintf("inner loop walks a COLUMN of %s — a row header dereference and a fresh cache line per 8-byte read; interchange to a row-major pass (accumulators are per-outer-index here, so summation order per output is preserved — confirm per site)", base),
+				Message: "inner loop walks a COLUMN of " + base + " — a row header dereference and a fresh cache line per 8-byte read; interchange to a row-major pass (accumulators are per-outer-index here, so summation order per output is preserved — confirm per site)",
 			}
 			if fix := ps1010Fix(pass, f, outerLoop, n); fix != nil {
 				diag.SuggestedFixes = []analysis.SuggestedFix{*fix}
@@ -429,7 +429,7 @@ func ps1010Fix(pass *analysis.Pass, file *ast.File, outerNode, innerNode ast.Nod
 	wf("%s\t%s[%s] = %s[%s] / %s\n", ind, outID.Name, jVar, sums, jVar, divisor)
 	wf("%s}", ind)
 	return &analysis.SuggestedFix{
-		Message: fmt.Sprintf("interchange to a row-major pass over %s with a column-sums slab", rowsID.Name),
+		Message: "interchange to a row-major pass over " + rowsID.Name + " with a column-sums slab",
 		TextEdits: []analysis.TextEdit{
 			{Pos: outer.Pos(), End: outer.End(), NewText: []byte(b.String())},
 		},

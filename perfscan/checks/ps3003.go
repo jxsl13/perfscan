@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/types"
 
@@ -104,7 +103,7 @@ func runPS3003(pass *analysis.Pass) (any, error) {
 			pass.Report(analysis.Diagnostic{
 				Pos:     idx.Pos(),
 				End:     idx.End(),
-				Message: fmt.Sprintf("integer-keyed map %s probed in a loop pays a hash per probe; dense keys in a known range fit a slice", label),
+				Message: "integer-keyed map " + label + " probed in a loop pays a hash per probe; dense keys in a known range fit a slice",
 			})
 			return true
 		})

@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -67,7 +66,7 @@ func runPS2001(pass *analysis.Pass) (any, error) {
 			pass.Report(analysis.Diagnostic{
 				Pos:     call.Pos(),
 				End:     call.End(),
-				Message: fmt.Sprintf("allocator %s called inside a loop allocates every iteration; hoist and reuse the buffer or take scratch from a pool", name),
+				Message: "allocator " + name + " called inside a loop allocates every iteration; hoist and reuse the buffer or take scratch from a pool",
 			})
 			return true
 		})

@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -75,7 +74,7 @@ func runPS1004(pass *analysis.Pass) (any, error) {
 				pass.Report(analysis.Diagnostic{
 					Pos:     call.Pos(),
 					End:     call.End(),
-					Message: fmt.Sprintf(".%s(idx...) rebuilds the flat offset and bounds-checks every dimension per call; carry the flat offset instead", name),
+					Message: "." + name + "(idx...) rebuilds the flat offset and bounds-checks every dimension per call; carry the flat offset instead",
 				})
 				return true
 			})

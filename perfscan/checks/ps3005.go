@@ -100,7 +100,7 @@ func runPS3005(pass *analysis.Pass) (any, error) {
 			diag := analysis.Diagnostic{
 				Pos:     call.Pos(),
 				End:     call.End(),
-				Message: fmt.Sprintf("the comparator sorting %s dereferences %s[%s[…]][…] on every comparison — a row-pointer load plus an index, O(n log n) times, for a value that depends only on the element; fill a flat id-indexed key column once and compare that (same predicate, identical permutation)", sorted, base, sorted),
+				Message: "the comparator sorting " + sorted + " dereferences " + base + "[" + sorted + "[…]][…] on every comparison — a row-pointer load plus an index, O(n log n) times, for a value that depends only on the element; fill a flat id-indexed key column once and compare that (same predicate, identical permutation)",
 			}
 			if fix := flatKeyFix(pass, stack, call, lit, params); fix != nil {
 				diag.SuggestedFixes = []analysis.SuggestedFix{*fix}
@@ -298,15 +298,10 @@ func flatKeyFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr, lit *
 	indent := strings.Repeat("\t", pos.Column-1)
 	keyName := fmt.Sprintf("psKey%d", pos.Line)
 	elemName := types.TypeString(elem, nil)
-	prefill := fmt.Sprintf("%s := make([]%s, len(%s))\n%sfor psI := range %s {\n%s\t%s[psI] = %s[psI][%s]\n%s}\n%s",
-		keyName, elemName, lhs.m.Name,
-		indent, lhs.m.Name,
-		indent, keyName, lhs.m.Name, lhs.fText,
-		indent, indent)
-	newCmp := fmt.Sprintf("%s[%s[%s]] < %s[%s[%s]]",
-		keyName, idx.Name, lhs.p.Name, keyName, idx.Name, rhs.p.Name)
+	prefill := keyName + " := make([]" + elemName + ", len(" + lhs.m.Name + "))\n" + indent + "for psI := range " + lhs.m.Name + " {\n" + indent + "\t" + keyName + "[psI] = " + lhs.m.Name + "[psI][" + lhs.fText + "]\n" + indent + "}\n" + indent
+	newCmp := keyName + "[" + idx.Name + "[" + lhs.p.Name + "]] < " + keyName + "[" + idx.Name + "[" + rhs.p.Name + "]]"
 	return &analysis.SuggestedFix{
-		Message: fmt.Sprintf("fill a flat key column once and compare that — the predicate is unchanged, so sort.%s returns the identical permutation", fn),
+		Message: "fill a flat key column once and compare that — the predicate is unchanged, so sort." + fn + " returns the identical permutation",
 		TextEdits: []analysis.TextEdit{
 			{Pos: exprStmt.Pos(), End: exprStmt.Pos(), NewText: []byte(prefill)},
 			{Pos: bin.Pos(), End: bin.End(), NewText: []byte(newCmp)},

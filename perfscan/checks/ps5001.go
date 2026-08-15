@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -116,7 +115,7 @@ func runPS5001(pass *analysis.Pass) (any, error) {
 				pass.Report(analysis.Diagnostic{
 					Pos:     be.Pos(),
 					End:     be.End(),
-					Message: fmt.Sprintf("divide by loop-invariant %s on every iteration; a reciprocal multiply is NOT bit-identical (≤1 ulp on up to 2/3 of inputs) and only pays on a memory-free path — MOST FINDINGS SHOULD BE DECLINED", d.Name),
+					Message: "divide by loop-invariant " + d.Name + " on every iteration; a reciprocal multiply is NOT bit-identical (≤1 ulp on up to 2/3 of inputs) and only pays on a memory-free path — MOST FINDINGS SHOULD BE DECLINED",
 				})
 				return true
 			})

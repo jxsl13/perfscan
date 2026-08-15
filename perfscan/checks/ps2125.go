@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/printer"
 	"go/token"
@@ -155,7 +154,7 @@ func ps2125ReportRune(pass *analysis.Pass, f *ast.File, lenCall, inner *ast.Call
 	diag := analysis.Diagnostic{
 		Pos:     lenCall.Pos(),
 		End:     lenCall.End(),
-		Message: fmt.Sprintf("len(%s) spells a rune count as a throwaway []rune conversion; utf8.RuneCountInString(%s) is the direct, bit-identical count (allocation-free on every toolchain)", convText, xText),
+		Message: "len(" + convText + ") spells a rune count as a throwaway []rune conversion; utf8.RuneCountInString(" + xText + ") is the direct, bit-identical count (allocation-free on every toolchain)",
 	}
 	// A comment inside the rewritten scaffolding would be destroyed —
 	// the fix is withheld then and the report stays advisory.
@@ -211,7 +210,7 @@ func ps2125ReportByte(pass *analysis.Pass, f *ast.File, lenCall, inner *ast.Call
 	diag := analysis.Diagnostic{
 		Pos:     lenCall.Pos(),
 		End:     lenCall.End(),
-		Message: fmt.Sprintf("len(%s) spells a byte length as a throwaway []byte conversion; len(%s) is the direct, bit-identical byte count (allocation-free on every toolchain)", convText, xText),
+		Message: "len(" + convText + ") spells a byte length as a throwaway []byte conversion; len(" + xText + ") is the direct, bit-identical byte count (allocation-free on every toolchain)",
 	}
 	if !ps2111CommentIn(f, inner.Pos(), x.Pos()) && !ps2111CommentIn(f, x.End(), inner.End()) {
 		diag.SuggestedFixes = []analysis.SuggestedFix{{

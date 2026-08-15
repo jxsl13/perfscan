@@ -135,7 +135,7 @@ func checkBuilderFunc(pass *analysis.Pass, fn *ast.FuncDecl) {
 		diag := analysis.Diagnostic{
 			Pos:     call.Pos(),
 			End:     call.End(),
-			Message: fmt.Sprintf("%s is written in a loop with no %s.Grow call in this function; a capacity hint removes the geometric growth copies", id.Name, id.Name),
+			Message: id.Name + " is written in a loop with no " + id.Name + ".Grow call in this function; a capacity hint removes the geometric growth copies",
 		}
 		if fix := growBuilderFix(pass, fn, stack, call, sel, id); fix != nil {
 			diag.SuggestedFixes = []analysis.SuggestedFix{*fix}
@@ -246,7 +246,7 @@ func growBuilderFix(pass *analysis.Pass, fn *ast.FuncDecl, stack []ast.Node, cal
 	text := fmt.Sprintf("%[1]s := 0\n%[2]sfor _, %[3]s := range %[4]s {\n%[2]s\t%[1]s += len(%[3]s)\n%[2]s}\n%[2]s%[5]s.Grow(%[1]s)\n%[2]s",
 		name, indent, val.Name, src.Name, builder.Name)
 	return &analysis.SuggestedFix{
-		Message: fmt.Sprintf("pre-count the total size and call %s.Grow before the loop", builder.Name),
+		Message: "pre-count the total size and call " + builder.Name + ".Grow before the loop",
 		TextEdits: []analysis.TextEdit{
 			{Pos: rng.Pos(), End: rng.Pos(), NewText: []byte(text)},
 		},

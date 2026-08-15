@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/token"
 	"slices"
@@ -117,7 +116,7 @@ func runPS3083(pass *analysis.Pass) (any, error) {
 			pass.Report(analysis.Diagnostic{
 				Pos:     as.Pos(),
 				End:     as.End(),
-				Message: fmt.Sprintf("int-keyed map %s is allocated every outer iteration and probed in a nested loop; for dense keys a slice with a generation-counter stamp removes the per-pass allocation and the hash per probe", id.Name),
+				Message: "int-keyed map " + id.Name + " is allocated every outer iteration and probed in a nested loop; for dense keys a slice with a generation-counter stamp removes the per-pass allocation and the hash per probe",
 			})
 			return true
 		})

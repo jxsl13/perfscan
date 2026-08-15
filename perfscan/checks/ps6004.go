@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -78,7 +77,7 @@ func runPS6004(pass *analysis.Pass) (any, error) {
 			pass.Report(analysis.Diagnostic{
 				Pos:     ifs.Pos(),
 				End:     ifs.Cond.End(),
-				Message: fmt.Sprintf("dual path guarded by %s's comma-ok is a bit-identity claim between two arms; it holds only while a test reaches BOTH — plant a strided/other-dtype fixture for the fallback arm", name),
+				Message: "dual path guarded by " + name + "'s comma-ok is a bit-identity claim between two arms; it holds only while a test reaches BOTH — plant a strided/other-dtype fixture for the fallback arm",
 			})
 			return true
 		})

@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/types"
 
@@ -136,8 +135,7 @@ func runPS2024(pass *analysis.Pass) (any, error) {
 					return true
 				}
 				ps2024Report(pass, f, call, nameID, conv, x, "RuneCountInString",
-					fmt.Sprintf("utf8.RuneCount(%s) copies %s into a throwaway []byte just to count its runes; utf8.RuneCountInString(%s) is the bit-identical, zero-copy count",
-						ps2125ExprText(conv), ps2125ExprText(x), ps2125ExprText(x)))
+					"utf8.RuneCount("+ps2125ExprText(conv)+") copies "+ps2125ExprText(x)+" into a throwaway []byte just to count its runes; utf8.RuneCountInString("+ps2125ExprText(x)+") is the bit-identical, zero-copy count")
 			case "RuneCountInString":
 				// utf8.RuneCountInString(string(b)) with b a plain []byte.
 				conv := ps2024StringConv(pass, ps2108Unparen(call.Args[0]))
@@ -149,8 +147,7 @@ func runPS2024(pass *analysis.Pass) (any, error) {
 					return true
 				}
 				ps2024Report(pass, f, call, nameID, conv, b, "RuneCount",
-					fmt.Sprintf("utf8.RuneCountInString(%s) copies %s into a throwaway string just to count its runes; utf8.RuneCount(%s) is the bit-identical, zero-copy count",
-						ps2125ExprText(conv), ps2125ExprText(b), ps2125ExprText(b)))
+					"utf8.RuneCountInString("+ps2125ExprText(conv)+") copies "+ps2125ExprText(b)+" into a throwaway string just to count its runes; utf8.RuneCount("+ps2125ExprText(b)+") is the bit-identical, zero-copy count")
 			}
 			return true
 		})

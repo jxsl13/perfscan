@@ -91,9 +91,9 @@ func runPS4101(pass *analysis.Pass) (any, error) {
 			pass.Report(analysis.Diagnostic{
 				Pos:     loop.Pos(),
 				End:     loop.End(),
-				Message: fmt.Sprintf("element-copy loop from %s to %s is a single memmove; replace with copy(%s, %s)", src, dst, dst, src),
+				Message: "element-copy loop from " + src + " to " + dst + " is a single memmove; replace with copy(" + dst + ", " + src + ")",
 				SuggestedFixes: []analysis.SuggestedFix{{
-					Message: fmt.Sprintf("replace loop with copy(%s, %s)", dst, src),
+					Message: "replace loop with copy(" + dst + ", " + src + ")",
 					TextEdits: []analysis.TextEdit{
 						{Pos: loop.Pos(), End: loop.End(), NewText: fmt.Appendf(nil, "copy(%s, %s)", dst, src)},
 					},

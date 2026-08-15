@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -75,7 +74,7 @@ func runPS1002(pass *analysis.Pass) (any, error) {
 			pass.Report(analysis.Diagnostic{
 				Pos:     call.Pos(),
 				End:     call.End(),
-				Message: fmt.Sprintf("per-element visitor %s is fed a closure — an indirect call per element; use a typed bulk loop over the backing slice for the hot dtype", name),
+				Message: "per-element visitor " + name + " is fed a closure — an indirect call per element; use a typed bulk loop over the backing slice for the hot dtype",
 			})
 			return true
 		})

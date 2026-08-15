@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -84,7 +83,7 @@ func runPS4002(pass *analysis.Pass) (any, error) {
 				pass.Report(analysis.Diagnostic{
 					Pos:     call.Pos(),
 					End:     call.End(),
-					Message: fmt.Sprintf("scalar math.%s per element in a function that already calls a vectorized sibling kernel — this branch is a proven SIMD candidate; gate the new kernel like the sibling was gated", name),
+					Message: "scalar math." + name + " per element in a function that already calls a vectorized sibling kernel — this branch is a proven SIMD candidate; gate the new kernel like the sibling was gated",
 				})
 				return true
 			})

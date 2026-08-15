@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/printer"
 	"go/token"
@@ -713,7 +712,7 @@ func reportPrealloc(pass *analysis.Pass, decl ast.Stmt, name string, typ ast.Exp
 		boundWord = "bound"
 	}
 	capExpr, class := capacityForCounts(boundWord, uncond, cond, unknown)
-	msg := fmt.Sprintf("%s is appended to in the following bounded loop but declared without capacity; pre-size it with make(..., 0, %s) — %s", name, capExpr, class)
+	msg := name + " is appended to in the following bounded loop but declared without capacity; pre-size it with make(..., 0, " + capExpr + ") — " + class
 	if isNil {
 		msg += " (declared nil: pre-size only if no caller distinguishes nil from empty)"
 	}
@@ -725,9 +724,9 @@ func reportPrealloc(pass *analysis.Pass, decl ast.Stmt, name string, typ ast.Exp
 	if emitFix { // bound already validated against body reassignment
 		var b strings.Builder
 		_ = printer.Fprint(&b, token.NewFileSet(), typ)
-		newDecl := fmt.Sprintf("%s := make(%s, 0, %s)", name, b.String(), capExpr)
+		newDecl := name + " := make(" + b.String() + ", 0, " + capExpr + ")"
 		diag.SuggestedFixes = []analysis.SuggestedFix{{
-			Message: fmt.Sprintf("pre-size %s to %s", name, capExpr),
+			Message: "pre-size " + name + " to " + capExpr,
 			TextEdits: []analysis.TextEdit{
 				{Pos: decl.Pos(), End: decl.End(), NewText: []byte(newDecl)},
 			},

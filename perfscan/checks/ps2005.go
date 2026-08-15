@@ -85,7 +85,7 @@ func runPS2005(pass *analysis.Pass) (any, error) {
 			diag := analysis.Diagnostic{
 				Pos:     call.Pos(),
 				End:     call.End(),
-				Message: fmt.Sprintf("regexp.%s inside a loop recompiles an invariant pattern every iteration; hoist it out of the loop", name),
+				Message: "regexp." + name + " inside a loop recompiles an invariant pattern every iteration; hoist it out of the loop",
 			}
 			if strings.HasPrefix(name, "Must") {
 				if fix := hoistRegexpFix(pass.Fset, stack, call); fix != nil {
@@ -187,9 +187,9 @@ func hoistRegexpFix(fset *token.FileSet, stack []ast.Node, call *ast.CallExpr) *
 	// detection is ever broadened to aliased imports (import rx "regexp") a
 	// hardcoded "regexp" would hoist to uncompilable code — the aliased-import
 	// bug fixed in PS2127/PS2132. exprTextRendered keeps this robust regardless.
-	binding := fmt.Sprintf("%s := %s.%s(%s)\n%s", name, exprTextRendered(sel.X), sel.Sel.Name, lit.Value, indent)
+	binding := name + " := " + exprTextRendered(sel.X) + "." + sel.Sel.Name + "(" + lit.Value + ")\n" + indent
 	return &analysis.SuggestedFix{
-		Message: fmt.Sprintf("hoist regexp.%s out of the loop", sel.Sel.Name),
+		Message: "hoist regexp." + sel.Sel.Name + " out of the loop",
 		TextEdits: []analysis.TextEdit{
 			{Pos: loop.Pos(), End: loop.Pos(), NewText: []byte(binding)},
 			{Pos: call.Pos(), End: call.End(), NewText: []byte(name)},

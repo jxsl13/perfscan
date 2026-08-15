@@ -462,7 +462,7 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 	// PS3105's sort.Reverse form uses), so the permutation is bit-identical.
 	if fields[0].suffix == "" && !fields[0].descending {
 		return &analysis.SuggestedFix{
-			Message: fmt.Sprintf("replace sort.%s with %s.Sort", name, slicesName),
+			Message: "replace sort." + name + " with " + slicesName + ".Sort",
 			TextEdits: []analysis.TextEdit{
 				{Pos: call.Pos(), End: call.End(), NewText: fmt.Appendf(nil, "%s.Sort(%s)", slicesName, targetText)},
 			},
@@ -503,9 +503,9 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 	// cmp.Compare(b.f, a.f).
 	compare := func(f fieldCmp) string {
 		if f.descending {
-			return fmt.Sprintf("%s.Compare(b%s, a%s)", cmpName, f.suffix, f.suffix)
+			return cmpName + ".Compare(b" + f.suffix + ", a" + f.suffix + ")"
 		}
-		return fmt.Sprintf("%s.Compare(a%s, b%s)", cmpName, f.suffix, f.suffix)
+		return cmpName + ".Compare(a" + f.suffix + ", b" + f.suffix + ")"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s.%s(%s, func(a, b %s) int { ", slicesName, fn, targetText, elemStr)
@@ -525,7 +525,7 @@ func sortFuncFix(pass *analysis.Pass, f *ast.File, call *ast.CallExpr, name stri
 		fmt.Fprintf(&b, "return %s })", compare(fields[len(fields)-1]))
 	}
 	return &analysis.SuggestedFix{
-		Message: fmt.Sprintf("replace sort.%s with %s.%s", name, slicesName, fn),
+		Message: "replace sort." + name + " with " + slicesName + "." + fn,
 		TextEdits: []analysis.TextEdit{
 			{Pos: call.Pos(), End: call.End(), NewText: []byte(b.String())},
 		},

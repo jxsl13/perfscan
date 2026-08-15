@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -93,7 +92,7 @@ func runPS1001(pass *analysis.Pass) (any, error) {
 				pass.Report(analysis.Diagnostic{
 					Pos:     call.Pos(),
 					End:     call.End(),
-					Message: fmt.Sprintf("per-element .%s in an element-count/index loop with no configured typed bulk accessor in %s(); walk the backing slice directly for the contiguous case, keeping this form as the strided fallback", name, fn.Name.Name),
+					Message: "per-element ." + name + " in an element-count/index loop with no configured typed bulk accessor in " + fn.Name.Name + "(); walk the backing slice directly for the contiguous case, keeping this form as the strided fallback",
 				})
 				return true
 			})

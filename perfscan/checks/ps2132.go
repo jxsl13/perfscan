@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 	"go/constant"
 	"go/types"
@@ -204,7 +203,7 @@ func ps2132HoistFix(pass *analysis.Pass, stack []ast.Node, inner *ast.CallExpr, 
 		qualifier = exprTextRendered(sel.X)
 		methodName = sel.Sel.Name
 	}
-	binding := fmt.Sprintf("var %s = %s.%s(%s)\n\n", varName, qualifier, methodName, strings.Join(parts, ", "))
+	binding := "var " + varName + " = " + qualifier + "." + methodName + "(" + strings.Join(parts, ", ") + ")\n\n"
 	return analysis.SuggestedFix{
 		Message: "hoist strings.NewReplacer to a package-level var",
 		TextEdits: []analysis.TextEdit{

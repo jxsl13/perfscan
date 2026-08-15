@@ -83,7 +83,7 @@ func runPS2003(pass *analysis.Pass) (any, error) {
 			diag := analysis.Diagnostic{
 				Pos:     call.Pos(),
 				End:     call.End(),
-				Message: fmt.Sprintf("strings.%s in a loop allocates a fresh string per iteration; hoist the transform, build a strings.Replacer once, or reuse a byte buffer", name),
+				Message: "strings." + name + " in a loop allocates a fresh string per iteration; hoist the transform, build a strings.Replacer once, or reuse a byte buffer",
 			}
 			if fix := hoistStringsFix(pass, stack, call, name); fix != nil {
 				diag.SuggestedFixes = []analysis.SuggestedFix{*fix}
@@ -152,9 +152,9 @@ func hoistStringsFix(pass *analysis.Pass, stack []ast.Node, call *ast.CallExpr, 
 	// binding must reuse the same alias (`s.ToUpper`) to compile bit-identically.
 	// call.Fun is guaranteed a *ast.SelectorExpr here (PkgFuncCall matched it).
 	sel := call.Fun.(*ast.SelectorExpr)
-	binding := fmt.Sprintf("%s := %s.%s(%s)\n%s", name, exprTextRendered(sel.X), fnName, strings.Join(args, ", "), indent)
+	binding := name + " := " + exprTextRendered(sel.X) + "." + fnName + "(" + strings.Join(args, ", ") + ")\n" + indent
 	return &analysis.SuggestedFix{
-		Message: fmt.Sprintf("hoist strings.%s out of the loop", fnName),
+		Message: "hoist strings." + fnName + " out of the loop",
 		TextEdits: []analysis.TextEdit{
 			{Pos: loop.Pos(), End: loop.Pos(), NewText: []byte(binding)},
 			{Pos: call.Pos(), End: call.End(), NewText: []byte(name)},

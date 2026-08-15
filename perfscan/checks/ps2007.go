@@ -1,7 +1,6 @@
 package checks
 
 import (
-	"fmt"
 	"go/ast"
 
 	"golang.org/x/tools/go/analysis"
@@ -89,7 +88,7 @@ func checkBuildNxN(pass *analysis.Pass, fn *ast.FuncDecl) {
 		pass.Report(analysis.Diagnostic{
 			Pos:     as.Pos(),
 			End:     as.End(),
-			Message: fmt.Sprintf("%s is called with %s twice, building a square result, and %s then indexes it — an N×N object materialized to consume one row; compute the row directly from the callee's per-element rule (verify bit-identity for ±Inf/NaN/-0)", callName(call), exprTextRendered(a), base),
+			Message: callName(call) + " is called with " + exprTextRendered(a) + " twice, building a square result, and " + base + " then indexes it — an N×N object materialized to consume one row; compute the row directly from the callee's per-element rule (verify bit-identity for ±Inf/NaN/-0)",
 		})
 		return true
 	})
