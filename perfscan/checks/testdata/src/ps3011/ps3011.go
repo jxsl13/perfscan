@@ -1,0 +1,26 @@
+package ps3011
+
+import (
+	"slices"
+	"strings"
+)
+
+// The bare strings.Compare comparator is slices.BinarySearch spelled the slow
+// way; the rewrites delete this file's ONLY strings references, so the fix also
+// drops the orphaned strings import. The slice and target expressions are kept
+// verbatim.
+
+func searchLiteral(xs []string, target string) (int, bool) {
+	return slices.BinarySearchFunc(xs, target, func(a, b string) int { return strings.Compare(a, b) }) // want `slices\.BinarySearchFunc with a bare strings\.Compare comparator`
+}
+
+// strings.Compare passed directly (one fewer call layer) is matched too.
+func searchFuncValue(xs []string, target string) (int, bool) {
+	return slices.BinarySearchFunc(xs, target, strings.Compare) // want `slices\.BinarySearchFunc with a bare strings\.Compare comparator`
+}
+
+// Split parameter fields func(a string, b string) match like func(a, b string),
+// and the slice/target expressions survive verbatim however they are spelled.
+func searchSplitParams(m map[string][]string, key string) (int, bool) {
+	return slices.BinarySearchFunc(m[key], key+"!", func(a string, b string) int { return strings.Compare(a, b) }) // want `slices\.BinarySearchFunc with a bare strings\.Compare comparator`
+}

@@ -1,0 +1,15 @@
+package ps3011
+
+import (
+	"slices"
+	"strings"
+)
+
+// The file keeps ANOTHER strings reference (the strings.ToUpper below), so the
+// rewrite must NOT drop the strings import: only the comparator's own
+// reference goes.
+func searchAndUpper(ys []string, t string) (int, bool) {
+	i, ok := slices.BinarySearchFunc(ys, t, func(a, b string) int { return strings.Compare(a, b) }) // want `slices\.BinarySearchFunc with a bare strings\.Compare comparator`
+	_ = strings.ToUpper(t)
+	return i, ok
+}
