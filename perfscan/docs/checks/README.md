@@ -56,6 +56,7 @@ checks' fixes.
 | [PS2032](PS2032.md) | alloc | L1 | yes | string(strconv.AppendInt(nil, ...)) allocates a throwaway []byte then copies it; strconv.FormatInt formats the string directly |
 | [PS2033](PS2033.md) | alloc | L1 | yes | fmt.Appendf(buf, "%s%s", a, b) boxes every operand and runs fmt's formatter; a nested append chain writes the same bytes directly |
 | [PS2034](PS2034.md) | alloc | L1 | yes | fmt.Sprintf splicing plain strings into literal text is a reflection-priced +; concatenate directly |
+| [PS2035](PS2035.md) | alloc | L1 | yes | fmt.Appendf(buf, "%v", x) of a plain integer, bool or float has a direct strconv.Append* equivalent |
 | [PS2036](PS2036.md) | alloc | L1 | yes | fmt.Append of a single plain integer, bool or float has a direct strconv.Append* equivalent |
 | [PS2037](PS2037.md) | alloc | L1 | yes | string([]rune{r}) builds a throwaway 1-element rune slice; string(rune(r)) encodes the rune directly |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
