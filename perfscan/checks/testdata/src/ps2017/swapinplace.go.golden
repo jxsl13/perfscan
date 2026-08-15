@@ -1,0 +1,13 @@
+package ps2017
+
+import (
+	"strings"
+	"unicode"
+)
+
+// The spec after "bytes" already sorts after "strings", so the orphaned
+// bytes spec is swapped for "strings" in place and the group stays
+// gofmt-sorted.
+func swapInPlace(s string) string {
+	return strings.Map(unicode.ToLower, s) // want `string\(bytes\.Map\(f, \[\]byte\(s\)\)\) copies`
+}
