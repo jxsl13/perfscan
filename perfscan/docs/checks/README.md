@@ -129,6 +129,7 @@ checks' fixes.
 | [PS3027](PS3027.md) | indirect | L1 | yes | slices.CompareFunc with a hand-rolled three-way comparator (a<b/a>b/-1/1/0) is slices.Compare spelled the slow way |
 | [PS3028](PS3028.md) | indirect | L1 | yes | slices.BinarySearchFunc with a hand-rolled three-way comparator (a<b/a>b/-1/1/0) is slices.BinarySearch spelled the slow way |
 | [PS3029](PS3029.md) | indirect | L1 | yes | slices.SortedStableFunc with a hand-rolled three-way comparator (a<b/a>b/-1/1/0) is slices.Sorted spelled the slow, stable way |
+| [PS3030](PS3030.md) | indirect | L1 | yes | bytes.FieldsFunc(b, unicode.IsSpace) decodes and calls the predicate per rune; bytes.Fields(b) is the same split with a byte-table ASCII fast path |
 | [PS3034](PS3034.md) | indirect | L3 |  | a serial nest whose every write names the outermost loop variable |
 | [PS3059](PS3059.md) | indirect | L3 |  | a serial nest writing through a base derived from the outermost loop variable |
 | [PS3060](PS3060.md) | indirect | L3 |  | a serial loop over calls to a function that itself fans out |
