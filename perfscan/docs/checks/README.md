@@ -63,6 +63,7 @@ checks' fixes.
 | [PS2039](PS2039.md) | alloc | L1 | yes | an unsized map immediately populated by maps.Copy; make(map[K]V, len(src)) reserves the buckets once |
 | [PS2040](PS2040.md) | alloc | L1 | yes | fmt.Append over two or more strings boxes every operand and runs fmt's printer; a nested append chain writes the same bytes directly |
 | [PS2041](PS2041.md) | alloc | L1 | yes | fmt.Appendln over strings boxes every operand and runs fmt's printer; a nested append chain writes the same bytes directly |
+| [PS2043](PS2043.md) | alloc | L1 | yes | len(EncodeToString(b)) encodes the whole input just to take a length; EncodedLen(len(b)) is the identical integer, allocation-free |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
