@@ -61,6 +61,7 @@ checks' fixes.
 | [PS2037](PS2037.md) | alloc | L1 | yes | string([]rune{r}) builds a throwaway 1-element rune slice; string(rune(r)) encodes the rune directly |
 | [PS2038](PS2038.md) | alloc | L1 | yes | utf8.DecodeRuneInString(string(b)) copies the whole []byte to decode one rune; utf8.DecodeRune(b) decodes it in place |
 | [PS2039](PS2039.md) | alloc | L1 | yes | an unsized map immediately populated by maps.Copy; make(map[K]V, len(src)) reserves the buckets once |
+| [PS2040](PS2040.md) | alloc | L1 | yes | fmt.Append over two or more strings boxes every operand and runs fmt's printer; a nested append chain writes the same bytes directly |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
