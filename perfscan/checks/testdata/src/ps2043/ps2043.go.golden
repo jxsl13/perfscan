@@ -1,0 +1,159 @@
+package ps2043
+
+import (
+	"encoding/base32"
+	"encoding/base64"
+	"encoding/hex"
+	hexenc "encoding/hex"
+)
+
+func getBytes() []byte { return []byte("data") }
+
+// --- POSITIVES: fixed to EncodedLen(len(...)) ---
+
+func hexLen(b []byte) int {
+	return hex.EncodedLen(len(b)) // want `allocates and fills the whole hex-encoded string`
+}
+
+// An aliased hex import keeps its alias — the qualifier stays verbatim.
+func hexAlias(b []byte) int {
+	return hexenc.EncodedLen(len(b)) // want `allocates and fills the whole hex-encoded string`
+}
+
+func b64Std(b []byte) int {
+	return base64.StdEncoding.EncodedLen(len(b)) // want `allocates and fills the whole base64-encoded string`
+}
+
+func b64URL(b []byte) int {
+	return base64.URLEncoding.EncodedLen(len(b)) // want `allocates and fills the whole base64-encoded string`
+}
+
+func b64Raw(b []byte) int {
+	return base64.RawStdEncoding.EncodedLen(len(b)) // want `allocates and fills the whole base64-encoded string`
+}
+
+// A derived encoder expression is the receiver in both forms — evaluated once.
+func b64Derived(b []byte) int {
+	return base64.StdEncoding.WithPadding('*').EncodedLen(len(b)) // want `allocates and fills the whole base64-encoded string`
+}
+
+// A local *Encoding variable receiver.
+func b64Var(enc *base64.Encoding, b []byte) int {
+	return enc.EncodedLen(len(b)) // want `allocates and fills the whole base64-encoded string`
+}
+
+// An addressable Encoding VALUE receiver auto-addresses identically in both forms.
+func b32Value(b []byte) int {
+	e := *base32.StdEncoding
+	return e.EncodedLen(len(b)) // want `allocates and fills the whole base32-encoded string`
+}
+
+func b32Hex(b []byte) int {
+	return base32.HexEncoding.EncodedLen(len(b)) // want `allocates and fills the whole base32-encoded string`
+}
+
+// A call argument is evaluated exactly once in both forms, in the same order.
+func argCall() int {
+	return hex.EncodedLen(len(getBytes())) // want `allocates and fills the whole hex-encoded string`
+}
+
+type payload []byte
+
+// A named []byte argument: len works on it directly, verbatim.
+func argNamed(p payload) int {
+	return hex.EncodedLen(len(p)) // want `allocates and fills the whole hex-encoded string`
+}
+
+// A conversion argument stays verbatim (PS2125 may then simplify further).
+func argConv(s string) int {
+	return hex.EncodedLen(len([]byte(s))) // want `allocates and fills the whole hex-encoded string`
+}
+
+// The replacement is a call — a primary expression — so any parent works.
+func inExpr(b []byte) bool {
+	return base64.StdEncoding.EncodedLen(len(b))*2 > 10 // want `allocates and fills the whole base64-encoded string`
+}
+
+// Parentheses around the inner call are absorbed by the rewrite.
+func parens(b []byte) int {
+	return hex.EncodedLen(len(b)) // want `allocates and fills the whole hex-encoded string`
+}
+
+// --- ADVISORY: reported but NOT fixed ---
+
+// hex.EncodeToString(nil) compiles, len(nil) does not — the argument cannot
+// be kept verbatim inside len.
+func nilArg() int {
+	return len(hex.EncodeToString(nil)) // want `allocates and fills the whole hex-encoded string`
+}
+
+// A comment inside the rewritten scaffolding would be destroyed.
+func commentInScaffolding(b []byte) int {
+	return len(hex.EncodeToString(b /* keep me */)) // want `allocates and fills the whole hex-encoded string`
+}
+
+func commentAfterLen(b []byte) int {
+	return len( /* keep me */ hex.EncodeToString(b)) // want `allocates and fills the whole hex-encoded string`
+}
+
+// --- NEGATIVES: not reported ---
+
+// The result stored first may have other consumers — out of scope.
+func stored(b []byte) int {
+	s := hex.EncodeToString(b)
+	return len(s)
+}
+
+// The encoded string itself (not just its length) is used.
+func used(b []byte) string {
+	return hex.EncodeToString(b)
+}
+
+// A method value call is an ident callee, not the selector shape.
+func methodValue(b []byte) int {
+	f := hex.EncodeToString
+	return len(f(b))
+}
+
+// A same-named method on a non-stdlib type is not the pattern.
+type fakeEncoder struct{}
+
+func (fakeEncoder) EncodeToString(b []byte) string { return "" }
+func (fakeEncoder) EncodedLen(n int) int           { return -1 }
+
+func otherType(e fakeEncoder, b []byte) int {
+	return len(e.EncodeToString(b))
+}
+
+// A wrapper EMBEDDING *base64.Encoding is skipped: its own EncodedLen would
+// shadow the promoted one and the rewrite would silently change callees.
+type wrapped struct{ *base64.Encoding }
+
+func (wrapped) EncodedLen(n int) int { return -1 }
+
+func embedded(w wrapped, b []byte) int {
+	return len(w.EncodeToString(b))
+}
+
+// A shadowed len is not the builtin.
+func shadowedLen(b []byte) int {
+	len := func(string) int { return 0 }
+	return len(hex.EncodeToString(b))
+}
+
+// A shadowed hex package is not encoding/hex.
+type fakeHex struct{}
+
+func (fakeHex) EncodeToString(b []byte) string { return "" }
+
+func shadowedPkg(b []byte) int {
+	hex := fakeHex{}
+	return len(hex.EncodeToString(b))
+}
+
+// Decoding is a different computation (DecodedLen is an upper bound for
+// padded base64/base32, not an identity) — never matched.
+func decode(s string) int {
+	b, _ := base64.StdEncoding.DecodeString(s)
+	return len(b)
+}
