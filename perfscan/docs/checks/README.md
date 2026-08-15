@@ -139,6 +139,7 @@ checks' fixes.
 | [PS5015](PS5015.md) | alloc | L1 | yes | fmt.Appendf of a single scalar verb runs fmt's formatter; strconv.Append* writes the bytes directly |
 | [PS5016](PS5016.md) | arith | L1 | yes | strings.Contains of a one-byte needle runs the substring machinery; IndexByte >= 0 answers the same membership question directly |
 | [PS5017](PS5017.md) | indirect | L1 | yes | bytes.Map(unicode.ToUpper, b) pays a per-rune indirect call; bytes.ToUpper(b) is the same mapping with an all-ASCII fast path |
+| [PS5018](PS5018.md) | indirect | L1 | yes | strings.Map(unicode.ToUpper, s) drives the case mapping through a per-rune indirect call; strings.ToUpper(s) is the same mapping with an all-ASCII fast path |
 | [PS5019](PS5019.md) | arith | L1 | yes | bytes.Replace(b, old, new, bytes.Count(b, old)) scans b twice for one replace-all; bytes.ReplaceAll(b, old, new) is the identical substitution in a single scan |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |

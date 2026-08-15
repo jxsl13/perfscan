@@ -1,0 +1,20 @@
+package ps5018
+
+import (
+	"strings"
+	"unicode"
+)
+
+// A comment inside the deleted span (mapping argument through the
+// comma) would be silently destroyed — that report stays advisory and
+// its call is left untouched.
+func commentedInside(s string) string {
+	return strings.Map(unicode.ToUpper /* keep me */, s) // want `strings\.Map\(unicode\.ToUpper, s\) pays`
+}
+
+// The advisory site above keeps referencing unicode, so this file's
+// fixable site must NOT drop the import: the orphan accounting counts
+// only the references the applied fixes actually delete.
+func fixedAlongside(s string) string {
+	return strings.Map(unicode.ToLower, s) // want `strings\.Map\(unicode\.ToLower, s\) pays`
+}
