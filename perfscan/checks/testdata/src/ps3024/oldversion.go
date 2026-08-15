@@ -1,0 +1,17 @@
+//go:build go1.20
+
+package ps3024
+
+import "sort"
+
+// VERSION GUARD, pinned semantics (same as PS3104/PS3008's oldversion
+// fixture): per-file version pinning exists only from go1.21 on, so
+// go/types CLAMPS a //go:build go1.20 line to go1.21
+// (pass.TypesInfo.FileVersions reports "go1.21" here) — the very version
+// that has slices.IsSorted. A file below go1.21 is therefore
+// unrepresentable inside a modern module and this file IS flagged and
+// fixed; the gate blocks only via pass.Pkg.GoVersion() when a whole
+// MODULE still declares go < 1.21.
+func oldVersion(xs []int) bool {
+	return sort.SliceIsSorted(xs, func(i, j int) bool { return xs[i] < xs[j] }) // want `sort\.SliceIsSorted reads the slice through reflection and calls its less closure indirectly per adjacent pair; the generic slices\.IsSorted/IsSortedFunc scans the concrete type directly`
+}
