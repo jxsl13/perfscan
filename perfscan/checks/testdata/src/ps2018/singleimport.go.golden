@@ -1,0 +1,9 @@
+package ps2018
+
+import "strings"
+
+// A single non-parenthesized import declaration whose only user is the
+// rewritten call: the whole spec is swapped for "strings" in place.
+func single(s string) string {
+	return strings.Repeat(s+"|", 16) // want `string\(bytes\.Repeat\(\[\]byte\(s\), n\)\) copies`
+}

@@ -1,0 +1,35 @@
+package ps2018
+
+import (
+	"bytes"
+	"fmt"
+)
+
+const rulerWidth = 8 * 10
+
+// These calls are the file's ONLY bytes references, so the fix also
+// drops the orphaned bytes import and inserts strings at its sorted
+// position ("fmt" orders between "bytes" and "strings", so an in-place
+// swap would unsort the group).
+func ruler(s string) string {
+	return string(bytes.Repeat([]byte(s), 64)) // want `string\(bytes\.Repeat\(\[\]byte\(s\), n\)\) copies`
+}
+
+// The seed and the count are kept byte-verbatim, however they are
+// spelled: a field selector, a compound expression with a call, a named
+// or arithmetic constant count (each seed evaluated exactly once in
+// both forms).
+type padder struct{ unit string }
+
+func pad(p padder, prefix func() string) {
+	fmt.Println(string(bytes.Repeat([]byte(p.unit), rulerWidth))) // want `string\(bytes\.Repeat\(\[\]byte\(s\), n\)\) copies`
+	fmt.Println(string(bytes.Repeat([]byte(prefix()+"-"), 4+4)))  // want `string\(bytes\.Repeat\(\[\]byte\(s\), n\)\) copies`
+	fmt.Println(string(bytes.Repeat(([]byte("=")), (200))))       // want `string\(bytes\.Repeat\(\[\]byte\(s\), n\)\) copies`
+}
+
+// Count 0 and 1 are degenerate but still matched and fixed.
+func degenerate(s string) (string, string) {
+	a := string(bytes.Repeat([]byte(s), 0)) // want `string\(bytes\.Repeat\(\[\]byte\(s\), n\)\) copies`
+	b := string(bytes.Repeat([]byte(s), 1)) // want `string\(bytes\.Repeat\(\[\]byte\(s\), n\)\) copies`
+	return a, b
+}
