@@ -1,0 +1,14 @@
+package ps3028
+
+import (
+	"fmt"
+	sl "slices"
+)
+
+// The package is resolved by IMPORT PATH, not spelling: an aliased slices
+// keeps its alias in the rewrite. The comparator references nothing but its
+// own parameters and literals, so no import is ever orphaned.
+func searchAliased(xs []int, target int) {
+	i, ok := sl.BinarySearchFunc(xs, target, func(a, b int) int { if a < b { return -1 }; if a > b { return 1 }; return 0 }) // want `slices\.BinarySearchFunc with a hand-rolled three-way comparator \(a<b/a>b/-1/1/0\) pays an indirect comparator call plus up to two relational comparisons per probe; slices\.BinarySearch searches the int elements with the identical \(index, found\) result and the comparison inlined`
+	fmt.Println(i, ok)
+}
