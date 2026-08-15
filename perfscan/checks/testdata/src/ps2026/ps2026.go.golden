@@ -1,0 +1,62 @@
+package ps2026
+
+import "bytes"
+
+func value() int {
+	var buf bytes.Buffer
+	buf.WriteString("hello")
+	return buf.Len() // want `len\(buf\.String\(\)\) heap-allocates and copies the whole bytes\.Buffer just to measure it; buf\.Len\(\) returns the identical int in O\(1\) with zero allocation`
+}
+
+// The receiver carries over byte-verbatim: fields, slice elements, and
+// deref shapes all stay in place and are evaluated exactly once.
+type carrier struct{ buf bytes.Buffer }
+
+func shapes(c carrier, bufs []bytes.Buffer, p *bytes.Buffer, b bytes.Buffer) {
+	_ = c.buf.Len()   // want `c\.buf\.Len\(\) returns the identical int in O\(1\) with zero allocation`
+	_ = bufs[0].Len() // want `bufs\[0\]\.Len\(\) returns the identical int in O\(1\) with zero allocation`
+	_ = (*p).Len()    // want `\(\*p\)\.Len\(\) returns the identical int in O\(1\) with zero allocation`
+	_ = (&b).Len()    // want `\(&b\)\.Len\(\) returns the identical int in O\(1\) with zero allocation`
+}
+
+// Provably non-nil pointer receivers: an address, the constructors, and
+// the builtin new all get the fix.
+func nonNilPointers(s string) {
+	_ = bytes.NewBufferString(s).Len() // want `bytes\.NewBufferString\(s\)\.Len\(\) returns the identical int`
+	_ = bytes.NewBuffer(nil).Len()     // want `bytes\.NewBuffer\(nil\)\.Len\(\) returns the identical int`
+	_ = new(bytes.Buffer).Len()        // want `new\(bytes\.Buffer\)\.Len\(\) returns the identical int`
+}
+
+// Redundant parentheses around the String call are deleted with the
+// len(...) scaffolding.
+func parens(buf bytes.Buffer) int {
+	return buf.Len() // want `buf\.Len\(\) returns the identical int in O\(1\) with zero allocation`
+}
+
+func inControlFlow(buf bytes.Buffer) string {
+	if buf.Len() == 0 { // want `buf\.Len\(\) returns the identical int in O\(1\) with zero allocation`
+		return ""
+	}
+	for i := 0; i < buf.Len(); i++ { // want `buf\.Len\(\) returns the identical int in O\(1\) with zero allocation`
+		_ = i
+	}
+	return "ok"
+}
+
+// A *bytes.Buffer receiver that is NOT provably non-nil is the one
+// divergent input of the pair (String() returns "<nil>" — length 5 —
+// where Len() panics): the report stays advisory, no fix.
+func advisoryPointer(p *bytes.Buffer) int {
+	return len(p.String()) // want `the automatic fix is withheld because a nil \*bytes\.Buffer diverges \(String\(\) returns "<nil>" — length 5 — where Len\(\) panics\) — prove the receiver pointer non-nil and rewrite by hand`
+}
+
+func advisoryConversion() int {
+	return len((*bytes.Buffer)(nil).String()) // want `prove the receiver pointer non-nil and rewrite by hand`
+}
+
+// A comment inside the len(...) scaffolding the fix would delete
+// withholds the automatic fix: the report stays advisory and the
+// comment survives.
+func commentAdvisory(buf bytes.Buffer) int {
+	return len( /* measured, not kept */ buf.String()) // want `a comment inside the syntax the fix would delete withholds the automatic fix — rewrite by hand`
+}
