@@ -1,0 +1,10 @@
+package ps5019
+
+import by "bytes"
+
+// An aliased bytes import: the rewrite reuses the file's own
+// qualifier verbatim. No import surgery is ever needed — the rewritten
+// call keeps the same package referenced.
+func aliased(b, old, new []byte) []byte {
+	return by.ReplaceAll(b, old, new) // want `bytes\.Replace\(b, old, new, bytes\.Count\(b, old\)\) walks b twice`
+}
