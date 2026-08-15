@@ -1,0 +1,13 @@
+package ps3025
+
+// An ALIASED fmt import still resolves to the fmt package by path; the fix
+// replaces the whole selector with the builtin append, so the alias vanishes
+// from the rewritten call. f.Println keeps the import referenced.
+
+import f "fmt"
+
+func keepAlias() { f.Println("x") }
+
+func aliased(buf []byte) []byte {
+	return f.Appendf(buf, "aliased text") // want `fmt\.Appendf on a verbless constant format`
+}
