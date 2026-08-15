@@ -1,0 +1,194 @@
+package ps5031
+
+import (
+	"bytes"
+	"strings"
+	stdstrings "strings"
+)
+
+// --- the six membership forms ---
+
+func hasNE(s, sub string) bool {
+	return strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) != -1 tests membership only; strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func hasGT(s, sub string) bool {
+	return strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) > -1 tests membership only; strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func hasGE(s, sub string) bool {
+	return strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) >= 0 tests membership only; strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func noneEQ(s, sub string) bool {
+	return !strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) == -1 tests membership only; !strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func noneLT(s, sub string) bool {
+	return !strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) < 0 tests membership only; !strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func noneLE(s, sub string) bool {
+	return !strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) <= -1 tests membership only; !strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// Literal on the left: `-1 != LastIndex` is `LastIndex != -1`,
+// `0 > LastIndex` is `LastIndex < 0`.
+
+func reversed(s, sub string) bool {
+	return strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) != -1 tests membership only; strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func reversedNeg(s, sub string) bool {
+	return !strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) < 0 tests membership only; !strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// Mirrored membership beyond the two above: `-1 < LastIndex` normalizes
+// to `LastIndex > -1` (member), `0 <= LastIndex` to `LastIndex >= 0`
+// (member), `-1 >= LastIndex` to `LastIndex <= -1` (absent).
+func reversedGT(s, sub string) bool {
+	return strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) > -1 tests membership only; strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func reversedGE(s, sub string) bool {
+	return strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) >= 0 tests membership only; strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+func reversedLE(s, sub string) bool {
+	return !strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) <= -1 tests membership only; !strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// A parenthesized literal is still the literal (the whole side is
+// deleted either way).
+func parenLit(s, sub string) bool {
+	return strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) != -1 tests membership only; strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// An aliased import keeps its qualifier: only the selected name changes.
+func aliased(s, sub string) bool {
+	return stdstrings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) != -1 tests membership only; strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// Composed into a larger condition: unary ! binds tighter than &&, so
+// the rewrite needs no extra parentheses.
+func composed(s, sub, t string) bool {
+	return len(t) > 0 && !strings.Contains(s, sub) // want `strings\.LastIndex\(\.\.\.\) == -1 tests membership only; !strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// In an if condition — the canonical shape.
+func inIf(s, sub string) int {
+	if strings.Contains(s, sub) { // want `strings\.LastIndex\(\.\.\.\) != -1 tests membership only; strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+		return 1
+	}
+	return 0
+}
+
+// A one-byte NAMED constant needle keeps the plain Contains rewrite:
+// PS5016 reports that Contains shape advisory-only, so nothing churns,
+// and the symbolic name survives.
+const sep = "/"
+
+func namedConstNeedle(s string) bool {
+	return strings.Contains(s, sep) // want `strings\.LastIndex\(\.\.\.\) != -1 tests membership only; strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// The empty-needle edge stays bit-identical: LastIndex(s, "") is len(s)
+// (always >= 0), exactly like Contains(s, "") — constant true either
+// way, and the rewrite preserves it.
+func emptyNeedle(s string) bool {
+	return strings.Contains(s, "") // want `strings\.LastIndex\(\.\.\.\) != -1 tests membership only; strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// Arguments pass through untouched — side effects stay evaluated exactly
+// once, in the same order.
+func sideEffects(f func() string, g func() string) bool {
+	return !strings.Contains(f(), g()) // want `strings\.LastIndex\(\.\.\.\) == -1 tests membership only; !strings\.Contains\(s, sub\) is the optimized forward scan and stops at the first match instead of running the backward Rabin-Karp`
+}
+
+// --- negatives: everything below stays silent ---
+
+// A direct one-byte string-literal needle is PS5007's territory
+// (LastIndex -> LastIndexByte on the call itself); a Contains spelling
+// here would be PS5016's Before-shape — churn either way.
+func oneByteLiteralNeedle(s string) bool {
+	return strings.LastIndex(s, "/") != -1
+}
+
+func oneByteRawLiteralNeedle(s string) bool {
+	return strings.LastIndex(s, `z`) != -1
+}
+
+// Comparisons that genuinely use the position.
+func positionEQ(s, sub string) bool  { return strings.LastIndex(s, sub) == 0 }
+func positionNEQ(s, sub string) bool { return strings.LastIndex(s, sub) != 0 }
+func positionGT(s, sub string) bool  { return strings.LastIndex(s, sub) > 0 }
+func positionGE(s, sub string) bool  { return strings.LastIndex(s, sub) >= 1 }
+func alwaysTrue(s, sub string) bool  { return strings.LastIndex(s, sub) >= -1 }
+func alwaysFalse(s, sub string) bool { return strings.LastIndex(s, sub) < -1 }
+
+// Mirrored NON-membership: `0 < LastIndex` normalizes to `LastIndex > 0`,
+// which uses the position — silent, exactly like its call-on-left twin.
+func reversedNonMembership(s, sub string) bool {
+	return 0 < strings.LastIndex(s, sub)
+}
+
+// The result bound to a variable or used as an index is a genuine
+// position use.
+func bound(s, sub string) bool {
+	i := strings.LastIndex(s, sub)
+	return i != -1
+}
+
+func indexed(s, sub string) string {
+	return s[strings.LastIndex(s, sub)+1:]
+}
+
+// Compared against a variable or named constant holding -1: only the
+// direct literal spelling is provably a membership test.
+func varRHS(s, sub string, notFound int) bool {
+	return strings.LastIndex(s, sub) != notFound
+}
+
+const missing = -1
+
+func namedConstRHS(s, sub string) bool {
+	return strings.LastIndex(s, sub) != missing
+}
+
+// A named bool context: Contains returns the basic type bool, which
+// would not compile here without a conversion.
+type tri bool
+
+func namedBoolContext(s, sub string) tri {
+	var f tri = strings.LastIndex(s, sub) != -1
+	return f
+}
+
+// bytes.LastIndex is a different implementation — out of scope.
+func bytesTwin(b, sub []byte) bool {
+	return bytes.LastIndex(b, sub) != -1
+}
+
+// LastIndexByte's membership sibling is deliberately not shipped:
+// PS5007's fix output would be its input, re-fixed on the next pass.
+func lastIndexByte(s string) bool {
+	return strings.LastIndexByte(s, '/') != -1
+}
+
+// A shadowed strings identifier or a same-named method never matches:
+// the callee is pinned by type information.
+type fake struct{}
+
+func (fake) LastIndex(a, b string) int { return -1 }
+
+func shadowed(s, sub string) bool {
+	strings := fake{}
+	return strings.LastIndex(s, sub) != -1
+}
+
+// Other strings members with the same comparison shape stay silent
+// (Index != -1 -> Contains is a rejected readability-only rewrite:
+// Contains wraps that very Index call).
+func plainIndex(s, sub string) bool {
+	return strings.Index(s, sub) != -1
+}
