@@ -86,6 +86,7 @@ checks' fixes.
 | [PS3007](PS3007.md) | indirect | L2 | yes | a membership set built from a slice the caller already owns, probed in a loop |
 | [PS3008](PS3008.md) | indirect | L1 | yes | sort.IntsAreSorted/sort.StringsAreSorted are the legacy spelling of slices.IsSorted; call the generic predicate directly |
 | [PS3009](PS3009.md) | indirect | L1 | yes | slices.SortFunc/SortStableFunc with a bare strings.Compare(a, b) comparator is slices.Sort spelled the slow way |
+| [PS3010](PS3010.md) | indirect | L1 | yes | slices.IsSortedFunc with a bare cmp.Compare comparator is slices.IsSorted spelled the slow way |
 | [PS3034](PS3034.md) | indirect | L3 |  | a serial nest whose every write names the outermost loop variable |
 | [PS3059](PS3059.md) | indirect | L3 |  | a serial nest writing through a base derived from the outermost loop variable |
 | [PS3060](PS3060.md) | indirect | L3 |  | a serial loop over calls to a function that itself fans out |
