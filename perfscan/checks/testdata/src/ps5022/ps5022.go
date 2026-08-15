@@ -1,0 +1,139 @@
+package ps5022
+
+import (
+	"bytes"
+	"strings"
+)
+
+// --- IndexAny form: the replacement stays a call returning the same int,
+// so it drops into every syntactic position with no parenthesization,
+// statement, or go/defer concerns.
+
+func indexBasics(s string, b []byte) int {
+	i := strings.IndexAny(s, "/") // want `strings\.IndexAny of the one-ASCII-byte cutset "/" pays the cutset dispatch and two non-inlined call frames before the byte scan; strings\.IndexByte\(s, "/"\[0\]\) jumps straight to the same scan — identical index for every input`
+	j := bytes.IndexAny(b, "=") // want `bytes\.IndexAny of the one-ASCII-byte cutset "=" pays the cutset dispatch and two non-inlined call frames before the byte scan; bytes\.IndexByte\(b, "="\[0\]\) jumps straight to the same scan — identical index for every input`
+	return i + j
+}
+
+// Escapes and raw literals carry over byte-verbatim: the ORIGINAL string
+// literal token is reused and wrapped as lit[0], so no re-escaping ever
+// happens. Every ASCII byte — control characters and NUL included — is in
+// scope; only the < 0x80 bound matters.
+func indexEscapes(s string, b []byte) {
+	_ = strings.IndexAny(s, "\t") // want `strings\.IndexByte\(s, "\\t"\[0\]\) jumps straight to the same scan`
+	_ = strings.IndexAny(s, "\x00") // want `strings\.IndexByte\(s, "\\x00"\[0\]\) jumps straight to the same scan`
+	_ = strings.IndexAny(s, "\x7f") // want `strings\.IndexByte\(s, "\\x7f"\[0\]\) jumps straight to the same scan`
+	_ = strings.IndexAny(s, "\\") // want `strings\.IndexByte\(s, "\\\\"\[0\]\) jumps straight to the same scan`
+	_ = bytes.IndexAny(b, `-`) // want "bytes\\.IndexByte\\(b, `-`\\[0\\]\\) jumps straight to the same scan"
+}
+
+// Parentheses around the cutset literal or the whole call are looked
+// through / left alone; the literal token is wrapped in place. A call in
+// a comparison, an index bracket, or a go/defer statement is still a call
+// after the rewrite — every position is safe for the IndexAny form.
+func indexContexts(s string, b []byte, m map[int]int) {
+	_ = strings.IndexAny(s, ("!")) // want `strings\.IndexByte\(s, "!"\[0\]\) jumps straight to the same scan`
+	_ = (bytes.IndexAny(b, ";")) // want `bytes\.IndexByte\(b, ";"\[0\]\) jumps straight to the same scan`
+	if strings.IndexAny(s, ",") >= 0 { // want `strings\.IndexByte\(s, ","\[0\]\) jumps straight to the same scan`
+		_ = m[bytes.IndexAny(b, ":")] // want `bytes\.IndexByte\(b, ":"\[0\]\) jumps straight to the same scan`
+	}
+	go strings.IndexAny(s, "g") // want `strings\.IndexByte\(s, "g"\[0\]\) jumps straight to the same scan`
+	defer bytes.IndexAny(b, "d") // want `bytes\.IndexByte\(b, "d"\[0\]\) jumps straight to the same scan`
+}
+
+// --- ContainsAny form: defined as IndexAny(...) >= 0, so the rewrite
+// appends the comparison; >= 0 binds tighter than && and ||, so plain
+// boolean positions need no parentheses.
+
+func containsBasics(line string, buf []byte) bool {
+	found := strings.ContainsAny(line, "=") // want `strings\.ContainsAny of the one-ASCII-byte cutset "=" routes a single byte through the cutset machinery; strings\.IndexByte\(s, "="\[0\]\) >= 0 answers the same membership question directly — identical boolean for every input`
+	return found || bytes.ContainsAny(buf, "\n") // want `bytes\.ContainsAny of the one-ASCII-byte cutset "\\n" routes a single byte through the cutset machinery; bytes\.IndexByte\(b, "\\n"\[0\]\) >= 0 answers the same membership question directly — identical boolean for every input`
+}
+
+func containsConditions(s string, ok bool) bool {
+	if strings.ContainsAny(s, "/") { // want `strings\.IndexByte\(s, "/"\[0\]\) >= 0 answers the same membership question`
+		return true
+	}
+	return ok && strings.ContainsAny(s, ":") || strings.ContainsAny(s, ";") // want `strings\.IndexByte\(s, ":"\[0\]\) >= 0 answers the same membership question` `strings\.IndexByte\(s, ";"\[0\]\) >= 0 answers the same membership question`
+}
+
+// A direct leading ! is absorbed into the comparison direction:
+// !(x >= 0) == (x < 0) for every int.
+func containsNegated(s string, b []byte) bool {
+	if !strings.ContainsAny(s, "#") { // want `strings\.IndexByte\(s, "#"\[0\]\) < 0 answers the same membership question`
+		return true
+	}
+	return !bytes.ContainsAny(b, "~") // want `bytes\.IndexByte\(b, "~"\[0\]\) < 0 answers the same membership question`
+}
+
+// An operand of a comparison must be parenthesized: == and >= share a
+// precedence level and would otherwise chain illegally.
+func containsComparisonOperand(s string, x bool) bool {
+	if x == strings.ContainsAny(s, "@") { // want `\(strings\.IndexByte\(s, "@"\[0\]\) >= 0\) answers the same membership question`
+		return true
+	}
+	return strings.ContainsAny(s, "%") != x // want `\(strings\.IndexByte\(s, "%"\[0\]\) >= 0\) answers the same membership question`
+}
+
+// The absorbed ! form needs the same parenthesization when it is itself a
+// comparison operand or under an outer !.
+func containsNegatedOperand(s string, x bool) bool {
+	if x == !strings.ContainsAny(s, "&") { // want `\(strings\.IndexByte\(s, "&"\[0\]\) < 0\) answers the same membership question`
+		return true
+	}
+	return !!strings.ContainsAny(s, "?") // want `\(strings\.IndexByte\(s, "\?"\[0\]\) < 0\) answers the same membership question`
+}
+
+// A parenthesized call is NOT a direct !call: the replacement happens
+// inside the existing parentheses and no absorption is needed.
+func containsParenthesizedCall(b []byte) bool {
+	return !(bytes.ContainsAny(b, "|")) // want `bytes\.IndexByte\(b, "\|"\[0\]\) >= 0 answers the same membership question`
+}
+
+// Other bracketed or delimited positions are safe bare: a call argument, a
+// switch tag, a case value, a struct literal value, a return.
+func sink(bool) {}
+
+type record struct{ ok bool }
+
+func containsContexts(s string) record {
+	sink(strings.ContainsAny(s, ".")) // want `strings\.IndexByte\(s, "\."\[0\]\) >= 0 answers the same membership question`
+	switch strings.ContainsAny(s, ",") { // want `strings\.IndexByte\(s, ","\[0\]\) >= 0 answers the same membership question`
+	case strings.ContainsAny(s, "_"): // want `strings\.IndexByte\(s, "_"\[0\]\) >= 0 answers the same membership question`
+	}
+	return record{ok: strings.ContainsAny(s, "^")} // want `strings\.IndexByte\(s, "\^"\[0\]\) >= 0 answers the same membership question`
+}
+
+// --- advisory: reported but never rewritten ---
+
+// A named string constant (or any constant expression that is not a
+// literal) keeps its symbolic name: wrapping a spelled-out copy of its
+// value would discard it. Index the constant itself (sep[0]) by hand.
+const sep = "/"
+
+func namedConst(s string, b []byte) {
+	_ = strings.IndexAny(s, sep) // want `the cutset is a constant expression, not a string literal — rewrite to strings\.IndexByte by hand`
+	_ = bytes.ContainsAny(b, sep) // want `the cutset is a constant expression, not a string literal — rewrite to bytes\.IndexByte by hand`
+	_ = strings.ContainsAny(s, ":"+"") // want `the cutset is a constant expression, not a string literal — rewrite to strings\.IndexByte by hand`
+}
+
+// go and defer require a call expression: the ContainsAny comparison
+// cannot be spliced into that position, so the site is advisory-only.
+// (The IndexAny form above has no such restriction — it stays a call.)
+func containsGoDefer(s string, b []byte) {
+	go strings.ContainsAny(s, "g") // want `a go/defer statement requires a call expression, so the comparison cannot be spliced here — rewrite by hand`
+	defer bytes.ContainsAny(b, "d") // want `a go/defer statement requires a call expression, so the comparison cannot be spliced here — rewrite by hand`
+}
+
+// A bare ContainsAny call statement discards the bool; a comparison
+// cannot stand alone as a statement.
+func containsStmt(s string) {
+	strings.ContainsAny(s, "x") // want `the call is a statement discarding its result — a comparison cannot stand alone as a statement, so no fix is offered — rewrite by hand`
+	(strings.ContainsAny(s, "y")) // want `the call is a statement discarding its result — a comparison cannot stand alone as a statement, so no fix is offered — rewrite by hand`
+}
+
+// A comment between a leading ! and the call the absorption would fold
+// away withholds the fix — the comment is never destroyed.
+func containsCommented(s string) bool {
+	return ! /* absent */ strings.ContainsAny(s, "w") // want `a comment inside the rewritten syntax withholds the automatic fix — rewrite by hand`
+}
