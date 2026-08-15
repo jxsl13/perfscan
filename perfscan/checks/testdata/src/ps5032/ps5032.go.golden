@@ -1,0 +1,68 @@
+package ps5032
+
+import "bytes"
+
+// --- IndexAny form: 2-, 3- and 4-byte encodings all rewrite to the
+// equivalent rune literal; the replacement is still a call returning the
+// same int, so it drops into every syntactic position.
+
+func indexBasics(b []byte) int {
+	i := bytes.IndexRune(b, '—') // want `bytes\.IndexAny of the one-multi-byte-rune cutset "—" falls into the general loop that decodes every rune of the haystack; bytes\.IndexRune\(b, '—'\) is a single substring scan over the rune's UTF-8 encoding — identical index for every input`
+	j := bytes.IndexRune(b, 'é') // want `bytes\.IndexRune\(b, 'é'\) is a single substring scan`
+	k := bytes.IndexRune(b, '😀') // want `bytes\.IndexRune\(b, '😀'\) is a single substring scan`
+	return i + j + k
+}
+
+// Every source spelling of the same rune — the direct character, a \u
+// escape, the raw byte escapes of its UTF-8 encoding, a raw backquoted
+// literal — lands on the same rune literal: the fix renders the DECODED
+// rune with strconv.QuoteRune, so no re-escaping subtleties exist. A
+// non-printable rune is rendered as a backslash escape.
+func indexSpellings(b []byte) {
+	_ = bytes.IndexRune(b, '—') // want `bytes\.IndexAny of the one-multi-byte-rune cutset "\\u2014" falls into the general loop that decodes every rune of the haystack; bytes\.IndexRune\(b, '—'\) is a single substring scan`
+	_ = bytes.IndexRune(b, '—') // want `bytes\.IndexRune\(b, '—'\) is a single substring scan`
+	_ = bytes.IndexRune(b, '—') // want "bytes\\.IndexRune\\(b, '—'\\) is a single substring scan"
+	_ = bytes.IndexRune(b, '\u00a0') // want `bytes\.IndexRune\(b, '\\u00a0'\) is a single substring scan`
+	_ = bytes.IndexRune(b, '\U0010ffff') // want `bytes\.IndexRune\(b, '\\U0010ffff'\) is a single substring scan`
+}
+
+// --- ContainsAny form: ContainsRune is the same call-for-call rename
+// (bool -> bool), so conditions, ! operands, && / || chains and
+// comparisons all need no extra syntax.
+
+func containsContexts(b []byte, ok bool) bool {
+	if bytes.ContainsRune(b, '€') { // want `bytes\.ContainsAny of the one-multi-byte-rune cutset "€" falls into the general loop that decodes every rune of the haystack; bytes\.ContainsRune\(b, '€'\) is a single substring scan over the rune's UTF-8 encoding — identical boolean for every input`
+		return true
+	}
+	found := !bytes.ContainsRune(b, '…') // want `bytes\.ContainsRune\(b, '…'\) is a single substring scan`
+	return ok && found || bytes.ContainsRune(b, 'あ') // want `bytes\.ContainsRune\(b, 'あ'\) is a single substring scan`
+}
+
+// Positions that force the ContainsAny siblings of OTHER checks into
+// advisory mode are all fixable here, because the replacement stays a
+// call expression: go/defer statements, a bare call statement, and
+// comparison operands.
+func callPositions(b []byte, m map[int]int) {
+	_ = bytes.IndexRune(b, ('»')) // want `bytes\.IndexRune\(b, '»'\) is a single substring scan`
+	_ = (bytes.ContainsRune(b, 'ø')) // want `bytes\.ContainsRune\(b, 'ø'\) is a single substring scan`
+	_ = m[bytes.IndexRune(b, 'ß')] // want `bytes\.IndexRune\(b, 'ß'\) is a single substring scan`
+	go bytes.IndexRune(b, 'Ω') // want `bytes\.IndexRune\(b, 'Ω'\) is a single substring scan`
+	defer bytes.ContainsRune(b, 'λ') // want `bytes\.ContainsRune\(b, 'λ'\) is a single substring scan`
+	bytes.ContainsRune(b, 'π') // want `bytes\.ContainsRune\(b, 'π'\) is a single substring scan`
+	if x := bytes.ContainsRune(b, 'µ'); x == bytes.ContainsRune(b, '¶') { // want `bytes\.ContainsRune\(b, 'µ'\) is a single substring scan` `bytes\.ContainsRune\(b, '¶'\) is a single substring scan`
+		return
+	}
+}
+
+// --- advisory: reported but never rewritten ---
+
+// A named string constant (or any constant expression that is not a
+// literal) keeps its symbolic name: spelling out a copy of its value as a
+// rune literal would discard it. Decode the constant by hand.
+const dash = "—"
+
+func namedConst(b []byte) {
+	_ = bytes.IndexAny(b, dash) // want `the cutset is a constant expression, not a string literal — rewrite to bytes\.IndexRune by hand`
+	_ = bytes.ContainsAny(b, dash) // want `the cutset is a constant expression, not a string literal — rewrite to bytes\.ContainsRune by hand`
+	_ = bytes.ContainsAny(b, "€"+"") // want `the cutset is a constant expression, not a string literal — rewrite to bytes\.ContainsRune by hand`
+}

@@ -1,0 +1,12 @@
+package ps5032
+
+import by "bytes"
+
+// An aliased bytes import keeps its qualifier verbatim; only the
+// selected name and the cutset literal change — IndexRune and
+// ContainsRune live in the same package, so no import surgery is ever
+// needed.
+func aliased(b []byte) bool {
+	i := by.IndexRune(b, '—') // want `bytes\.IndexAny of the one-multi-byte-rune cutset "—" falls into the general loop`
+	return i >= 0 && by.ContainsRune(b, '€') // want `bytes\.ContainsAny of the one-multi-byte-rune cutset "€" falls into the general loop`
+}
