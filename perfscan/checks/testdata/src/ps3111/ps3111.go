@@ -7,9 +7,10 @@ import (
 
 type Priority int
 
-// The bare cmp.Compare comparator is slices.Max/Min spelled the slow way; the
-// rewrites delete this file's ONLY cmp references, so the fix drops the orphaned
-// cmp import. The slice expression is kept verbatim.
+// The bare cmp.Compare comparator is slices.Max/Min spelled the slow way. The
+// integer maxInt/maxNamed are fixed; the string minStr stays ADVISORY (slices.Max/
+// Min fold via an outlined runtime.strmax and regress ~10-25% on []string), so it
+// keeps cmp.Compare and the cmp import is retained. Slice expressions kept verbatim.
 
 // cmp.Compare passed directly.
 func maxInt(xs []int) int {
