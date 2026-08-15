@@ -1,0 +1,125 @@
+package ps5026
+
+import "bytes"
+
+// --- basics: ContainsRune is IndexRune >= 0, and for an ASCII rune
+// IndexRune is IndexByte, so the rewrite appends the comparison; >= 0
+// binds tighter than && and ||, so plain boolean positions need no
+// parentheses.
+
+func basics(line []byte) bool {
+	found := bytes.ContainsRune(line, '=')         // want `bytes\.ContainsRune of the constant ASCII rune '=' chains two wrapper frames \(ContainsRune -> IndexRune\) before the byte scan; bytes\.IndexByte\(b, '='\) >= 0 answers the same membership question directly — identical boolean for every input`
+	return found || bytes.ContainsRune(line, '\n') // want `bytes\.IndexByte\(b, '\\n'\) >= 0 answers the same membership question`
+}
+
+// The needle literal carries over byte-verbatim: an untyped rune or
+// integer literal below 0x80 is representable as byte, so it is passed to
+// IndexByte's byte parameter unchanged — escape sequences, NUL, 0x7f,
+// unicode escapes and plain integer spellings included.
+func literalSpellings(b []byte) {
+	_ = bytes.ContainsRune(b, '\t')     // want `bytes\.IndexByte\(b, '\\t'\) >= 0 answers the same membership question`
+	_ = bytes.ContainsRune(b, '\x00')   // want `bytes\.IndexByte\(b, '\\x00'\) >= 0 answers the same membership question`
+	_ = bytes.ContainsRune(b, '\x7f')   // want `bytes\.IndexByte\(b, '\\x7f'\) >= 0 answers the same membership question`
+	_ = bytes.ContainsRune(b, '\\')     // want `bytes\.IndexByte\(b, '\\\\'\) >= 0 answers the same membership question`
+	_ = bytes.ContainsRune(b, '\'')     // want `bytes\.IndexByte\(b, '\\''\) >= 0 answers the same membership question`
+	_ = bytes.ContainsRune(b, '\u0041') // want `bytes\.IndexByte\(b, '\\u0041'\) >= 0 answers the same membership question`
+	_ = bytes.ContainsRune(b, 47)       // want `bytes\.IndexByte\(b, 47\) >= 0 answers the same membership question`
+	_ = bytes.ContainsRune(b, 0x2f)     // want `bytes\.IndexByte\(b, 0x2f\) >= 0 answers the same membership question`
+}
+
+// Parentheses around the needle literal or the whole call are looked
+// through / left alone.
+func parens(b []byte) {
+	_ = bytes.ContainsRune(b, ('!')) // want `bytes\.IndexByte\(b, '!'\) >= 0 answers the same membership question`
+	_ = (bytes.ContainsRune(b, ';')) // want `bytes\.IndexByte\(b, ';'\) >= 0 answers the same membership question`
+}
+
+func conditions(b []byte, ok bool) bool {
+	if bytes.ContainsRune(b, '/') { // want `bytes\.IndexByte\(b, '/'\) >= 0 answers the same membership question`
+		return true
+	}
+	return ok && bytes.ContainsRune(b, ':') || bytes.ContainsRune(b, ';') // want `bytes\.IndexByte\(b, ':'\) >= 0 answers the same membership question` `bytes\.IndexByte\(b, ';'\) >= 0 answers the same membership question`
+}
+
+// A direct leading ! is absorbed into the comparison direction:
+// !(x >= 0) == (x < 0) for every int.
+func negated(b []byte) bool {
+	if !bytes.ContainsRune(b, '#') { // want `bytes\.IndexByte\(b, '#'\) < 0 answers the same membership question`
+		return true
+	}
+	return !bytes.ContainsRune(b, '~') // want `bytes\.IndexByte\(b, '~'\) < 0 answers the same membership question`
+}
+
+// An operand of a comparison must be parenthesized: == and >= share a
+// precedence level and would otherwise chain illegally.
+func comparisonOperand(b []byte, x bool) bool {
+	if x == bytes.ContainsRune(b, '@') { // want `\(bytes\.IndexByte\(b, '@'\) >= 0\) answers the same membership question`
+		return true
+	}
+	return bytes.ContainsRune(b, '%') != x // want `\(bytes\.IndexByte\(b, '%'\) >= 0\) answers the same membership question`
+}
+
+// The absorbed ! form needs the same parenthesization when it is itself a
+// comparison operand or under an outer !.
+func negatedOperand(b []byte, x bool) bool {
+	if x == !bytes.ContainsRune(b, '&') { // want `\(bytes\.IndexByte\(b, '&'\) < 0\) answers the same membership question`
+		return true
+	}
+	return !!bytes.ContainsRune(b, '?') // want `\(bytes\.IndexByte\(b, '\?'\) < 0\) answers the same membership question`
+}
+
+// A parenthesized call is NOT a direct !call: the replacement happens
+// inside the existing parentheses and no absorption is needed.
+func parenthesizedCall(b []byte) bool {
+	return !(bytes.ContainsRune(b, '|')) // want `bytes\.IndexByte\(b, '\|'\) >= 0 answers the same membership question`
+}
+
+// Other bracketed or delimited positions are safe bare: a call argument, a
+// switch tag, a case value, a struct literal value, a return.
+func sink(bool) {}
+
+type record struct{ ok bool }
+
+func contexts(b []byte) record {
+	sink(bytes.ContainsRune(b, '.'))    // want `bytes\.IndexByte\(b, '\.'\) >= 0 answers the same membership question`
+	switch bytes.ContainsRune(b, ',') { // want `bytes\.IndexByte\(b, ','\) >= 0 answers the same membership question`
+	case bytes.ContainsRune(b, '_'): // want `bytes\.IndexByte\(b, '_'\) >= 0 answers the same membership question`
+	}
+	return record{ok: bytes.ContainsRune(b, '^')} // want `bytes\.IndexByte\(b, '\^'\) >= 0 answers the same membership question`
+}
+
+// --- advisory: reported but never rewritten ---
+
+// A named constant (or any constant expression that is not a rune or
+// integer literal) keeps its symbolic name — and a TYPED rune constant
+// additionally needs an explicit byte(c) conversion the fix will not
+// synthesize. Write bytes.IndexByte(b, byte(c)) >= 0 by hand.
+const slash = '/'
+
+const tab rune = '\t'
+
+func namedConst(b []byte) {
+	_ = bytes.ContainsRune(b, slash) // want `the needle is a constant expression, not a rune literal — rewrite to bytes\.IndexByte with a byte conversion by hand`
+	_ = bytes.ContainsRune(b, tab)   // want `the needle is a constant expression, not a rune literal — rewrite to bytes\.IndexByte with a byte conversion by hand`
+	_ = bytes.ContainsRune(b, 'a'+1) // want `the needle is a constant expression, not a rune literal — rewrite to bytes\.IndexByte with a byte conversion by hand`
+}
+
+// go and defer require a call expression: the comparison cannot be
+// spliced into that position, so the site is advisory-only.
+func goDefer(b []byte) {
+	go bytes.ContainsRune(b, 'g')    // want `a go/defer statement requires a call expression, so the comparison cannot be spliced here — rewrite by hand`
+	defer bytes.ContainsRune(b, 'd') // want `a go/defer statement requires a call expression, so the comparison cannot be spliced here — rewrite by hand`
+}
+
+// A bare call statement discards the bool; a comparison cannot stand
+// alone as a statement.
+func stmtOnly(b []byte) {
+	bytes.ContainsRune(b, 'x')   // want `the call is a statement discarding its result — a comparison cannot stand alone as a statement, so no fix is offered — rewrite by hand`
+	(bytes.ContainsRune(b, 'y')) // want `the call is a statement discarding its result — a comparison cannot stand alone as a statement, so no fix is offered — rewrite by hand`
+}
+
+// A comment between a leading ! and the call the absorption would fold
+// away withholds the fix — the comment is never destroyed.
+func commented(b []byte) bool {
+	return ! /* absent */ bytes.ContainsRune(b, 'w') // want `a comment inside the rewritten syntax withholds the automatic fix — rewrite by hand`
+}

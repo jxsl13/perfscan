@@ -1,0 +1,11 @@
+package ps5026
+
+import byt "bytes"
+
+// An aliased bytes import keeps its qualifier verbatim; only the
+// selected name and the appended comparison change — IndexByte lives in
+// the same package, so no import surgery is ever needed.
+func aliased(b []byte) bool {
+	found := byt.ContainsRune(b, '@')         // want `bytes\.ContainsRune of the constant ASCII rune '@' chains two wrapper frames`
+	return found || !byt.ContainsRune(b, '#') // want `bytes\.IndexByte\(b, '#'\) < 0 answers the same membership question`
+}
