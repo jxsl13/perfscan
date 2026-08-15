@@ -59,6 +59,7 @@ checks' fixes.
 | [PS2035](PS2035.md) | alloc | L1 | yes | fmt.Appendf(buf, "%v", x) of a plain integer, bool or float has a direct strconv.Append* equivalent |
 | [PS2036](PS2036.md) | alloc | L1 | yes | fmt.Append of a single plain integer, bool or float has a direct strconv.Append* equivalent |
 | [PS2037](PS2037.md) | alloc | L1 | yes | string([]rune{r}) builds a throwaway 1-element rune slice; string(rune(r)) encodes the rune directly |
+| [PS2039](PS2039.md) | alloc | L1 | yes | an unsized map immediately populated by maps.Copy; make(map[K]V, len(src)) reserves the buckets once |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
