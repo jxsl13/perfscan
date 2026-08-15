@@ -1,0 +1,115 @@
+package ps5027
+
+import (
+	"errors"
+	"fmt"
+)
+
+// fmt stays imported: this reference (and the guard cases below) keeps
+// the import alive after every fix in this file is applied (the orphan
+// path is exercised by dropimport.go).
+func keepFmtAlive() {
+	fmt.Println("side effect")
+}
+
+// Verbless constant string → the literal itself.
+func basic() string {
+	return "database connection failed" // want `fmt\.Sprintf on a verbless constant string`
+}
+
+// A raw-string literal with no % also qualifies; the literal stays in
+// place byte-verbatim, backticks and all.
+func raw() string {
+	return `disk is full` // want `fmt\.Sprintf on a verbless constant string`
+}
+
+// Two calls in the same file, both fixed.
+func two() (string, string) {
+	a := "first"  // want `fmt\.Sprintf on a verbless constant string`
+	b := "second" // want `fmt\.Sprintf on a verbless constant string`
+	return a, b
+}
+
+// A string literal is self-delimiting: indexing the call becomes
+// indexing the literal, no parentheses needed.
+func indexed() byte {
+	return "abc"[0] // want `fmt\.Sprintf on a verbless constant string`
+}
+
+// Escapes (including NUL and invalid UTF-8) ride through verbatim —
+// no verbs means fmt never interprets them.
+func escapes() string {
+	return "tab\there\x00\xff" // want `fmt\.Sprintf on a verbless constant string`
+}
+
+// In an argument position the untyped constant defaults to string,
+// exactly like the call's result.
+func asArg() error {
+	return errors.New("wrapped message") // want `fmt\.Sprintf on a verbless constant string`
+}
+
+// --- advisory only: reported, but never rewritten ---
+
+// A call is a valid statement; a bare string literal is not — no fix.
+func statement() {
+	fmt.Sprintf("discarded") // want `fmt\.Sprintf on a verbless constant string`
+}
+
+// go and defer require a call — no fix.
+func spawned() {
+	go fmt.Sprintf("spawned")     // want `fmt\.Sprintf on a verbless constant string`
+	defer fmt.Sprintf("deferred") // want `fmt\.Sprintf on a verbless constant string`
+}
+
+// A comment inside the deleted wrapper would be swallowed — no fix.
+func commented() string {
+	return fmt.Sprintf( /* keep me */ "commented") // want `fmt\.Sprintf on a verbless constant string`
+}
+
+// --- guards: none of the following may be reported ---
+
+// A verb consuming an argument is real formatting.
+func withVerb(name string) string {
+	return fmt.Sprintf("bad name: %s", name)
+}
+
+// A bare %% is transformed by fmt (%%->%) but kept verbatim by the
+// literal — any '%' breaks bit-identity.
+func percentEscape() string {
+	return fmt.Sprintf("100%% done")
+}
+
+// A lone verb with no argument prints %!d(MISSING), not the literal.
+func missingOperand() string {
+	return fmt.Sprintf("%d")
+}
+
+// Extra arguments with no verbs: fmt appends %!(EXTRA ...), not verbatim.
+func extraArgs(x int) string {
+	return fmt.Sprintf("static", x)
+}
+
+// A non-literal format proves nothing.
+func varFormat(msg string) string {
+	return fmt.Sprintf(msg)
+}
+
+// A constant expression is not a string LITERAL — out of the narrow match.
+func concat() string {
+	return fmt.Sprintf("a" + "b")
+}
+
+// A spread passes an unknown number of arguments.
+func spread(args ...any) string {
+	return fmt.Sprintf("tmpl", args...)
+}
+
+// A shadowed fmt is not the fmt package.
+type fakeFmt struct{}
+
+func (fakeFmt) Sprintf(format string, a ...any) string { return format }
+
+func shadowed() string {
+	fmt := fakeFmt{}
+	return fmt.Sprintf("shadowed")
+}
