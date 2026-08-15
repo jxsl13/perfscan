@@ -148,6 +148,7 @@ checks' fixes.
 | [PS5020](PS5020.md) | alloc | L1 | yes | append(dst, []byte(s)...) copies s through a throwaway byte slice; append(dst, s...) appends the identical bytes directly |
 | [PS5021](PS5021.md) | alloc | L1 | yes | copy(dst, []byte(s)) converts s just to copy from the conversion's throwaway result; copy(dst, s) copies the string's bytes directly — the builtin special-cases a string source |
 | [PS5022](PS5022.md) | arith | L1 | yes | IndexAny/ContainsAny with a one-ASCII-byte cutset pays the set machinery for a plain byte search; IndexByte jumps straight to the scan |
+| [PS5023](PS5023.md) | arith | L1 | yes | IndexRune with a constant ASCII rune pays a non-inlined range-check wrapper; IndexByte jumps straight to the scan |
 | [PS5024](PS5024.md) | arith | L1 | yes | strings.ContainsRune of a constant ASCII rune chains two wrapper frames before the byte scan; IndexByte >= 0 answers the same membership question directly |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
