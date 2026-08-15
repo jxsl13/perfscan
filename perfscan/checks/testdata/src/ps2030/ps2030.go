@@ -1,0 +1,83 @@
+package ps2030
+
+import (
+	"bytes"
+	byt "bytes"
+)
+
+// Every blankness-equivalent comparison shape is rewritten, with the
+// literal on either side of the operator. The fix renames only the
+// Fields identifier: the len wrapper, the argument, the operator and
+// the literal all stay byte-verbatim.
+func forms(b []byte) {
+	_ = len(bytes.Fields(b)) == 0 // want `len\(bytes\.Fields\(b\)\) == 0 allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; len\(bytes\.TrimSpace\(b\)\) == 0 is the identical zero test with zero allocations and stops at the first non-space byte`
+	_ = len(bytes.Fields(b)) < 1  // want `len\(bytes\.Fields\(b\)\) < 1 allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; len\(bytes\.TrimSpace\(b\)\) < 1`
+	_ = len(bytes.Fields(b)) <= 0 // want `len\(bytes\.Fields\(b\)\) <= 0 allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; len\(bytes\.TrimSpace\(b\)\) <= 0`
+	_ = len(bytes.Fields(b)) != 0 // want `len\(bytes\.Fields\(b\)\) != 0 allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; len\(bytes\.TrimSpace\(b\)\) != 0`
+	_ = len(bytes.Fields(b)) > 0  // want `len\(bytes\.Fields\(b\)\) > 0 allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; len\(bytes\.TrimSpace\(b\)\) > 0`
+	_ = len(bytes.Fields(b)) >= 1 // want `len\(bytes\.Fields\(b\)\) >= 1 allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; len\(bytes\.TrimSpace\(b\)\) >= 1`
+	_ = 0 == len(bytes.Fields(b)) // want `0 == len\(bytes\.Fields\(b\)\) allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; 0 == len\(bytes\.TrimSpace\(b\)\)`
+	_ = 0 < len(bytes.Fields(b))  // want `0 < len\(bytes\.Fields\(b\)\) allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; 0 < len\(bytes\.TrimSpace\(b\)\)`
+	_ = 1 > len(bytes.Fields(b))  // want `1 > len\(bytes\.Fields\(b\)\) allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; 1 > len\(bytes\.TrimSpace\(b\)\)`
+	_ = 0 != len(bytes.Fields(b)) // want `0 != len\(bytes\.Fields\(b\)\) allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; 0 != len\(bytes\.TrimSpace\(b\)\)`
+	_ = 1 <= len(bytes.Fields(b)) // want `1 <= len\(bytes\.Fields\(b\)\) allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; 1 <= len\(bytes\.TrimSpace\(b\)\)`
+	_ = 0 >= len(bytes.Fields(b)) // want `0 >= len\(bytes\.Fields\(b\)\) allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; 0 >= len\(bytes\.TrimSpace\(b\)\)`
+}
+
+// An aliased import keeps its qualifier verbatim; TrimSpace lives in
+// the same package, so the import is never orphaned.
+func aliased(b []byte) bool {
+	return len(byt.Fields(b)) == 0 // want `len\(byt\.Fields\(b\)\) == 0 allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; len\(byt\.TrimSpace\(b\)\) == 0`
+}
+
+// The argument expression carries over byte-verbatim: struct fields,
+// index expressions, calls, appends, named []byte types (assignable to
+// Fields' parameter and TrimSpace's alike) and redundant parens all
+// stay exactly as written and are evaluated exactly once either way.
+type payload struct{ raw []byte }
+
+type buf []byte
+
+func args(p payload, chunks [][]byte, get func() []byte, nb buf) {
+	if len(bytes.Fields(p.raw)) == 0 { // want `len\(bytes\.Fields\(p\.raw\)\) == 0 allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; len\(bytes\.TrimSpace\(p\.raw\)\) == 0`
+		return
+	}
+	for len(bytes.Fields(chunks[0])) > 0 { // want `len\(bytes\.Fields\(chunks\[0\]\)\) > 0 allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; len\(bytes\.TrimSpace\(chunks\[0\]\)\) > 0`
+		break
+	}
+	_ = len(bytes.Fields(get())) != 0                          // want `len\(bytes\.Fields\(get\(\)\)\) != 0 allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness; len\(bytes\.TrimSpace\(get\(\)\)\) != 0`
+	_ = len(bytes.Fields(append([]byte("a "), p.raw...))) == 0 // want `allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness`
+	_ = len(bytes.Fields(nb)) == 0                             // want `allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness`
+	_ = len(bytes.Fields((p.raw))) == 0                        // want `allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness`
+}
+
+// Redundant parens around the len call, the Fields call, or the Fields
+// selector are not part of the edited token and survive verbatim.
+func parens(b []byte) {
+	_ = (len(bytes.Fields(b))) == 0 // want `allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness`
+	_ = len((bytes.Fields(b))) > 0  // want `allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness`
+	_ = len((bytes.Fields)(b)) == 0 // want `allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness`
+}
+
+// The rewrite touches a single identifier, so it is parse-identical
+// inside a larger condition.
+func condition(ok bool, b []byte) bool {
+	return ok && len(bytes.Fields(b)) == 0 // want `allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness`
+}
+
+// Both the Before and the After shape are untyped-bool comparisons, so
+// a context that materializes a named bool type keeps compiling.
+type myBool bool
+
+func namedBoolContext(b []byte) myBool {
+	var v myBool = len(bytes.Fields(b)) == 0 // want `allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness`
+	return v
+}
+
+// A comment anywhere in the scaffolding survives: the sole edited span
+// is the Fields identifier itself, which cannot contain a comment, so
+// the fix is never withheld.
+func comments(b []byte) {
+	_ = len( /* keep me */ bytes.Fields(b)) == 0 // want `allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness`
+	_ = len(bytes.Fields(b)) == /* zero */ 0     // want `allocates a \[\]\[\]byte of every whitespace-separated field just to test blankness`
+}
