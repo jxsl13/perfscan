@@ -1,0 +1,135 @@
+package ps5028
+
+import (
+	"fmt"
+	"io"
+)
+
+// fmt stays imported: this reference keeps the import alive after every
+// fix in this file is applied.
+func keepFmtAlive(w io.Writer) {
+	fmt.Fprintln(w, "kept")
+}
+
+func basic(w io.Writer) {
+	io.WriteString(w, "done\n") // want `fmt\.Fprintf with a verbless constant format and no operands pays fmt's pooled printer, format scan and intermediate buffer copy just to write the literal's bytes; io\.WriteString\(w, s\) hands them to w directly with the same \(n, err\)`
+}
+
+// Escapes, unicode and NUL bytes all pass through verbatim — only a '%'
+// in the VALUE matters.
+func escapes(w io.Writer) {
+	io.WriteString(w, "a\tb\x00é\n") // want `fmt\.Fprintf with a verbless constant format and no operands pays fmt's pooled printer, format scan and intermediate buffer copy just to write the literal's bytes; io\.WriteString\(w, s\) hands them to w directly with the same \(n, err\)`
+}
+
+// A raw string literal is a literal too.
+func rawLit(w io.Writer) {
+	io.WriteString(w, `shutdown: all shards flushed`) // want `fmt\.Fprintf with a verbless constant format and no operands pays fmt's pooled printer, format scan and intermediate buffer copy just to write the literal's bytes; io\.WriteString\(w, s\) hands them to w directly with the same \(n, err\)`
+}
+
+// Both return (n int, err error) from the same underlying write: the
+// results carry over verbatim.
+func results(w io.Writer) (int, error) {
+	return io.WriteString(w, "header: v1\n") // want `fmt\.Fprintf with a verbless constant format and no operands pays fmt's pooled printer, format scan and intermediate buffer copy just to write the literal's bytes; io\.WriteString\(w, s\) hands them to w directly with the same \(n, err\)`
+}
+
+// --- advisory only: reported, but never rewritten ---
+
+// A local named io shadows the package at the call site: the emitted
+// io.WriteString qualifier would not resolve — no fix.
+func shadowedIo(w io.Writer) {
+	io := 1
+	_ = io
+	fmt.Fprintf(w, "shadowed\n") // want `fmt\.Fprintf with a verbless constant format and no operands pays fmt's pooled printer, format scan and intermediate buffer copy just to write the literal's bytes; io\.WriteString\(w, s\) hands them to w directly with the same \(n, err\)`
+}
+
+// A comment inside the rewritten punctuation would be swallowed — no fix.
+func commented(w io.Writer) {
+	fmt.Fprintf(w /* keep me */, "commented\n") // want `fmt\.Fprintf with a verbless constant format and no operands pays fmt's pooled printer, format scan and intermediate buffer copy just to write the literal's bytes; io\.WriteString\(w, s\) hands them to w directly with the same \(n, err\)`
+}
+
+// --- guards: none of the following may be reported ---
+
+// ANY '%' in the value disqualifies: fmt interprets it ("%%" collapses to
+// "%", a verb with no argument prints %!v\(MISSING\), a trailing "%"
+// prints %!\(NOVERB\)) while io.WriteString would keep the bytes verbatim.
+func percents(w io.Writer) {
+	fmt.Fprintf(w, "100%%\n")
+	fmt.Fprintf(w, "%d\n")
+	fmt.Fprintf(w, "trailing %")
+	fmt.Fprintf(w, "a\x25b") // '%' smuggled through an escape
+}
+
+// Operands mean the format is doing real work — and a verbless format
+// with an extra argument appends %!(EXTRA ...): only the two-argument
+// form matches. The one-verb "%s"/"%v" shapes are PS2129's.
+func operands(w io.Writer, s string, v int) {
+	fmt.Fprintf(w, "%s", s)
+	fmt.Fprintf(w, "done", v)
+	fmt.Fprintf(w, "%d items\n", v)
+}
+
+// No variadic spread.
+func spread(w io.Writer, args []any) {
+	fmt.Fprintf(w, "done\n", args...)
+}
+
+// A non-literal format never matches, even when its constant value is
+// verbless: the symbolic name is the point of the constant.
+const banner = "ready\n"
+
+func nonLiteral(w io.Writer) {
+	format := "done\n"
+	fmt.Fprintf(w, format)
+	fmt.Fprintf(w, banner)
+}
+
+// Fprint/Fprintln and the Print family are other checks' territory.
+func otherFuncs(w io.Writer) {
+	fmt.Fprintln(w, "done")
+	fmt.Print("done\n")
+	fmt.Printf("done\n")
+}
+
+// A local object named fmt shadows the package: not stdlib fmt.Fprintf.
+type fakeFmt struct{}
+
+func (fakeFmt) Fprintf(w io.Writer, format string) (int, error) { return 0, nil }
+
+func shadowedFmt(w io.Writer) {
+	var fmt fakeFmt
+	fmt.Fprintf(w, "done\n")
+}
+
+// A WriteString that delegates through fmt: the rewrite
+// io.WriteString(f, "flush\n") would dispatch to f.WriteString — the
+// enclosing method itself: unbounded recursion that still compiles.
+// Nothing is reported.
+type selfF struct{ b []byte }
+
+func (f *selfF) Write(p []byte) (int, error) {
+	f.b = append(f.b, p...)
+	return len(p), nil
+}
+
+func (f *selfF) WriteString(s string) (int, error) {
+	return fmt.Fprintf(f, "flush\n")
+}
+
+// A writer WITHOUT WriteString: io.WriteString(g, s) would fall back to
+// g.Write — inside Write that is the enclosing method itself: recursion.
+// Nothing is reported.
+type selfF2 struct{ b []byte }
+
+func (g *selfF2) Write(p []byte) (int, error) {
+	return fmt.Fprintf(g, "tick\n")
+}
+
+// The same call in any OTHER method of the receiver, or on a different
+// writer, is still reported.
+func (f *selfF) dump() {
+	io.WriteString(f, "dump\n") // want `fmt\.Fprintf with a verbless constant format and no operands pays fmt's pooled printer, format scan and intermediate buffer copy just to write the literal's bytes; io\.WriteString\(w, s\) hands them to w directly with the same \(n, err\)`
+}
+
+func (f *selfF) mirror(w io.Writer) (int, error) {
+	return io.WriteString(w, "mirror\n") // want `fmt\.Fprintf with a verbless constant format and no operands pays fmt's pooled printer, format scan and intermediate buffer copy just to write the literal's bytes; io\.WriteString\(w, s\) hands them to w directly with the same \(n, err\)`
+}

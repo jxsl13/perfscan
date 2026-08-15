@@ -1,0 +1,14 @@
+package ps5028
+
+import (
+	"bytes"
+	"fmt"
+)
+
+// io is NOT imported here: the fixable site's fix also inserts the io
+// import at its sorted position; the fmt.Fprintln reference keeps fmt
+// alive, so only the addition is needed.
+func addImport(buf *bytes.Buffer) {
+	fmt.Fprintf(buf, "begin\n") // want `fmt\.Fprintf with a verbless constant format and no operands pays fmt's pooled printer, format scan and intermediate buffer copy just to write the literal's bytes; io\.WriteString\(w, s\) hands them to w directly with the same \(n, err\)`
+	fmt.Fprintln(buf)
+}

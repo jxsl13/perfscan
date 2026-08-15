@@ -19,6 +19,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -102,7 +103,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `perfscan — a staticcheck-style performance linter for Go with graded auto-fixing
+	io.WriteString(os.Stderr, `perfscan — a staticcheck-style performance linter for Go with graded auto-fixing
 
 Usage:
 
