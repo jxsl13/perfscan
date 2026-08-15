@@ -1,0 +1,14 @@
+package ps3010
+
+import (
+	"cmp"
+	"slices"
+)
+
+// A type-parameter element is fixed too: cmp.Compare[E] already proves
+// E cmp.Ordered — exactly slices.IsSorted's constraint — and the
+// identical-bool argument holds for every instantiation. The cmp.Ordered
+// constraint keeps a cmp reference alive, so the import SURVIVES the rewrite.
+func sortedGeneric[E cmp.Ordered](s []E) bool {
+	return slices.IsSortedFunc(s, cmp.Compare) // want `slices\.IsSortedFunc with a bare cmp\.Compare comparator`
+}
