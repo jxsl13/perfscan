@@ -1,0 +1,124 @@
+package ps2033
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+// Keeps fmt referenced so the rewrites below do not orphan the import (orphan.go
+// exercises the orphan path).
+func keep() { fmt.Println("x") }
+
+// --- POSITIVES: "%s" repeated per operand, plain strings, unnamed []byte dest ---
+
+func two(buf []byte, a, b string) []byte {
+	return append(append(buf, a...), b...) // want `fmt\.Appendf whose format is only repeated %s verbs`
+}
+
+func three(buf []byte, a, b, c string) []byte {
+	return append(append(append(buf, a...), b...), c...) // want `fmt\.Appendf whose format is only repeated %s verbs`
+}
+
+// The FIRST operand may be any string expression — both forms evaluate buf,
+// then it, before the chain's first write.
+func firstCall(buf []byte, a, b string) []byte {
+	return append(append(buf, strings.ToUpper(a)...), b...) // want `fmt\.Appendf whose format is only repeated %s verbs`
+}
+
+// Untyped string constants default to string; a package-qualified identifier
+// is inert.
+func lits(buf []byte, a string) []byte {
+	return append(append(append(buf, a...), "-"...), os.DevNull...) // want `fmt\.Appendf whose format is only repeated %s verbs`
+}
+
+// --- ADVISORY: reported but NOT fixed (not provably bit-identical) ---
+
+type MyStr string
+
+// A NAMED string type may implement fmt.Stringer/fmt.Formatter.
+func named(buf []byte, a string, s MyStr) []byte {
+	return fmt.Appendf(buf, "%s%s", a, s) // want `fmt\.Appendf whose format is only repeated %s verbs`
+}
+
+type ByteBuf []byte
+
+// A NAMED []byte destination changes the returned slice type.
+func namedDest(buf ByteBuf, a, b string) ByteBuf {
+	return fmt.Appendf(buf, "%s%s", a, b) // want `fmt\.Appendf whose format is only repeated %s verbs`
+}
+
+// A []byte operand — fixable for single-operand PS2141 — is NOT fixable here:
+// if it aliases buf's spare capacity, the chain's first append clobbers it
+// before a later append reads it, while fmt.Appendf reads every operand first.
+func byteSliceOperand(buf []byte, a string, bs []byte) []byte {
+	return fmt.Appendf(buf, "%s%s", a, bs) // want `fmt\.Appendf whose format is only repeated %s verbs`
+}
+
+// A LATER operand that runs user code is evaluated after the chain's first
+// write to buf but before fmt.Appendf's only write — an observable
+// difference, so the call keeps the advisory report.
+func laterCall(buf []byte, a, b string) []byte {
+	return fmt.Appendf(buf, "%s%s", a, strings.ToUpper(b)) // want `fmt\.Appendf whose format is only repeated %s verbs`
+}
+
+// An index expression may panic — panic timing would move across the first
+// write, so it is not inert either.
+func laterIndex(buf []byte, a string, parts []string) []byte {
+	return fmt.Appendf(buf, "%s%s", a, parts[0]) // want `fmt\.Appendf whose format is only repeated %s verbs`
+}
+
+// A comment inside the rewritten scaffolding would be destroyed — advisory.
+func commented(buf []byte, a, b string) []byte {
+	return fmt.Appendf(buf, "%s%s" /* keep me */, a, b) // want `fmt\.Appendf whose format is only repeated %s verbs`
+}
+
+// --- NEGATIVES: not reported ---
+
+// The lone %s is PS2141's shape, not PS2033's.
+func single(buf []byte, a string) []byte {
+	return fmt.Appendf(buf, "%s", a)
+}
+
+// Any literal text, flag, width, %% or other verb disqualifies the format.
+func spaced(buf []byte, a, b string) []byte {
+	return fmt.Appendf(buf, "%s %s", a, b)
+}
+
+func otherVerb(buf []byte, a, b string) []byte {
+	return fmt.Appendf(buf, "%s%q", a, b)
+}
+
+func percent(buf []byte, a, b string) []byte {
+	return fmt.Appendf(buf, "%s%%%s", a, b)
+}
+
+func flagged(buf []byte, a, b string) []byte {
+	return fmt.Appendf(buf, "%s%-8s", a, b)
+}
+
+// %s over an int is different formatting, not a string append.
+func intVal(buf []byte, a string, n int) []byte {
+	return fmt.Appendf(buf, "%s%s", a, n)
+}
+
+// A spread call passes an unknown number of arguments.
+func spread(buf []byte, args ...any) []byte {
+	return fmt.Appendf(buf, "%s%s", args...)
+}
+
+// A non-literal format proves nothing.
+func varFormat(buf []byte, a, b string) []byte {
+	format := "%s%s"
+	return fmt.Appendf(buf, format, a, b)
+}
+
+// A shadowed fmt is not the fmt package.
+type fakeFmt struct{}
+
+func (fakeFmt) Appendf(b []byte, format string, args ...any) []byte { return b }
+
+func shadowed(buf []byte, a, b string) []byte {
+	fmt := fakeFmt{}
+	return fmt.Appendf(buf, "%s%s", a, b)
+}
