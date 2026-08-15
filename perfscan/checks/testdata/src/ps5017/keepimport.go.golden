@@ -1,0 +1,15 @@
+package ps5017
+
+import (
+	"bytes"
+	"unicode"
+)
+
+// This file keeps another unicode reference (IsSpace), so the rewrites
+// do NOT orphan the import and no import surgery happens.
+func keepImport(b []byte) []byte {
+	if len(b) > 0 && unicode.IsSpace(rune(b[0])) {
+		b = b[1:]
+	}
+	return bytes.ToUpper(b) // want `bytes\.Map\(unicode\.ToUpper, b\) pays`
+}
