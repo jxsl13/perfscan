@@ -92,6 +92,7 @@ checks' fixes.
 | [PS3010](PS3010.md) | indirect | L1 | yes | slices.IsSortedFunc with a bare cmp.Compare comparator is slices.IsSorted spelled the slow way |
 | [PS3011](PS3011.md) | indirect | L1 | yes | slices.BinarySearchFunc with a bare strings.Compare comparator is slices.BinarySearch spelled the slow way |
 | [PS3012](PS3012.md) | indirect | L1 | yes | slices.SortedFunc with a bare cmp.Compare comparator is slices.Sorted spelled the slow way |
+| [PS3013](PS3013.md) | indirect | L1 | yes | slices.SortFunc with a hand-rolled three-way comparator (a<b/a>b/-1/1/0) is slices.Sort spelled the slow way |
 | [PS3034](PS3034.md) | indirect | L3 |  | a serial nest whose every write names the outermost loop variable |
 | [PS3059](PS3059.md) | indirect | L3 |  | a serial nest writing through a base derived from the outermost loop variable |
 | [PS3060](PS3060.md) | indirect | L3 |  | a serial loop over calls to a function that itself fans out |

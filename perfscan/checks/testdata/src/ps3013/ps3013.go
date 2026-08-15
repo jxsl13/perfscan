@@ -1,0 +1,64 @@
+package ps3013
+
+import (
+	"fmt"
+	"slices"
+)
+
+type Celsius int
+
+// The hand-rolled three-way if-chain is slices.Sort spelled the slow way;
+// the slice expression is kept verbatim. (The fixture comparators are
+// one-liners because the `want` comment must share the call's line, and a
+// comment INSIDE the deleted span keeps a report advisory — see
+// advisory.go; the AST shapes are identical to the multi-line spellings.)
+func sortInts(xs []int) {
+	slices.SortFunc(xs, func(a, b int) int { if a < b { return -1 }; if a > b { return 1 }; return 0 }) // want `slices\.SortFunc with a hand-rolled three-way comparator \(a<b/a>b/-1/1/0\) pays an indirect comparator call plus up to two relational comparisons per comparison; slices\.Sort sorts the int elements with the identical ascending order and a single inlined comparison`
+	fmt.Println(xs)
+}
+
+// The if/else-if chain with a trailing return is the same three-way.
+func sortStrings(ys []string) {
+	slices.SortFunc(ys, func(a, b string) int { if a < b { return -1 } else if a > b { return 1 }; return 0 }) // want `slices\.Sort sorts the string elements with the identical ascending order and a single inlined comparison`
+	fmt.Println(ys)
+}
+
+// The fully chained if/else-if/else spelling maps identically.
+func sortChained(xs []int) {
+	slices.SortFunc(xs, func(a, b int) int { if a < b { return -1 } else if a > b { return 1 } else { return 0 } }) // want `slices\.Sort sorts the int elements with the identical ascending order and a single inlined comparison`
+	fmt.Println(xs)
+}
+
+// An expressionless switch with a default clause is the same three-way, and
+// a NAMED ordered element is fixed too: sorting orders by the ordered value,
+// equal values are identical bytes, and a String() method on the element is
+// never consulted.
+func sortNamed(cs []Celsius) {
+	slices.SortFunc(cs, func(a, b Celsius) int { switch { case a < b: return -1; case a > b: return 1; default: return 0 } }) // want `slices\.Sort sorts the Celsius elements with the identical ascending order and a single inlined comparison`
+	fmt.Println(cs)
+}
+
+// A switch without a default clause plus the trailing return matches too;
+// parameter names are matched by object identity, not spelling, and the
+// operand expression is kept verbatim, however it is spelled.
+func sortField(w struct{ ids []uint64 }) {
+	slices.SortFunc(w.ids, func(x, y uint64) int { switch { case x < y: return -1; case x > y: return 1 }; return 0 }) // want `slices\.Sort sorts the uint64 elements with the identical ascending order and a single inlined comparison`
+	fmt.Println(w.ids)
+}
+
+// The two ifs in SWAPPED order (greater first), the b</b> operand
+// spellings, and magnitudes other than 1 are the same three-way — only the
+// SIGN is consumed. The two-field parameter spelling func(a T, b T) matches
+// like func(a, b T).
+func sortSwapped(xs []int) {
+	slices.SortFunc(xs, func(a int, b int) int { if b < a { return 42 }; if b > a { return -7 }; return 0 }) // want `slices\.Sort sorts the int elements with the identical ascending order and a single inlined comparison`
+	fmt.Println(xs)
+}
+
+// A deferred call rewrites the same way (both spellings evaluate the slice
+// expression at defer time and sort at function exit); a unary +1 is a
+// positive literal like 1.
+func sortDeferred(xs []int) {
+	defer slices.SortFunc(xs, func(a, b int) int { if a < b { return -1 }; if a > b { return +1 }; return 0 }) // want `slices\.Sort sorts the int elements with the identical ascending order and a single inlined comparison`
+	fmt.Println(xs)
+}
