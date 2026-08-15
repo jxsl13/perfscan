@@ -1,0 +1,140 @@
+package ps2042
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+)
+
+// fmt stays imported: this reference keeps the import alive after every
+// fix in this file is applied.
+func keepFmtAlive(w io.Writer) {
+	fmt.Fprintln(w, "kept")
+}
+
+func basic(w io.Writer, b []byte) {
+	fmt.Fprintf(w, "%s", b) // want `fmt\.Fprintf\(w, "%s", b\) on a \[\]byte pays fmt's format parse, interface boxing and pooled-buffer copy just to hand the bytes to a single w\.Write; w\.Write\(b\) writes them directly with the same \(n, err\)`
+}
+
+// Both return (n int, err error): fmt.Fprintf's final step is exactly
+// w.Write(p.buf), so the results carry over verbatim.
+func results(w io.Writer, b []byte) (int, error) {
+	return fmt.Fprintf(w, "%s", b) // want `fmt\.Fprintf\(w, "%s", b\) on a \[\]byte pays fmt's format parse, interface boxing and pooled-buffer copy just to hand the bytes to a single w\.Write; w\.Write\(b\) writes them directly with the same \(n, err\)`
+}
+
+// A concrete writer works the same: assignability to io.Writer guarantees
+// the Write method is in w's method set.
+func concrete(buf *bytes.Buffer, b []byte) {
+	fmt.Fprintf(buf, "%s", b) // want `fmt\.Fprintf\(w, "%s", b\) on a \[\]byte pays fmt's format parse, interface boxing and pooled-buffer copy just to hand the bytes to a single w\.Write; w\.Write\(b\) writes them directly with the same \(n, err\)`
+}
+
+// A non-primary writer expression (here &buf) is parenthesized so the
+// emitted .Write selector binds to the whole operand, not just buf.
+func addrOf(b []byte) {
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "%s", b) // want `fmt\.Fprintf\(w, "%s", b\) on a \[\]byte pays fmt's format parse, interface boxing and pooled-buffer copy just to hand the bytes to a single w\.Write; w\.Write\(b\) writes them directly with the same \(n, err\)`
+}
+
+type sink struct{ w io.Writer }
+
+func selectorWriter(s *sink, b []byte) {
+	fmt.Fprintf(s.w, "%s", b) // want `fmt\.Fprintf\(w, "%s", b\) on a \[\]byte pays fmt's format parse, interface boxing and pooled-buffer copy just to hand the bytes to a single w\.Write; w\.Write\(b\) writes them directly with the same \(n, err\)`
+}
+
+// An ALIAS of []byte is the same predeclared type (aliases resolve).
+type bs = []byte
+
+func aliasOperand(w io.Writer, b bs) {
+	fmt.Fprintf(w, "%s", b) // want `fmt\.Fprintf\(w, "%s", b\) on a \[\]byte pays fmt's format parse, interface boxing and pooled-buffer copy just to hand the bytes to a single w\.Write; w\.Write\(b\) writes them directly with the same \(n, err\)`
+}
+
+// A parenthesized format literal is still the constant "%s".
+func parenFormat(w io.Writer, b []byte) {
+	fmt.Fprintf(w, ("%s"), b) // want `fmt\.Fprintf\(w, "%s", b\) on a \[\]byte pays fmt's format parse, interface boxing and pooled-buffer copy just to hand the bytes to a single w\.Write; w\.Write\(b\) writes them directly with the same \(n, err\)`
+}
+
+// A conversion operand has static type []byte and stays verbatim in place.
+func converted(w io.Writer, s string) {
+	fmt.Fprintf(w, "%s", []byte(s)) // want `fmt\.Fprintf\(w, "%s", b\) on a \[\]byte pays fmt's format parse, interface boxing and pooled-buffer copy just to hand the bytes to a single w\.Write; w\.Write\(b\) writes them directly with the same \(n, err\)`
+}
+
+// --- advisory only: reported, but never rewritten ---
+
+// A comment inside the rewritten punctuation would be swallowed — no fix.
+func commented(w io.Writer, b []byte) {
+	fmt.Fprintf(w /* keep me */, "%s", b) // want `fmt\.Fprintf\(w, "%s", b\) on a \[\]byte pays fmt's format parse, interface boxing and pooled-buffer copy just to hand the bytes to a single w\.Write; w\.Write\(b\) writes them directly with the same \(n, err\)`
+}
+
+// --- guards: none of the following may be reported ---
+
+type namedB []byte
+
+func (namedB) String() string { return "STRINGER" }
+
+type plainNamed []byte
+
+func guards(w io.Writer, b []byte, nb namedB, pn plainNamed, s string, v int) {
+	// %v of a []byte prints the decimal slice form "[104 105]", not the
+	// bytes — NEVER matched, not even as advisory.
+	fmt.Fprintf(w, "%v", b)
+	// The whole format must be EXACTLY the one verb.
+	fmt.Fprintf(w, "%s\n", b)
+	fmt.Fprintf(w, "%q", b)
+	fmt.Fprintf(w, "%x", b)
+	fmt.Fprintf(w, "%d", v)
+	// A NAMED type could carry String()/Format() that %s honors and Write
+	// would not — here it demonstrably does.
+	fmt.Fprintf(w, "%s", nb)
+	// Even a methodless named type is excluded: the guard is on the static
+	// type, not the method set (methods may be added elsewhere).
+	fmt.Fprintf(w, "%s", pn)
+	// A string operand is PS2129's pattern (io.WriteString), not this one.
+	fmt.Fprintf(w, "%s", s)
+	// nil is not statically []byte (it prints "%!s(<nil>)").
+	fmt.Fprintf(w, "%s", nil)
+	// fmt.Fprint's default verb prints the decimal slice form — no []byte
+	// arm exists for the two-argument form.
+	fmt.Fprint(w, b)
+	// Only the single-operand form matches.
+	fmt.Fprintf(w, "%s%s", b, b)
+}
+
+// No variadic spread.
+func spread(w io.Writer, args []any) {
+	fmt.Fprintf(w, "%s", args...)
+}
+
+// A non-literal format never matches, even when it holds the right verb.
+func nonLiteral(w io.Writer, b []byte) {
+	format := "%s"
+	fmt.Fprintf(w, format, b)
+}
+
+// An untyped nil writer compiles as io.Writer, but nil.Write(b) would not;
+// the original panics at runtime anyway — skipped entirely.
+func nilWriter(b []byte) {
+	fmt.Fprintf(nil, "%s", b)
+}
+
+// A local object named fmt shadows the package: not stdlib fmt.Fprintf.
+type fakeFmt struct{}
+
+func (fakeFmt) Fprintf(w io.Writer, format string, b []byte) (int, error) { return 0, nil }
+
+func shadowedFmt(w io.Writer, b []byte) {
+	var fmt fakeFmt
+	fmt.Fprintf(w, "%s", b)
+}
+
+// Inside w's own Write method the original fmt.Fprintf already recurses
+// through w.Write — degenerate either way, nothing is reported.
+type selfW struct{ n int }
+
+func (t *selfW) Write(p []byte) (int, error) {
+	return fmt.Fprintf(t, "%s", p)
+}
+
+// ...but the same call in any OTHER method of the receiver is reported.
+func (t *selfW) dump(b []byte) {
+	fmt.Fprintf(t, "%s", b) // want `fmt\.Fprintf\(w, "%s", b\) on a \[\]byte pays fmt's format parse, interface boxing and pooled-buffer copy just to hand the bytes to a single w\.Write; w\.Write\(b\) writes them directly with the same \(n, err\)`
+}
