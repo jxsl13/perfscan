@@ -38,6 +38,7 @@ checks' fixes.
 | [PS2015](PS2015.md) | alloc | L1 | yes | strings.Join(strings.Split(s, sep), new) rebuilds a replacement via a throwaway []string; strings.ReplaceAll(s, sep, new) is the identical result in one scan |
 | [PS2016](PS2016.md) | alloc | L1 | yes | string(bytes.TrimFunc([]byte(s), f)) pays two throwaway copies; strings.TrimFunc(s, f) is the same trim with zero copies |
 | [PS2017](PS2017.md) | alloc | L1 | yes | string(bytes.Map(f, []byte(s))) pays two throwaway copies; strings.Map(f, s) is the same per-rune mapping with at most the result allocation |
+| [PS2018](PS2018.md) | alloc | L1 | yes | string(bytes.Repeat([]byte(s), n)) allocates three times; strings.Repeat(s, n) builds the identical repetition once |
 | [PS2019](PS2019.md) | alloc | L1 | yes | a strings.* predicate fed string([]byte) conversions pays throwaway string copies; the bytes.* twin scans the []byte directly |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
