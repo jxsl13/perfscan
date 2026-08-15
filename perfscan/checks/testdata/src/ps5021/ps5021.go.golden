@@ -1,0 +1,88 @@
+package ps5021
+
+// MyStr exercises the named-string-operand form: the builtin's special
+// case accepts any string type, so copy(dst, ms) type-checks.
+type MyStr string
+
+// Bytes exercises the defined-conversion-type advisory guard.
+type Bytes []byte
+
+// bs exercises the alias-spelling advisory guard.
+type bs = []byte
+
+// The canonical shape: the conversion materializes a throwaway slice the
+// builtin immediately copies again. Rewritten to a direct string source.
+func basic(dst []byte, s string) int {
+	return copy(dst, s) // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+}
+
+// []uint8 is the same type as []byte — same rewrite.
+func uint8Spelling(dst []byte, s string) int {
+	return copy(dst, s) // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+}
+
+// A parenthesized conversion type is the same shape.
+func parenType(dst []byte, s string) int {
+	return copy(dst, s) // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+}
+
+// The operand is kept byte-verbatim: index expressions, field selectors,
+// slice expressions — and calls, which are evaluated exactly once in both
+// forms, so no purity guard is needed.
+type conf struct{ payload string }
+
+func operands(dst []byte, m map[string]string, c conf, f func() string) {
+	_ = copy(dst, m["k"])         // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+	_ = copy(dst[4:], c.payload)  // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+	_ = copy(dst, f())            // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+	_ = copy(dst, c.payload[1:])  // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+	_ = copy(dst, string(m["k"])) // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+}
+
+// An untyped string constant is a string-typed operand too.
+func constant(dst []byte) int {
+	return copy(dst, "hello, 世界") // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+}
+
+// A named string operand: the special case accepts any string type.
+func namedStringOperand(dst []byte, ms MyStr) int {
+	return copy(dst, ms) // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+}
+
+// A named byte-slice destination is assignable to []byte — rewrite applies.
+func namedDst(b Bytes, s string) int {
+	return copy(b, s) // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+}
+
+// A type-parameter destination with a []byte core type also admits the
+// string-source special case.
+func genericDst[T ~[]byte](dst T, s string) int {
+	return copy(dst, s) // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+}
+
+// Expression positions: the call is replaced in place, never needing parens.
+func expressions(dst []byte, s string) {
+	if copy(dst, s) != len(s) { // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+		panic("short")
+	}
+	_ = dst[:copy(dst, s)] // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+}
+
+// A conversion through a DEFINED byte-slice type is the same waste but
+// stays advisory: the fix will not delete a named type's spelling.
+func namedConversion(dst []byte, s string) int {
+	return copy(dst, Bytes(s)) // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+}
+
+// An alias spelling stays advisory too (a cross-package alias could be the
+// import's last reference; the guard is syntactic: literal []byte only).
+func aliasConversion(dst []byte, s string) int {
+	return copy(dst, bs(s)) // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+}
+
+// A comment inside the deleted conversion scaffolding would be silently
+// destroyed — advisory.
+func commented(dst []byte, s string) {
+	_ = copy(dst, []byte( /* keep */ s)) // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+	_ = copy(dst, []byte(s /* tail */))  // want `copy\(dst, \[\]byte\(s\)\) converts s to a throwaway byte slice`
+}

@@ -141,6 +141,7 @@ checks' fixes.
 | [PS5017](PS5017.md) | indirect | L1 | yes | bytes.Map(unicode.ToUpper, b) pays a per-rune indirect call; bytes.ToUpper(b) is the same mapping with an all-ASCII fast path |
 | [PS5018](PS5018.md) | indirect | L1 | yes | strings.Map(unicode.ToUpper, s) drives the case mapping through a per-rune indirect call; strings.ToUpper(s) is the same mapping with an all-ASCII fast path |
 | [PS5019](PS5019.md) | arith | L1 | yes | bytes.Replace(b, old, new, bytes.Count(b, old)) scans b twice for one replace-all; bytes.ReplaceAll(b, old, new) is the identical substitution in a single scan |
+| [PS5021](PS5021.md) | alloc | L1 | yes | copy(dst, []byte(s)) converts s just to copy from the conversion's throwaway result; copy(dst, s) copies the string's bytes directly — the builtin special-cases a string source |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
