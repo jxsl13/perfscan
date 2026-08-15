@@ -182,6 +182,7 @@ checks' fixes.
 | [PS5028](PS5028.md) | indirect | L1 | yes | fmt.Fprintf of a verbless constant format pays fmt's format scan and pooled-buffer copy; io.WriteString writes the bytes directly |
 | [PS5029](PS5029.md) | alloc | L1 | yes | fmt.Sprintln over plain strings is a reflection-priced + with " " and "\n"; concatenate directly |
 | [PS5030](PS5030.md) | arith | L1 | yes | IndexAny/ContainsAny with a one-multi-byte-rune cutset decodes every haystack rune; IndexRune/ContainsRune run one substring scan |
+| [PS5031](PS5031.md) | arith | L1 | yes | strings.LastIndex compared against -1/0 for membership runs a backward Rabin-Karp; Contains is the optimized forward scan that stops at the first match |
 | [PS5032](PS5032.md) | arith | L1 | yes | bytes.IndexAny/ContainsAny with a one-multi-byte-rune cutset decodes every haystack rune; IndexRune/ContainsRune run one substring scan |
 | [PS5033](PS5033.md) | alloc | L1 | yes | fmt.Append with a single string runs fmt's printer to append bytes append writes directly |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
