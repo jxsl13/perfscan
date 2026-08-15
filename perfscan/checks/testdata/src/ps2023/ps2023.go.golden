@@ -1,0 +1,107 @@
+package ps2023
+
+import (
+	"bytes"
+	"strings"
+)
+
+// Literal separator, constant index 2: the classic early-field read.
+func third(s string) string {
+	f := strings.SplitAfterN(s, ",", 4)[2] // want `strings\.SplitAfter\(\.\.\.\)\[2\] scans the whole input and allocates every piece just to read one field; strings\.SplitAfterN\(\.\.\., 4\)\[2\] stops after that field and is bit-identical`
+	return f
+}
+
+// Index 0 IS in scope here: PS2009 covers only Split, never SplitAfter,
+// so the head read has no other check.
+func head(s string) string {
+	return strings.SplitAfterN(s, ",", 2)[0] // want `strings\.SplitAfter\(\.\.\.\)\[0\] scans the whole input and allocates every piece just to read one field; strings\.SplitAfterN\(\.\.\., 2\)\[0\] stops after that field and is bit-identical`
+}
+
+// A VARIABLE separator is fine — the identity holds for every separator
+// value, including the empty string.
+func varSep(s, sep string) string {
+	return strings.SplitAfterN(s, sep, 5)[3] // want `strings\.SplitAfter\(\.\.\.\)\[3\] scans the whole input and allocates every piece just to read one field; strings\.SplitAfterN\(\.\.\., 5\)\[3\] stops after that field and is bit-identical`
+}
+
+// The EMPTY separator is fine too: both forms take the same rune-explode
+// path (the separator-attachment tweak is unused there) and piece i is
+// the i-th rune in both (the remainder is piece i+1, never read).
+func emptySep(s string) string {
+	return strings.SplitAfterN(s, "", 4)[2] // want `strings\.SplitAfter\(\.\.\.\)\[2\] scans the whole input and allocates every piece just to read one field; strings\.SplitAfterN\(\.\.\., 4\)\[2\] stops after that field and is bit-identical`
+}
+
+// Parenthesized operand: still a direct index of the call.
+func parenthesized(s string) string {
+	return (strings.SplitAfterN(s, ",", 4))[2] // want `strings\.SplitAfter\(\.\.\.\)\[2\] scans the whole input and allocates every piece just to read one field; strings\.SplitAfterN\(\.\.\., 4\)\[2\] stops after that field and is bit-identical`
+}
+
+// A named constant that evaluates to a small index is the same index;
+// the fix inserts the computed literal n = i+2.
+const fieldIdx = 5
+
+func namedIdx(s string) string {
+	return strings.SplitAfterN(s, ",", 7)[fieldIdx] // want `strings\.SplitAfter\(\.\.\.\)\[5\] scans the whole input and allocates every piece just to read one field; strings\.SplitAfterN\(\.\.\., 7\)\[5\] stops after that field and is bit-identical`
+}
+
+// A comment after the separator argument survives: the fix INSERTS
+// ", 4" directly after the argument instead of rewriting the span up
+// to the closing parenthesis.
+func commented(s string) string {
+	return strings.SplitAfterN(s, ",", 4 /* sep */)[2] // want `strings\.SplitAfter\(\.\.\.\)\[2\] scans the whole input and allocates every piece just to read one field; strings\.SplitAfterN\(\.\.\., 4\)\[2\] stops after that field and is bit-identical`
+}
+
+// The upper bound of the scope: index 16 rewrites to SplitAfterN(..., 18).
+func atCap(s string) string {
+	return strings.SplitAfterN(s, ",", 18)[16] // want `strings\.SplitAfter\(\.\.\.\)\[16\] scans the whole input and allocates every piece just to read one field; strings\.SplitAfterN\(\.\.\., 18\)\[16\] stops after that field and is bit-identical`
+}
+
+// bytes twin: piece i is the same capped subslice of the same backing
+// array (identical len, cap, aliasing, nil-ness).
+func bytesThird(b []byte) []byte {
+	return bytes.SplitAfterN(b, []byte(","), 4)[2] // want `bytes\.SplitAfter\(\.\.\.\)\[2\] scans the whole input and allocates every piece just to read one field; bytes\.SplitAfterN\(\.\.\., 4\)\[2\] stops after that field and is bit-identical`
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// A variable index may take any value at run time.
+func varIndex(s string, i int) string {
+	return strings.SplitAfter(s, ",")[i]
+}
+
+// Beyond the cap: a huge constant index shrinks the win and suggests
+// the code wants most pieces anyway — out of scope.
+func beyondCap(s string) string {
+	return strings.SplitAfter(s, ",")[17]
+}
+
+// The result stored first may have other consumers — out of scope.
+func storedFirst(s string) string {
+	parts := strings.SplitAfter(s, ",")
+	return parts[2]
+}
+
+// Already limited: nothing to gain.
+func alreadyN(s string) string {
+	return strings.SplitAfterN(s, ",", 4)[2]
+}
+
+// Plain Split is PS2009/PS2014's domain — this check never matches it,
+// so the checks are disjoint and never double-report.
+func plainSplit(s string) string {
+	return strings.Split(s, ",")[2]
+}
+
+// A shadowed strings is not the strings package.
+type fakeStrings struct{}
+
+func (fakeStrings) SplitAfter(s, sep string) []string { return []string{s, s, s} }
+
+func shadowedPkg(s string) string {
+	strings := fakeStrings{}
+	return strings.SplitAfter(s, ",")[2]
+}
+
+// Slicing (not indexing) the result is out of scope.
+func sliced(s string) []string {
+	return strings.SplitAfter(s, ",")[1:3]
+}
