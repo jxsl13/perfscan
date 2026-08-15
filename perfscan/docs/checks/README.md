@@ -185,6 +185,7 @@ checks' fixes.
 | [PS5031](PS5031.md) | arith | L1 | yes | strings.LastIndex compared against -1/0 for membership runs a backward Rabin-Karp; Contains is the optimized forward scan that stops at the first match |
 | [PS5032](PS5032.md) | arith | L1 | yes | bytes.IndexAny/ContainsAny with a one-multi-byte-rune cutset decodes every haystack rune; IndexRune/ContainsRune run one substring scan |
 | [PS5033](PS5033.md) | alloc | L1 | yes | fmt.Append with a single string runs fmt's printer to append bytes append writes directly |
+| [PS5034](PS5034.md) | indirect | L1 | yes | strings.TrimFunc(s, unicode.IsSpace) decodes every boundary rune through an indirect call; strings.TrimSpace(s) is the same trim with an ASCII byte-table fast path |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
