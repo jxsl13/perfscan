@@ -1,0 +1,145 @@
+package ps5014
+
+import "bytes"
+
+func basicComposite(buf []byte) bool {
+	found := bytes.IndexByte(buf, '\n') >= 0 // want `bytes\.Contains of the one-byte needle \[\]byte\{'\\n'\} builds a throwaway slice and runs the generic substring search; bytes\.IndexByte\(b, '\\n'\) >= 0 answers the same membership question directly`
+	return found
+}
+
+func basicConversion(b []byte) bool {
+	return bytes.IndexByte(b, "z"[0]) >= 0 // want `bytes\.Contains of the one-byte needle \[\]byte\("z"\) builds a throwaway slice and runs the generic substring search; bytes\.IndexByte\(b, "z"\[0\]\) >= 0 answers the same membership question directly`
+}
+
+// Plain boolean positions need no parentheses: the introduced >= 0 binds
+// tighter than && and ||.
+func conditions(b []byte, ok bool) bool {
+	if bytes.IndexByte(b, ':') >= 0 { // want `bytes\.IndexByte\(b, ':'\) >= 0 answers the same membership question`
+		return true
+	}
+	return ok && bytes.IndexByte(b, '=') >= 0 || bytes.IndexByte(b, ";"[0]) >= 0 // want `bytes\.IndexByte\(b, '='\) >= 0 answers the same membership question` `bytes\.IndexByte\(b, ";"\[0\]\) >= 0 answers the same membership question`
+}
+
+// A direct leading ! is absorbed into the comparison direction:
+// !(x >= 0) == (x < 0) for every int.
+func negated(b []byte) bool {
+	if bytes.IndexByte(b, '#') < 0 { // want `bytes\.IndexByte\(b, '#'\) < 0 answers the same membership question`
+		return true
+	}
+	return bytes.IndexByte(b, "~"[0]) < 0 // want `bytes\.IndexByte\(b, "~"\[0\]\) < 0 answers the same membership question`
+}
+
+// An operand of a comparison must be parenthesized: == and >= share a
+// precedence level and would otherwise chain illegally.
+func comparisonOperand(b []byte, x bool) bool {
+	if x == (bytes.IndexByte(b, '@') >= 0) { // want `\(bytes\.IndexByte\(b, '@'\) >= 0\) answers the same membership question`
+		return true
+	}
+	return (bytes.IndexByte(b, '%') >= 0) != x // want `\(bytes\.IndexByte\(b, '%'\) >= 0\) answers the same membership question`
+}
+
+// The absorbed ! form needs the same parenthesization when it is itself a
+// comparison operand or under an outer !.
+func negatedOperand(b []byte, x bool) bool {
+	if x == (bytes.IndexByte(b, '&') < 0) { // want `\(bytes\.IndexByte\(b, '&'\) < 0\) answers the same membership question`
+		return true
+	}
+	return !(bytes.IndexByte(b, '?') < 0) // want `\(bytes\.IndexByte\(b, '\?'\) < 0\) answers the same membership question`
+}
+
+// A parenthesized call is NOT a direct !call: the replacement happens
+// inside the existing parentheses and no absorption is needed.
+func parenthesizedCall(b []byte) bool {
+	return !(bytes.IndexByte(b, '|') >= 0) // want `bytes\.IndexByte\(b, '\|'\) >= 0 answers the same membership question`
+}
+
+// The composite element carries over VERBATIM: a named byte constant keeps
+// its symbolic name, an integer spelling stays an integer spelling, an
+// expression with side effects runs exactly once in the same argument
+// position, and a variable element (not constant at all) is still
+// statically one byte long by shape.
+const slash = byte('/')
+
+func next() byte { return 0 }
+
+func compositeElements(b []byte, c byte) {
+	_ = bytes.IndexByte(b, slash) >= 0 // want `bytes\.IndexByte\(b, slash\) >= 0 answers the same membership question`
+	_ = bytes.IndexByte(b, 0x2f) >= 0 // want `bytes\.IndexByte\(b, 0x2f\) >= 0 answers the same membership question`
+	_ = bytes.IndexByte(b, c) >= 0 // want `bytes\.IndexByte\(b, c\) >= 0 answers the same membership question`
+	_ = bytes.IndexByte(b, b[0]) >= 0 // want `bytes\.IndexByte\(b, b\[0\]\) >= 0 answers the same membership question`
+	_ = bytes.IndexByte(b, next()) >= 0 // want `bytes\.IndexByte\(b, next\(\)\) >= 0 answers the same membership question`
+	_ = bytes.IndexByte(b, 'u') >= 0 // want `bytes\.IndexByte\(b, 'u'\) >= 0 answers the same membership question`
+	_ = bytes.IndexByte(b, 'x') >= 0 // want `bytes\.IndexByte\(b, 'x'\) >= 0 answers the same membership question`
+}
+
+// Escapes and raw literals in the conversion form carry over byte-verbatim:
+// the ORIGINAL string literal token is reused and wrapped as lit[0], so no
+// re-escaping ever happens. "\xff" is one raw byte (not valid UTF-8) and
+// still in scope — a one-byte needle is matched byte-wise on both sides.
+func escapes(b []byte) {
+	_ = bytes.IndexByte(b, "\n"[0]) >= 0 // want `bytes\.IndexByte\(b, "\\n"\[0\]\) >= 0 answers the same membership question`
+	_ = bytes.IndexByte(b, "\xff"[0]) >= 0 // want `bytes\.IndexByte\(b, "\\xff"\[0\]\) >= 0 answers the same membership question`
+	_ = bytes.IndexByte(b, "\\"[0]) >= 0 // want `bytes\.IndexByte\(b, "\\\\"\[0\]\) >= 0 answers the same membership question`
+	_ = bytes.IndexByte(b, "\x00"[0]) >= 0 // want `bytes\.IndexByte\(b, "\\x00"\[0\]\) >= 0 answers the same membership question`
+	_ = bytes.IndexByte(b, `-`[0]) >= 0 // want "bytes\\.IndexByte\\(b, `-`\\[0\\]\\) >= 0 answers the same membership question"
+}
+
+// Parentheses around and inside the needle are looked through; only the
+// scaffolding around the kept token is deleted.
+func parensAroundNeedle(b []byte) bool {
+	return bytes.IndexByte(b, (';')) >= 0 || bytes.IndexByte(b, "!"[0]) >= 0 // want `bytes\.IndexByte\(b, ';'\) >= 0 answers the same membership question` `bytes\.IndexByte\(b, "!"\[0\]\) >= 0 answers the same membership question`
+}
+
+// A nested match inside another match's haystack is rewritten
+// independently — the edits never overlap. The inner call sits in an index
+// expression, a bracketed position that needs no parentheses.
+func nested(b []byte, m map[bool][]byte) bool {
+	return bytes.IndexByte(m[bytes.IndexByte(b, '-') >= 0], "+"[0]) >= 0 // want `bytes\.IndexByte\(b, '-'\) >= 0 answers the same membership question` `bytes\.IndexByte\(b, "\+"\[0\]\) >= 0 answers the same membership question`
+}
+
+// Other bracketed or delimited positions are safe bare: a call argument, a
+// switch tag, a case value, a struct literal value, a return.
+func sink(bool) {}
+
+type record struct{ ok bool }
+
+func contexts(b []byte) record {
+	sink(bytes.IndexByte(b, '.') >= 0) // want `bytes\.IndexByte\(b, '\.'\) >= 0 answers the same membership question`
+	switch bytes.IndexByte(b, ',') >= 0 { // want `bytes\.IndexByte\(b, ','\) >= 0 answers the same membership question`
+	case bytes.IndexByte(b, '_') >= 0: // want `bytes\.IndexByte\(b, '_'\) >= 0 answers the same membership question`
+	}
+	return record{ok: bytes.IndexByte(b, '^') >= 0} // want `bytes\.IndexByte\(b, '\^'\) >= 0 answers the same membership question`
+}
+
+// --- advisory: reported but never rewritten ---
+
+// A conversion of a named string constant (or any constant expression that
+// is not a literal) keeps its symbolic name: spelling out a copy of its
+// value would discard it. Index the constant itself (colon[0]) by hand.
+const colon = ":"
+
+func namedConst(b []byte) bool {
+	return bytes.Contains(b, []byte(colon)) // want `bytes\.Contains of the one-byte needle \[\]byte\(colon\) builds a throwaway slice and runs the generic substring search; bytes\.IndexByte\(b, colon\[0\]\) >= 0 answers the same membership question directly — identical boolean for every input; the needle is a constant expression, not a literal — rewrite to bytes\.IndexByte by hand`
+}
+
+func constExpr(b []byte) bool {
+	return bytes.Contains(b, []byte(":"+"")) // want `the needle is a constant expression, not a literal — rewrite to bytes\.IndexByte by hand`
+}
+
+// A comment inside syntax the fix would delete withholds the fix — the
+// comment is never destroyed: inside the slice scaffolding, or between a
+// leading ! and the call the absorption would fold away.
+func commented(b []byte) bool {
+	return bytes.Contains(b, []byte{ /* the field separator */ ':'}) // want `a comment inside the rewritten syntax withholds the automatic fix — rewrite by hand`
+}
+
+func notCommented(b []byte) bool {
+	return ! /* absent */ bytes.Contains(b, []byte{'w'}) // want `a comment inside the rewritten syntax withholds the automatic fix — rewrite by hand`
+}
+
+// go and defer require a call expression: a comparison cannot be spliced
+// into that position, so the site is advisory-only.
+func goDefer(b []byte) {
+	go bytes.Contains(b, []byte{'g'}) // want `a go/defer statement requires a call expression, so the comparison cannot be spliced here — rewrite by hand`
+	defer bytes.Contains(b, []byte("d")) // want `a go/defer statement requires a call expression, so the comparison cannot be spliced here — rewrite by hand`
+}
