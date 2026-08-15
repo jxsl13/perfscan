@@ -1,0 +1,125 @@
+package ps5016
+
+import "strings"
+
+func basic(line string) bool {
+	found := strings.IndexByte(line, "="[0]) >= 0 // want `strings\.Contains of the single-byte string "=" runs the generic substring search; strings\.IndexByte\(s, "="\[0\]\) >= 0 answers the same membership question directly — identical boolean for every input`
+	return found
+}
+
+// Plain boolean positions need no parentheses: the introduced >= 0 binds
+// tighter than && and ||.
+func conditions(s string, ok bool) bool {
+	if strings.IndexByte(s, "/"[0]) >= 0 { // want `strings\.IndexByte\(s, "/"\[0\]\) >= 0 answers the same membership question`
+		return true
+	}
+	return ok && strings.IndexByte(s, ":"[0]) >= 0 || strings.IndexByte(s, ";"[0]) >= 0 // want `strings\.IndexByte\(s, ":"\[0\]\) >= 0 answers the same membership question` `strings\.IndexByte\(s, ";"\[0\]\) >= 0 answers the same membership question`
+}
+
+// A direct leading ! is absorbed into the comparison direction:
+// !(x >= 0) == (x < 0) for every int.
+func negated(s string) bool {
+	if strings.IndexByte(s, "#"[0]) < 0 { // want `strings\.IndexByte\(s, "#"\[0\]\) < 0 answers the same membership question`
+		return true
+	}
+	return strings.IndexByte(s, "~"[0]) < 0 // want `strings\.IndexByte\(s, "~"\[0\]\) < 0 answers the same membership question`
+}
+
+// An operand of a comparison must be parenthesized: == and >= share a
+// precedence level and would otherwise chain illegally.
+func comparisonOperand(s string, x bool) bool {
+	if x == (strings.IndexByte(s, "@"[0]) >= 0) { // want `\(strings\.IndexByte\(s, "@"\[0\]\) >= 0\) answers the same membership question`
+		return true
+	}
+	return (strings.IndexByte(s, "%"[0]) >= 0) != x // want `\(strings\.IndexByte\(s, "%"\[0\]\) >= 0\) answers the same membership question`
+}
+
+// The absorbed ! form needs the same parenthesization when it is itself a
+// comparison operand or under an outer !.
+func negatedOperand(s string, x bool) bool {
+	if x == (strings.IndexByte(s, "&"[0]) < 0) { // want `\(strings\.IndexByte\(s, "&"\[0\]\) < 0\) answers the same membership question`
+		return true
+	}
+	return !(strings.IndexByte(s, "?"[0]) < 0) // want `\(strings\.IndexByte\(s, "\?"\[0\]\) < 0\) answers the same membership question`
+}
+
+// A parenthesized call is NOT a direct !call: the replacement happens
+// inside the existing parentheses and no absorption is needed.
+func parenthesizedCall(s string) bool {
+	return !(strings.IndexByte(s, "|"[0]) >= 0) // want `strings\.IndexByte\(s, "\|"\[0\]\) >= 0 answers the same membership question`
+}
+
+// Escapes and raw literals carry over byte-verbatim: the ORIGINAL string
+// literal token is reused and wrapped as lit[0], so no re-escaping ever
+// happens. "\xff" is one raw byte (not valid UTF-8) and still in scope —
+// a one-byte needle is matched byte-wise on both sides.
+func escapes(s string) {
+	_ = strings.IndexByte(s, "\n"[0]) >= 0 // want `strings\.IndexByte\(s, "\\n"\[0\]\) >= 0 answers the same membership question`
+	_ = strings.IndexByte(s, "\xff"[0]) >= 0 // want `strings\.IndexByte\(s, "\\xff"\[0\]\) >= 0 answers the same membership question`
+	_ = strings.IndexByte(s, "\\"[0]) >= 0 // want `strings\.IndexByte\(s, "\\\\"\[0\]\) >= 0 answers the same membership question`
+	_ = strings.IndexByte(s, "\x00"[0]) >= 0 // want `strings\.IndexByte\(s, "\\x00"\[0\]\) >= 0 answers the same membership question`
+	_ = strings.IndexByte(s, `-`[0]) >= 0 // want "strings\\.IndexByte\\(s, `-`\\[0\\]\\) >= 0 answers the same membership question"
+}
+
+// Parentheses around the needle are looked through for matching; the
+// literal token is rewritten in place inside them.
+func parensAroundNeedle(s string) bool {
+	return strings.IndexByte(s, ("!"[0])) >= 0 // want `strings\.IndexByte\(s, "!"\[0\]\) >= 0 answers the same membership question`
+}
+
+// A nested match inside another match's haystack is rewritten
+// independently — the edits never overlap. The inner call sits in an
+// index expression, a bracketed position that needs no parentheses.
+func nested(s string, m map[bool]string) bool {
+	return strings.IndexByte(m[strings.IndexByte(s, "-"[0]) >= 0], "+"[0]) >= 0 // want `strings\.IndexByte\(s, "-"\[0\]\) >= 0 answers the same membership question` `strings\.IndexByte\(s, "\+"\[0\]\) >= 0 answers the same membership question`
+}
+
+// Other bracketed or delimited positions are safe bare: a call argument,
+// a switch tag, a case value, a struct literal value, a return.
+func sink(bool) {}
+
+type record struct{ ok bool }
+
+func contexts(s string) record {
+	sink(strings.IndexByte(s, "."[0]) >= 0) // want `strings\.IndexByte\(s, "\."\[0\]\) >= 0 answers the same membership question`
+	switch strings.IndexByte(s, ","[0]) >= 0 { // want `strings\.IndexByte\(s, ","\[0\]\) >= 0 answers the same membership question`
+	case strings.IndexByte(s, "_"[0]) >= 0: // want `strings\.IndexByte\(s, "_"\[0\]\) >= 0 answers the same membership question`
+	}
+	return record{ok: strings.IndexByte(s, "^"[0]) >= 0} // want `strings\.IndexByte\(s, "\^"\[0\]\) >= 0 answers the same membership question`
+}
+
+// --- advisory: reported but never rewritten ---
+
+// A named string constant (or any constant expression that is not a
+// literal) keeps its symbolic name: wrapping a spelled-out copy of its
+// value would discard it. Index the constant itself (colon[0]) by hand.
+const colon = ":"
+
+func namedConst(s string) bool {
+	return strings.Contains(s, colon) // want `strings\.Contains of the single-byte string colon runs the generic substring search; strings\.IndexByte\(s, colon\[0\]\) >= 0 answers the same membership question directly — identical boolean for every input; the needle is a constant expression, not a string literal — rewrite to strings\.IndexByte by hand`
+}
+
+func constExpr(s string) bool {
+	return strings.Contains(s, ":"+"") // want `the needle is a constant expression, not a string literal — rewrite to strings\.IndexByte by hand`
+}
+
+// A comment between a leading ! and the call the absorption would fold
+// away withholds the fix — the comment is never destroyed.
+func notCommented(s string) bool {
+	return ! /* absent */ strings.Contains(s, "w") // want `a comment inside the rewritten syntax withholds the automatic fix — rewrite by hand`
+}
+
+// go and defer require a call expression: a comparison cannot be spliced
+// into that position, so the site is advisory-only.
+func goDefer(s string) {
+	go strings.Contains(s, "g") // want `a go/defer statement requires a call expression, so the comparison cannot be spliced here — rewrite by hand`
+	defer strings.Contains(s, "d") // want `a go/defer statement requires a call expression, so the comparison cannot be spliced here — rewrite by hand`
+}
+
+// A bare call statement compiles (the bool is discarded), but a
+// comparison cannot stand alone as a statement — the site is
+// advisory-only, parenthesized or not.
+func statement(s string) {
+	strings.Contains(s, "x") // want `the call is a statement discarding its result — a comparison cannot stand alone as a statement, so no fix is offered — rewrite by hand`
+	(strings.Contains(s, "y")) // want `the call is a statement discarding its result — a comparison cannot stand alone as a statement, so no fix is offered — rewrite by hand`
+}

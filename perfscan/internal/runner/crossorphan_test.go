@@ -533,9 +533,20 @@ func TestFixTransformChecksReuseAliasedQualifier(t *testing.T) {
 			want: "by.Equal(a, b)", path: `"bytes"`,
 		},
 		{
+			// A one-byte literal needle takes PS5104's chained fast path
+			// (Count > 0 -> IndexByte >= 0, the fixed point PS5016 would
+			// otherwise reach on a second pass) — still through the
+			// source's aliased qualifier.
 			name: "PS5104_strings_contains",
 			src:  "package p\n\nimport s2 \"strings\"\n\nfunc f(s string) bool { return s2.Count(s, \"x\") > 0 }\n",
-			want: "s2.Contains(s, \"x\")", path: `"strings"`,
+			want: "s2.IndexByte(s, \"x\"[0]) >= 0", path: `"strings"`,
+		},
+		{
+			// A multi-byte needle keeps the plain Contains rewrite, again
+			// through the aliased qualifier.
+			name: "PS5104_strings_contains_multibyte",
+			src:  "package p\n\nimport s2 \"strings\"\n\nfunc f(s string) bool { return s2.Count(s, \"xy\") > 0 }\n",
+			want: "s2.Contains(s, \"xy\")", path: `"strings"`,
 		},
 		{
 			name: "PS5105_strings_hasprefix",

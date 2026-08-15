@@ -56,7 +56,11 @@ func compose(n int, s string, a, b []byte, xs []int, m map[string]int, zs []int)
 	}
 	// Sanity that the fixes actually landed (so the idempotence above is over a
 	// genuinely rewritten file, not a no-op run).
-	for _, want := range []string{"strconv.Itoa(n)", "slices.Sort(xs)", "bytes.Equal(a, b)", "strings.Contains(s,", "clear(m)", "clear(zs)"} {
+	// The one-byte Count needle lands directly on PS5104's chained fast
+	// path (Count > 0 -> IndexByte >= 0): emitting Contains would be
+	// PS5016's Before-shape and pass 2 would rewrite it — exactly the
+	// churn this test pins away.
+	for _, want := range []string{"strconv.Itoa(n)", "slices.Sort(xs)", "bytes.Equal(a, b)", `strings.IndexByte(s, "x"[0]) >= 0`, "clear(m)", "clear(zs)"} {
 		if !strings.Contains(pass1, want) {
 			t.Errorf("expected %q in the fixed output:\n%s", want, pass1)
 		}
