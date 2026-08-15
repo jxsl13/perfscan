@@ -1,0 +1,12 @@
+package ps3029
+
+import (
+	sl "slices"
+)
+
+// The package is resolved by IMPORT PATH, not spelling: an aliased slices
+// keeps its alias in the rewrite. The comparator references nothing but its
+// own parameters and literals, so no import is ever orphaned.
+func sortedAliased(xs []int) []int {
+	return sl.SortedStableFunc(sl.Values(xs), func(a, b int) int { if a < b { return -1 }; if a > b { return 1 }; return 0 }) // want `slices\.SortedStableFunc with a hand-rolled three-way comparator \(a<b/a>b/-1/1/0\) pays an indirect comparator call plus up to two relational comparisons per comparison and the stable sort's merge overhead; slices\.Sorted collects and sorts the int elements with the identical ascending order, a single inlined comparison and no stability cost`
+}
