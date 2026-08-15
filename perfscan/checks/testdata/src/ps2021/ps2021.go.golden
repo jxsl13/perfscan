@@ -1,0 +1,190 @@
+package ps2021
+
+import (
+	"bytes"
+	"strings"
+)
+
+func getS() string { return "a,b,c" }
+
+func sink(string) {}
+
+// Canonical shape: declare, read the last field once, done. The pair is
+// rewritten to a single zero-allocation reslice.
+func lastField(s string) string {
+	last := s[strings.LastIndexByte(s, ',')+1:]
+	return last
+}
+
+// Plain assignment (not a definition) to an existing variable.
+func assignExisting(s string) string {
+	var last string
+	last = s[strings.LastIndexByte(s, '/')+1:]
+	return last
+}
+
+// Direct return of the last field.
+func returned(s string) string {
+	return s[strings.LastIndexByte(s, ',')+1:]
+}
+
+type config struct{ Line string }
+
+// A field-selector source is side-effect-free and may be re-evaluated.
+func fieldSource(cfg config) string {
+	return cfg.Line[strings.LastIndexByte(cfg.Line, ',')+1:]
+}
+
+// A pointer base implicitly dereferences at both evaluations; a nil
+// pointer panics at the same point either way.
+func ptrFieldSource(cfg *config) string {
+	return cfg.Line[strings.LastIndexByte(cfg.Line, ',')+1:]
+}
+
+// An escaped separator is re-spelled as the equivalent byte literal.
+func tabSep(s string) string {
+	return s[strings.LastIndexByte(s, '\t')+1:]
+}
+
+// A single-quote separator needs escaping inside the byte literal.
+func quoteSep(s string) string {
+	return s[strings.LastIndexByte(s, '\'')+1:]
+}
+
+// A separator byte >= 0x80 matches raw bytes identically in both forms.
+func highBitSep(s string) string {
+	return s[strings.LastIndexByte(s, 'ÿ')+1:]
+}
+
+const comma = ","
+
+// A named constant separator is still statically one byte.
+func namedConstSep(s string) string {
+	return s[strings.LastIndexByte(s, ',')+1:]
+}
+
+// --- advisory-only: reported, but no fix may be attached ---
+
+// A call source would be evaluated twice by the rewrite.
+func callSource() string {
+	parts := strings.Split(getS(), ",") // want `strings\.Split with a single-byte separator allocates every field just to read the last one; s\[strings\.LastIndexByte\(s, c\)\+1:\] is bit-identical with zero allocations`
+	return parts[len(parts)-1]
+}
+
+// An indexed source is not a plain identifier chain.
+func indexedSource(lines []string) string {
+	parts := strings.Split(lines[0], ",") // want `strings\.Split with a single-byte separator allocates every field just to read the last one; s\[strings\.LastIndexByte\(s, c\)\+1:\] is bit-identical with zero allocations`
+	return parts[len(parts)-1]
+}
+
+// A statement in between could reassign the source string.
+func stmtBetween(s string) string {
+	parts := strings.Split(s, ",") // want `strings\.Split with a single-byte separator allocates every field just to read the last one; s\[strings\.LastIndexByte\(s, c\)\+1:\] is bit-identical with zero allocations`
+	s = "changed"
+	last := parts[len(parts)-1]
+	sink(s)
+	return last
+}
+
+// A call-argument use: sibling arguments could run code before the use.
+func callArgUse(s string) {
+	parts := strings.Split(s, ",") // want `strings\.Split with a single-byte separator allocates every field just to read the last one; s\[strings\.LastIndexByte\(s, c\)\+1:\] is bit-identical with zero allocations`
+	sink(parts[len(parts)-1])
+}
+
+// A use captured by a closure runs at an unknowable time.
+func closureUse(s string) func() string {
+	parts := strings.Split(s, ",") // want `strings\.Split with a single-byte separator allocates every field just to read the last one; s\[strings\.LastIndexByte\(s, c\)\+1:\] is bit-identical with zero allocations`
+	return func() string { return parts[len(parts)-1] }
+}
+
+// The declared variable shadows the strings qualifier at the use site.
+func shadowQual(s string) string {
+	strings := strings.Split(s, ",") // want `strings\.Split with a single-byte separator allocates every field just to read the last one; s\[strings\.LastIndexByte\(s, c\)\+1:\] is bit-identical with zero allocations`
+	return strings[len(strings)-1]
+}
+
+// A comment on its own line between the statements would be deleted.
+func commentBetween(s string) string {
+	parts := strings.Split(s, ",") // want `strings\.Split with a single-byte separator allocates every field just to read the last one; s\[strings\.LastIndexByte\(s, c\)\+1:\] is bit-identical with zero allocations`
+	// the last field
+	return parts[len(parts)-1]
+}
+
+// --- guards: none of the following may be reported at all ---
+
+// A multi-byte separator diverges: Split("aaa", "aa") ends "a", the
+// LastIndex boundary would yield "".
+func multiByteSep(s string) string {
+	parts := strings.Split(s, "aa")
+	return parts[len(parts)-1]
+}
+
+// A variable separator may be empty or multi-byte at run time.
+func varSep(s, sep string) string {
+	parts := strings.Split(s, sep)
+	return parts[len(parts)-1]
+}
+
+// The empty separator rune-explodes in Split; the reslice would panic.
+func emptySep(s string) string {
+	parts := strings.Split(s, "")
+	return parts[len(parts)-1]
+}
+
+// A second use still needs the whole slice.
+func twoUses(s string) (string, string) {
+	parts := strings.Split(s, ",")
+	first := parts[0]
+	last := parts[len(parts)-1]
+	return first, last
+}
+
+// A write target needs the addressable slice element; the reslice is not
+// addressable.
+func writeTarget(s string) {
+	parts := strings.Split(s, ",")
+	parts[len(parts)-1] = "x"
+}
+
+// Taking the element's address likewise.
+func addrTaken(s string) *string {
+	parts := strings.Split(s, ",")
+	return &parts[len(parts)-1]
+}
+
+// Any index other than len(parts)-1 needs other pieces.
+func wrongIndex(s string) string {
+	parts := strings.Split(s, ",")
+	return parts[len(parts)-2]
+}
+
+// len of a different slice is not the last-field shape.
+func lenOther(s string, other []string) string {
+	parts := strings.Split(s, ",")
+	return parts[len(other)-1]
+}
+
+// bytes.Split has no safe twin: Split caps each piece's capacity, a plain
+// reslice keeps the backing array's, so appends would diverge.
+func bytesSplit(b []byte) []byte {
+	parts := bytes.Split(b, []byte(","))
+	return parts[len(parts)-1]
+}
+
+// Already limited: a different function, out of scope.
+func splitN(s string) string {
+	parts := strings.SplitN(s, ",", 3)
+	return parts[len(parts)-1]
+}
+
+// A shadowed strings is not the strings package.
+type fakeStrings struct{}
+
+func (fakeStrings) Split(s, sep string) []string { return []string{s} }
+
+func shadowedPkg(s string) string {
+	strings := fakeStrings{}
+	parts := strings.Split(s, ",")
+	return parts[len(parts)-1]
+}
