@@ -51,6 +51,7 @@ checks' fixes.
 | [PS2028](PS2028.md) | alloc | L1 | yes | len(strings.Fields(s)) == 0 allocates every field just to test blankness; strings.TrimSpace(s) == "" is allocation-free |
 | [PS2029](PS2029.md) | alloc | L1 | yes | len(strings.SplitN(s, sep, 2)) compared against 1 or 2 allocates the piece slice just to test for the separator; strings.Contains is allocation-free |
 | [PS2030](PS2030.md) | alloc | L1 | yes | len(bytes.Fields(b)) == 0 allocates every field just to test blankness; len(bytes.TrimSpace(b)) == 0 is allocation-free |
+| [PS2031](PS2031.md) | alloc | L1 | yes | fmt.Errorf("%s", s) on a plain string is errors.New(s) behind the printf machinery |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
