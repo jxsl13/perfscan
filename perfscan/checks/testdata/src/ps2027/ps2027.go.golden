@@ -1,0 +1,82 @@
+package ps2027
+
+import "bytes"
+
+// Every comparison form on a value-typed (provably non-nil) receiver is
+// rewritten: String() against the empty string with == / != in either
+// operand order, and len(String()) against an integer constant with any
+// comparison operator.
+func forms() {
+	var buf bytes.Buffer
+	_ = buf.Len() == 0     // want `buf\.String\(\) == "" copies the whole bytes\.Buffer just to test emptiness; buf\.Len\(\) == 0 reads the same answer in O\(1\) with no copy and no allocation`
+	_ = buf.Len() != 0     // want `buf\.String\(\) != "" copies the whole bytes\.Buffer just to test emptiness; buf\.Len\(\) != 0 reads`
+	_ = 0 == buf.Len()     // want `"" == buf\.String\(\) copies the whole bytes\.Buffer just to test emptiness; 0 == buf\.Len\(\) reads`
+	_ = 0 != buf.Len()     // want `"" != buf\.String\(\) copies the whole bytes\.Buffer`
+	_ = buf.Len() == 0     // want `len\(buf\.String\(\)\) == 0 copies the whole bytes\.Buffer just to test emptiness; buf\.Len\(\) == 0 reads`
+	_ = buf.Len() != 0     // want `len\(buf\.String\(\)\) != 0 copies the whole bytes\.Buffer`
+	_ = buf.Len() > 0      // want `len\(buf\.String\(\)\) > 0 copies the whole bytes\.Buffer just to test emptiness; buf\.Len\(\) > 0 reads`
+	_ = buf.Len() >= 1     // want `len\(buf\.String\(\)\) >= 1 copies the whole bytes\.Buffer`
+	_ = buf.Len() < 1      // want `len\(buf\.String\(\)\) < 1 copies the whole bytes\.Buffer`
+	_ = 0 < buf.Len()      // want `0 < len\(buf\.String\(\)\) copies the whole bytes\.Buffer just to test emptiness; 0 < buf\.Len\(\) reads`
+	_ = 0 == buf.Len()     // want `0 == len\(buf\.String\(\)\) copies the whole bytes\.Buffer`
+}
+
+// The receiver carries over byte-verbatim: struct fields, slice and
+// array elements, and named empty-string constants all stay in place.
+type holder struct{ b bytes.Buffer }
+
+const empty = ""
+
+func receivers(h holder, bufs []bytes.Buffer, arr [2]bytes.Buffer) {
+	if h.b.Len() == 0 { // want `h\.b\.String\(\) == "" copies the whole bytes\.Buffer just to test emptiness; h\.b\.Len\(\) == 0 reads`
+		return
+	}
+	for bufs[0].Len() > 0 { // want `len\(bufs\[0\]\.String\(\)\) > 0 copies the whole bytes\.Buffer just to test emptiness; bufs\[0\]\.Len\(\) > 0 reads`
+		break
+	}
+	_ = arr[1].Len() != 0 // want `arr\[1\]\.String\(\) != "" copies the whole bytes\.Buffer`
+	_ = h.b.Len() == 0    // want `h\.b\.String\(\) == empty copies the whole bytes\.Buffer just to test emptiness; h\.b\.Len\(\) == 0 reads`
+}
+
+// Provably non-nil pointer receivers — an address-of expression or a
+// direct new(bytes.Buffer) — are rewritten too.
+func provablyNonNil() {
+	var buf bytes.Buffer
+	_ = (&buf).Len() == 0        // want `\(&buf\)\.String\(\) == "" copies the whole bytes\.Buffer`
+	_ = new(bytes.Buffer).Len() == 0 // want `len\(new\(bytes\.Buffer\)\.String\(\)\) == 0 copies the whole bytes\.Buffer`
+}
+
+// An alias of bytes.Buffer is the identical type — the spelling does
+// not matter.
+type bufAlias = bytes.Buffer
+
+func aliased(buf bufAlias) bool {
+	return buf.Len() == 0 // want `buf\.String\(\) == "" copies the whole bytes\.Buffer`
+}
+
+// Parenthesized shapes: parens around the String() call or the len call
+// survive; redundant parens between len( and the call are deleted with
+// the scaffolding.
+func parens() {
+	var buf bytes.Buffer
+	_ = (buf.Len()) == 0   // want `\(buf\.String\(\)\) == "" copies the whole bytes\.Buffer`
+	_ = (buf.Len()) > 0    // want `\(len\(buf\.String\(\)\)\) > 0 copies the whole bytes\.Buffer`
+	_ = buf.Len() > 0      // want `len\(\(buf\.String\(\)\)\) > 0 copies the whole bytes\.Buffer`
+}
+
+// A *bytes.Buffer receiver that is not provably non-nil keeps the
+// report advisory: (*bytes.Buffer)(nil).String() is "<nil>" while Len
+// panics, so the rewrite could turn a false comparison into a panic.
+func pointerAdvisory(p *bytes.Buffer) {
+	_ = p.String() == ""    // want `the \*bytes\.Buffer receiver is not provably non-nil .* the automatic fix is withheld`
+	_ = len(p.String()) > 0 // want `the \*bytes\.Buffer receiver is not provably non-nil .* the automatic fix is withheld`
+	_ = bytes.NewBuffer(nil).String() == "" // want `the \*bytes\.Buffer receiver is not provably non-nil .* the automatic fix is withheld`
+}
+
+// A comment inside the syntax the fix would delete withholds the
+// automatic fix: the report stays advisory and the comment survives.
+func commentAdvisory() {
+	var buf bytes.Buffer
+	_ = len( /* raw */ buf.String()) > 0 // want `a comment inside the rewritten syntax withholds the automatic fix — rewrite by hand`
+	_ = buf.String() == ( /* raw */ "")  // want `a comment inside the rewritten syntax withholds the automatic fix — rewrite by hand`
+}
