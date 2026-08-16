@@ -147,6 +147,7 @@ checks' fixes.
 | [PS3033](PS3033.md) | indirect | L1 | yes | a comma-ok presence guard around delete(m, k) hashes the key twice; the builtin delete of an absent key is already a no-op, so call it unconditionally |
 | [PS3034](PS3034.md) | indirect | L3 |  | a serial nest whose every write names the outermost loop variable |
 | [PS3035](PS3035.md) | indirect | L1 | yes | slices.MaxFunc/MinFunc with a swapped hand-rolled three-way comparator (a>b/-1, a<b/1) is the opposite extremum — slices.Min/Max spelled the slow way |
+| [PS3036](PS3036.md) | indirect | L1 | yes | slices.CompareFunc with a bare strings.Compare comparator is slices.Compare spelled the slow way |
 | [PS3059](PS3059.md) | indirect | L3 |  | a serial nest writing through a base derived from the outermost loop variable |
 | [PS3060](PS3060.md) | indirect | L3 |  | a serial loop over calls to a function that itself fans out |
 | [PS3063](PS3063.md) | indirect | L3 |  | a serial nest inside a function that already fans out elsewhere |
