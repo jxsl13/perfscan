@@ -1,0 +1,148 @@
+package ps2052
+
+func compute() int     { return 0 }
+func use(a, b int)     {}
+func sideEffect() bool { return true }
+func key() string      { return "" }
+
+type Store struct {
+	counts map[string]int
+}
+
+// --- POSITIVES ---
+
+func simple(counts map[string]int, k string) int {
+	total := 0
+	if v := counts[k]; v > 0 { // want `map is looked up twice for the same key`
+		total += v
+	}
+	return total
+}
+
+// Two reads live entirely in the condition.
+func condOnly(m map[string]int, k string) bool {
+	if v := m[k]; v > 0 && v < 10 { // want `map is looked up twice for the same key`
+		return true
+	}
+	return false
+}
+
+func stringVal(cfg map[string]string, k string) string {
+	path := ""
+	if v := cfg[k]; v != "" { // want `map is looked up twice for the same key`
+		path = v
+	}
+	return path
+}
+
+// A selector map (s.counts) is a stable object too.
+func selectorMap(s *Store, k string) int {
+	x := 0
+	if v := s.counts[k]; v > 0 { // want `map is looked up twice for the same key`
+		x = v
+	}
+	return x
+}
+
+func multiRead(m map[string]int, k string) (int, int) {
+	a, b := 0, 0
+	if v := m[k]; v > 0 { // want `map is looked up twice for the same key`
+		a = v
+		b = v
+	}
+	return a, b
+}
+
+// v is already taken in the body, so the fix picks the next fresh name.
+func freshName(m map[string]int, k string) {
+	if val := m[k]; val > 0 { // want `map is looked up twice for the same key`
+		v := compute()
+		use(v, val)
+	}
+}
+
+// --- ADVISORY: reported, no fix ---
+
+func commentInGuard(m map[string]int, k string) int {
+	total := 0
+	if m[ /* keep */ k] > 0 { // want `map is looked up twice for the same key`
+		total += m[k]
+	}
+	return total
+}
+
+// --- NEGATIVES: silent ---
+
+// Only one read — nothing to remove.
+func oneRead(m map[string]int, k string) {
+	if m[k] > 0 {
+		_ = 1
+	}
+}
+
+// Comma-ok guard is PS3021's domain.
+func commaOk(m map[string]int, k string) int {
+	if _, ok := m[k]; ok {
+		return m[k]
+	}
+	return 0
+}
+
+// The body writes the entry — a re-read would differ.
+func bodyMutates(m map[string]int, k string) int {
+	if m[k] > 0 {
+		m[k] = 0
+		return m[k]
+	}
+	return 0
+}
+
+func bodyDeletes(m map[string]int, k string) int {
+	if m[k] > 0 {
+		delete(m, k)
+		return m[k]
+	}
+	return 0
+}
+
+func reassignsMap(m map[string]int, k string) int {
+	if m[k] > 0 {
+		m = map[string]int{}
+		return m[k]
+	}
+	return 0
+}
+
+// A call in the condition could mutate m[k] between reads.
+func condCall(m map[string]int, k string) int {
+	total := 0
+	if m[k] > 0 && sideEffect() {
+		total += m[k]
+	}
+	return total
+}
+
+// A non-pure key is not safe to re-evaluate as an init.
+func impureKey(m map[string]int) int {
+	total := 0
+	if m[key()] > 0 {
+		total += m[key()]
+	}
+	return total
+}
+
+// A read hidden in a closure could run after m changes elsewhere.
+func closureRead(m map[string]int, k string) {
+	if m[k] > 0 {
+		go func() { _ = m[k] }()
+	}
+}
+
+// Different keys — no repeat of the same lookup.
+func differentKeys(m map[string]int, k1, k2 string) int {
+	total := 0
+	if m[k1] > 0 {
+		total += m[k2]
+	}
+	return total
+}

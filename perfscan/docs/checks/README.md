@@ -73,6 +73,7 @@ checks' fixes.
 | [PS2049](PS2049.md) | alloc | L1 | yes | fmt.Fprintln over only plain strings boxes every operand through fmt's machinery; io.WriteString(w, a+" "+b+"\n") writes the identical bytes directly |
 | [PS2050](PS2050.md) | alloc | L1 | yes | string(utf8.AppendRune(nil, r)) allocates a throwaway []byte then copies it; string(r) encodes the rune directly |
 | [PS2051](PS2051.md) | alloc | L1 | yes | re.Match([]byte(s)) copies the whole input to feed the wrong twin; re.MatchString(s) scans it in place |
+| [PS2052](PS2052.md) | indirect | L2 | yes | a map read in a plain if-condition and again in the body for the same key hashes the key twice; bind the value in the if-init |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
