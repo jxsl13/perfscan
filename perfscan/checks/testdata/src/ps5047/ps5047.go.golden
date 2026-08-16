@@ -1,0 +1,77 @@
+package ps5047
+
+import (
+	"fmt"
+	"strconv"
+)
+
+type buffer []byte
+
+type myInt int
+
+func (m myInt) Format(f fmt.State, verb rune) { fmt.Fprint(f, "X") }
+
+func sideEffect() int { return 7 }
+
+var _ = strconv.Quote
+
+// --- fixable: unnamed []byte dst, "%b", integer operand ---
+
+func intVar(dst []byte, n int) []byte {
+	return strconv.AppendInt(dst, int64(n), 2) // want `fmt\.Appendf\(buf, "%b", n\) parses the format and boxes n to binary-print one integer; strconv\.AppendInt/AppendUint appends the base-2 digits directly`
+}
+
+func int64Var(dst []byte, n int64) []byte {
+	return strconv.AppendInt(dst, n, 2) // want `fmt\.Appendf\(buf, "%b", n\) parses the format and boxes n to binary-print one integer; strconv\.AppendInt/AppendUint appends the base-2 digits directly`
+}
+
+func uintVar(dst []byte, u uint) []byte {
+	return strconv.AppendUint(dst, uint64(u), 2) // want `fmt\.Appendf\(buf, "%b", n\) parses the format and boxes n to binary-print one integer; strconv\.AppendInt/AppendUint appends the base-2 digits directly`
+}
+
+func uint64Var(dst []byte, u uint64) []byte {
+	return strconv.AppendUint(dst, u, 2) // want `fmt\.Appendf\(buf, "%b", n\) parses the format and boxes n to binary-print one integer; strconv\.AppendInt/AppendUint appends the base-2 digits directly`
+}
+
+func byteVar(dst []byte, c byte) []byte {
+	return strconv.AppendUint(dst, uint64(c), 2) // want `fmt\.Appendf\(buf, "%b", n\) parses the format and boxes n to binary-print one integer; strconv\.AppendInt/AppendUint appends the base-2 digits directly`
+}
+
+func sideEffectOperand(dst []byte) []byte {
+	return strconv.AppendInt(dst, int64(sideEffect()), 2) // want `fmt\.Appendf\(buf, "%b", n\) parses the format and boxes n to binary-print one integer; strconv\.AppendInt/AppendUint appends the base-2 digits directly`
+}
+
+// --- advisory: reported, no fix ---
+
+func namedDst(dst buffer, n int) buffer {
+	return fmt.Appendf(dst, "%b", n) // want `fmt\.Appendf\(buf, "%b", n\) parses the format and boxes n to binary-print one integer; strconv\.AppendInt/AppendUint appends the base-2 digits directly`
+}
+
+func commentInside(dst []byte, n int) []byte {
+	return fmt.Appendf(dst /* keep */, "%b", n) // want `fmt\.Appendf\(buf, "%b", n\) parses the format and boxes n to binary-print one integer; strconv\.AppendInt/AppendUint appends the base-2 digits directly`
+}
+
+// --- negatives: silent ---
+
+// A named integer type with a Format method: "%b" formats via Format().
+func namedInt(dst []byte, m myInt) []byte {
+	return fmt.Appendf(dst, "%b", m)
+}
+
+func widthFlag(dst []byte, n int) []byte {
+	return fmt.Appendf(dst, "%3x", n)
+}
+
+// The alternate "%#b" form (a flag) is not the bare verb — silent.
+func altForm(dst []byte, n int) []byte {
+	return fmt.Appendf(dst, "%#b", n)
+}
+
+func otherVerb(dst []byte, n int) []byte {
+	return fmt.Appendf(dst, "%o", n)
+}
+
+// "%b" of a float is a hex-float form, not the integer shape.
+func floatOperand(dst []byte, x float64) []byte {
+	return fmt.Appendf(dst, "%b", x)
+}
