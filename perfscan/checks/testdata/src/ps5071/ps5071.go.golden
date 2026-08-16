@@ -1,0 +1,78 @@
+package ps5071
+
+import "strconv"
+
+// A residual strconv use so the rewrites never orphan the import.
+func keep(s string) int { n, _ := strconv.Atoi(s); return n }
+
+func statusEQ(status int) bool {
+	return status == 200 // want `strconv\.Itoa\(x\) == a decimal string constant formats the int to a throwaway string just to compare it`
+}
+
+func statusNE(n int) bool {
+	return n != 0 // want `strconv\.Itoa\(x\) != a decimal string constant formats the int to a throwaway string just to compare it`
+}
+
+// Yoda order: the constant on the left.
+func yoda(code int) bool {
+	return 404 == code // want `strconv\.Itoa\(x\) == a decimal string constant formats the int to a throwaway string just to compare it`
+}
+
+// An expression argument unwraps without parentheses.
+func exprArg(a, b int) bool {
+	return a+b == 10 // want `strconv\.Itoa\(x\) == a decimal string constant formats the int to a throwaway string just to compare it`
+}
+
+// A canonical negative constant.
+func negative(delta int) bool {
+	return delta == -5 // want `strconv\.Itoa\(x\) == a decimal string constant formats the int to a throwaway string just to compare it`
+}
+
+// A named string constant, matched by value, carries over as the int.
+const want = "42"
+
+func namedConst(x int) bool {
+	return x == 42 // want `strconv\.Itoa\(x\) == a decimal string constant formats the int to a throwaway string just to compare it`
+}
+
+// --- advisory: a comment inside the removed wrapper withholds the fix ---
+func commented(x int) bool {
+	return strconv.Itoa( /* keep me */ x) == "1" // want `strconv\.Itoa\(x\) == a decimal string constant formats the int to a throwaway string just to compare it`
+}
+
+// --- negatives: none of these may be reported ---
+
+// Ordering does not carry over (lexicographic vs numeric).
+func ordering(x int) bool {
+	return strconv.Itoa(x) < "5"
+}
+
+// Non-canonical: a leading zero is never Itoa output.
+func leadingZero(x int) bool {
+	return strconv.Itoa(x) == "007"
+}
+
+// Non-canonical: an explicit plus sign.
+func plusSign(x int) bool {
+	return strconv.Itoa(x) == "+5"
+}
+
+// Non-numeric constant.
+func nonNumeric(x int) bool {
+	return strconv.Itoa(x) == "abc"
+}
+
+// Overflows a signed 32-bit int: excluded for cross-platform safety.
+func tooBig(x int) bool {
+	return strconv.Itoa(x) == "3000000000"
+}
+
+// The empty string is never Itoa output.
+func empty(x int) bool {
+	return strconv.Itoa(x) == ""
+}
+
+// Itoa == Itoa is PS5048's pattern, not this one.
+func twoItoa(a, b int) bool {
+	return strconv.Itoa(a) == strconv.Itoa(b)
+}
