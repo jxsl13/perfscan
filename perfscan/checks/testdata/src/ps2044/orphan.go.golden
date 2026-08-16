@@ -1,0 +1,9 @@
+package ps2044
+
+// The only fmt reference in this FILE is the fixable Appendf itself: the
+// append-chain rewrite orphans the import, and the fix pipeline prunes the
+// now-unused fmt import afterwards, so the fix applies (non-cgo file).
+
+func orphanSplice(buf []byte, k, v string) []byte {
+	return append(append(append(append(buf, k...), "="...), v...), ";"...) // want `fmt\.Appendf splicing plain strings into literal text`
+}
