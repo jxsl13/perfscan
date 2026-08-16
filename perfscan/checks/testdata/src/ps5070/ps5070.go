@@ -1,0 +1,111 @@
+package ps5070
+
+import (
+	"bufio"
+	"bytes"
+	"io"
+	"strings"
+)
+
+func direct(buf *bytes.Buffer, b []byte) {
+	buf.WriteString(string(b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the slice; the receiver implements io\.Writer, so w\.Write\(b\) writes the bytes directly`
+}
+
+// Both return (int, error): the results survive the rewrite.
+func withResults(buf *bytes.Buffer, b []byte) (int, error) {
+	return buf.WriteString(string(b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the slice; the receiver implements io\.Writer, so w\.Write\(b\) writes the bytes directly`
+}
+
+// Pointer-receiver WriteString on an addressable value: the auto-address
+// that made WriteString callable makes Write callable too.
+func valueBuilder(b []byte) string {
+	var sb strings.Builder
+	sb.WriteString(string(b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the slice; the receiver implements io\.Writer, so w\.Write\(b\) writes the bytes directly`
+	return sb.String()
+}
+
+// bufio.Writer implements both methods.
+func bufioWriter(w *bufio.Writer, b []byte) {
+	w.WriteString(string(b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the slice; the receiver implements io\.Writer, so w\.Write\(b\) writes the bytes directly`
+}
+
+// The argument expression is left in place untouched.
+func sliceExpr(buf *bytes.Buffer, b []byte) {
+	buf.WriteString(string(b[1:])) // want `w\.WriteString\(string\(b\)\) allocates and copies the slice; the receiver implements io\.Writer, so w\.Write\(b\) writes the bytes directly`
+}
+
+// A named slice of byte is assignable to Write's []byte parameter: fixed.
+type Data []byte
+
+func namedByteSlice(buf *bytes.Buffer, d Data) {
+	buf.WriteString(string(d)) // want `w\.WriteString\(string\(b\)\) allocates and copies the slice; the receiver implements io\.Writer, so w\.Write\(b\) writes the bytes directly`
+}
+
+type bothWriter interface {
+	io.Writer
+	io.StringWriter
+}
+
+// An interface receiver declaring both methods qualifies.
+func viaInterface(w bothWriter, b []byte) {
+	w.WriteString(string(b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the slice; the receiver implements io\.Writer, so w\.Write\(b\) writes the bytes directly`
+}
+
+// Reported but NOT fixed: a comment inside the dropped conversion text
+// would be destroyed by the rewrite.
+func commented(buf *bytes.Buffer, b []byte) {
+	buf.WriteString(string( /* keep me */ b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the slice; the receiver implements io\.Writer, so w\.Write\(b\) writes the bytes directly`
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// A type with WriteString but no Write cannot be handed the bytes.
+type onlyStringWriter struct{}
+
+func (onlyStringWriter) WriteString(s string) (int, error) { return len(s), nil }
+
+func noWrite(w onlyStringWriter, b []byte) {
+	w.WriteString(string(b))
+}
+
+// A plain string argument — no conversion to remove.
+func plainString(buf *bytes.Buffer, s string) {
+	buf.WriteString(s)
+}
+
+// A []rune is not assignable to Write's []byte parameter, and
+// string([]rune) is a UTF-8 re-encoding, not the raw bytes: excluded.
+func runes(buf *bytes.Buffer, rs []rune) {
+	buf.WriteString(string(rs))
+}
+
+// The classic Write-delegates-to-WriteString implementation: rewriting
+// w.WriteString(string(p)) to w.Write(p) here would make Write call
+// ITSELF — unbounded recursion. The delegation is correct; nothing is
+// reported.
+type selfW struct{ b []byte }
+
+func (w *selfW) WriteString(s string) (int, error) {
+	w.b = append(w.b, s...)
+	return len(s), nil
+}
+
+func (w *selfW) Write(p []byte) (int, error) {
+	return w.WriteString(string(p))
+}
+
+// Writing to a DIFFERENT object inside Write is still reported: a field of
+// the receiver is not the receiver.
+type wrapW struct{ buf *bytes.Buffer }
+
+func (w *wrapW) WriteString(s string) (int, error) { return w.buf.WriteString(s) }
+
+func (w *wrapW) Write(p []byte) (int, error) {
+	return w.buf.WriteString(string(p)) // want `w\.WriteString\(string\(b\)\) allocates and copies the slice; the receiver implements io\.Writer, so w\.Write\(b\) writes the bytes directly`
+}
+
+// A method OTHER than Write writing to the receiver is still reported: the
+// rewrite dispatches to Write, not to the enclosing method.
+func (w *selfW) dump(b []byte) {
+	w.WriteString(string(b)) // want `w\.WriteString\(string\(b\)\) allocates and copies the slice; the receiver implements io\.Writer, so w\.Write\(b\) writes the bytes directly`
+}
