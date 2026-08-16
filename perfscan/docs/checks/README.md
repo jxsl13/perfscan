@@ -226,6 +226,7 @@ checks' fixes.
 | [PS5048](PS5048.md) | alloc | L1 | yes | strconv.Itoa(a) == strconv.Itoa(b) formats both ints to throwaway strings just to compare them; a == b compares the ints directly |
 | [PS5049](PS5049.md) | alloc | L1 | yes | append(dst, fmt.Sprintf(...)...) allocates an intermediate string then copies it; fmt.Appendf formats into dst directly |
 | [PS5050](PS5050.md) | arith | L1 | yes | slices.Index/Contains over a byte slice runs the generic element scan; bytes.IndexByte runs the SIMD byte search for the identical result |
+| [PS5051](PS5051.md) | alloc | L1 | yes | strconv.FormatInt(a, B) == strconv.FormatInt(b, B) formats both integers to throwaway strings just to compare them; a == b compares the integers directly |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
