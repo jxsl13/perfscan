@@ -1,0 +1,10 @@
+package ps5059add
+
+import "strconv"
+import "fmt"
+
+var _ = fmt.Println // keeps fmt alive after the rewrite
+
+func addStrconv(buf []byte, n int) []byte {
+	return append(strconv.AppendInt(append(buf, "id="...), int64(n), 10), ";"...) // want `fmt\.Appendf splicing one integer verb into literal text`
+}

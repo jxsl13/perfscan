@@ -1,0 +1,89 @@
+package ps5059
+
+import (
+	"fmt"
+	"strconv"
+)
+
+// Keepers so neither import is orphaned by the rewrites (predictable golden).
+var _ = fmt.Println
+var _ = strconv.Atoi
+
+type buffer []byte
+
+type myInt int
+
+func sideEffect() int { return 7 }
+
+// --- POSITIVES ---
+
+func bothD(buf []byte, n int) []byte {
+	return append(strconv.AppendInt(append(buf, "id="...), int64(n), 10), ";"...) // want `fmt\.Appendf splicing one integer verb into literal text`
+}
+
+func prefixX(buf []byte, u uint) []byte {
+	return strconv.AppendUint(append(buf, "0x"...), uint64(u), 16) // want `fmt\.Appendf splicing one integer verb into literal text`
+}
+
+func suffixB(buf []byte, i int64) []byte {
+	return append(strconv.AppendInt(buf, i, 2), "\n"...) // want `fmt\.Appendf splicing one integer verb into literal text`
+}
+
+func bothO(buf []byte, n int) []byte {
+	return append(strconv.AppendInt(append(buf, "["...), int64(n), 8), "]"...) // want `fmt\.Appendf splicing one integer verb into literal text`
+}
+
+// A trailing-only literal needs no inert guard (operand evaluated first).
+func suffixSideEffect(buf []byte) []byte {
+	return append(strconv.AppendInt(buf, int64(sideEffect()), 10), "!"...) // want `fmt\.Appendf splicing one integer verb into literal text`
+}
+
+// --- ADVISORY: reported, no fix ---
+
+// A named byte-slice destination.
+func namedDst(dst buffer, n int) buffer {
+	return fmt.Appendf(dst, "id=%d;", n) // want `fmt\.Appendf splicing one integer verb into literal text`
+}
+
+// Leading literal + side-effecting operand: the chain would evaluate the
+// operand after the leading append, so the fix is withheld.
+func leadingSideEffect(buf []byte) []byte {
+	return fmt.Appendf(buf, "n=%d", sideEffect()) // want `fmt\.Appendf splicing one integer verb into literal text`
+}
+
+func commentInside(buf []byte, n int) []byte {
+	return fmt.Appendf(buf, "id=%d;" /* keep */, n) // want `fmt\.Appendf splicing one integer verb into literal text`
+}
+
+// --- NEGATIVES: silent ---
+
+// Bare verb with no literal text is PS5042's.
+func bareVerb(buf []byte, n int) []byte {
+	return fmt.Appendf(buf, "%d", n)
+}
+
+// %X uppercase has no lowercase-only AppendInt form.
+func upperX(buf []byte, n int) []byte {
+	return fmt.Appendf(buf, "x=%X", n)
+}
+
+// %s is not an integer verb.
+func stringVerb(buf []byte, s string) []byte {
+	return fmt.Appendf(buf, "s=%s", s)
+}
+
+// A named integer type: its Format method could hijack the verb.
+func namedInt(buf []byte, m myInt) []byte {
+	return fmt.Appendf(buf, "v=%d", m)
+}
+
+// A %% escape means more than one percent sign.
+func percentEscape(buf []byte, n int) []byte {
+	return fmt.Appendf(buf, "100%% of %d", n)
+}
+
+// A literal nil destination: append cannot take an untyped nil, so the chain is
+// unspellable and the site is silent.
+func nilDest(n int) []byte {
+	return fmt.Appendf(nil, "id=%d;", n)
+}
