@@ -1,0 +1,44 @@
+package ps5053
+
+import "strconv"
+
+// strconv stays referenced, so the rewrites below do not orphan the import.
+var _ = strconv.Unquote
+
+// --- POSITIVES ---
+
+func eq(a, b string) bool {
+	return a == b // want `strconv\.Quote\(a\) == strconv\.Quote\(b\) quotes two strings just to compare them; a == b compares the strings directly`
+}
+
+func neq(a, b string) bool {
+	return a != b // want `strconv\.Quote\(a\) != strconv\.Quote\(b\) quotes two strings just to compare them; a != b compares the strings directly`
+}
+
+// Concatenation binds tighter than ==, so the args unwrap without parentheses.
+func exprArgs(a, b, x, y string) bool {
+	return a+x == b+y // want `strconv\.Quote\(a\) == strconv\.Quote\(b\) quotes two strings just to compare them; a == b compares the strings directly`
+}
+
+// --- ADVISORY: reported, no fix ---
+
+func commentInside(a, b string) bool {
+	return strconv.Quote(a) == strconv.Quote( /* keep */ b) // want `strconv\.Quote\(a\) == strconv\.Quote\(b\) quotes two strings just to compare them; a == b compares the strings directly`
+}
+
+// --- NEGATIVES: silent ---
+
+// Ordering does NOT carry over.
+func ordering(a, b string) bool {
+	return strconv.Quote(a) < strconv.Quote(b)
+}
+
+// Only one operand is Quote.
+func oneQuote(a string) bool {
+	return strconv.Quote(a) == "x"
+}
+
+// QuoteToASCII is a different function.
+func quoteASCII(a, b string) bool {
+	return strconv.QuoteToASCII(a) == strconv.QuoteToASCII(b)
+}
