@@ -67,6 +67,7 @@ checks' fixes.
 | [PS2043](PS2043.md) | alloc | L1 | yes | len(EncodeToString(b)) encodes the whole input just to take a length; EncodedLen(len(b)) is the identical integer, allocation-free |
 | [PS2044](PS2044.md) | alloc | L1 | yes | fmt.Appendf splicing plain strings into literal text runs fmt's formatter; a nested append chain writes the same bytes directly |
 | [PS2045](PS2045.md) | alloc | L1 | yes | buf1.String() == buf2.String() copies both whole bytes.Buffers just to compare them; bytes.Equal(buf1.Bytes(), buf2.Bytes()) is allocation-free |
+| [PS2046](PS2046.md) | alloc | L1 |  | fmt.Appendf(buf, "%x", bs) runs fmt's formatter to hex-encode bytes hex.AppendEncode writes directly |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
