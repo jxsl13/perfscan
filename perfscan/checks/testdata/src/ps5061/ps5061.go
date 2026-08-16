@@ -1,0 +1,76 @@
+package ps5061
+
+import (
+	"fmt"
+	"unicode/utf8"
+)
+
+var _ = fmt.Println
+var _ = utf8.RuneLen
+
+type buffer []byte
+
+type myRune rune
+
+func sideEffect() rune { return 'x' }
+
+// --- POSITIVES ---
+
+func bothRune(buf []byte, r rune) []byte {
+	return fmt.Appendf(buf, "[%c]", r) // want `fmt\.Appendf splicing one %c rune verb into literal text`
+}
+
+func prefixRune(buf []byte, r rune) []byte {
+	return fmt.Appendf(buf, "ch=%c", r) // want `fmt\.Appendf splicing one %c rune verb into literal text`
+}
+
+// A narrower kind is rune-wrapped.
+func byteRune(buf []byte, b byte) []byte {
+	return fmt.Appendf(buf, "b=%c", b) // want `fmt\.Appendf splicing one %c rune verb into literal text`
+}
+
+// Trailing-only literal: operand evaluated first, no inert guard needed.
+func suffixSideEffect(buf []byte) []byte {
+	return fmt.Appendf(buf, "%c.", sideEffect()) // want `fmt\.Appendf splicing one %c rune verb into literal text`
+}
+
+// --- ADVISORY: reported, no fix ---
+
+func namedDst(dst buffer, r rune) buffer {
+	return fmt.Appendf(dst, "[%c]", r) // want `fmt\.Appendf splicing one %c rune verb into literal text`
+}
+
+func leadingSideEffect(buf []byte) []byte {
+	return fmt.Appendf(buf, "c=%c", sideEffect()) // want `fmt\.Appendf splicing one %c rune verb into literal text`
+}
+
+func commentInside(buf []byte, r rune) []byte {
+	return fmt.Appendf(buf, "[%c]" /* keep */, r) // want `fmt\.Appendf splicing one %c rune verb into literal text`
+}
+
+// --- NEGATIVES: silent ---
+
+// Bare %c with no literal text is PS5040's.
+func bareVerb(buf []byte, r rune) []byte {
+	return fmt.Appendf(buf, "%c", r)
+}
+
+// A named rune type: its Format method could hijack %c.
+func namedRuneType(buf []byte, m myRune) []byte {
+	return fmt.Appendf(buf, "v=%c", m)
+}
+
+// A wider integer kind: fmt emits U+FFFD past int32 while rune(x) would truncate.
+func wideInt(buf []byte, n int64) []byte {
+	return fmt.Appendf(buf, "n=%c", n)
+}
+
+// A constant operand: rune(const) could overflow int32 at compile time.
+func constRune(buf []byte) []byte {
+	return fmt.Appendf(buf, "a=%c", 'A')
+}
+
+// A literal nil destination is unspellable as an append chain.
+func nilDest(r rune) []byte {
+	return fmt.Appendf(nil, "[%c]", r)
+}
