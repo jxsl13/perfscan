@@ -1,0 +1,35 @@
+package ps5056
+
+import (
+	"encoding/base64"
+	"encoding/hex"
+)
+
+// --- POSITIVES ---
+
+func simple(b []byte) []byte {
+	return []byte(hex.EncodeToString(b)) // want `\[\]byte\(hex\.EncodeToString\(b\)\) allocates a throwaway hex string and copies it into a \[\]byte`
+}
+
+// Expression argument carries over verbatim.
+func exprArg(b []byte) []byte {
+	return []byte(hex.EncodeToString(b[1:])) // want `\[\]byte\(hex\.EncodeToString\(b\)\) allocates a throwaway hex string and copies it into a \[\]byte`
+}
+
+// --- ADVISORY: reported, no fix ---
+
+func commentInside(b []byte) []byte {
+	return []byte(hex.EncodeToString(b) /* keep */) // want `\[\]byte\(hex\.EncodeToString\(b\)\) allocates a throwaway hex string and copies it into a \[\]byte`
+}
+
+// --- NEGATIVES: silent ---
+
+// A string result, not []byte(...).
+func stringResult(b []byte) string {
+	return hex.EncodeToString(b)
+}
+
+// A base64 Encoding METHOD, not package-level hex.
+func base64Method(b []byte) []byte {
+	return []byte(base64.StdEncoding.EncodeToString(b))
+}
