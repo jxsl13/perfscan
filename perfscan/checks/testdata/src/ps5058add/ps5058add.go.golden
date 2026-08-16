@@ -1,0 +1,10 @@
+package ps5058add
+
+import "bytes"
+import "encoding/base64"
+
+var _ = base64.URLEncoding
+
+func addBytes(a, b []byte) bool {
+	return bytes.Equal(a, b) // want `enc\.EncodeToString\(a\) == enc\.EncodeToString\(b\) encodes two slices just to compare them`
+}
