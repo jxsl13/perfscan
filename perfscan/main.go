@@ -160,7 +160,7 @@ Flags:
 
 func printList() {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tCATEGORY\tLEVEL\tFIX\tCONFIG\tTITLE")
+	io.WriteString(w, "ID\tCATEGORY\tLEVEL\tFIX\tCONFIG\tTITLE"+"\n")
 	for _, c := range checks.All() {
 		fix := ""
 		if c.AutoFix {

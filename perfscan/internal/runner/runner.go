@@ -97,7 +97,7 @@ func Run(checks []*lint.Check, opts Options) int {
 		opts.MaxLevel = lint.LevelAggressive
 	}
 	if opts.Diff && opts.Fix {
-		fmt.Fprintln(opts.Stderr, "perfscan: -diff and -fix are mutually exclusive")
+		io.WriteString(opts.Stderr, "perfscan: -diff and -fix are mutually exclusive"+"\n")
 		return 2
 	}
 	cacheWd()
@@ -187,7 +187,7 @@ func Run(checks []*lint.Check, opts Options) int {
 
 	if opts.WriteBaseline {
 		if opts.Baseline == "" {
-			fmt.Fprintln(opts.Stderr, "perfscan: -write-baseline requires -baseline <file>")
+			io.WriteString(opts.Stderr, "perfscan: -write-baseline requires -baseline <file>"+"\n")
 			return 2
 		}
 		if err := writeBaseline(opts.Baseline, findings); err != nil {
@@ -227,7 +227,7 @@ func Run(checks []*lint.Check, opts Options) int {
 		if failed > 0 {
 			msg += fmt.Sprintf(", %d failed", failed)
 		}
-		fmt.Fprintln(opts.Stderr, msg)
+		io.WriteString(opts.Stderr, msg+"\n")
 	}
 
 	switch {

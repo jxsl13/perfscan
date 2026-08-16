@@ -1,0 +1,11 @@
+package ps5038
+
+import (
+	"io"
+)
+
+// io is already imported and stays used; the sole fmt reference is the
+// fixable call, so the fix drops the orphaned fmt spec.
+func dropFmt(w io.Writer, s string) {
+	io.WriteString(w, s+"\n") // want `fmt\.Fprintln\(w, s\) on a single plain string pays fmt's interface boxing, pooled printer and format walk just to write s plus one newline; io\.WriteString\(w, s\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+}

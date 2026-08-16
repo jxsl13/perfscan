@@ -1,0 +1,156 @@
+package ps5038
+
+import (
+	"fmt"
+	"io"
+)
+
+// fmt stays imported: this reference keeps the import alive after every
+// fix in this file is applied.
+func keepFmtAlive(w io.Writer, v int) {
+	fmt.Fprintf(w, "kept %d\n", v)
+}
+
+func basic(w io.Writer, s string) {
+	io.WriteString(w, s+"\n") // want `fmt\.Fprintln\(w, s\) on a single plain string pays fmt's interface boxing, pooled printer and format walk just to write s plus one newline; io\.WriteString\(w, s\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+}
+
+// An untyped constant string operand defaults to the predeclared string;
+// the +"\n" then folds at compile time.
+func literal(w io.Writer) {
+	io.WriteString(w, "hello"+"\n") // want `fmt\.Fprintln\(w, s\) on a single plain string pays fmt's interface boxing, pooled printer and format walk just to write s plus one newline; io\.WriteString\(w, s\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+}
+
+// A raw string literal is a plain string too.
+func rawLit(w io.Writer) {
+	io.WriteString(w, `path: /var/log`+"\n") // want `fmt\.Fprintln\(w, s\) on a single plain string pays fmt's interface boxing, pooled printer and format walk just to write s plus one newline; io\.WriteString\(w, s\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+}
+
+// A named untyped constant defaults to string as well.
+const banner = "ready"
+
+func constOperand(w io.Writer) {
+	io.WriteString(w, banner+"\n") // want `fmt\.Fprintln\(w, s\) on a single plain string pays fmt's interface boxing, pooled printer and format walk just to write s plus one newline; io\.WriteString\(w, s\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+}
+
+// A + chain stays a + chain: string + is left-associative, so appending
+// +"\n" never needs parentheses around the operand.
+func concat(w io.Writer, a, b string) {
+	io.WriteString(w, a+b+"\n") // want `fmt\.Fprintln\(w, s\) on a single plain string pays fmt's interface boxing, pooled printer and format walk just to write s plus one newline; io\.WriteString\(w, s\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+}
+
+// The operand expression is kept verbatim in place: evaluated exactly
+// once through both forms.
+func onceCall(w io.Writer, next func() string) {
+	io.WriteString(w, next()+"\n") // want `fmt\.Fprintln\(w, s\) on a single plain string pays fmt's interface boxing, pooled printer and format walk just to write s plus one newline; io\.WriteString\(w, s\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+}
+
+// Both return (n int, err error) from the same underlying single write:
+// the results carry over verbatim (n == len(s)+1 on success).
+func results(w io.Writer, s string) (int, error) {
+	return io.WriteString(w, s+"\n") // want `fmt\.Fprintln\(w, s\) on a single plain string pays fmt's interface boxing, pooled printer and format walk just to write s plus one newline; io\.WriteString\(w, s\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+}
+
+// --- advisory only: reported, but never rewritten ---
+
+// A local named io shadows the package at the call site: the emitted
+// io.WriteString qualifier would not resolve — no fix.
+func shadowedIo(w io.Writer, s string) {
+	io := 1
+	_ = io
+	fmt.Fprintln(w, s) // want `fmt\.Fprintln\(w, s\) on a single plain string pays fmt's interface boxing, pooled printer and format walk just to write s plus one newline; io\.WriteString\(w, s\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+}
+
+// A comment inside the rewritten punctuation would be swallowed — no fix.
+func commented(w io.Writer, s string) {
+	fmt.Fprintln(w /* keep me */, s) // want `fmt\.Fprintln\(w, s\) on a single plain string pays fmt's interface boxing, pooled printer and format walk just to write s plus one newline; io\.WriteString\(w, s\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+}
+
+// --- guards: none of the following may be reported ---
+
+// Zero operands writes just "\n" — out of scope (exactly one operand).
+func zeroOperands(w io.Writer) {
+	fmt.Fprintln(w)
+}
+
+// Two operands gain Fprintln's separating space, which a bare a+b+"\n"
+// join would drop.
+func twoOperands(w io.Writer, a, b string) {
+	fmt.Fprintln(w, a, b)
+}
+
+// No variadic spread.
+func spread(w io.Writer, args []any) {
+	fmt.Fprintln(w, args...)
+}
+
+// A NAMED string type may implement fmt.Stringer/fmt.Formatter, which
+// Fprintln's %v formatting honors and + would not — and io.WriteString
+// would not compile without a conversion.
+type loud string
+
+func (loud) String() string { return "SURPRISE" }
+
+func namedType(w io.Writer, m loud) {
+	fmt.Fprintln(w, m)
+}
+
+// []byte, error, interfaces, numbers: all format through fmt's own
+// logic — never matched.
+func otherTypes(w io.Writer, b []byte, e error, n int, v any) {
+	fmt.Fprintln(w, b)
+	fmt.Fprintln(w, e)
+	fmt.Fprintln(w, n)
+	fmt.Fprintln(w, v)
+}
+
+// fmt.Fprint (no newline — PS2129's territory) and the Print family
+// never match.
+func otherFuncs(w io.Writer, s string) {
+	fmt.Fprint(w, s)
+	fmt.Println(s)
+}
+
+// A local object named fmt shadows the package: not stdlib fmt.Fprintln.
+type fakeFmt struct{}
+
+func (fakeFmt) Fprintln(w io.Writer, s string) (int, error) { return 0, nil }
+
+func shadowedFmt(w io.Writer, s string) {
+	var fmt fakeFmt
+	fmt.Fprintln(w, s)
+}
+
+// A WriteString that delegates through fmt: the rewrite
+// io.WriteString(f, s+"\n") would dispatch to f.WriteString — the
+// enclosing method itself: unbounded recursion that still compiles.
+// Nothing is reported.
+type selfF struct{ b []byte }
+
+func (f *selfF) Write(p []byte) (int, error) {
+	f.b = append(f.b, p...)
+	return len(p), nil
+}
+
+func (f *selfF) WriteString(s string) (int, error) {
+	return fmt.Fprintln(f, s)
+}
+
+// A writer WITHOUT WriteString: io.WriteString(g, s+"\n") would fall
+// back to g.Write — inside Write that is the enclosing method itself:
+// recursion. Nothing is reported.
+type selfF2 struct{ b []byte }
+
+func (g *selfF2) Write(p []byte) (int, error) {
+	return fmt.Fprintln(g, string(p))
+}
+
+// The same call in any OTHER method of the receiver, or on a different
+// writer, is still reported.
+func (f *selfF) dump(s string) {
+	io.WriteString(f, s+"\n") // want `fmt\.Fprintln\(w, s\) on a single plain string pays fmt's interface boxing, pooled printer and format walk just to write s plus one newline; io\.WriteString\(w, s\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+}
+
+func (f *selfF) mirror(w io.Writer, s string) (int, error) {
+	return io.WriteString(w, s+"\n") // want `fmt\.Fprintln\(w, s\) on a single plain string pays fmt's interface boxing, pooled printer and format walk just to write s plus one newline; io\.WriteString\(w, s\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+}
