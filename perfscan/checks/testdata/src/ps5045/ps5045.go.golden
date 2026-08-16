@@ -1,0 +1,46 @@
+package ps5045
+
+import (
+	"maps"
+	"slices"
+)
+
+// --- POSITIVES ---
+
+func keysLen(m map[string]int) int {
+	return len(m) // want `len\(slices\.Collect\(maps\.Keys/Values\(m\)\)\) materializes a throwaway slice of every entry just to count it; len\(m\) is the identical count in O\(1\) with no allocation`
+}
+
+func valuesLen(m map[int]int) int {
+	return len(m) // want `len\(slices\.Collect\(maps\.Keys/Values\(m\)\)\) materializes a throwaway slice of every entry just to count it; len\(m\) is the identical count in O\(1\) with no allocation`
+}
+
+// A named map type is still a map — len works on it.
+type Registry map[string]int
+
+func namedMap(r Registry) int {
+	return len(r) // want `len\(slices\.Collect\(maps\.Keys/Values\(m\)\)\) materializes a throwaway slice of every entry just to count it; len\(m\) is the identical count in O\(1\) with no allocation`
+}
+
+// --- ADVISORY: reported, no fix ---
+
+func commentInside(m map[string]int) int {
+	return len(slices.Collect(maps.Keys( /* keep */ m))) // want `len\(slices\.Collect\(maps\.Keys/Values\(m\)\)\) materializes a throwaway slice of every entry just to count it; len\(m\) is the identical count in O\(1\) with no allocation`
+}
+
+// --- NEGATIVES: silent ---
+
+// slices.Collect of a non-maps iterator has no O(1) count.
+func otherIter(s []int) int {
+	return len(slices.Collect(slices.Values(s)))
+}
+
+// Already len(m).
+func plainLen(m map[string]int) int {
+	return len(m)
+}
+
+// cap, not len.
+func capNotLen(m map[string]int) int {
+	return cap(slices.Collect(maps.Keys(m)))
+}
