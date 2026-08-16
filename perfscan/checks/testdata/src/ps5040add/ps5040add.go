@@ -1,0 +1,11 @@
+package ps5040add
+
+import "fmt"
+
+// The file lacks a unicode/utf8 import: the first fix adds it. fmt stays
+// referenced via keepFmt, so the fmt import survives the rewrite.
+func addImport(dst []byte, r rune) []byte {
+	return fmt.Appendf(dst, "%c", r) // want `fmt\.Appendf\(buf, "%c", r\) parses the format and boxes r to UTF-8-encode one rune; utf8\.AppendRune\(buf, r\) appends the identical bytes directly`
+}
+
+func keepFmt() { fmt.Println("keep") }
