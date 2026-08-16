@@ -1,0 +1,51 @@
+package ps5052
+
+import (
+	"maps"
+	"slices"
+)
+
+// --- POSITIVES ---
+
+func keysLen(m map[string]int) int {
+	return len(slices.Sorted(maps.Keys(m))) // want `len\(slices\.Sorted\(maps\.Keys/Values\(m\)\)\) materializes and sorts a throwaway slice of every entry just to count it; len\(m\) is the identical count`
+}
+
+func valuesLen(m map[int]int) int {
+	return len(slices.Sorted(maps.Values(m))) // want `len\(slices\.Sorted\(maps\.Keys/Values\(m\)\)\) materializes and sorts a throwaway slice of every entry just to count it; len\(m\) is the identical count`
+}
+
+// A named map type is still a map — len works on it.
+type Registry map[string]int
+
+func namedMap(r Registry) int {
+	return len(slices.Sorted(maps.Keys(r))) // want `len\(slices\.Sorted\(maps\.Keys/Values\(m\)\)\) materializes and sorts a throwaway slice of every entry just to count it; len\(m\) is the identical count`
+}
+
+// --- ADVISORY: reported, no fix ---
+
+func commentInside(m map[string]int) int {
+	return len(slices.Sorted(maps.Keys( /* keep */ m))) // want `len\(slices\.Sorted\(maps\.Keys/Values\(m\)\)\) materializes and sorts a throwaway slice of every entry just to count it; len\(m\) is the identical count`
+}
+
+// --- NEGATIVES: silent ---
+
+// slices.Sorted of a non-maps iterator has no O(1) count.
+func otherIter(s []int) int {
+	return len(slices.Sorted(slices.Values(s)))
+}
+
+// slices.SortedFunc takes a user comparator (that could panic) — excluded.
+func sortedFunc(m map[string]int) int {
+	return len(slices.SortedFunc(maps.Keys(m), func(a, b string) int { return 0 }))
+}
+
+// Already len(m).
+func plainLen(m map[string]int) int {
+	return len(m)
+}
+
+// cap, not len.
+func capNotLen(m map[string]int) int {
+	return cap(slices.Sorted(maps.Keys(m)))
+}
