@@ -1,0 +1,9 @@
+package ps5049alias
+
+import f "fmt"
+
+// The fmt import is aliased; the alias must be carried through into the
+// Appendf rewrite (f.Sprintf -> f.Appendf), never a hard-coded "fmt".
+func aliased(dst []byte, id int) []byte {
+	return append(dst, f.Sprintf("id=%d", id)...) // want `fmt\.Appendf\(dst, \.\.\.\) formats into dst directly`
+}
