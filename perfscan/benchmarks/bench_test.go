@@ -942,3 +942,22 @@ func BenchmarkPS2107_After(b *testing.B) {
 		}
 	}
 }
+
+// PS2107 float verb (%e) — fmt.Sprintf vs strconv.FormatFloat('e', 6, 64).
+func BenchmarkPS2107Float_Before(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		for _, f := range floats {
+			sinkS = fmt.Sprintf("%e", f)
+		}
+	}
+}
+
+func BenchmarkPS2107Float_After(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		for _, f := range floats {
+			sinkS = strconv.FormatFloat(f, 'e', 6, 64)
+		}
+	}
+}

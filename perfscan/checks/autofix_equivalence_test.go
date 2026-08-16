@@ -1327,13 +1327,26 @@ func TestEquiv_PS2107SByteSlice(t *testing.T) {
 	}
 }
 
-// PS2107 (%g case): fmt.Sprintf("%g", f) -> strconv.FormatFloat(f, 'g', -1, 64)
-// for float64, and -> strconv.FormatFloat(float64(f), 'g', -1, 32) for
-// float32. %g prints the SHORTEST representation that round-trips at the
-// operand's width — exactly FormatFloat's precision -1 with the matching
-// bitSize — including the special values (-0 keeps its sign, NaN, ±Inf).
-// %e/%f are NOT equivalent (they default to 6 digits) and are not rewritten.
-func TestEquiv_PS2107SprintfGFloatToFormatFloat(t *testing.T) {
+// PS2107 (float verbs): fmt.Sprintf("<verb>", f) -> strconv.FormatFloat with
+// the matching fmtByte and precision, at the operand's bitSize (64 for
+// float64, 32 with a float64() widening for float32). %g/%G print the SHORTEST
+// round-tripping form (precision -1); %e/%E/%f/%F use fmt's default precision
+// of 6. FormatFloat has no 'F' byte, so %F reuses 'f'. Every verb must agree
+// with fmt over the special values (-0 keeps its sign, NaN, ±Inf) and a large
+// computed sweep — this is the safety proof for extending the %g arm to the
+// exponent/fixed verbs.
+func TestEquiv_PS2107SprintfFloatToFormatFloat(t *testing.T) {
+	// verb -> [fmtByte, precision], mirroring ps2107FloatVerb in ps2107.go.
+	verbs := []struct {
+		verb string
+		b    byte
+		prec int
+	}{
+		{"%e", 'e', 6}, {"%E", 'E', 6},
+		{"%f", 'f', 6}, {"%F", 'f', 6},
+		{"%g", 'g', -1}, {"%G", 'G', -1},
+	}
+
 	f64s := []float64{
 		0, math.Copysign(0, -1), 1, -1,
 		math.NaN(), math.Inf(1), math.Inf(-1),
@@ -1346,11 +1359,6 @@ func TestEquiv_PS2107SprintfGFloatToFormatFloat(t *testing.T) {
 		v := float64(i) * 1.000123
 		f64s = append(f64s, v, -v, 1/v, v*1e17, v*1e-17, math.Sqrt(v), math.Exp(-v/100))
 	}
-	for _, f := range f64s {
-		if got, want := fmt.Sprintf("%g", f), strconv.FormatFloat(f, 'g', -1, 64); got != want {
-			t.Errorf("fmt.Sprintf(%%g, %v)=%q != strconv.FormatFloat(f, 'g', -1, 64)=%q", f, got, want)
-		}
-	}
 
 	f32s := []float32{
 		0, float32(math.Copysign(0, -1)), 1, -1,
@@ -1362,9 +1370,17 @@ func TestEquiv_PS2107SprintfGFloatToFormatFloat(t *testing.T) {
 		v := float32(i) * 1.000123
 		f32s = append(f32s, v, -v, 1/v, v*1e17, v*1e-17)
 	}
-	for _, f := range f32s {
-		if got, want := fmt.Sprintf("%g", f), strconv.FormatFloat(float64(f), 'g', -1, 32); got != want {
-			t.Errorf("fmt.Sprintf(%%g, float32(%v))=%q != strconv.FormatFloat(float64(f), 'g', -1, 32)=%q", f, got, want)
+
+	for _, vc := range verbs {
+		for _, f := range f64s {
+			if got, want := fmt.Sprintf(vc.verb, f), strconv.FormatFloat(f, vc.b, vc.prec, 64); got != want {
+				t.Errorf("fmt.Sprintf(%q, %v)=%q != strconv.FormatFloat(f, %q, %d, 64)=%q", vc.verb, f, got, vc.b, vc.prec, want)
+			}
+		}
+		for _, f := range f32s {
+			if got, want := fmt.Sprintf(vc.verb, f), strconv.FormatFloat(float64(f), vc.b, vc.prec, 32); got != want {
+				t.Errorf("fmt.Sprintf(%q, float32(%v))=%q != strconv.FormatFloat(float64(f), %q, %d, 32)=%q", vc.verb, f, got, vc.b, vc.prec, want)
+			}
 		}
 	}
 }
