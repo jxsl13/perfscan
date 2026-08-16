@@ -1,0 +1,59 @@
+package ps5051
+
+import "strconv"
+
+// strconv stays referenced, so the rewrites below do not orphan the import.
+var _ = strconv.Atoi
+
+// --- POSITIVES ---
+
+func eqInt(a, b int64) bool {
+	return strconv.FormatInt(a, 10) == strconv.FormatInt(b, 10) // want `formats two integers to throwaway strings just to compare them; a == b`
+}
+
+func neqInt(a, b int64) bool {
+	return strconv.FormatInt(a, 16) != strconv.FormatInt(b, 16) // want `formats two integers to throwaway strings just to compare them; a != b`
+}
+
+func eqUint(x, y uint64) bool {
+	return strconv.FormatUint(x, 2) == strconv.FormatUint(y, 2) // want `formats two integers to throwaway strings just to compare them; a == b`
+}
+
+// Expression arguments unwrap without parentheses (arithmetic binds tighter).
+func exprArgs(a, b int64) bool {
+	return strconv.FormatInt(a+1, 16) == strconv.FormatInt(b*2, 16) // want `formats two integers to throwaway strings just to compare them; a == b`
+}
+
+// --- ADVISORY: reported, no fix ---
+
+func commentInside(a, b int64) bool {
+	return strconv.FormatInt(a, 10) == strconv.FormatInt( /* keep */ b, 10) // want `formats two integers to throwaway strings just to compare them; a == b`
+}
+
+// --- NEGATIVES: silent ---
+
+// Ordering does NOT carry over (lexicographic vs numeric).
+func ordering(a, b int64) bool {
+	return strconv.FormatInt(a, 10) < strconv.FormatInt(b, 10)
+}
+
+// Different bases are not equivalent (FormatInt(21,16) == FormatInt(15,10)).
+func differentBase(a, b int64) bool {
+	return strconv.FormatInt(a, 16) == strconv.FormatInt(b, 10)
+}
+
+// A FormatInt/FormatUint mix compares int64 against uint64 — not the same
+// function, so no rewrite (and a == b would not type-check).
+func mixed(a int64, u uint64) bool {
+	return strconv.FormatInt(a, 10) == strconv.FormatUint(u, 10)
+}
+
+// A non-constant base cannot be proven equal or in range.
+func varBase(a, b int64, base int) bool {
+	return strconv.FormatInt(a, base) == strconv.FormatInt(b, base)
+}
+
+// An out-of-range base would panic at runtime; a == b would not reproduce it.
+func badBase(a, b int64) bool {
+	return strconv.FormatInt(a, 1) == strconv.FormatInt(b, 1)
+}
