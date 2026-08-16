@@ -217,6 +217,7 @@ checks' fixes.
 | [PS5041](PS5041.md) | alloc | L1 | yes | fmt.Appendf(buf, "%q", s) runs fmt's formatter to quote one string; strconv.AppendQuote(buf, s) writes the identical bytes directly |
 | [PS5042](PS5042.md) | alloc | L1 | yes | fmt.Appendf(buf, "%d", n) runs fmt's formatter to print one integer; strconv.AppendInt/AppendUint writes the decimal digits directly |
 | [PS5043](PS5043.md) | alloc | L1 | yes | fmt.Appendf(buf, "%x", n) runs fmt's formatter to hex-print one integer; strconv.AppendInt/AppendUint writes the lowercase hex digits directly |
+| [PS5044](PS5044.md) | alloc | L1 | yes | fmt.Appendf(buf, "%v", s) over a plain string runs fmt's formatter to append bytes append writes directly |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
