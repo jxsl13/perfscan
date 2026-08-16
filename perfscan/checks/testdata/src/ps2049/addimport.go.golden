@@ -1,0 +1,15 @@
+package ps2049
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+)
+
+// io is NOT imported here: the fixable site's fix also inserts the io
+// import at its sorted position; the fmt.Fprintf reference keeps fmt
+// alive, so only the addition is needed.
+func addImport(buf *bytes.Buffer, a, b string) {
+	io.WriteString(buf, a+" "+b+"\n") // want `fmt\.Fprintln over only plain strings writes exactly one space between operands and one trailing newline, boxing every operand through fmt's machinery; io\.WriteString\(w, a\+" "\+b\+"\\n"\) writes the identical bytes with the same \(n, err\)`
+	fmt.Fprintf(buf, "%d\n", buf.Len())
+}
