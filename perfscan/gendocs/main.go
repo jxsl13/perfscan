@@ -52,7 +52,28 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: ` + "`perfscan -fix`" + ` applies exactly the reported
 checks' fixes.
 
-| ID | Category | Level | Auto-fix | Title |
+`)
+	// Summary counts, kept current on every gendocs run: total checks, how many
+	// carry a bit-identical auto-fix, and the L1/L2/L3 breakdown.
+	all := checks.All()
+	autofix, l1, l2, l3 := 0, 0, 0, 0
+	for _, c := range all {
+		if c.AutoFix {
+			autofix++
+		}
+		switch c.Level {
+		case lint.LevelIdiomatic:
+			l1++
+		case lint.LevelStructured:
+			l2++
+		case lint.LevelAggressive:
+			l3++
+		}
+	}
+	fmt.Fprintf(&index, "**%d checks total** — **%d with a bit-identical auto-fix**, %d advisory. "+
+		"By fix level: **%d L1** (idiomatic), **%d L2** (structured), **%d L3** (aggressive).\n\n",
+		len(all), autofix, len(all)-autofix, l1, l2, l3)
+	index.WriteString(`| ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
 `)
 	for _, c := range checks.All() {

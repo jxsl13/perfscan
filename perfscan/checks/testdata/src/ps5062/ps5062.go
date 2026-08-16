@@ -1,0 +1,63 @@
+package ps5062
+
+import "bytes"
+
+// A non-Runes bytes use keeps the import alive, so the rewrites never orphan it.
+var _ = bytes.Contains
+
+func total(b []byte) int {
+	// --- POSITIVE: value used, key blank ---
+	n := 0
+	for _, r := range bytes.Runes(b) { // want `for range bytes\.Runes\(b\) decodes the slice into a throwaway \[\]rune`
+		n += int(r)
+	}
+	return n
+}
+
+// Neither key nor value: iteration count is identical.
+func count(b []byte) int {
+	n := 0
+	for range bytes.Runes(b) { // want `for range bytes\.Runes\(b\) decodes the slice into a throwaway \[\]rune`
+		n++
+	}
+	return n
+}
+
+// --- ADVISORY: reported, no fix ---
+
+func commentInside(b []byte) int {
+	n := 0
+	for _, r := range bytes. /*keep*/ Runes(b) { // want `for range bytes\.Runes\(b\) decodes the slice into a throwaway \[\]rune`
+		n += int(r)
+	}
+	return n
+}
+
+// --- NEGATIVES: silent ---
+
+// The key is used: over a []rune it is the rune index, over a string the byte
+// offset — different values.
+func usesKey(b []byte) int {
+	n := 0
+	for i, r := range bytes.Runes(b) {
+		n += i + int(r)
+	}
+	return n
+}
+
+func usesKeyOnly(b []byte) int {
+	n := 0
+	for i := range bytes.Runes(b) {
+		n += i
+	}
+	return n
+}
+
+// Not bytes.Runes.
+func other(s []string) int {
+	n := 0
+	for _, x := range s {
+		n += len(x)
+	}
+	return n
+}
