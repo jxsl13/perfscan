@@ -1,0 +1,63 @@
+package ps5044
+
+import (
+	"fmt"
+	"strings"
+)
+
+// Keeps fmt referenced so the rewrites below do not orphan the import.
+func keep() { fmt.Println("x") }
+
+// --- POSITIVES: lone "%v" over a plain string, unnamed []byte dest ---
+
+func str(buf []byte, s string) []byte {
+	return append(buf, s...) // want `fmt\.Appendf with a lone %v over a plain string`
+}
+
+// The value is a call — kept verbatim.
+func callArg(buf []byte, s string) []byte {
+	return append(buf, strings.ToUpper(s)...) // want `fmt\.Appendf with a lone %v over a plain string`
+}
+
+// An untyped string constant argument defaults to string.
+func lit(buf []byte) []byte {
+	return append(buf, "literal"...) // want `fmt\.Appendf with a lone %v over a plain string`
+}
+
+// --- ADVISORY: reported but NOT fixed ---
+
+type MyStr string
+
+// A NAMED string type may implement fmt.Stringer/fmt.Formatter.
+func named(buf []byte, s MyStr) []byte {
+	return fmt.Appendf(buf, "%v", s) // want `fmt\.Appendf with a lone %v over a plain string`
+}
+
+type ByteBuf []byte
+
+// A NAMED []byte destination changes the returned slice type.
+func namedDest(buf ByteBuf, s string) ByteBuf {
+	return fmt.Appendf(buf, "%v", s) // want `fmt\.Appendf with a lone %v over a plain string`
+}
+
+// A comment inside the rewritten scaffolding suppresses the fix.
+func commentInside(buf []byte, s string) []byte {
+	return fmt.Appendf(buf /* keep */, "%v", s) // want `fmt\.Appendf with a lone %v over a plain string`
+}
+
+// --- NEGATIVES: silent ---
+
+// "%v" of a []byte prints the decimal element list "[104 105]", not the bytes.
+func byteSlice(buf []byte, b []byte) []byte {
+	return fmt.Appendf(buf, "%v", b)
+}
+
+// "%v" of an int is not this pattern.
+func intArg(buf []byte, n int) []byte {
+	return fmt.Appendf(buf, "%v", n)
+}
+
+// "%s" belongs to PS2141, not this check.
+func sVerb(buf []byte, s string) []byte {
+	return fmt.Appendf(buf, "%s", s)
+}
