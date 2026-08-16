@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**242 checks total** — **205 with a bit-identical auto-fix**, 37 advisory. By fix level: **189 L1** (idiomatic), **37 L2** (structured), **16 L3** (aggressive).
+**243 checks total** — **206 with a bit-identical auto-fix**, 37 advisory. By fix level: **190 L1** (idiomatic), **37 L2** (structured), **16 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -246,6 +246,7 @@ checks' fixes.
 | [PS5063](PS5063.md) | arith | L1 | yes | slices.Compare used only for equality, where slices.Equal is faster |
 | [PS5064](PS5064.md) | alloc | L1 | yes | hex.EncodeToString(x) == "<hex>" encodes the slice just to compare it to a constant; bytes.Equal(x, <decoded>) compares the raw bytes |
 | [PS5065](PS5065.md) | alloc | L1 | yes | hex.EncodeToString(a) < hex.EncodeToString(b) encodes both slices just to order them; bytes.Compare(a, b) < 0 orders the raw bytes |
+| [PS5066](PS5066.md) | alloc | L1 | yes | indexing bytes.Buffer.String() copies the whole buffer to read one byte; buf.Bytes()[i] reads it in place |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
