@@ -1,0 +1,18 @@
+package ps3032
+
+import (
+	"sort"
+)
+
+// The file keeps OTHER sort references (sort.Float64Slice, sort.Ints), so
+// the sort import stays; the fix only inserts the slices import.
+func keepSort(xs []int, fs []float64) bool {
+	ok := sort.IsSorted(sort.IntSlice(xs)) // want `sort\.IsSorted\(sort\.IntSlice\(\.\.\.\)\) scans through the sort\.Interface adapter \(an interface Len plus a Less dispatch per adjacent pair\); slices\.IsSorted checks the concrete \[\]int directly with the identical boolean result`
+
+	// NEVER flagged by PS3032: the sort family's bright no-float line.
+	ok = ok && sort.IsSorted(sort.Float64Slice(fs))
+
+	// NEVER flagged by PS3032: a different sort function entirely.
+	sort.Ints(xs)
+	return ok
+}
