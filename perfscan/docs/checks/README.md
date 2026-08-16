@@ -74,6 +74,7 @@ checks' fixes.
 | [PS2050](PS2050.md) | alloc | L1 | yes | string(utf8.AppendRune(nil, r)) allocates a throwaway []byte then copies it; string(r) encodes the rune directly |
 | [PS2051](PS2051.md) | alloc | L1 | yes | re.Match([]byte(s)) copies the whole input to feed the wrong twin; re.MatchString(s) scans it in place |
 | [PS2052](PS2052.md) | indirect | L2 | yes | a map read in a plain if-condition and again in the body for the same key hashes the key twice; bind the value in the if-init |
+| [PS2053](PS2053.md) | indirect | L2 | yes | ranging a map by key and re-indexing m[k] in the body re-hashes the key the range already walked; bind the value with for k, v := range m |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
