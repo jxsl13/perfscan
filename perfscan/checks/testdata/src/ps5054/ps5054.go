@@ -1,0 +1,45 @@
+package ps5054
+
+import (
+	"bytes"
+	"encoding/hex"
+)
+
+var _ = bytes.Contains
+
+// A non-compare hex use keeps the hex import alive, so the rewrites below do not
+// orphan it.
+var _ = hex.EncodedLen
+
+// --- POSITIVES ---
+
+func eq(a, b []byte) bool {
+	return hex.EncodeToString(a) == hex.EncodeToString(b) // want `hex\.EncodeToString\(a\) == hex\.EncodeToString\(b\) hex-encodes two slices just to compare them; bytes\.Equal\(a, b\) compares the bytes directly`
+}
+
+func neq(a, b []byte) bool {
+	return hex.EncodeToString(a) != hex.EncodeToString(b) // want `hex\.EncodeToString\(a\) != hex\.EncodeToString\(b\) hex-encodes two slices just to compare them; bytes\.Equal\(a, b\) compares the bytes directly`
+}
+
+// Expression arguments carry over verbatim.
+func exprArgs(a, b []byte) bool {
+	return hex.EncodeToString(a[1:]) == hex.EncodeToString(b[:2]) // want `hex\.EncodeToString\(a\) == hex\.EncodeToString\(b\) hex-encodes two slices just to compare them; bytes\.Equal\(a, b\) compares the bytes directly`
+}
+
+// --- ADVISORY: reported, no fix ---
+
+func commentInside(a, b []byte) bool {
+	return hex.EncodeToString(a) == hex.EncodeToString( /* keep */ b) // want `hex\.EncodeToString\(a\) == hex\.EncodeToString\(b\) hex-encodes two slices just to compare them; bytes\.Equal\(a, b\) compares the bytes directly`
+}
+
+// --- NEGATIVES: silent ---
+
+// Ordering does not carry over.
+func ordering(a, b []byte) bool {
+	return hex.EncodeToString(a) < hex.EncodeToString(b)
+}
+
+// Only one operand is a hex encode.
+func oneEncode(a []byte) bool {
+	return hex.EncodeToString(a) == "00"
+}
