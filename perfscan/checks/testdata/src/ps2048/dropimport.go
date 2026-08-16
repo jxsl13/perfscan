@@ -1,0 +1,12 @@
+package ps2048
+
+import (
+	"fmt"
+	"io"
+)
+
+// io is already imported and stays used; the sole fmt reference is the
+// fixable call, so the fix drops the orphaned fmt spec.
+func dropFmt(w io.Writer, a, b string) {
+	fmt.Fprint(w, a, b) // want `fmt\.Fprint over only plain strings inserts no separators, boxes every operand and walks fmt's reflection printer just to write their concatenation; io\.WriteString\(w, a\+b\+\.\.\.\) writes the identical bytes with the same \(n, err\)`
+}

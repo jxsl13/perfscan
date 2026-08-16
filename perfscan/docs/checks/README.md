@@ -69,6 +69,7 @@ checks' fixes.
 | [PS2045](PS2045.md) | alloc | L1 | yes | buf1.String() == buf2.String() copies both whole bytes.Buffers just to compare them; bytes.Equal(buf1.Bytes(), buf2.Bytes()) is allocation-free |
 | [PS2046](PS2046.md) | alloc | L1 |  | fmt.Appendf(buf, "%x", bs) runs fmt's formatter to hex-encode bytes hex.AppendEncode writes directly |
 | [PS2047](PS2047.md) | alloc | L1 | yes | append(dst, strconv.Itoa(n)...) formats a throwaway string then copies it; strconv.AppendInt writes the bytes into dst directly |
+| [PS2048](PS2048.md) | alloc | L1 | yes | fmt.Fprint over only plain strings is a reflection-priced concatenation; io.WriteString(w, a+b+...) writes the same bytes directly |
 | [PS2101](PS2101.md) | alloc | L1 | yes | a slice built by append in a bounded loop directly after an unsized declaration |
 | [PS2102](PS2102.md) | alloc | L1 | yes | string concatenation with += inside a loop |
 | [PS2103](PS2103.md) | alloc | L1 | yes | fmt.Sprintf in a loop for simple concatenation or conversion |
