@@ -137,6 +137,7 @@ checks' fixes.
 | [PS3029](PS3029.md) | indirect | L1 | yes | slices.SortedStableFunc with a hand-rolled three-way comparator (a<b/a>b/-1/1/0) is slices.Sorted spelled the slow, stable way |
 | [PS3030](PS3030.md) | indirect | L1 | yes | bytes.FieldsFunc(b, unicode.IsSpace) decodes and calls the predicate per rune; bytes.Fields(b) is the same split with a byte-table ASCII fast path |
 | [PS3031](PS3031.md) | indirect | L1 | yes | bytes.TrimFunc(b, unicode.IsSpace) decodes every boundary rune through an indirect call; bytes.TrimSpace(b) is the same trim with an ASCII byte-table fast path |
+| [PS3032](PS3032.md) | indirect | L1 | yes | sort.IsSorted over a sort.IntSlice/StringSlice adapter is slices.IsSorted spelled the long way; call the generic predicate directly |
 | [PS3034](PS3034.md) | indirect | L3 |  | a serial nest whose every write names the outermost loop variable |
 | [PS3059](PS3059.md) | indirect | L3 |  | a serial nest writing through a base derived from the outermost loop variable |
 | [PS3060](PS3060.md) | indirect | L3 |  | a serial loop over calls to a function that itself fans out |
