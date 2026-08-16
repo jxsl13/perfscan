@@ -1,0 +1,14 @@
+package ps2048
+
+import (
+	"io"
+	"os"
+)
+
+// The two fmt references in this FILE are the fixable calls themselves:
+// applying both fixes orphans the fmt import, so its spec is swapped for
+// "io" in place.
+func orphanSwap(a, b string) {
+	io.WriteString(os.Stdout, a+b+a) // want `fmt\.Fprint over only plain strings inserts no separators, boxes every operand and walks fmt's reflection printer just to write their concatenation; io\.WriteString\(w, a\+b\+\.\.\.\) writes the identical bytes with the same \(n, err\)`
+	io.WriteString(os.Stderr, b+a) // want `fmt\.Fprint over only plain strings inserts no separators, boxes every operand and walks fmt's reflection printer just to write their concatenation; io\.WriteString\(w, a\+b\+\.\.\.\) writes the identical bytes with the same \(n, err\)`
+}
