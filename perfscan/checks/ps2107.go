@@ -35,6 +35,7 @@ direct conversion for each such shape:
   fmt.Sprintf("%x", bs) -> hex.EncodeToString(bs)     (bs is []byte)
   fmt.Sprintf("%g", f)  -> strconv.FormatFloat(f, 'g', -1, 64)          (f is float64)
                         -> strconv.FormatFloat(float64(f), 'g', -1, 32) (f is float32)
+  fmt.Sprintf("%e", f)  -> strconv.FormatFloat(f, 'e', 6, 64)   (%E/%f/%F/%G likewise)
   fmt.Sprintf("%b", i)  -> strconv.FormatInt/FormatUint(i, 2)  (base 2)
   fmt.Sprintf("%o", i)  -> strconv.FormatInt/FormatUint(i, 8)  (base 8)
   fmt.Sprintf("%x", i)  -> strconv.FormatInt/FormatUint(i, 16) (base 16; i an integer)
@@ -187,6 +188,19 @@ type ps2107Case struct {
 // fmt.Formatter, which fmt would honor and the direct conversion would not.
 // Unnamed basic kinds ([]byte for %x) cannot carry methods, so for them the
 // rewrite is bit-identical.
+// ps2107FloatVerb maps each recognized float verb to the [fmtByte, precision]
+// pair its strconv.FormatFloat equivalent uses. %g/%G are the shortest form
+// (precision -1); %e/%E/%f/%F use fmt's default precision of 6. FormatFloat
+// has no 'F' byte, so %F reuses 'f' (which yields identical output).
+var ps2107FloatVerb = map[string][2]string{
+	"%e": {"'e'", "6"},
+	"%E": {"'E'", "6"},
+	"%f": {"'f'", "6"},
+	"%F": {"'f'", "6"},
+	"%g": {"'g'", "-1"},
+	"%G": {"'G'", "-1"},
+}
+
 func ps2107Classify(pass *analysis.Pass, verb string, arg ast.Expr) *ps2107Case {
 	t := pass.TypesInfo.TypeOf(arg)
 	if t == nil {
@@ -232,17 +246,19 @@ func ps2107Classify(pass *analysis.Pass, verb string, arg ast.Expr) *ps2107Case 
 		c.replName = "strconv.FormatBool"
 		c.pkgName, c.pkgPath = "strconv", "strconv"
 		return c
-	case "%g":
-		// Only %g maps onto FormatFloat's shortest form ('g' with precision
-		// -1): %e/%f default to 6 digits, which FormatFloat(-1) does not
-		// reproduce, so they are deliberately NOT recognized here. The
-		// bitSize argument must match the operand's float width, so that the
-		// shortest representation rounds back to the ORIGINAL float32/float64
-		// value — exactly what %g prints (including -0, NaN and the Infs).
+	case "%e", "%E", "%f", "%F", "%g", "%G":
+		// Every float verb has an exact FormatFloat spelling. %g/%G use the
+		// shortest round-tripping form (precision -1); %e/%E/%f/%F use fmt's
+		// default precision of 6. FormatFloat has no 'F' byte — 'f' produces
+		// the identical text %F does. The bitSize argument must match the
+		// operand's float width so the value round-trips exactly — precisely
+		// what fmt prints too (including -0, NaN and the Infs). Verified
+		// bit-identical over the special floats and a large random sweep.
+		fb := ps2107FloatVerb[verb] // [fmtByte, precision]
 		if !underBasic || under.Info()&types.IsFloat == 0 {
 			return nil
 		}
-		c := &ps2107Case{msg: "fmt.Sprintf of a single %g float value" + boxes + "strconv.FormatFloat converts it directly"}
+		c := &ps2107Case{msg: "fmt.Sprintf of a single " + verb + " float value" + boxes + "strconv.FormatFloat converts it directly"}
 		if !tIsBasic {
 			return c
 		}
@@ -252,11 +268,11 @@ func ps2107Classify(pass *analysis.Pass, verb string, arg ast.Expr) *ps2107Case 
 		}
 		switch basic.Kind() {
 		case types.Float64:
-			c.repl = "strconv.FormatFloat(" + argText + ", 'g', -1, 64)"
+			c.repl = "strconv.FormatFloat(" + argText + ", " + fb[0] + ", " + fb[1] + ", 64)"
 		case types.Float32:
 			// FormatFloat takes a float64; the widening float64(f) is
 			// value-preserving and bitSize 32 keeps the float32 rounding.
-			c.repl = "strconv.FormatFloat(float64(" + argText + "), 'g', -1, 32)"
+			c.repl = "strconv.FormatFloat(float64(" + argText + "), " + fb[0] + ", " + fb[1] + ", 32)"
 		default:
 			return c
 		}

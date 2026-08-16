@@ -95,10 +95,34 @@ func fgn(c Celsius) string {
 	return fmt.Sprintf("%g", c) // want `fmt\.Sprintf of a single %g float value boxes the argument and walks fmt's formatter state machine; strconv\.FormatFloat converts it directly`
 }
 
-// %e defaults to 6 digits, not the shortest form FormatFloat(-1) prints:
-// silent.
+// %e over a float64: fixed to FormatFloat with fmt's default precision 6.
 func fe(f float64) string {
-	return fmt.Sprintf("%e", f)
+	return strconv.FormatFloat(f, 'e', 6, 64) // want `fmt\.Sprintf of a single %e float value boxes the argument and walks fmt's formatter state machine; strconv\.FormatFloat converts it directly`
+}
+
+// %E over a float64: uppercase exponent, precision 6.
+func fE(f float64) string {
+	return strconv.FormatFloat(f, 'E', 6, 64) // want `fmt\.Sprintf of a single %E float value boxes the argument and walks fmt's formatter state machine; strconv\.FormatFloat converts it directly`
+}
+
+// %f over a float32: FormatFloat('f', 6) with the float64 widening, bitSize 32.
+func ff32(f float32) string {
+	return strconv.FormatFloat(float64(f), 'f', 6, 32) // want `fmt\.Sprintf of a single %f float value boxes the argument and walks fmt's formatter state machine; strconv\.FormatFloat converts it directly`
+}
+
+// %F is an alias of %f; FormatFloat has no 'F' byte, so it reuses 'f'.
+func fF(f float64) string {
+	return strconv.FormatFloat(f, 'f', 6, 64) // want `fmt\.Sprintf of a single %F float value boxes the argument and walks fmt's formatter state machine; strconv\.FormatFloat converts it directly`
+}
+
+// %G is the uppercase shortest form: FormatFloat('G', -1).
+func fG(f float64) string {
+	return strconv.FormatFloat(f, 'G', -1, 64) // want `fmt\.Sprintf of a single %G float value boxes the argument and walks fmt's formatter state machine; strconv\.FormatFloat converts it directly`
+}
+
+// Named float type with %e: could implement fmt.Formatter — reported, no fix.
+func fen(c Celsius) string {
+	return fmt.Sprintf("%e", c) // want `fmt\.Sprintf of a single %e float value boxes the argument and walks fmt's formatter state machine; strconv\.FormatFloat converts it directly`
 }
 
 // A precision makes %g no longer a bare verb: silent.
