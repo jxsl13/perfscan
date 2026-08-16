@@ -236,6 +236,7 @@ checks' fixes.
 | [PS5055](PS5055.md) | arith | L1 | yes | slices.Equal/Compare over byte slices runs the generic element loop; bytes.Equal/Compare runs the SIMD routine for the identical result |
 | [PS5056](PS5056.md) | alloc | L1 | yes | []byte(hex.EncodeToString(b)) allocates a hex STRING then copies it into a []byte; hex.AppendEncode encodes straight into the []byte |
 | [PS5057](PS5057.md) | alloc | L1 | yes | []byte(enc.EncodeToString(b)) (base64/base32) allocates an encoded STRING then copies it into a []byte; enc.AppendEncode encodes straight into the []byte |
+| [PS5058](PS5058.md) | alloc | L1 | yes | enc.EncodeToString(a) == enc.EncodeToString(b) (base64/base32, same encoder) encodes both slices just to compare them; bytes.Equal(a, b) compares the bytes directly |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
