@@ -1,0 +1,27 @@
+package ps3036
+
+import (
+	"slices"
+	"strings"
+)
+
+// The bare strings.Compare comparator is slices.Compare spelled the slow way.
+// Every case here is FIXED, so the rewrites remove the file's last strings
+// references and the golden drops the strings import. Slice expressions are
+// kept verbatim.
+
+// strings.Compare passed directly.
+func direct(a, b []string) int {
+	return slices.CompareFunc(a, b, strings.Compare) // want `slices\.CompareFunc with a bare strings\.Compare comparator`
+}
+
+// A func literal wrapping strings.Compare, parameters in source order.
+func literal(a, b []string) bool {
+	return slices.CompareFunc(a, b, func(x, y string) int { return strings.Compare(x, y) }) < 0 // want `slices\.CompareFunc with a bare strings\.Compare comparator`
+}
+
+// Split parameter fields func(x string, y string) match like func(x, y string),
+// and the slice expressions survive verbatim however they are spelled.
+func split(m map[string][]string, k string) int {
+	return slices.CompareFunc(m[k], m[k+"!"], func(x string, y string) int { return strings.Compare(x, y) }) // want `slices\.CompareFunc with a bare strings\.Compare comparator`
+}
