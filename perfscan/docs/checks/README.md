@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**247 checks total** — **210 with a bit-identical auto-fix**, 37 advisory. By fix level: **194 L1** (idiomatic), **37 L2** (structured), **16 L3** (aggressive).
+**248 checks total** — **211 with a bit-identical auto-fix**, 37 advisory. By fix level: **195 L1** (idiomatic), **37 L2** (structured), **16 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -251,6 +251,7 @@ checks' fixes.
 | [PS5068](PS5068.md) | alloc | L1 | yes | fmt.Appendf(buf, "%e", f) runs fmt's formatter to print one float; strconv.AppendFloat writes the identical digits directly |
 | [PS5069](PS5069.md) | alloc | L1 | yes | strings.HasPrefix/Contains/Index/... over buf.String() copies the whole bytes.Buffer; the bytes twin over buf.Bytes() reads it with no copy |
 | [PS5070](PS5070.md) | alloc | L1 | yes | w.WriteString(string(b)) allocates; w.Write(b) writes the bytes directly |
+| [PS5071](PS5071.md) | alloc | L1 | yes | strconv.Itoa(x) == "123" formats an int to a throwaway string just to compare it to a constant; x == 123 compares the int directly |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
