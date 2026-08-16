@@ -1,0 +1,61 @@
+package ps2051
+
+import "regexp"
+
+var re = regexp.MustCompile("ab+c")
+
+type MyStr string
+type MyBytes []byte
+
+// --- POSITIVES ---
+
+// re.Match([]byte(s)) with s a plain string -> re.MatchString(s).
+func matchBytes(s string) bool {
+	return re.Match([]byte(s)) // want `re\.Match\(\[\]byte\(x\)\) copies the whole input to feed the wrong twin; re\.MatchString\(x\) scans it in place`
+}
+
+// re.MatchString(string(b)) with b an unnamed []byte -> re.Match(b).
+func matchStr(b []byte) bool {
+	return re.MatchString(string(b)) // want `re\.MatchString\(string\(x\)\) copies the whole input to feed the wrong twin; re\.Match\(x\) scans it in place`
+}
+
+// --- ADVISORY: reported, no fix (named operand not assignable to the twin param) ---
+
+func namedStr(ms MyStr) bool {
+	return re.Match([]byte(ms)) // want `re\.Match\(\[\]byte\(x\)\) copies the whole input to feed the wrong twin; re\.MatchString\(x\) scans it in place`
+}
+
+func namedBytes(mb MyBytes) bool {
+	return re.MatchString(string(mb)) // want `re\.MatchString\(string\(x\)\) copies the whole input to feed the wrong twin; re\.Match\(x\) scans it in place`
+}
+
+func commentInside(s string) bool {
+	return re.Match([]byte( /* keep */ s)) // want `re\.Match\(\[\]byte\(x\)\) copies the whole input to feed the wrong twin; re\.MatchString\(x\) scans it in place`
+}
+
+// --- NEGATIVES: silent ---
+
+// No conversion — already the right type.
+func plainBytes(b []byte) bool {
+	return re.Match(b)
+}
+
+func plainStr(s string) bool {
+	return re.MatchString(s)
+}
+
+// Identity conversion (b already []byte): no copy, not this shape.
+func identity(b []byte) bool {
+	return re.Match([]byte(b))
+}
+
+// The package-level regexp.Match recompiles the pattern (two args).
+func pkgLevel(s string) bool {
+	ok, _ := regexp.Match("ab+c", []byte(s))
+	return ok
+}
+
+// A different method.
+func otherMethod(s string) string {
+	return re.FindString(s)
+}
