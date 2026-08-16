@@ -1,0 +1,13 @@
+package ps5037
+
+import u8 "unicode/utf8"
+
+// An aliased import keeps nothing to keep: the whole selector —
+// qualifier included — is replaced by the builtin len. The alias import
+// stays referenced by the sibling use below (in production the fix
+// pipeline would prune an orphaned spec).
+func aliased(b []byte) bool {
+	return len(b) == 0 // want `utf8\.RuneCount\(\.\.\.\) == 0 scans the entire \[\]byte just to test emptiness; len\(b\) == 0 is the bit-identical O\(1\) test`
+}
+
+var _ = u8.UTFMax
