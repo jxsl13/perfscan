@@ -68,7 +68,7 @@ func baselineRelPath(p, anchorDir string) string {
 	return filepath.ToSlash(abs)
 }
 
-func baselineKey(f Finding, anchorDir string) string {
+func baselineKey(f *Finding, anchorDir string) string {
 	return baselineRelPath(f.Pos.Filename, anchorDir) + "\x00" + f.Check.ID + "\x00" + f.Message
 }
 
@@ -76,7 +76,8 @@ func baselineKey(f Finding, anchorDir string) string {
 func writeBaseline(path string, findings []Finding) error {
 	anchor := baselineAnchor(path)
 	counts := make(map[string]*baselineEntry, len(findings))
-	for _, f := range findings {
+	for i := range findings {
+		f := &findings[i]
 		k := baselineKey(f, anchor)
 		if e, ok := counts[k]; ok {
 			e.Count++
@@ -135,14 +136,15 @@ func applyBaseline(path string, findings []Finding) ([]Finding, int, error) {
 	}
 	out := make([]Finding, 0, len(findings))
 	suppressed := 0
-	for _, f := range findings {
+	for i := range findings {
+		f := &findings[i]
 		k := baselineKey(f, anchor)
 		if budget[k] > 0 {
 			budget[k]--
 			suppressed++
 			continue
 		}
-		out = append(out, f)
+		out = append(out, *f)
 	}
 	return out, suppressed, nil
 }

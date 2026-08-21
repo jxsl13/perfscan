@@ -1,0 +1,9 @@
+package ps5095orphan
+
+type reader struct{}
+
+func (reader) Read(buffer []byte) (int, error) { return len(buffer), nil }
+
+func read(buffer []byte) (int, error) {
+	return (reader{}).Read(buffer) // want "io.NopCloser chain constructs 1 adapter layer[(]s[)] only to call Read immediately"
+}

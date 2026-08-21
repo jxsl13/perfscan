@@ -75,9 +75,11 @@ parentheses are ever needed; the unicode/utf8 import is added when
 missing (reusing an existing import's alias when present), and the
 vanishing []rune spelling references only predeclared identifiers, so no
 import can be orphaned. len([]byte(x)) becomes len(x): only the
-conversion around x is dropped, so no import changes at all. A comment
-inside the rewritten scaffolding downgrades the fix to an advisory
-report.`,
+conversion around x is dropped, so no import changes at all. A constant
+byte-form operand remains advisory because len([]byte("x")) is not a constant
+while len("x") is; changing that compile-time property can create a duplicate
+switch case. A comment inside the rewritten scaffolding likewise downgrades
+the fix to an advisory report.`,
 		Before: `n := len([]rune(name))
 m := len([]byte(name))`,
 		After: `n := utf8.RuneCountInString(name)
@@ -212,7 +214,11 @@ func ps2125ReportByte(pass *analysis.Pass, f *ast.File, lenCall, inner *ast.Call
 		End:     lenCall.End(),
 		Message: "len(" + convText + ") spells a byte length as a throwaway []byte conversion; len(" + xText + ") is the direct, bit-identical byte count (allocation-free on every toolchain)",
 	}
-	if !ps2111CommentIn(f, inner.Pos(), x.Pos()) && !ps2111CommentIn(f, x.End(), inner.End()) {
+	// Do not turn a runtime len(slice-conversion) into a compile-time string
+	// length constant: that can make an existing switch fail with duplicate
+	// cases even though the integer value is unchanged.
+	typedValue := pass.TypesInfo.Types[x]
+	if typedValue.Value == nil && !ps2111CommentIn(f, inner.Pos(), x.Pos()) && !ps2111CommentIn(f, x.End(), inner.End()) {
 		diag.SuggestedFixes = []analysis.SuggestedFix{{
 			Message: "drop the []byte conversion",
 			TextEdits: []analysis.TextEdit{

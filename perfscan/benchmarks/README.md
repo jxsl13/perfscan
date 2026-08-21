@@ -38,3 +38,16 @@ Rules without a pair, and why:
   that the win evaporates on any memory-touching path; its evidence table
   lives in the check text.
 - **PS6004**: a verification-gap advisory; there is nothing to time.
+- **PS6005–PS6059 and PS6062–PS6078** (accelerator and campaign verification advisories): their
+  remedies require real device traces, independent processes, exact workload
+  identities, topology/parity evidence, or project-specific kernels. A toy Go
+  micro-benchmark cannot reproduce those contracts and would manufacture a
+  speedup disconnected from the finding. The check documentation records the
+  owner campaign measurements; validate candidates on the target device with
+  the gates each rule requires.
+- **PS6060–PS6061** (exact ReLU/Abs SIMD advisories): portable Go has no ordered SIMD
+  compare-and-bit-select primitive to benchmark as an After implementation,
+  while `FMAX`/`math.Max`, plain `FABS`, and a sign mask do not reproduce the
+  required NaN and signed-zero contracts. Their documentation records the
+  owner campaigns' native arm64 measurements and raw-bit/tail validation;
+  benchmark the registered native sibling on each supported architecture.

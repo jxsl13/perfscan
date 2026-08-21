@@ -1,0 +1,11 @@
+package ps5100alias
+
+import stream "io"
+
+func copyTo(destination stream.Writer, a, b, c stream.Reader) (int64, error) {
+	return stream.Copy(destination, stream.MultiReader(a, b, c)) // want "io.Copy uses MultiReader's WriterTo path; 1 nested source adapter"
+}
+
+func copyBuffer(destination stream.Writer, a, b, c stream.Reader, buffer []byte) (int64, error) {
+	return stream.CopyBuffer(destination, stream.MultiReader(a, b, c), buffer) // want "io.CopyBuffer uses MultiReader's WriterTo path; 1 nested source adapter"
+}

@@ -18,11 +18,22 @@ import (
 // where copy was shadowed; this is the single guard every such check now shares
 // so the mistake cannot be re-made per check.
 func builtinInScope(pass *analysis.Pass, pos token.Pos, name string) bool {
+	if !predeclaredInScope(pass, pos, name) {
+		return false
+	}
+	b, ok := types.Universe.Lookup(name).(*types.Builtin)
+	return ok && b.Name() == name
+}
+
+// predeclaredInScope is the general universe-binding guard for fixes that
+// inject a predeclared identifier. Unlike builtinInScope it also accepts
+// universe type names such as string, byte, and int64. A same-named local,
+// package declaration, or import alias rejects the rewrite.
+func predeclaredInScope(pass *analysis.Pass, pos token.Pos, name string) bool {
 	scope := pass.Pkg.Scope().Innermost(pos)
 	if scope == nil {
 		scope = pass.Pkg.Scope()
 	}
 	_, obj := scope.LookupParent(name, pos)
-	b, ok := obj.(*types.Builtin)
-	return ok && b.Name() == name
+	return obj != nil && obj == types.Universe.Lookup(name)
 }

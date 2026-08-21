@@ -1,0 +1,75 @@
+package ps5091
+
+import "strings"
+
+func byteAt(text string, index int) byte {
+	return text[index] // want "string byte index consumes 2 throwaway strings.Clone layer"
+}
+
+func mapRead(values map[string]int, key string) int {
+	return values[key] // want "read-only map lookup key consumes 2 throwaway strings.Clone layer"
+}
+
+func mapReadOK(values map[string]int, key string) (int, bool) {
+	value, ok := values[key] // want "read-only map lookup key consumes 1 throwaway strings.Clone layer"
+	return value, ok
+}
+
+func interfaceKeyRead(values map[any]int, key string) int {
+	return values[key] // want "read-only map lookup key consumes 1 throwaway strings.Clone layer"
+}
+
+type record struct{ count int }
+
+func nestedPointerRead(values map[string]*record, key string) {
+	values[key].count++ // want "read-only map lookup key consumes 1 throwaway strings.Clone layer"
+}
+
+func remove(values map[string]int, key string) {
+	delete(values, key) // want "delete map key consumes 2 throwaway strings.Clone layer"
+}
+
+func commentPreserved(values map[string]int, key string) int {
+	return values[strings.Clone( /* retention rationale */ key)] // want "read-only map lookup key consumes 1 throwaway strings.Clone layer"
+}
+
+// Storage contexts may intentionally detach a short key from a large backing
+// string and must remain untouched.
+func mapWrite(values map[string]int, key string) {
+	values[strings.Clone(key)] = 1
+}
+
+func mapCompoundWrite(values map[string]int, key string) {
+	values[strings.Clone(key)] += 2
+}
+
+func mapIncrement(values map[string]int, key string) {
+	values[strings.Clone(key)]++
+}
+
+func rangeAssignment(values map[string]int, input []int, key string) {
+	for values[strings.Clone(key)] = range input {
+	}
+}
+
+func substringMayRetain(text string) string {
+	return strings.Clone(text)[1:]
+}
+
+type cloner struct{}
+
+func (cloner) Clone(value string) string { return value }
+
+func userClone(c cloner, values map[string]int, key string) int {
+	return values[c.Clone(key)]
+}
+
+func functionValue(values map[string]int, key string) int {
+	clone := strings.Clone
+	return values[clone(key)]
+}
+
+func shadowedDelete(values map[string]int, key string) {
+	delete := func(map[string]int, string) {}
+	delete(values, strings.Clone(key))
+}

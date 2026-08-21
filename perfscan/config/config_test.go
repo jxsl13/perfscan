@@ -22,16 +22,24 @@ func TestToSetAndCompile(t *testing.T) {
 	}
 
 	c := Config{
-		ElementAccessors:    []string{"AtF64", "SetF64"},
-		AllocatorFuncs:      []string{"Zeros"},
-		ElementCountMethods: nil, // stays nil after compile
+		CacheLineBytes:           128,
+		ElementAccessors:         []string{"AtF64", "SetF64"},
+		AllocatorFuncs:           []string{"Zeros"},
+		SelectorPromotionSymbols: []string{"selectKernel"},
+		ElementCountMethods:      nil, // stays nil after compile
 	}
 	sets := c.Compile()
+	if sets.CacheLineBytes != 128 {
+		t.Errorf("Compile lost cache line size: %d", sets.CacheLineBytes)
+	}
 	if !sets.ElementAccessors["AtF64"] || !sets.ElementAccessors["SetF64"] {
 		t.Errorf("Compile lost element accessors: %v", sets.ElementAccessors)
 	}
 	if !sets.AllocatorFuncs["Zeros"] {
 		t.Errorf("Compile lost allocator funcs: %v", sets.AllocatorFuncs)
+	}
+	if !sets.SelectorPromotionSymbols["selectKernel"] {
+		t.Errorf("Compile lost selector promotion symbols: %v", sets.SelectorPromotionSymbols)
 	}
 	if sets.ElementCountMethods != nil {
 		t.Errorf("empty field must compile to a nil set, got %v", sets.ElementCountMethods)
@@ -43,12 +51,12 @@ func TestLoad(t *testing.T) {
 
 	// Valid YAML round-trips into the typed config.
 	good := filepath.Join(dir, "perfscan.yaml")
-	os.WriteFile(good, []byte("elementAccessors: [AtF64, SetF64]\nallocatorFuncs: [Zeros]\n"), 0o644)
+	os.WriteFile(good, []byte("cacheLineBytes: 128\nelementAccessors: [AtF64, SetF64]\nallocatorFuncs: [Zeros]\n"), 0o644)
 	c, err := Load(good)
 	if err != nil {
 		t.Fatalf("Load(valid) error: %v", err)
 	}
-	if len(c.ElementAccessors) != 2 || c.ElementAccessors[0] != "AtF64" || c.AllocatorFuncs[0] != "Zeros" {
+	if c.CacheLineBytes != 128 || len(c.ElementAccessors) != 2 || c.ElementAccessors[0] != "AtF64" || c.AllocatorFuncs[0] != "Zeros" {
 		t.Errorf("Load parsed wrong config: %+v", c)
 	}
 
@@ -121,7 +129,10 @@ func TestDiscover(t *testing.T) {
 }
 
 func TestSetForTesting(t *testing.T) {
-	restore := SetForTesting(Config{FanOutHelpers: []string{"parallelFor"}})
+	restore := SetForTesting(Config{CacheLineBytes: 128, FanOutHelpers: []string{"parallelFor"}})
+	if Current().CacheLineBytes != 128 {
+		t.Error("SetForTesting did not install numeric tuning")
+	}
 	if !Current().FanOutHelpers["parallelFor"] {
 		t.Error("SetForTesting did not install the vocabulary")
 	}
@@ -144,7 +155,7 @@ func TestUnknownKeys(t *testing.T) {
 	}
 
 	// All-known config -> no unknowns.
-	os.WriteFile(p, []byte("elementAccessors: [A]\nfanOutHelpers: [F]\n"), 0o644)
+	os.WriteFile(p, []byte("_comment: metadata\nelementAccessors: [A]\nfanOutHelpers: [F]\n"), 0o644)
 	if got := UnknownKeys(p); len(got) != 0 {
 		t.Errorf("UnknownKeys(all known) = %v, want none", got)
 	}
@@ -157,6 +168,51 @@ func TestUnknownKeys(t *testing.T) {
 	os.WriteFile(seq, []byte("- a\n- b\n"), 0o644)
 	if got := UnknownKeys(seq); got != nil {
 		t.Errorf("UnknownKeys(non-mapping) = %v, want nil", got)
+	}
+}
+
+func TestGoAICurrentVocabularyCompatibility(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "perfscan.json")
+	data := []byte(`{
+  "_comment": "schema compatibility fixture",
+	"cacheLineBytes": 128,
+  "pureComputeFuncs": ["forward"],
+  "layoutOpConstants": ["OpSlice", "OpConcat"],
+  "pointerTypeNames": ["Tensor", "Storage"],
+  "variadicDispatchWrappers": ["exec", "visExecN"],
+  "topKSelectorFuncs": ["topKIndices"],
+  "inputViewFuncs": ["f64Data", "f32Data"],
+  "outputViewFuncs": ["outF64", "outF32"],
+  "referenceBackendPkg": "ref",
+  "optimizedBackendPkgs": ["cpu"],
+  "kernelRegisterFuncs": ["add"]
+}`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if unknown := UnknownKeys(path); len(unknown) != 0 {
+		t.Fatalf("current GoAI vocabulary has unknown keys: %v", unknown)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(current GoAI vocabulary): %v", err)
+	}
+	if cfg.Comment == "" || cfg.CacheLineBytes != 128 || cfg.ReferenceBackendPkg != "ref" ||
+		len(cfg.PureComputeFuncs) != 1 || len(cfg.LayoutOpConstants) != 2 ||
+		len(cfg.PointerTypeNames) != 2 || len(cfg.VariadicDispatchWrappers) != 2 ||
+		len(cfg.TopKSelectorFuncs) != 1 || len(cfg.InputViewFuncs) != 2 ||
+		len(cfg.OutputViewFuncs) != 2 || len(cfg.OptimizedBackendPkgs) != 1 ||
+		len(cfg.KernelRegisterFuncs) != 1 {
+		t.Fatalf("current GoAI vocabulary did not round-trip: %+v", cfg)
+	}
+	sets := cfg.Compile()
+	if sets.CacheLineBytes != 128 || !sets.PureComputeFuncs["forward"] || !sets.LayoutOpConstants["OpSlice"] ||
+		!sets.PointerTypeNames["Tensor"] || !sets.VariadicDispatchWrappers["exec"] ||
+		!sets.TopKSelectorFuncs["topKIndices"] || !sets.InputViewFuncs["f64Data"] ||
+		!sets.OutputViewFuncs["outF64"] || sets.ReferenceBackendPkg != "ref" ||
+		!sets.OptimizedBackendPkgs["cpu"] || !sets.KernelRegisterFuncs["add"] {
+		t.Fatalf("Compile lost current GoAI vocabulary: %+v", sets)
 	}
 }
 
@@ -174,15 +230,28 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 	}
 	fields := map[string]int{
 		"ElementAccessors": len(c.ElementAccessors), "FastPathHelpers": len(c.FastPathHelpers),
-		"ElementCountMethods": len(c.ElementCountMethods), "ShapeMethods": len(c.ShapeMethods),
+		"SelectorPromotionSymbols": len(c.SelectorPromotionSymbols),
+		"ElementCountMethods":      len(c.ElementCountMethods), "ShapeMethods": len(c.ShapeMethods),
 		"IndexDecomposeFuncs": len(c.IndexDecomposeFuncs), "AllocatorFuncs": len(c.AllocatorFuncs),
 		"PerElementVisitors": len(c.PerElementVisitors), "BulkCopyHelpers": len(c.BulkCopyHelpers),
 		"VectorizedSiblingFuncs": len(c.VectorizedSiblingFuncs), "FanOutHelpers": len(c.FanOutHelpers),
-		"DtypeMethods": len(c.DtypeMethods),
+		"DtypeMethods": len(c.DtypeMethods), "OutputBufferElemTypes": len(c.OutputBufferElemTypes),
+		"CompiledResourceFuncs": len(c.CompiledResourceFuncs), "GPUReductionKernels": len(c.GPUReductionKernels),
+		"PureComputeFuncs": len(c.PureComputeFuncs), "LayoutOpConstants": len(c.LayoutOpConstants),
+		"PointerTypeNames": len(c.PointerTypeNames), "VariadicDispatchWrappers": len(c.VariadicDispatchWrappers),
+		"TopKSelectorFuncs": len(c.TopKSelectorFuncs), "InputViewFuncs": len(c.InputViewFuncs),
+		"OutputViewFuncs": len(c.OutputViewFuncs), "OptimizedBackendPkgs": len(c.OptimizedBackendPkgs),
+		"KernelRegisterFuncs": len(c.KernelRegisterFuncs),
 	}
 	for name, n := range fields {
 		if n == 0 {
 			t.Errorf("example config leaves %s empty; the template should exercise every field", name)
 		}
+	}
+	if c.Comment == "" || c.ReferenceBackendPkg == "" {
+		t.Errorf("example config must populate _comment and referenceBackendPkg")
+	}
+	if c.CacheLineBytes <= 0 {
+		t.Errorf("example config must populate cacheLineBytes")
 	}
 }

@@ -1,0 +1,59 @@
+package ps5079
+
+import (
+	"bytes"
+	"strings"
+)
+
+const empty = ""
+
+func stringDeep(s string) string {
+	return strings.Trim(strings.TrimPrefix(strings.TrimSuffix(strings.TrimLeft(s, ""), empty), ""), "") // want `4 adjacent strings boundary operation\(s\) use an empty prefix`
+}
+
+func stringOne(s string) string {
+	return strings.TrimRight(s, "") // want `1 adjacent strings boundary operation\(s\) use an empty prefix`
+}
+
+func byteDeep(b []byte) []byte {
+	return bytes.TrimPrefix(bytes.TrimRight(bytes.TrimSuffix(b, nil), ""), []byte{}) // want `3 adjacent bytes boundary operation\(s\) use an empty prefix`
+}
+
+func byteConversion(b []byte) []byte {
+	return bytes.TrimSuffix(b, []byte("")) // want `1 adjacent bytes boundary operation\(s\) use an empty prefix`
+}
+
+// A comment in deleted scaffolding keeps the report advisory.
+func commented(s string) string {
+	return strings.Trim( /* retain */ s, "") // want `1 adjacent strings boundary operation\(s\) use an empty prefix`
+}
+
+// Removing this call would leave the local constant unused.
+func orphanLocal(s string) string {
+	const local = ""
+	return strings.Trim(s, local) // want `1 adjacent strings boundary operation\(s\) use an empty prefix`
+}
+
+// --- negatives ---
+
+func nonempty(s string) string { return strings.Trim(s, "x") }
+
+func dynamic(s, cutset string) string { return strings.Trim(s, cutset) }
+
+func dynamicBytes(b, prefix []byte) []byte { return bytes.TrimPrefix(b, prefix) }
+
+func madeBytes(b []byte) []byte { return bytes.TrimPrefix(b, make([]byte, 0)) }
+
+func headerChangingTrim(b []byte) []byte { return bytes.Trim(b, "") }
+
+func headerChangingTrimLeft(b []byte) []byte { return bytes.TrimLeft(b, "") }
+
+func Trim(s, cutset string) string { return s }
+
+func shadowed(s string) string { return Trim(s, "") }
+
+type trimmer string
+
+func (t trimmer) Trim(string) trimmer { return t }
+
+func method(t trimmer) trimmer { return t.Trim("") }

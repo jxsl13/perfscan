@@ -1,0 +1,70 @@
+package ps5114
+
+import (
+	"path"
+	"path/filepath"
+)
+
+func clean(name string) string {
+	return filepath.FromSlash(filepath.Clean(name)) // want `filepath.FromSlash rescans the already-native result of filepath.Clean through 1 redundant FromSlash layer`
+}
+
+func join(root, tail string) string {
+	return filepath.FromSlash(filepath.Join(root, tail)) // want `filepath.FromSlash rescans the already-native result of filepath.Join through 1 redundant FromSlash layer`
+}
+
+func emptyJoin() string {
+	return filepath.FromSlash(filepath.Join()) // want `filepath.FromSlash rescans the already-native result of filepath.Join through 1 redundant FromSlash layer`
+}
+
+func spreadJoin(parts []string) string {
+	return filepath.FromSlash(filepath.Join(parts...)) // want `filepath.FromSlash rescans the already-native result of filepath.Join through 1 redundant FromSlash layer`
+}
+
+func dir(name string) string {
+	return filepath.FromSlash(filepath.Dir(name)) // want `filepath.FromSlash rescans the already-native result of filepath.Dir through 1 redundant FromSlash layer`
+}
+
+func base(name string) string {
+	return filepath.FromSlash((filepath.Base(name))) // want `filepath.FromSlash rescans the already-native result of filepath.Base through 1 redundant FromSlash layer`
+}
+
+func ext(name string) string {
+	return filepath.FromSlash(filepath.Ext(name)) // want `filepath.FromSlash rescans the already-native result of filepath.Ext through 1 redundant FromSlash layer`
+}
+
+func volume(name string) string {
+	return filepath.FromSlash(filepath.VolumeName(name)) // want `filepath.FromSlash rescans the already-native result of filepath.VolumeName through 1 redundant FromSlash layer`
+}
+
+func deep(name string) string {
+	return filepath.FromSlash(filepath.FromSlash(filepath.FromSlash(filepath.Clean(name)))) // want `filepath.FromSlash rescans the already-native result of filepath.Clean through 3 redundant FromSlash layer`
+}
+
+// ToSlash chooses a different representation on Windows. Functions outside
+// the proven producer set and the path package are not interchangeable.
+func toSlash(name string) string { return filepath.FromSlash(filepath.ToSlash(name)) }
+func splitList(name string) []string {
+	return filepath.SplitList(filepath.Clean(name))
+}
+func pathPackage(name string) string { return filepath.FromSlash(path.Clean(name)) }
+
+func functionValue(name string) string {
+	from := filepath.FromSlash
+	return from(filepath.Clean(name))
+}
+
+func producerValue(name string) string {
+	clean := filepath.Clean
+	return filepath.FromSlash(clean(name))
+}
+
+type fakeFilepath struct{}
+
+func (fakeFilepath) FromSlash(name string) string { return name }
+func (fakeFilepath) Clean(name string) string     { return name }
+
+func shadowed(name string) string {
+	filepath := fakeFilepath{}
+	return filepath.FromSlash(filepath.Clean(name))
+}

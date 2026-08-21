@@ -33,9 +33,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the project vocabulary for domain checks. All fields are
-// optional; an empty field silences the checks that depend on it.
+// Config is the project vocabulary and target tuning for perfscan checks.
+// Vocabulary fields are optional; an empty vocabulary field silences the
+// domain checks that depend on it. Numeric tuning fields use documented
+// conservative defaults when omitted.
 type Config struct {
+	// Comment is human-readable metadata accepted for JSON/YAML configuration
+	// files. It never feeds an analyzer, but allowing it lets repositories
+	// explain why a vocabulary exists without triggering an unknown-key warning.
+	Comment string `json:"_comment,omitempty" yaml:"_comment"`
+
+	// CacheLineBytes is the target data-cache line size used by locality
+	// advisories such as PS6075. Zero selects the portable conservative default
+	// of 64 bytes; Apple M-series campaigns should normally set 128.
+	CacheLineBytes int `json:"cacheLineBytes,omitempty" yaml:"cacheLineBytes"`
+
 	// ElementAccessors are per-element get/set methods (e.g. At/Set — a tensor
 	// library might name them AtF64/SetF64) whose per-call dispatch inside hot
 	// loops PS1xxx checks report.
@@ -46,6 +58,12 @@ type Config struct {
 	// comma-ok helper missing from the list makes the per-element checks
 	// report the very fallback the fast path exists to guard.
 	FastPathHelpers []string `json:"fastPathHelpers,omitempty" yaml:"fastPathHelpers"`
+
+	// SelectorPromotionSymbols are production fast-path selectors, default
+	// toggles, or selected kernel entry points whose appearance in a repeated
+	// leaf benchmark PS6006 reports. The opt-in distinguishes promotion-bearing
+	// symbols from ordinary helpers and requires resident integration evidence.
+	SelectorPromotionSymbols []string `json:"selectorPromotionSymbols,omitempty" yaml:"selectorPromotionSymbols"`
 
 	// ElementCountMethods are methods whose result used as a loop bound
 	// marks the loop as per-element (e.g. Len, Size, Count).
@@ -78,8 +96,9 @@ type Config struct {
 	VectorizedSiblingFuncs []string `json:"vectorizedSiblingFuncs,omitempty" yaml:"vectorizedSiblingFuncs"`
 
 	// FanOutHelpers are the project's parallel fan-out entry points
-	// (e.g. parallel.For); PS3xxx serial-nest checks report loops in
-	// packages that declare one but leave a hot nest serial.
+	// (e.g. parallel.For). PS3xxx checks inspect serial work and closure
+	// escapes around them; PS6076 detects range-invariant packing repeated by
+	// every callback band.
 	FanOutHelpers []string `json:"fanOutHelpers,omitempty" yaml:"fanOutHelpers"`
 
 	// DtypeMethods are element-type discriminator methods (e.g. Dtype, Kind)
@@ -117,24 +136,71 @@ type Config struct {
 	// is the wrong choice is shape/dtype/device-dependent and cannot be judged
 	// from source alone. With none listed PS7001 stays silent.
 	GPUReductionKernels []string `json:"gpuReductionKernels,omitempty" yaml:"gpuReductionKernels"`
+
+	// PureComputeFuncs are project helpers known to perform computation without
+	// changing tensor layout or ownership. Graph/dispatch checks use the set to
+	// distinguish real compute stages from wrappers and movement operations.
+	PureComputeFuncs []string `json:"pureComputeFuncs,omitempty" yaml:"pureComputeFuncs"`
+
+	// LayoutOpConstants are operation constants that denote layout/view or
+	// movement boundaries such as Slice, Reshape, Transpose, and Concat.
+	LayoutOpConstants []string `json:"layoutOpConstants,omitempty" yaml:"layoutOpConstants"`
+
+	// PointerTypeNames are project types whose pointer identity or aliasing is
+	// semantically meaningful to ownership and materialization checks.
+	PointerTypeNames []string `json:"pointerTypeNames,omitempty" yaml:"pointerTypeNames"`
+
+	// VariadicDispatchWrappers are helpers whose variadic operands fan into one
+	// backend dispatch. They let graph checks see through repository wrappers.
+	VariadicDispatchWrappers []string `json:"variadicDispatchWrappers,omitempty" yaml:"variadicDispatchWrappers"`
+
+	// TopKSelectorFuncs are repository selectors that consume only a small
+	// ranked subset of a larger device result.
+	TopKSelectorFuncs []string `json:"topKSelectorFuncs,omitempty" yaml:"topKSelectorFuncs"`
+
+	// InputViewFuncs and OutputViewFuncs expose repository-specific typed views
+	// over input and destination storage respectively.
+	InputViewFuncs  []string `json:"inputViewFuncs,omitempty" yaml:"inputViewFuncs"`
+	OutputViewFuncs []string `json:"outputViewFuncs,omitempty" yaml:"outputViewFuncs"`
+
+	// ReferenceBackendPkg names the scalar/reference backend package, while
+	// OptimizedBackendPkgs name production optimized backend packages.
+	ReferenceBackendPkg  string   `json:"referenceBackendPkg,omitempty" yaml:"referenceBackendPkg"`
+	OptimizedBackendPkgs []string `json:"optimizedBackendPkgs,omitempty" yaml:"optimizedBackendPkgs"`
+
+	// KernelRegisterFuncs are repository functions that register an operation,
+	// dtype, backend, and implementation in a kernel table.
+	KernelRegisterFuncs []string `json:"kernelRegisterFuncs,omitempty" yaml:"kernelRegisterFuncs"`
 }
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
 type Sets struct {
-	ElementAccessors       map[string]bool
-	FastPathHelpers        map[string]bool
-	ElementCountMethods    map[string]bool
-	ShapeMethods           map[string]bool
-	IndexDecomposeFuncs    map[string]bool
-	AllocatorFuncs         map[string]bool
-	PerElementVisitors     map[string]bool
-	BulkCopyHelpers        map[string]bool
-	VectorizedSiblingFuncs map[string]bool
-	FanOutHelpers          map[string]bool
-	DtypeMethods           map[string]bool
-	OutputBufferElemTypes  map[string]bool
-	CompiledResourceFuncs  map[string]bool
-	GPUReductionKernels    map[string]bool
+	CacheLineBytes           int
+	ElementAccessors         map[string]bool
+	FastPathHelpers          map[string]bool
+	SelectorPromotionSymbols map[string]bool
+	ElementCountMethods      map[string]bool
+	ShapeMethods             map[string]bool
+	IndexDecomposeFuncs      map[string]bool
+	AllocatorFuncs           map[string]bool
+	PerElementVisitors       map[string]bool
+	BulkCopyHelpers          map[string]bool
+	VectorizedSiblingFuncs   map[string]bool
+	FanOutHelpers            map[string]bool
+	DtypeMethods             map[string]bool
+	OutputBufferElemTypes    map[string]bool
+	CompiledResourceFuncs    map[string]bool
+	GPUReductionKernels      map[string]bool
+	PureComputeFuncs         map[string]bool
+	LayoutOpConstants        map[string]bool
+	PointerTypeNames         map[string]bool
+	VariadicDispatchWrappers map[string]bool
+	TopKSelectorFuncs        map[string]bool
+	InputViewFuncs           map[string]bool
+	OutputViewFuncs          map[string]bool
+	ReferenceBackendPkg      string
+	OptimizedBackendPkgs     map[string]bool
+	KernelRegisterFuncs      map[string]bool
 }
 
 func toSet(xs []string) map[string]bool {
@@ -149,22 +215,34 @@ func toSet(xs []string) map[string]bool {
 }
 
 // Compile converts the config into set form.
-func (c Config) Compile() Sets {
+func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep the public value API source-compatible
 	return Sets{
-		ElementAccessors:       toSet(c.ElementAccessors),
-		FastPathHelpers:        toSet(c.FastPathHelpers),
-		ElementCountMethods:    toSet(c.ElementCountMethods),
-		ShapeMethods:           toSet(c.ShapeMethods),
-		IndexDecomposeFuncs:    toSet(c.IndexDecomposeFuncs),
-		AllocatorFuncs:         toSet(c.AllocatorFuncs),
-		PerElementVisitors:     toSet(c.PerElementVisitors),
-		BulkCopyHelpers:        toSet(c.BulkCopyHelpers),
-		VectorizedSiblingFuncs: toSet(c.VectorizedSiblingFuncs),
-		FanOutHelpers:          toSet(c.FanOutHelpers),
-		DtypeMethods:           toSet(c.DtypeMethods),
-		OutputBufferElemTypes:  toSet(c.OutputBufferElemTypes),
-		CompiledResourceFuncs:  toSet(c.CompiledResourceFuncs),
-		GPUReductionKernels:    toSet(c.GPUReductionKernels),
+		CacheLineBytes:           c.CacheLineBytes,
+		ElementAccessors:         toSet(c.ElementAccessors),
+		FastPathHelpers:          toSet(c.FastPathHelpers),
+		SelectorPromotionSymbols: toSet(c.SelectorPromotionSymbols),
+		ElementCountMethods:      toSet(c.ElementCountMethods),
+		ShapeMethods:             toSet(c.ShapeMethods),
+		IndexDecomposeFuncs:      toSet(c.IndexDecomposeFuncs),
+		AllocatorFuncs:           toSet(c.AllocatorFuncs),
+		PerElementVisitors:       toSet(c.PerElementVisitors),
+		BulkCopyHelpers:          toSet(c.BulkCopyHelpers),
+		VectorizedSiblingFuncs:   toSet(c.VectorizedSiblingFuncs),
+		FanOutHelpers:            toSet(c.FanOutHelpers),
+		DtypeMethods:             toSet(c.DtypeMethods),
+		OutputBufferElemTypes:    toSet(c.OutputBufferElemTypes),
+		CompiledResourceFuncs:    toSet(c.CompiledResourceFuncs),
+		GPUReductionKernels:      toSet(c.GPUReductionKernels),
+		PureComputeFuncs:         toSet(c.PureComputeFuncs),
+		LayoutOpConstants:        toSet(c.LayoutOpConstants),
+		PointerTypeNames:         toSet(c.PointerTypeNames),
+		VariadicDispatchWrappers: toSet(c.VariadicDispatchWrappers),
+		TopKSelectorFuncs:        toSet(c.TopKSelectorFuncs),
+		InputViewFuncs:           toSet(c.InputViewFuncs),
+		OutputViewFuncs:          toSet(c.OutputViewFuncs),
+		ReferenceBackendPkg:      c.ReferenceBackendPkg,
+		OptimizedBackendPkgs:     toSet(c.OptimizedBackendPkgs),
+		KernelRegisterFuncs:      toSet(c.KernelRegisterFuncs),
 	}
 }
 
@@ -259,13 +337,15 @@ func Discover(dir string) (Config, string) {
 var current Sets
 
 // Set installs the active vocabulary.
-func Set(s Sets) { current = s }
+func Set(s Sets) { //perfscan:ignore PS3106 one startup copy; keep the public value API source-compatible
+	current = s
+}
 
 // Current returns the active vocabulary.
 func Current() Sets { return current }
 
 // SetForTesting installs a vocabulary and returns a restore func.
-func SetForTesting(c Config) func() {
+func SetForTesting(c Config) func() { //perfscan:ignore PS3106 test-only convenience intentionally accepts struct literals
 	prev := current
 	current = c.Compile()
 	return func() { current = prev }

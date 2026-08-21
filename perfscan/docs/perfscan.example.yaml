@@ -15,6 +15,14 @@
 # The n-dimensional-data fields (shapeMethods, indexDecomposeFuncs, dtypeMethods)
 # are only meaningful for tensor/array libraries — omit them otherwise.
 
+# Optional human-readable metadata. It is accepted by the schema but never fed
+# to an analyzer.
+_comment: Replace every placeholder below with this repository's vocabulary.
+
+# Target data-cache line size used by locality advisories. Omit for the
+# conservative 64-byte default; Apple M-series CPUs use 128-byte cache lines.
+cacheLineBytes: 128
+
 # Per-element getter/setter methods whose per-call dispatch inside a hot loop the
 # PS1xxx checks report. (matrix lib: At/Set — tensor lib: AtF64/SetF64)
 elementAccessors:
@@ -27,6 +35,18 @@ elementAccessors:
 fastPathHelpers:
   - flatSlice
   - rawData
+
+# Production selector helpers, default toggles, or selected kernel entry points
+# whose use in a repeated leaf benchmark PS6006 audits. List only symbols whose
+# promotion changes a production GPU/accelerator path; a finding asks for an
+# order-alternating resident integration benchmark, not another leaf timing.
+selectorPromotionSymbols:
+  - selectKernel
+  - useFusedAttention
+  # Optional trusted caller-level promotion contract used by PS6054. Keep the
+  # plain symbol above for other selector checks; quote contracts because they
+  # contain YAML-significant punctuation.
+  - "selectKernel=>BenchmarkPipelineEndToEnd|samples=10|independent|alternating|equivalent-outputs|retained-shapes<=0.5%"
 
 # Methods whose result is used as a loop bound, marking the loop as per-element.
 # (e.g. Len, Size, Count)
@@ -64,8 +84,9 @@ bulkCopyHelpers:
 vectorizedSiblingFuncs:
   - vExp
 
-# The project's parallel fan-out entry points; the PS3xxx serial-nest checks
-# report a hot serial nest in a package that declares one. (e.g. parallel.For)
+# The project's parallel fan-out entry points. PS3xxx checks inspect serial
+# work and closure escapes around them; PS6076 detects invariant packing
+# repeated by every callback band. (e.g. parallel.For)
 fanOutHelpers:
   - parallel.For
 
@@ -102,13 +123,53 @@ compiledResourceFuncs:
 gpuReductionKernels:
   - matvec_q4k
 
+# Helpers known to perform computation without changing tensor layout or
+# ownership. Graph checks use these to distinguish compute from movement.
+pureComputeFuncs:
+  - forward
+
+# Operation constants that represent layout/view or movement boundaries.
+layoutOpConstants:
+  - OpSlice
+  - OpConcat
+
+# Project types whose pointer identity or aliasing matters to ownership checks.
+pointerTypeNames:
+  - Tensor
+  - Storage
+
+# Variadic wrappers that submit their operands as one backend dispatch.
+variadicDispatchWrappers:
+  - exec
+
+# Selectors that consume only a small ranked subset of a larger device result.
+topKSelectorFuncs:
+  - topKIndices
+
+# Helpers exposing typed input views and caller-owned output views.
+inputViewFuncs:
+  - f64Data
+outputViewFuncs:
+  - outF64
+
+# Reference backend package and optimized production backend packages.
+referenceBackendPkg: ref
+optimizedBackendPkgs:
+  - cpu
+
+# Functions that register operation/dtype/backend implementations.
+kernelRegisterFuncs:
+  - registerKernel
+
 # ---------------------------------------------------------------------------
-# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 14
+# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 26
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the
 # names:
 #
+#   cacheLineBytes:        128
 #   elementAccessors:       [AtF64, SetF64]
 #   fastPathHelpers:        [flatF64, flatF32, flatContig, F64, F32]
+#   selectorPromotionSymbols: [selectAttentionKernel, useSplitK, "selectAttentionKernel=>BenchmarkDecodeEndToEnd|samples=10|independent|alternating|equivalent-outputs|retained-shapes<=0.5%"]
 #   elementCountMethods:    [Numel]
 #   shapeMethods:           [Shape]
 #   indexDecomposeFuncs:    [Unravel]
@@ -121,4 +182,14 @@ gpuReductionKernels:
 #   outputBufferElemTypes:  [float64, float32]
 #   compiledResourceFuncs:  [NewMPSGraph, compilePipeline, buildProgram]
 #   gpuReductionKernels:    [matvec_q4k, mul_mat_vec_q4_K_f32]
+#   pureComputeFuncs:       [forward]
+#   layoutOpConstants:      [OpSlice, OpReshape, OpTranspose, OpConcat]
+#   pointerTypeNames:       [Shape, Strides, Tensor, Storage, Device, Context]
+#   variadicDispatchWrappers: [bitExec, exec, hcExec, rdropExec, visExecN]
+#   topKSelectorFuncs:      [topKIndices]
+#   inputViewFuncs:         [f64Data, f32Data]
+#   outputViewFuncs:        [outF64, outF32]
+#   referenceBackendPkg:    ref
+#   optimizedBackendPkgs:   [cpu]
+#   kernelRegisterFuncs:    [add]
 # ---------------------------------------------------------------------------

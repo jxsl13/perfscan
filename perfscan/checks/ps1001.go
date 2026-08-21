@@ -67,7 +67,7 @@ func runPS1001(pass *analysis.Pass) (any, error) {
 			if !ok || fn.Body == nil {
 				continue
 			}
-			ff := collectFuncFacts(fn, ns)
+			ff := collectFuncFacts(fn, &ns)
 			if ff.hasFlat {
 				continue
 			}

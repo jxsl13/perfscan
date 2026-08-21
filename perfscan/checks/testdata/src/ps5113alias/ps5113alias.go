@@ -1,0 +1,7 @@
+package ps5113alias
+
+import fp "path/filepath"
+
+func normalize(path string) string {
+	return fp.FromSlash(fp.ToSlash(fp.FromSlash(path))) // want `filepath.FromSlash absorbs 2 nested ToSlash/FromSlash layer`
+}

@@ -1,0 +1,7 @@
+package ps5115alias
+
+import text "strings"
+
+func sanitize(payload string) string {
+	return text.ToValidUTF8(payload, "?") // want `strings.ToValidUTF8 is applied 3 times even though the retained call's valid replacement already guarantees valid UTF-8`
+}

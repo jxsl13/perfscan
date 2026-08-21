@@ -1,0 +1,69 @@
+package ps5093
+
+import (
+	"bytes"
+	"strings"
+)
+
+func stringLen(text string) int {
+	return len(text) // want "strings.NewReader[(]...[)].Len constructs an ephemeral container only to recover its input length and carries 2 throwaway Clone layer"
+}
+
+func stringSize(text string) int64 {
+	return int64(len(text)) // want "strings.NewReader[(]...[)].Size constructs an ephemeral container only to recover its input length and carries 1 throwaway Clone layer"
+}
+
+func byteReaderLen(data []byte) int {
+	return len(data) // want "bytes.NewReader[(]...[)].Len constructs an ephemeral container only to recover its input length and carries 3 throwaway Clone layer"
+}
+
+func byteReaderSize(data []byte) int64 {
+	return int64(len(data)) // want "bytes.NewReader[(]...[)].Size constructs an ephemeral container only to recover its input length and carries 1 throwaway Clone layer"
+}
+
+func bufferLen(data []byte) int {
+	return len(data) // want "bytes.NewBuffer[(]...[)].Len constructs an ephemeral container only to recover its input length and carries 1 throwaway Clone layer"
+}
+
+func bufferStringLen(text string) int {
+	return len(text) // want "bytes.NewBufferString[(]...[)].Len constructs an ephemeral container only to recover its input length and carries 1 throwaway Clone layer"
+}
+
+func conversionSize(text string) int64 {
+	return int64(len(text)) // want "bytes.NewReader[(]...[)].Size constructs an ephemeral container only to recover its input length and carries 3 throwaway Clone layer"
+}
+
+func commentPreserved(text string) int {
+	return strings.NewReader( /* constructor rationale */ strings.Clone(text)).Len() // want "strings.NewReader[(]...[)].Len constructs an ephemeral container only to recover its input length and carries 1 throwaway Clone layer"
+}
+
+// Constant string inputs are excluded to preserve runtime-expression
+// constantness in every source context.
+func constantString() int {
+	return strings.NewReader("constant").Len()
+}
+
+func untypedNil() int {
+	return bytes.NewReader(nil).Len()
+}
+
+func readerUsedBeforeLen(text string) int {
+	reader := strings.NewReader(strings.Clone(text))
+	_, _ = reader.ReadByte()
+	return reader.Len()
+}
+
+type reader struct{}
+
+func (reader) Len() int { return 0 }
+
+func NewReader(string) reader { return reader{} }
+
+func userConstructor(text string) int {
+	return NewReader(strings.Clone(text)).Len()
+}
+
+func functionValue(text string) int {
+	constructor := strings.NewReader
+	return constructor(strings.Clone(text)).Len()
+}

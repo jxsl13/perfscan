@@ -1,0 +1,11 @@
+package ps5099alias
+
+import stream "io"
+
+func read(a, b, c stream.Reader, buffer []byte) (int, error) {
+	return stream.ReadFull(stream.MultiReader(a, b, c), buffer) // want "io.ReadFull consumes only the flattened behavior of io.MultiReader; 1 nested adapter"
+}
+
+func write(a, b, c stream.Writer, text string) (int, error) {
+	return stream.WriteString(stream.MultiWriter(a, b, c), text) // want "io.WriteString consumes only the flattened behavior of io.MultiWriter; 1 nested adapter"
+}

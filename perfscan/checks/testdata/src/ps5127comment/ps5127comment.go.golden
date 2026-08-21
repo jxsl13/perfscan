@@ -1,0 +1,33 @@
+package ps5127comment
+
+import (
+	"strings"
+	"unicode/utf8"
+)
+
+func guardComment(value string) string {
+	// want +1 `utf8.ValidString scans before strings.ToValidUTF8 repeats validation and repair`
+	if !utf8.ValidString(value /* retain validation rationale */) {
+		return strings.ToValidUTF8(value, "?")
+	}
+	return value
+}
+
+func fallbackComment(value string) string {
+	// want +1 `utf8.ValidString scans before strings.ToValidUTF8 repeats validation and repair`
+	if !utf8.ValidString(value) {
+		return strings.ToValidUTF8(value, "?")
+	}
+	return value // retain valid-path rationale
+}
+
+func localGuardInput(value string) string {
+	guardInput := value
+	// want +1 `utf8.ValidString scans before strings.ToValidUTF8 repeats validation and repair`
+	return strings.ToValidUTF8(guardInput, "?")
+}
+
+func keptComment(value string) string {
+	// want +1 `utf8.ValidString scans before strings.ToValidUTF8 repeats validation and repair`
+	return strings.ToValidUTF8(value, "?" /* retain replacement rationale */)
+}

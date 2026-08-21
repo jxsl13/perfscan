@@ -89,7 +89,8 @@ func emitSARIF(w io.Writer, findings []Finding) {
 	ruleIndex := make(map[string]int, len(findings))
 	rules := make([]sarifRule, 0, len(findings))
 	results := make([]sarifResult, 0, len(findings))
-	for _, f := range findings {
+	for i := range findings {
+		f := &findings[i]
 		if _, ok := ruleIndex[f.Check.ID]; !ok {
 			ruleIndex[f.Check.ID] = len(rules)
 			rules = append(rules, sarifRule{

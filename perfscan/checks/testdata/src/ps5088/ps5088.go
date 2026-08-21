@@ -1,0 +1,57 @@
+package ps5088
+
+import (
+	"bytes"
+	"regexp"
+	"slices"
+	"strings"
+)
+
+func packageBytes(pattern string, subject []byte) (bool, error) {
+	return regexp.Match(pattern, bytes.Clone(slices.Clone(bytes.Clone(subject)))) // want `regexp.Match returns only match status but scans 3 throwaway Clone layer`
+}
+
+func methodBytes(compiled *regexp.Regexp, subject []byte) bool {
+	return compiled.Match(slices.Clone(subject)) // want `regexp.Match returns only match status but scans 1 throwaway Clone layer`
+}
+
+func packageString(pattern, subject string) (bool, error) {
+	return regexp.MatchString(pattern, strings.Clone(strings.Clone(subject))) // want `regexp.MatchString returns only match status but scans 2 throwaway Clone layer`
+}
+
+func methodString(compiled *regexp.Regexp, subject string) bool {
+	return compiled.MatchString(strings.Clone(subject)) // want `regexp.MatchString returns only match status but scans 1 throwaway Clone layer`
+}
+
+func commentPreserved(compiled *regexp.Regexp, subject []byte) bool {
+	return compiled.Match(bytes.Clone( /* snapshot rationale */ subject)) // want `regexp.Match returns only match status but scans 1 throwaway Clone layer`
+}
+
+// A syntax error may retain the pattern, so this Clone is not removed.
+func clonedPattern(pattern, subject string) (bool, error) {
+	return regexp.MatchString(strings.Clone(pattern), subject)
+}
+
+// Find methods expose input-backed results.
+func findBytes(compiled *regexp.Regexp, subject []byte) []byte {
+	return compiled.Find(bytes.Clone(subject))
+}
+
+func findString(compiled *regexp.Regexp, subject string) string {
+	return compiled.FindString(strings.Clone(subject))
+}
+
+type matcher struct{}
+
+func (matcher) Match(subject []byte) bool { return len(subject) != 0 }
+
+func userMethod(value matcher, subject []byte) bool {
+	return value.Match(bytes.Clone(subject))
+}
+
+func methodValue(compiled *regexp.Regexp, subject []byte) bool {
+	match := compiled.Match
+	return match(bytes.Clone(subject))
+}
+
+var _ = []any{packageBytes, methodBytes, packageString, methodString, commentPreserved, clonedPattern, findBytes, findString, userMethod, methodValue}

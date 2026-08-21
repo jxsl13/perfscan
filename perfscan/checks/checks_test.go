@@ -121,7 +121,7 @@ func TestPS4101(t *testing.T) {
 }
 
 func TestPS2004(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), PS2004.Analyzer, "ps2004")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2004.Analyzer, "ps2004", "ps2004cgo")
 }
 
 func TestPS2007(t *testing.T) {

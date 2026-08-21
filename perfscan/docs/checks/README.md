@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**248 checks total** — **211 with a bit-identical auto-fix**, 37 advisory. By fix level: **195 L1** (idiomatic), **37 L2** (structured), **16 L3** (aggressive).
+**373 checks total** — **262 with a bit-identical auto-fix**, 111 advisory. By fix level: **245 L1** (idiomatic), **109 L2** (structured), **19 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -27,7 +27,7 @@ checks' fixes.
 | [PS2001](PS2001.md) | alloc | L2 |  | a project allocation entry point called inside a loop |
 | [PS2002](PS2002.md) | alloc | L1 | yes | a strings.Builder/bytes.Buffer written in a loop with no Grow |
 | [PS2003](PS2003.md) | alloc | L1 | yes | an allocating strings transform (Replace/Map/Repeat) in a loop |
-| [PS2004](PS2004.md) | alloc | L2 |  | per-call scratch make() bound to a non-escaping local in a pointer-method loop |
+| [PS2004](PS2004.md) | alloc | L2 | yes | per-call scratch make() bound to a non-escaping local in a pointer-method loop |
 | [PS2005](PS2005.md) | alloc | L1 | yes | a regexp.Compile/MustCompile inside a loop |
 | [PS2006](PS2006.md) | alloc | L3 |  | a per-token cache slot reassigned to a concat of itself and a new row |
 | [PS2007](PS2007.md) | alloc | L3 |  | an N×N object materialized to consume one row |
@@ -118,6 +118,8 @@ checks' fixes.
 | [PS2139](PS2139.md) | alloc | L1 | yes | w.WriteString(string(r)) allocates a one-rune string; w.WriteRune(r) encodes into the buffer directly |
 | [PS2140](PS2140.md) | alloc | L2 |  | an operation allocates an input-sized result it fully overwrites and returns; a caller-owned Into variant lets hot callers reuse the buffer |
 | [PS2141](PS2141.md) | alloc | L1 | yes | fmt.Appendf(buf, "%s", s) runs fmt's formatter to append bytes append writes directly |
+| [PS2142](PS2142.md) | alloc | L2 |  | an os.Open file is fully heap-staged by io.ReadAll before decode |
+| [PS2143](PS2143.md) | alloc | L2 |  | a partial ReadAt payload is rebuilt with a synthetic JSON header for a full collection parser, then one item is selected |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
@@ -252,12 +254,135 @@ checks' fixes.
 | [PS5069](PS5069.md) | alloc | L1 | yes | strings.HasPrefix/Contains/Index/... over buf.String() copies the whole bytes.Buffer; the bytes twin over buf.Bytes() reads it with no copy |
 | [PS5070](PS5070.md) | alloc | L1 | yes | w.WriteString(string(b)) allocates; w.Write(b) writes the bytes directly |
 | [PS5071](PS5071.md) | alloc | L1 | yes | strconv.Itoa(x) == "123" formats an int to a throwaway string just to compare it to a constant; x == 123 compares the int directly |
+| [PS5072](PS5072.md) | alloc | L1 | yes | binary.LittleEndian.Uint64(h.Sum(nil)) rebuilds the value hash/maphash.Hash.Sum64 already computed |
+| [PS5073](PS5073.md) | alloc | L1 | yes | slog.Log, Logger.Log, or slog.Group receives only Attr values; the Attrs variant avoids ...any conversion |
+| [PS5074](PS5074.md) | alloc | L1 | yes | nested bytes/strings/slices/maps.Clone repeats an already-complete clone |
+| [PS5075](PS5075.md) | arith | L1 | yes | a standard-library normalizer is applied repeatedly even though one application is already stable |
+| [PS5076](PS5076.md) | indirect | L1 | yes | io.NopCloser is immediately passed to io.ReadAll/Copy/CopyBuffer, where Close is never observed |
+| [PS5077](PS5077.md) | arith | L1 | yes | strings/bytes Trim is repeated with the same constant cutset |
+| [PS5078](PS5078.md) | arith | L1 | yes | TrimSpace is composed with a redundant constant whitespace-only Trim operation |
+| [PS5079](PS5079.md) | arith | L1 | yes | strings/bytes boundary operations use an empty prefix, suffix, or cutset |
+| [PS5080](PS5080.md) | arith | L1 | yes | Replace/ReplaceAll uses equal old/new values or a zero replacement count |
+| [PS5081](PS5081.md) | alloc | L1 | yes | a read-only standard-library observer is fed throwaway clones |
+| [PS5082](PS5082.md) | alloc | L1 | yes | a scalar standard-library observer is fed throwaway string clones |
+| [PS5083](PS5083.md) | alloc | L1 | yes | len is applied to throwaway standard-library clones |
+| [PS5084](PS5084.md) | alloc | L1 | yes | a copying builtin consumes throwaway standard-library clones |
+| [PS5085](PS5085.md) | alloc | L1 | yes | a standard-library buffer copies a throwaway Clone result |
+| [PS5086](PS5086.md) | alloc | L1 | yes | an independently allocating stdlib transformer receives throwaway clones |
+| [PS5087](PS5087.md) | alloc | L1 | yes | an independent stdlib decoder is fed throwaway string clones |
+| [PS5088](PS5088.md) | alloc | L1 | yes | a regexp boolean match scans a throwaway Clone of its subject |
+| [PS5089](PS5089.md) | alloc | L1 | yes | a synchronous os write receives a throwaway Clone |
+| [PS5090](PS5090.md) | alloc | L1 | yes | a strconv quoting function formats a throwaway string Clone |
+| [PS5091](PS5091.md) | alloc | L1 | yes | a string byte index or map-key lookup consumes a throwaway clone |
+| [PS5092](PS5092.md) | alloc | L1 | yes | a string or nilness comparison consumes throwaway clones |
+| [PS5093](PS5093.md) | alloc | L1 | yes | an ephemeral reader or buffer is constructed only to ask its size |
+| [PS5094](PS5094.md) | alloc | L1 | yes | an ephemeral bytes.Buffer is constructed only to extract its initial value |
+| [PS5095](PS5095.md) | indirect | L1 | yes | io.NopCloser wrappers are constructed only for an immediate Read or Close |
+| [PS5096](PS5096.md) | indirect | L1 | yes | nested io.LimitReader adapters are constructed only for one immediate Read |
+| [PS5097](PS5097.md) | indirect | L1 | yes | nested bufio Reader/Writer constructors return the exact inner buffer |
+| [PS5098](PS5098.md) | alloc | L1 | yes | nested io.MultiReader/MultiWriter values are allocated only for one terminal operation |
+| [PS5099](PS5099.md) | alloc | L1 | yes | a non-retaining io consumer receives a nested MultiReader/MultiWriter tree |
+| [PS5100](PS5100.md) | alloc | L1 | yes | io.Copy/CopyBuffer receives a nested MultiReader source tree |
 | [PS5101](PS5101.md) | arith | L1 | yes | bytes.Compare used only for equality, where bytes.Equal is faster |
 | [PS5102](PS5102.md) | arith | L1 | yes | WriteRune of a single-byte rune runs the UTF-8 encoder; WriteByte is direct |
 | [PS5103](PS5103.md) | arith | L1 |  | case-insensitive compare via ToLower/ToUpper equality, where strings.EqualFold is allocation-free |
 | [PS5104](PS5104.md) | arith | L1 | yes | strings.Count/bytes.Count compared against 0 or 1 for membership, where Contains short-circuits |
 | [PS5105](PS5105.md) | arith | L1 | yes | strings.Index/bytes.Index compared == 0 for a prefix test, where HasPrefix stops at the first mismatch |
 | [PS5106](PS5106.md) | arith | L1 | yes | strings.Compare(a, b) compared to 0 where the direct operator is clearer and faster |
+| [PS5107](PS5107.md) | alloc | L1 | yes | errors.Is receives a nested errors.Join tree |
+| [PS5108](PS5108.md) | alloc | L1 | yes | nested strings/bytes/slices.Repeat materializes intermediate repetitions |
+| [PS5109](PS5109.md) | alloc | L1 | yes | path.Join repeatedly cleans and allocates the same completed prefix |
+| [PS5110](PS5110.md) | alloc | L1 | yes | nested slices.Concat calls allocate and recopy intermediate slices |
+| [PS5111](PS5111.md) | arith | L1 | yes | path.Clean or filepath.Clean rescans an already canonical standard-library result |
+| [PS5112](PS5112.md) | arith | L1 | yes | strings.Join exactly reverses an adjacent Split operation and reconstructs its input |
+| [PS5113](PS5113.md) | arith | L1 | yes | nested filepath.ToSlash and FromSlash calls are absorbed by the outermost normalizer |
+| [PS5114](PS5114.md) | arith | L1 | yes | filepath.FromSlash rescans a result that is already in native filepath form |
+| [PS5115](PS5115.md) | arith | L1 | yes | strings.ToValidUTF8 rescans the already-valid result of another ToValidUTF8 call |
+| [PS5116](PS5116.md) | arith | L1 | yes | unicode/utf8 validates a ToValidUTF8 result that is guaranteed to be valid |
+| [PS5117](PS5117.md) | alloc | L1 | yes | Join+Fields canonicalizes an already canonicalized string or byte slice |
+| [PS5118](PS5118.md) | arith | L1 | yes | Replace or ReplaceAll searches for a byte eliminated by an inner all-replacement |
+| [PS5119](PS5119.md) | arith | L1 | yes | HasPrefix/HasSuffix repeats a boundary proof in a guarded TrimPrefix/TrimSuffix |
+| [PS5120](PS5120.md) | alloc | L1 | yes | an assigned strings.Split/SplitN head allocates a piece slice instead of using strings.Cut |
+| [PS5121](PS5121.md) | alloc | L1 | yes | Contains guards an immediate SplitN head/tail instead of using one Cut call |
+| [PS5122](PS5122.md) | arith | L1 | yes | strings.Contains guards a ReplaceAll call that already handles the no-match case |
+| [PS5123](PS5123.md) | arith | L1 | yes | Contains guards an Index call that already returns the absence sentinel |
+| [PS5124](PS5124.md) | arith | L1 | yes | Contains guards a Count call that already returns zero on misses |
+| [PS5125](PS5125.md) | arith | L1 | yes | strings.Contains guards a Replace call that already preserves misses |
+| [PS5126](PS5126.md) | arith | L1 | yes | Contains guards a backward index call that already returns the absence sentinel |
+| [PS5127](PS5127.md) | arith | L1 | yes | utf8.ValidString guards a sanitizer that already preserves valid strings |
 | [PS6004](PS6004.md) | verify | L2 |  | a fast-path/fallback dual path whose bit-identity claim needs coverage on both arms |
+| [PS6005](PS6005.md) | verify | L2 |  | an external accelerator benchmark pins workload size but leaves material semantic axes implicit |
+| [PS6006](PS6006.md) | verify | L2 |  | a production selector or default toggle appears in a repeated leaf benchmark |
+| [PS6007](PS6007.md) | verify | L2 |  | a GPU residency rewrite's zero-cost removable-pass ceiling is below its promotion gate |
+| [PS6008](PS6008.md) | verify | L2 |  | an incumbent-justified GPU kernel port omits selector or memory-regime context |
+| [PS6009](PS6009.md) | verify | L2 |  | a tiled GPU promotion gate omits the second reuse-axis tile or production comparator |
 | [PS6010](PS6010.md) | verify | L3 | yes | an accumulator loop re-reading an operand invariant in the output index |
+| [PS6011](PS6011.md) | verify | L2 |  | a graph-fused matmul timing gate omits large-shape numerical parity |
+| [PS6012](PS6012.md) | verify | L2 |  | a batch-indexed Slice dispatch loop concatenates the results back into one tensor |
+| [PS6013](PS6013.md) | verify | L2 |  | a synchronous accelerator wrapper round-trips a host-resident tensor |
+| [PS6014](PS6014.md) | verify | L2 |  | a structural GPU fusion win misses its declared latency leverage floor |
+| [PS6015](PS6015.md) | verify | L2 |  | an accelerator route or its evidence is stale after an implementation-capability change |
+| [PS6016](PS6016.md) | verify | L2 |  | a dispatch-eliminating fusion gate ignores its Amdahl ceiling or end-to-end regressions |
+| [PS6017](PS6017.md) | verify | L2 |  | a leaf fusion speedup overstates its supported end-to-end graph leverage |
+| [PS6018](PS6018.md) | verify | L2 |  | a fixed-count control/candidate route benchmark warms an arm only once |
+| [PS6019](PS6019.md) | verify | L2 |  | a device-resident vector is fully materialized before a bounded Top-K consumer |
+| [PS6020](PS6020.md) | verify | L2 |  | a fused producer is followed by multiple layout-only operations over its output |
+| [PS6021](PS6021.md) | verify | L2 |  | a fused floating-point vendor GEMM uses bit-exact output as a mandatory promotion gate |
+| [PS6022](PS6022.md) | verify | L2 |  | consecutive sibling dtype-conversion dispatches differ only by source/destination buffers |
+| [PS6023](PS6023.md) | verify | L2 |  | an asynchronous accelerator benchmark can hide a device gain behind host fixed cost |
+| [PS6024](PS6024.md) | verify | L2 |  | a fresh destination is partially pre-touched as scratch before a later full overwrite |
+| [PS6025](PS6025.md) | verify | L2 |  | a GPU trace treats summed stage busy time as structural completeness |
+| [PS6026](PS6026.md) | verify | L2 |  | a GPU comparison attributes removal of inactive-capacity traversal to fusion |
+| [PS6027](PS6027.md) | verify | L2 |  | a leaf-negative fusion is promoted without a predeclared same-work exact-parent gate |
+| [PS6028](PS6028.md) | verify | L2 |  | a GPU exclusivity claim lacks exact foreign-interval overlap evidence |
+| [PS6029](PS6029.md) | verify | L2 |  | a profiler split-pass campaign lacks an exact claim/witness join contract |
+| [PS6030](PS6030.md) | verify | L2 |  | a profiler stage claim uses nonempty samples without an effective-density gate |
+| [PS6031](PS6031.md) | verify | L2 |  | a profiler completeness gate does not classify counter semantics |
+| [PS6032](PS6032.md) | verify | L2 |  | an adjacent residual-add and normalization dispatch share a single-consumer intermediate |
+| [PS6033](PS6033.md) | verify | L2 |  | a cached command-construction leaf win is promoted without parent leverage |
+| [PS6034](PS6034.md) | verify | L2 |  | a Metal kernel-throughput claim conflates recording, submission, GPU time, or warm-up |
+| [PS6035](PS6035.md) | verify | L2 |  | a persistent Metal encoder topology advances without an exact-parent kill screen |
+| [PS6036](PS6036.md) | verify | L2 |  | xctrace counters are correlated to internal GPU stages without a fail-closed identity contract |
+| [PS6037](PS6037.md) | verify | L2 |  | an external GPU-counter capture lacks environment, privacy, volume, or contamination gates |
+| [PS6038](PS6038.md) | verify | L2 |  | a host-only Metal recorder win has immaterial parent leverage |
+| [PS6039](PS6039.md) | verify | L2 |  | a GPU arena claim uses a cache-hot or unequal resource comparison |
+| [PS6040](PS6040.md) | verify | L2 |  | a rejected GPU fusion loses its positive absolute result |
+| [PS6041](PS6041.md) | verify | L2 |  | a GPU fusion counts removed dispatches but omits parent-kernel inflation |
+| [PS6042](PS6042.md) | verify | L2 |  | a GPU encoder-count reduction hides unchanged dependency depth |
+| [PS6043](PS6043.md) | verify | L2 |  | accelerator leaf benchmarks compare different submission boundaries |
+| [PS6044](PS6044.md) | verify | L2 |  | a same-process GPU screen is treated as promotion evidence |
+| [PS6045](PS6045.md) | verify | L2 |  | a cold GPU profiler trace never reaches the timed region |
+| [PS6046](PS6046.md) | verify | L2 |  | serial Metal encoder persistence is overclaimed as executor leverage |
+| [PS6047](PS6047.md) | verify | L2 |  | a packed Metal quant-unpack experiment omits alignment or compiler evidence |
+| [PS6048](PS6048.md) | verify | L2 |  | Metal native artifact analysis guesses unavailable compiler statistics |
+| [PS6049](PS6049.md) | verify | L2 |  | an xctrace Metal counter probe uses an empty instrument or ambiguous ROI |
+| [PS6050](PS6050.md) | verify | L2 |  | private Metal storage is recommended without a unified-memory cost model |
+| [PS6051](PS6051.md) | verify | L2 |  | cache-local GPU metadata loads are replaced by unpriced cross-lane shuffles |
+| [PS6052](PS6052.md) | verify | L2 |  | tiny immutable Metal parameter buffers are replaced by a recorder-local arena without an end-to-end gate |
+| [PS6053](PS6053.md) | verify | L2 |  | a full logical-vector accumulator is replicated and shuffled in every GPU lane |
+| [PS6054](PS6054.md) | verify | L2 |  | a shape-keyed backend selector has leaf coverage but no end-to-end promotion contract |
+| [PS6055](PS6055.md) | verify | L2 |  | a Metal fusion candidate is ranked from encoder count without priced leverage and a complete seam |
+| [PS6056](PS6056.md) | verify | L2 |  | a GPU fusion candidate is promoted from a grouped short screen |
+| [PS6057](PS6057.md) | verify | L2 |  | repeated heavy-producer to tiny-elementwise GPU boundaries are fusion candidates |
+| [PS6058](PS6058.md) | verify | L2 |  | resolved Metal counter timestamps are converted without paired CPU/GPU calibration |
+| [PS6059](PS6059.md) | verify | L2 |  | a GPU source-fusion opportunity has unpriced register and occupancy risk |
+| [PS6060](PS6060.md) | arith | L2 |  | an exact float ReLU loop remains scalar despite a SIMD-safe ordered form |
+| [PS6061](PS6061.md) | arith | L2 |  | a widened float32 Abs loop needs payload-preserving NaN quieting in SIMD |
+| [PS6062](PS6062.md) | verify | L2 |  | a fused floating graph lacks exact forward/VJP and workload leverage gates |
+| [PS6063](PS6063.md) | arith | L2 |  | an exact float negation loop remains scalar despite a sign-bit SIMD form |
+| [PS6064](PS6064.md) | arith | L2 |  | softplus complements recompute the same expensive stable base |
+| [PS6065](PS6065.md) | verify | L2 |  | an approximate exp clamp residue can be amplified in a fused VJP |
+| [PS6066](PS6066.md) | verify | L3 |  | a nested byte-wise decode loop has an aligned packed-load candidate |
+| [PS6067](PS6067.md) | verify | L2 |  | an ordinary test enforces an absolute performance ceiling on a potentially shared runner |
+| [PS6068](PS6068.md) | verify | L2 |  | a lane-uniform Metal load is serialized through an explicit SIMD broadcast |
+| [PS6069](PS6069.md) | verify | L3 |  | an eight-byte Metal quant load is aligned for two scalar words but not one vector word |
+| [PS6070](PS6070.md) | verify | L3 |  | a partial-lane Metal packed load pays a dynamic SIMD redistribution on every block |
+| [PS6071](PS6071.md) | verify | L2 |  | a hot dispatcher repeatedly resolves an immutable backend, operation, and dtype route |
+| [PS6072](PS6072.md) | verify | L2 |  | a hot specialization wrapper exceeds Go's inline budget through non-inlineable calls |
+| [PS6073](PS6073.md) | verify | L2 |  | a generic hot function carries a flag-gated fast path for only one dtype |
+| [PS6074](PS6074.md) | verify | L2 |  | an architecture pipeline mixes whole-pass scalar and SIMD-backed sibling stages |
+| [PS6075](PS6075.md) | verify | L2 |  | a store-once accumulator tile destroys row-contiguous source traversal |
+| [PS6076](PS6076.md) | verify | L2 |  | a parallel band callback rebuilds the same invariant packed data |
+| [PS6077](PS6077.md) | verify | L2 |  | same-signature architecture siblings select scalar transcendental and vector implementations |
+| [PS6078](PS6078.md) | verify | L2 |  | an architecture capability flag constant-folds optimized branches out of public operations |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |

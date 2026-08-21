@@ -1,0 +1,5 @@
+package ps5084multi
+
+func adjacentCloneImports(dst, src []byte) int {
+	return copy(dst, src) // want "copy source consumes 2 throwaway standard-library Clone layer"
+}

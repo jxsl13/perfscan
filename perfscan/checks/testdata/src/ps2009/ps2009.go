@@ -7,7 +7,7 @@ import (
 
 // Literal separator: the classic head read.
 func head(s string) string {
-	first := strings.Split(s, ",")[0] // want `strings\.Split\(\.\.\.\)\[0\] scans the whole input and allocates every piece just to read the head; strings\.SplitN\(\.\.\., 2\)\[0\] stops at the first separator and is bit-identical`
+	first := strings.Split(s, ",")[0] // want `strings\.Split\(\.\.\.\)\[0\] allocates a piece slice only to assign its head; strings\.Cut returns the identical head directly with no result-slice allocation`
 	return first
 }
 

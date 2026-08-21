@@ -1,0 +1,44 @@
+package ps5096
+
+import "io"
+
+func nested(reader io.Reader, buffer []byte, inner, outer int64) (int, error) {
+	return io.LimitReader(io.LimitReader(reader, inner), outer).Read(buffer) // want "2 nested io.LimitReader layers only bound one immediate Read"
+}
+
+func triple(reader io.Reader, buffer []byte, first, second, third int64) (int, error) {
+	return io.LimitReader(io.LimitReader(io.LimitReader(reader, first), second), third).Read(buffer) // want "3 nested io.LimitReader layers only bound one immediate Read"
+}
+
+func supplied(reader io.Reader, order *[]string) (int, error) {
+	makeReader := func() io.Reader { *order = append(*order, "reader"); return reader }
+	inner := func() int64 { *order = append(*order, "inner"); return 2 }
+	outer := func() int64 { *order = append(*order, "outer"); return 3 }
+	buffer := func() []byte { *order = append(*order, "buffer"); return make([]byte, 4) }
+	return io.LimitReader(io.LimitReader(makeReader(), inner()), outer()).Read(buffer()) // want "2 nested io.LimitReader layers only bound one immediate Read"
+}
+
+// The wrapper structure remains observable when the Reader value escapes.
+func expose(reader io.Reader, inner, outer int64) io.Reader {
+	return io.LimitReader(io.LimitReader(reader, inner), outer)
+}
+
+// A ReaderFrom implementation can inspect the source passed by io.Copy.
+func consume(writer io.Writer, reader io.Reader, inner, outer int64) (int64, error) {
+	return io.Copy(writer, io.LimitReader(io.LimitReader(reader, inner), outer))
+}
+
+func single(reader io.Reader, buffer []byte, limit int64) (int, error) {
+	return io.LimitReader(reader, limit).Read(buffer)
+}
+
+func functionValue(reader io.Reader, buffer []byte, inner, outer int64) (int, error) {
+	constructor := io.LimitReader
+	return constructor(constructor(reader, inner), outer).Read(buffer)
+}
+
+func LimitReader(reader io.Reader, _ int64) io.Reader { return reader }
+
+func userConstructor(reader io.Reader, buffer []byte, inner, outer int64) (int, error) {
+	return LimitReader(LimitReader(reader, inner), outer).Read(buffer)
+}

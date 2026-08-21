@@ -54,7 +54,16 @@ other consumers. SplitN takes the same two arguments plus the literal
 limit, so the fix only renames Split to SplitN and inserts ", 2"
 after the separator argument — both argument expressions stay
 byte-verbatim, no import changes, and the indexed call remains a
-primary expression, so no parenthesization is ever needed.`,
+primary expression, so no parenthesization is ever needed.
+
+There is one stronger assignment form. When the package is strings, the
+separator is a compile-time non-empty constant, and the indexed expression is
+the sole right-hand side of = or :=, PS2009 uses PS5120's shared assigned-
+indexed-producer abstraction to rewrite directly to
+` + "`first, _, _ := strings.Cut(s, sep)`" + `. This removes the result slice
+entirely and reaches the optimal fixed point in one pass. Return expressions,
+empty or dynamic separators, and bytes keep the universally valid SplitN
+rewrite described above.`,
 		Before: `first := strings.Split(s, sep)[0]`,
 		After:  `first := strings.SplitN(s, sep, 2)[0]`,
 		MeasuredWin: `BenchmarkPS2009 (a ~1.3KB line of 64 comma-separated
@@ -73,6 +82,7 @@ a slice header for every piece, SplitN(2) pays for the prefix only.`,
 
 func runPS2009(pass *analysis.Pass) (any, error) {
 	for _, f := range pass.Files {
+		parents := ps6071Parents(f)
 		ast.Inspect(f, func(n ast.Node) bool {
 			idx, ok := n.(*ast.IndexExpr)
 			if !ok {
@@ -109,6 +119,22 @@ func runPS2009(pass *analysis.Pass) (any, error) {
 			}
 			if sig, isSig := fn.Type().(*types.Signature); !isSig || sig.Recv() != nil {
 				return true
+			}
+			// In a single-result assignment with a proven non-empty separator,
+			// skip the intermediate SplitN spelling and use strings.Cut directly.
+			// PS5120 owns already-limited SplitN assignments; sharing its matcher
+			// makes the Split -> Cut path converge in one fix pass.
+			if pkgPath == "strings" && ps5120CutAvailable(pass, f) {
+				if assignment, found := ps5120AssignmentForIndex(idx, parents); found {
+					if match, matched := ps5120AssignedHead(pass, assignment, "Split"); matched && match.composition.index == idx {
+						diagnostic := ps5120Diagnostic(match)
+						if fix, fixable := ps5120SuggestedFix(pass, f, match); fixable {
+							diagnostic.SuggestedFixes = []analysis.SuggestedFix{fix}
+						}
+						pass.Report(diagnostic)
+						return true
+					}
+				}
 			}
 			// Two edits keep both arguments byte-verbatim: rename the Split
 			// selector (a bare identifier — it cannot contain a comment) and

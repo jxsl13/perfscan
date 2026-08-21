@@ -37,7 +37,7 @@ func TestDiffOverlappingFixReported(t *testing.T) {
 
 	var out, errBuf bytes.Buffer
 	// A [18,24] and B [20,22] overlap; A wins, B is a benign overlap drop.
-	code := diffFixes([]Finding{mk(18, 24, "1"), mk(20, 22, "9")}, Options{Stdout: &out, Stderr: &errBuf})
+	code := diffFixes([]Finding{mk(18, 24, "1"), mk(20, 22, "9")}, &Options{Stdout: &out, Stderr: &errBuf})
 	if code != 1 {
 		t.Errorf("diffFixes with a pending change: code=%d, want 1", code)
 	}

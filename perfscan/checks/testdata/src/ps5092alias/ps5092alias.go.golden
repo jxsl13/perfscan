@@ -1,0 +1,5 @@
+package ps5092alias
+
+func compare(left, right string) bool {
+	return left != right // want "!= comparison consumes 3 throwaway standard-library Clone layer[(]s[)] across 2 operand"
+}

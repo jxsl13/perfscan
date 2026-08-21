@@ -1,0 +1,118 @@
+package ps5084
+
+import (
+	"bytes"
+	"slices"
+	"strings"
+)
+
+func copyBytesDeep(dst, src []byte) int {
+	return copy(dst, bytes.Clone(slices.Clone(src))) // want "copy source consumes 2 throwaway standard-library Clone layer"
+}
+
+func copyExplicitGeneric(dst, src []int) int {
+	return copy(dst, slices.Clone[[]int](src)) // want "copy source consumes 1 throwaway standard-library Clone layer"
+}
+
+func appendExpanded(dst, src []byte) []byte {
+	return append(dst, bytes.Clone(src)...) // want "append expanded source consumes 1 throwaway standard-library Clone layer"
+}
+
+func bytesToString(src []byte) string {
+	return string(bytes.Clone(src)) // want "slice-to-string conversion consumes 1 throwaway standard-library Clone layer"
+}
+
+func runesToString(src []rune) string {
+	return string(slices.Clone(src)) // want "slice-to-string conversion consumes 1 throwaway standard-library Clone layer"
+}
+
+func stringToBytes(src string) []byte {
+	return []byte(strings.Clone(src)) // want "string-to-slice conversion consumes 1 throwaway standard-library Clone layer"
+}
+
+func stringToRunes(src string) []rune {
+	return []rune(strings.Clone(strings.Clone(src))) // want "string-to-slice conversion consumes 2 throwaway standard-library Clone layer"
+}
+
+func copyStringFixedPoint(dst []byte, src string) int {
+	return copy(dst, bytes.Clone([]byte(strings.Clone(strings.Clone(src))))) // want "copy source consumes 1 throwaway standard-library Clone layer"
+}
+
+func appendStringFixedPoint(dst []byte, src string) []byte {
+	return append(dst, bytes.Clone([]byte(strings.Clone(src)))...) // want "append expanded source consumes 1 throwaway standard-library Clone layer"
+}
+
+func stringRoundTripFixedPoint(src string) string {
+	return string(bytes.Clone([]byte(strings.Clone(src)))) // want "slice-to-string conversion consumes 1 throwaway standard-library Clone layer"
+}
+
+func stringRoundTripExpression(left, right string) string {
+	return string(bytes.Clone([]byte(left + right))) // want "slice-to-string conversion consumes 1 throwaway standard-library Clone layer"
+}
+
+// Replacing the whole expression with the literal would change its constant
+// status. PS5084 still removes Clone; PS2108 deliberately leaves the remaining
+// constant round-trip advisory.
+func stringRoundTripConstant() string {
+	return string(bytes.Clone([]byte("constant"))) // want "slice-to-string conversion consumes 1 throwaway standard-library Clone layer"
+}
+
+type namedBytes []byte
+type namedString string
+
+func stringToNamedBytes(src string) namedBytes {
+	return namedBytes(strings.Clone(src)) // want "string-to-slice conversion consumes 1 throwaway standard-library Clone layer"
+}
+
+func bytesToNamedString(src []byte) namedString {
+	return namedString(bytes.Clone(src)) // want "slice-to-string conversion consumes 1 throwaway standard-library Clone layer"
+}
+
+func commentPreserved(dst, src []byte) int {
+	return copy(dst, bytes.Clone( /* snapshot rationale */ src)) // want "copy source consumes 1 throwaway standard-library Clone layer"
+}
+
+// --- negatives ---
+
+func clonedDestination(dst, src []byte) int {
+	return copy(bytes.Clone(dst), src)
+}
+
+// Without ..., append stores the cloned slice as an independently mutable
+// element; removing Clone would change aliasing.
+func appendSnapshot(dst [][]byte, src []byte) [][]byte {
+	return append(dst, bytes.Clone(src))
+}
+
+// Same-category conversions can expose the clone itself.
+func identityBytes(src []byte) []byte {
+	return []byte(bytes.Clone(src))
+}
+
+func identityString(src string) string {
+	return string(strings.Clone(src))
+}
+
+func retainedReader(src []byte) *bytes.Reader {
+	return bytes.NewReader(bytes.Clone(src))
+}
+
+type cloner struct{}
+
+func (cloner) Clone(src []byte) []byte { return src }
+
+func userClone(dst, src []byte, c cloner) int {
+	return copy(dst, c.Clone(src))
+}
+
+func shadowedCopy(dst, src []byte) int {
+	copy := func(_, _ []byte) int { return 0 }
+	return copy(dst, bytes.Clone(src))
+}
+
+func shadowedAppend(dst, src []byte) []byte {
+	append := func(dst []byte, src ...byte) []byte { return dst }
+	return append(dst, bytes.Clone(src)...)
+}
+
+var _ = []any{copyBytesDeep, copyExplicitGeneric, appendExpanded, bytesToString, runesToString, stringToBytes, stringToRunes, copyStringFixedPoint, appendStringFixedPoint, stringRoundTripFixedPoint, stringRoundTripExpression, stringRoundTripConstant, stringToNamedBytes, bytesToNamedString, commentPreserved, clonedDestination, appendSnapshot, identityBytes, identityString, retainedReader, userClone, shadowedCopy, shadowedAppend}

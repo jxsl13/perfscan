@@ -1,0 +1,10 @@
+package ps5082alias
+
+import (
+	s "strings"
+	u "unicode/utf8"
+)
+
+func lastCloneImport(value string) bool {
+	return u.ValidString(s.Clone(value)) // want "unicode/utf8.ValidString scalar observation consumes 1 throwaway strings.Clone layer"
+}

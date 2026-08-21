@@ -20,6 +20,7 @@ func TestBuiltinInScope(t *testing.T) {
 import mycopy "strings"
 
 func clear() {}
+type string int
 
 func local() {
 	copy := 0
@@ -72,6 +73,13 @@ var _ = mycopy.Count
 	// A real builtin never shadowed: len.
 	if !builtinInScope(pass, posOf("FINE"), "len") {
 		t.Error("len should resolve to the builtin at FINE")
+	}
+	// The general guard covers predeclared types as well as call builtins.
+	if predeclaredInScope(pass, posOf("FINE"), "string") {
+		t.Error("string should be shadowed by the package-level type")
+	}
+	if !predeclaredInScope(pass, posOf("FINE"), "byte") {
+		t.Error("byte should resolve to the universe type at FINE")
 	}
 }
 

@@ -2,7 +2,6 @@ package checks
 
 import (
 	"go/ast"
-	"go/token"
 	"go/types"
 
 	"golang.org/x/tools/go/analysis"
@@ -210,11 +209,8 @@ func ps3107PkgFunc(pass *analysis.Pass, fun ast.Expr, pkgPath, name string) (*as
 	if !ok {
 		return nil, false
 	}
-	fn, ok := pass.TypesInfo.Uses[sel.Sel].(*types.Func)
-	if !ok || fn.Pkg() == nil || fn.Pkg().Path() != pkgPath || fn.Name() != name {
-		return nil, false
-	}
-	if sig, isSig := fn.Type().(*types.Signature); !isSig || sig.Recv() != nil {
+	fn, sig, ok := typedCallee(pass, sel)
+	if !ok || fn.Pkg() == nil || fn.Pkg().Path() != pkgPath || fn.Name() != name || sig.Recv() != nil {
 		return nil, false
 	}
 	return sel, true
@@ -365,27 +361,5 @@ func ps3107ImportEdits(f *ast.File, dropCmp bool) (edits []analysis.TextEdit, ok
 // (same spec-removal shapes as ps3104SortImportEdit: sole spec drops the
 // whole declaration, otherwise the spec plus one separating boundary).
 func ps3107CmpImportEdit(f *ast.File) (analysis.TextEdit, bool) {
-	for _, d := range f.Decls {
-		gd, ok := d.(*ast.GenDecl)
-		if !ok || gd.Tok != token.IMPORT {
-			continue
-		}
-		for i, spec := range gd.Specs {
-			is, ok := spec.(*ast.ImportSpec)
-			if !ok || is.Path == nil || is.Path.Value != `"cmp"` {
-				continue
-			}
-			switch {
-			case len(gd.Specs) == 1:
-				// Sole spec: drop the whole declaration (parenthesized or
-				// not); gofmt normalizes the leftover blank line.
-				return analysis.TextEdit{Pos: gd.Pos(), End: gd.End()}, true
-			case i+1 < len(gd.Specs):
-				return analysis.TextEdit{Pos: is.Pos(), End: gd.Specs[i+1].Pos()}, true
-			default:
-				return analysis.TextEdit{Pos: gd.Specs[i-1].End(), End: is.End()}, true
-			}
-		}
-	}
-	return analysis.TextEdit{}, false
+	return dropImportEdit(f, "cmp")
 }

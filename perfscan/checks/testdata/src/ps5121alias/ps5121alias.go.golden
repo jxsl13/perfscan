@@ -1,0 +1,20 @@
+package ps5121alias
+
+import (
+	b "bytes"
+	s "strings"
+)
+
+func tail(value string) string {
+	if _, after, found := s.Cut(value, "|"); found { // want `strings.Contains proves.*index 1`
+		return after
+	}
+	return value
+}
+
+func head(value []byte) []byte {
+	if before, _, found := b.Cut(value, []byte{'|'}); found { // want `bytes.Contains proves.*index 0`
+		return before[:len(before):len(before)]
+	}
+	return value
+}

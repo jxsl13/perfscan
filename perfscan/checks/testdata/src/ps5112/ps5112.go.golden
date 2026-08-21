@@ -1,0 +1,102 @@
+package ps5112
+
+import (
+	"bytes"
+	"strings"
+)
+
+const comma = ","
+const foldedComma = "" + ","
+const negative = -2
+const payload = "a,b,c"
+
+func split(s string) string {
+	return s // want `strings.Join exactly reverses strings.Split and reconstructs its original plain-string input`
+}
+
+func emptySeparator(s string) string {
+	return s // want `strings.Join exactly reverses strings.Split and reconstructs its original plain-string input`
+}
+
+func splitAfter(s string) string {
+	return s // want `strings.Join exactly reverses strings.SplitAfter and reconstructs its original plain-string input`
+}
+
+func splitN(s string) string {
+	return s // want `strings.Join exactly reverses strings.SplitN and reconstructs its original plain-string input`
+}
+
+func splitNOne(s string) string {
+	return s // want `strings.Join consumes the single piece returned by strings.SplitN and reconstructs its original plain-string input`
+}
+
+func splitAfterN(s string) string {
+	return s // want `strings.Join exactly reverses strings.SplitAfterN and reconstructs its original plain-string input`
+}
+
+func splitAfterNOne(s string) string {
+	return s // want `strings.Join consumes the single piece returned by strings.SplitAfterN and reconstructs its original plain-string input`
+}
+
+func parenthesized(s string) string {
+	return (s) // want `strings.Join exactly reverses strings.Split and reconstructs its original plain-string input`
+}
+
+func source() string { return payload }
+
+func evaluatedOnce() string {
+	return source() // want `strings.Join exactly reverses strings.Split and reconstructs its original plain-string input`
+}
+
+func untypedConstant() any {
+	return payload // want `strings.Join exactly reverses strings.Split and reconstructs its original plain-string input`
+}
+
+type stringAlias = string
+
+func aliasInput(s stringAlias) any {
+	return s // want `strings.Join exactly reverses strings.Split and reconstructs its original plain-string input`
+}
+
+// Unequal and dynamic separators do not prove an inverse.
+func unequal(s string) string              { return strings.Join(strings.Split(s, ","), ";") }
+func dynamic(s, sep string) string         { return strings.Join(strings.Split(s, sep), sep) }
+func dynamicOuter(s, sep string) string    { return strings.Join(strings.Split(s, ","), sep) }
+func splitAfterNonempty(s string) string   { return strings.Join(strings.SplitAfter(s, ","), ",") }
+func splitNLimited(s string) string        { return strings.Join(strings.SplitN(s, ",", 2), ",") }
+func splitAfterNLimited(s string) string   { return strings.Join(strings.SplitAfterN(s, ",", 2), "") }
+func splitNDynamic(s string, n int) string { return strings.Join(strings.SplitN(s, ",", n), ",") }
+
+// A stored slice may have other consumers and is not a direct composition.
+func stored(s string) string {
+	parts := strings.Split(s, ",")
+	return strings.Join(parts, ",")
+}
+
+// A required conversion from a defined string is retained.
+type definedString string
+
+func definedInput(s definedString) any {
+	return string(s) // want `strings.Join exactly reverses strings.Split and reconstructs its original plain-string input`
+}
+
+// bytes.Join returns a fresh slice, so substituting b would change aliasing.
+func bytesTwin(b []byte) []byte {
+	return bytes.Join(bytes.Split(b, []byte(",")), []byte(","))
+}
+
+func functionValues(s string) string {
+	split := strings.Split
+	join := strings.Join
+	return join(split(s, ","), ",")
+}
+
+type fakeStrings struct{}
+
+func (fakeStrings) Split(s, sep string) []string           { return []string{s} }
+func (fakeStrings) Join(parts []string, sep string) string { return parts[0] }
+
+func shadowed(s string) string {
+	strings := fakeStrings{}
+	return strings.Join(strings.Split(s, ","), ",")
+}

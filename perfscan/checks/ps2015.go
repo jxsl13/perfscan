@@ -92,6 +92,12 @@ func runPS2015(pass *analysis.Pass) (any, error) {
 			if !ok || len(join.Args) != 2 || join.Ellipsis.IsValid() {
 				return true
 			}
+			// PS5112 owns exact inverse Split/Join compositions and removes
+			// both calls in one pass. Do not overlap it with the intermediate
+			// ReplaceAll(s, sep, sep) rewrite.
+			if _, owned := ps5112SplitJoinIdentity(pass, join); owned {
+				return true
+			}
 			joinSel, ok := join.Fun.(*ast.SelectorExpr)
 			if !ok || !ps2015IsStringsFunc(pass, joinSel, "Join") {
 				return true

@@ -54,7 +54,7 @@ func runPS1004(pass *analysis.Pass) (any, error) {
 			if !ok || fn.Body == nil {
 				continue
 			}
-			ff := collectFuncFacts(fn, ns)
+			ff := collectFuncFacts(fn, &ns)
 			astutil.WithStack(fn.Body, func(n ast.Node, stack []ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok || !call.Ellipsis.IsValid() {

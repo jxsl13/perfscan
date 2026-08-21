@@ -4,15 +4,18 @@ package runner
 
 import (
 	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/format"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -83,6 +86,8 @@ type Finding struct {
 }
 
 // Run executes perfscan and returns the process exit code.
+//
+//perfscan:ignore PS3106 Options is intentionally copied so defaults never mutate caller state
 func Run(checks []*lint.Check, opts Options) int {
 	if opts.Stdout == nil {
 		opts.Stdout = os.Stdout
@@ -102,7 +107,7 @@ func Run(checks []*lint.Check, opts Options) int {
 	}
 	cacheWd()
 
-	cfg, cfgPath := loadConfig(opts)
+	cfg, cfgPath := loadConfig(&opts)
 	config.Set(cfg.Compile())
 
 	enabled, explicit, err := selectChecks(checks, opts.Checks, opts.MaxLevel)
@@ -118,7 +123,7 @@ func Run(checks []*lint.Check, opts Options) int {
 	// line.
 	kept := make([]*lint.Check, 0, len(enabled))
 	for _, c := range enabled {
-		missing := missingVocab(c, cfg)
+		missing := missingVocab(c, &cfg)
 		fullyStarved := c.NeedsConfig && len(missing) == len(c.Vocab)
 		if fullyStarved && !explicit[c.ID] {
 			continue
@@ -135,7 +140,7 @@ func Run(checks []*lint.Check, opts Options) int {
 	}
 	enabled = kept
 
-	pkgs, err := load(opts)
+	pkgs, err := load(&opts)
 	if err != nil {
 		fmt.Fprintln(opts.Stderr, "perfscan:", err)
 		return 2
@@ -152,9 +157,13 @@ func Run(checks []*lint.Check, opts Options) int {
 	}
 
 	findings := make([]Finding, 0, len(pkgs))
-	for _, pkg := range pkgs {
-		for _, c := range enabled {
-			findings = append(findings, runCheck(c, pkg)...)
+	for _, c := range enabled {
+		if len(c.Analyzer.FactTypes) != 0 {
+			findings = append(findings, runFactCheck(c, pkgs)...)
+			continue
+		}
+		for _, pkg := range pkgs {
+			findings = append(findings, runCheck(c, pkg, nil)...)
 		}
 	}
 
@@ -212,11 +221,11 @@ func Run(checks []*lint.Check, opts Options) int {
 	if opts.Diff {
 		// Dry-run: the diff IS the output — findings text is suppressed
 		// (stdout must stay a valid patch); the summary goes to stderr.
-		return diffFixes(findings, opts)
+		return diffFixes(findings, &opts)
 	}
 
 	if opts.Fix {
-		applied, overlapping, failed := applyFixes(findings, opts)
+		applied, overlapping, failed := applyFixes(findings, &opts)
 		msg := fmt.Sprintf("perfscan: applied %d fix(es)", applied)
 		if overlapping > 0 {
 			// Benign: these overlapped a fix already applied to the same span
@@ -236,7 +245,8 @@ func Run(checks []*lint.Check, opts Options) int {
 	case opts.JSON:
 		emitJSON(opts.Stdout, findings)
 	default:
-		for _, f := range findings {
+		for i := range findings {
+			f := &findings[i]
 			fmt.Fprintf(opts.Stdout, "%s:%d:%d: %s (%s %s)\n",
 				relPath(f.Pos.Filename), f.Pos.Line, f.Pos.Column, f.Message, f.Check.ID, f.Check.Level)
 		}
@@ -278,7 +288,7 @@ func relPath(p string) string {
 	return p
 }
 
-func loadConfig(opts Options) (config.Config, string) {
+func loadConfig(opts *Options) (config.Config, string) {
 	var c config.Config
 	var path string
 	if opts.ConfigPath != "" {
@@ -305,25 +315,36 @@ func loadConfig(opts Options) (config.Config, string) {
 // missingVocab returns the vocabulary fields a domain check needs that the
 // config does not supply. Empty for non-domain checks and fully-fed domain
 // checks.
-func missingVocab(c *lint.Check, cfg config.Config) []string {
+func missingVocab(c *lint.Check, cfg *config.Config) []string {
 	if !c.NeedsConfig {
 		return nil
 	}
 	fields := map[string]int{
-		"elementAccessors":       len(cfg.ElementAccessors),
-		"fastPathHelpers":        len(cfg.FastPathHelpers),
-		"elementCountMethods":    len(cfg.ElementCountMethods),
-		"shapeMethods":           len(cfg.ShapeMethods),
-		"indexDecomposeFuncs":    len(cfg.IndexDecomposeFuncs),
-		"allocatorFuncs":         len(cfg.AllocatorFuncs),
-		"perElementVisitors":     len(cfg.PerElementVisitors),
-		"bulkCopyHelpers":        len(cfg.BulkCopyHelpers),
-		"vectorizedSiblingFuncs": len(cfg.VectorizedSiblingFuncs),
-		"fanOutHelpers":          len(cfg.FanOutHelpers),
-		"dtypeMethods":           len(cfg.DtypeMethods),
-		"outputBufferElemTypes":  len(cfg.OutputBufferElemTypes),
-		"compiledResourceFuncs":  len(cfg.CompiledResourceFuncs),
-		"gpuReductionKernels":    len(cfg.GPUReductionKernels),
+		"elementAccessors":         len(cfg.ElementAccessors),
+		"fastPathHelpers":          len(cfg.FastPathHelpers),
+		"selectorPromotionSymbols": len(cfg.SelectorPromotionSymbols),
+		"elementCountMethods":      len(cfg.ElementCountMethods),
+		"shapeMethods":             len(cfg.ShapeMethods),
+		"indexDecomposeFuncs":      len(cfg.IndexDecomposeFuncs),
+		"allocatorFuncs":           len(cfg.AllocatorFuncs),
+		"perElementVisitors":       len(cfg.PerElementVisitors),
+		"bulkCopyHelpers":          len(cfg.BulkCopyHelpers),
+		"vectorizedSiblingFuncs":   len(cfg.VectorizedSiblingFuncs),
+		"fanOutHelpers":            len(cfg.FanOutHelpers),
+		"dtypeMethods":             len(cfg.DtypeMethods),
+		"outputBufferElemTypes":    len(cfg.OutputBufferElemTypes),
+		"compiledResourceFuncs":    len(cfg.CompiledResourceFuncs),
+		"gpuReductionKernels":      len(cfg.GPUReductionKernels),
+		"pureComputeFuncs":         len(cfg.PureComputeFuncs),
+		"layoutOpConstants":        len(cfg.LayoutOpConstants),
+		"pointerTypeNames":         len(cfg.PointerTypeNames),
+		"variadicDispatchWrappers": len(cfg.VariadicDispatchWrappers),
+		"topKSelectorFuncs":        len(cfg.TopKSelectorFuncs),
+		"inputViewFuncs":           len(cfg.InputViewFuncs),
+		"outputViewFuncs":          len(cfg.OutputViewFuncs),
+		"referenceBackendPkg":      len(cfg.ReferenceBackendPkg),
+		"optimizedBackendPkgs":     len(cfg.OptimizedBackendPkgs),
+		"kernelRegisterFuncs":      len(cfg.KernelRegisterFuncs),
 	}
 	missing := make([]string, 0, len(c.Vocab))
 	for _, v := range c.Vocab {
@@ -392,27 +413,74 @@ func matchCheck(id, pat string) bool {
 	return id == pat
 }
 
-func load(opts Options) ([]*packages.Package, error) {
+func load(opts *Options) ([]*packages.Package, error) {
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
 			packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo |
-			packages.NeedTypesSizes | packages.NeedImports | packages.NeedDeps,
+			packages.NeedTypesSizes | packages.NeedImports | packages.NeedDeps |
+			packages.NeedEmbedFiles,
 		Tests: opts.Tests,
 	}
 	return packages.Load(cfg, opts.Patterns...)
 }
 
-func runCheck(c *lint.Check, pkg *packages.Package) []Finding {
+// factStore is the per-analyzer serialized fact graph. analysis.Fact's
+// contract requires gob-compatible pointer values and copy-on-import; storing
+// encoded bytes satisfies both without sharing mutable fact instances between
+// package passes.
+type factStore struct {
+	allowed  map[reflect.Type]bool
+	objects  map[types.Object]map[reflect.Type][]byte
+	packages map[*types.Package]map[reflect.Type][]byte
+}
+
+func newFactStore(analyzer *analysis.Analyzer) *factStore {
+	store := &factStore{
+		allowed:  make(map[reflect.Type]bool, len(analyzer.FactTypes)),
+		objects:  make(map[types.Object]map[reflect.Type][]byte),
+		packages: make(map[*types.Package]map[reflect.Type][]byte),
+	}
+	for _, fact := range analyzer.FactTypes {
+		store.allowed[reflect.TypeOf(fact)] = true
+	}
+	return store
+}
+
+// runFactCheck executes one fact-producing analyzer over the complete import
+// graph in dependency-first order. Diagnostics remain scoped to the packages
+// the user requested, while dependency passes exist only to publish facts —
+// matching the standard go/analysis driver contract.
+func runFactCheck(c *lint.Check, roots []*packages.Package) []Finding {
+	var order []*packages.Package
+	packages.Visit(roots, nil, func(pkg *packages.Package) {
+		if len(pkg.Syntax) != 0 {
+			order = append(order, pkg)
+		}
+	})
+	store := newFactStore(c.Analyzer)
+	var findings []Finding
+	for _, pkg := range order {
+		current := runCheck(c, pkg, store)
+		if slices.Contains(roots, pkg) {
+			findings = append(findings, current...)
+		}
+	}
+	return findings
+}
+
+func runCheck(c *lint.Check, pkg *packages.Package, facts *factStore) []Finding {
 	var out []Finding
 	pass := &analysis.Pass{
-		Analyzer:   c.Analyzer,
-		Fset:       pkg.Fset,
-		Files:      pkg.Syntax,
-		OtherFiles: pkg.OtherFiles,
-		Pkg:        pkg.Types,
-		TypesInfo:  pkg.TypesInfo,
-		TypesSizes: pkg.TypesSizes,
-		ResultOf:   map[*analysis.Analyzer]any{},
+		Analyzer:     c.Analyzer,
+		Fset:         pkg.Fset,
+		Files:        pkg.Syntax,
+		OtherFiles:   sourceOtherFiles(pkg.OtherFiles, pkg.EmbedFiles),
+		IgnoredFiles: pkg.IgnoredFiles,
+		Pkg:          pkg.Types,
+		TypesInfo:    pkg.TypesInfo,
+		TypesSizes:   pkg.TypesSizes,
+		ResultOf:     map[*analysis.Analyzer]any{},
+		ReadFile:     os.ReadFile,
 		Report: func(d analysis.Diagnostic) {
 			end := d.End
 			if !end.IsValid() {
@@ -428,8 +496,108 @@ func runCheck(c *lint.Check, pkg *packages.Package) []Finding {
 			})
 		},
 	}
+	if facts != nil {
+		facts.bind(pass)
+	}
 	if _, err := c.Analyzer.Run(pass); err != nil {
 		fmt.Fprintf(os.Stderr, "perfscan: %s on %s: %v\n", c.ID, pkg.PkgPath, err)
+	}
+	return out
+}
+
+func (store *factStore) bind(pass *analysis.Pass) {
+	pass.ImportObjectFact = func(object types.Object, fact analysis.Fact) bool {
+		return store.importFact(store.objects[object], fact)
+	}
+	pass.ImportPackageFact = func(pkg *types.Package, fact analysis.Fact) bool {
+		return store.importFact(store.packages[pkg], fact)
+	}
+	pass.ExportObjectFact = func(object types.Object, fact analysis.Fact) {
+		if object == nil || object.Pkg() != pass.Pkg {
+			panic(pass.Analyzer.Name + ": cannot export fact for object outside package " + pass.Pkg.Path())
+		}
+		exportFact(store, store.objects, object, fact)
+	}
+	pass.ExportPackageFact = func(fact analysis.Fact) {
+		exportFact(store, store.packages, pass.Pkg, fact)
+	}
+	pass.AllObjectFacts = func() []analysis.ObjectFact {
+		facts := make([]analysis.ObjectFact, 0, len(store.objects))
+		for object, encoded := range store.objects {
+			for factType := range encoded {
+				fact := reflect.New(factType.Elem()).Interface().(analysis.Fact)
+				if store.importFact(encoded, fact) {
+					facts = append(facts, analysis.ObjectFact{Object: object, Fact: fact})
+				}
+			}
+		}
+		return facts
+	}
+	pass.AllPackageFacts = func() []analysis.PackageFact {
+		facts := make([]analysis.PackageFact, 0, len(store.packages))
+		for pkg, encoded := range store.packages {
+			for factType := range encoded {
+				fact := reflect.New(factType.Elem()).Interface().(analysis.Fact)
+				if store.importFact(encoded, fact) {
+					facts = append(facts, analysis.PackageFact{Package: pkg, Fact: fact})
+				}
+			}
+		}
+		return facts
+	}
+}
+
+func (store *factStore) importFact(encoded map[reflect.Type][]byte, fact analysis.Fact) bool {
+	if fact == nil {
+		panic("analysis fact is nil")
+	}
+	factType := reflect.TypeOf(fact)
+	if !store.allowed[factType] {
+		panic(fmt.Sprintf("analysis fact type %v is not registered", factType))
+	}
+	data, ok := encoded[factType]
+	if !ok {
+		return false
+	}
+	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(fact); err != nil {
+		panic(fmt.Sprintf("decode analysis fact %v: %v", factType, err))
+	}
+	return true
+}
+
+func exportFact[K comparable](store *factStore, destination map[K]map[reflect.Type][]byte, key K, fact analysis.Fact) {
+	if fact == nil {
+		panic("analysis fact is nil")
+	}
+	factType := reflect.TypeOf(fact)
+	if !store.allowed[factType] {
+		panic(fmt.Sprintf("analysis fact type %v is not registered", factType))
+	}
+	var encoded bytes.Buffer
+	if err := gob.NewEncoder(&encoded).Encode(fact); err != nil {
+		panic(fmt.Sprintf("encode analysis fact %v: %v", factType, err))
+	}
+	byType := destination[key]
+	if byType == nil {
+		byType = make(map[reflect.Type][]byte)
+		destination[key] = byType
+	}
+	byType[factType] = bytes.Clone(encoded.Bytes())
+}
+
+// sourceOtherFiles exposes go:embed payloads to analyzers through the standard
+// analysis.Pass file API. GPU kernels and other native sources are commonly
+// kept in .metal/.cu/.comp files and embedded at build time, so they are not in
+// packages.Package.OtherFiles even though they belong to the package.
+func sourceOtherFiles(other, embedded []string) []string {
+	out := make([]string, 0, len(other)+len(embedded))
+	seen := make(map[string]struct{}, cap(out))
+	for _, name := range slices.Concat(other, embedded) {
+		if _, duplicate := seen[name]; duplicate {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
 	}
 	return out
 }
@@ -437,13 +605,14 @@ func runCheck(c *lint.Check, pkg *packages.Package) []Finding {
 func dedup(in []Finding) []Finding {
 	seen := make(map[string]bool, len(in))
 	out := make([]Finding, 0, len(in))
-	for _, f := range in {
+	for i := range in {
+		f := &in[i]
 		key := f.Pos.Filename + ":" + strconv.Itoa(f.Pos.Line) + ":" + strconv.Itoa(f.Pos.Column) + ":" + f.Check.ID
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		out = append(out, f)
+		out = append(out, *f)
 	}
 	return out
 }
@@ -467,7 +636,7 @@ func filterIgnored(findings []Finding) []Finding {
 		lines[path] = l
 		return l
 	}
-	covered := func(f Finding, line int) bool {
+	covered := func(f *Finding, line int) bool {
 		l := fileLines(f.Pos.Filename)
 		if line < 1 || line > len(l) {
 			return false
@@ -493,11 +662,12 @@ func filterIgnored(findings []Finding) []Finding {
 		return false
 	}
 	out := make([]Finding, 0, len(findings))
-	for _, f := range findings {
+	for i := range findings {
+		f := &findings[i]
 		if covered(f, f.Pos.Line) || covered(f, f.Pos.Line-1) {
 			continue
 		}
-		out = append(out, f)
+		out = append(out, *f)
 	}
 	return out
 }
@@ -578,7 +748,7 @@ type patchedFile struct {
 // is already MaxLevel-gated), merges the sorted TextEdits, and
 // gofmt-formats the result — everything applyFixes does except the final
 // write. applyFixes writes the results; the -diff path renders them.
-func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFile, applied, overlapping, failed int) {
+func patchedFiles(findings []Finding, opts *Options) (files map[string]patchedFile, applied, overlapping, failed int) {
 	type edit struct {
 		start, end int
 		text       []byte
@@ -590,7 +760,8 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 	}
 	//perfscan:ignore PS2104 findings cluster in few files; len(findings) would over-reserve
 	perFile := map[string][]fileFix{}
-	for _, f := range findings {
+	for i := range findings {
+		f := &findings[i]
 		if !f.Check.AutoFix || len(f.Fixes) == 0 {
 			continue
 		}
@@ -742,7 +913,7 @@ func patchedFiles(findings []Finding, opts Options) (files map[string]patchedFil
 		// Apply accepted edits back-to-front so earlier offsets stay valid.
 		slices.SortFunc(accepted, func(a, b edit) int { return b.start - a.start })
 		for _, e := range accepted {
-			src = append(src[:e.start], append(append([]byte{}, e.text...), src[e.end:]...)...)
+			src = slices.Concat(src[:e.start], e.text, src[e.end:])
 		}
 		// Drop any import the applied fixes just orphaned. Independent checks
 		// can EACH remove the last-but-one reference to a shared package —
@@ -1077,11 +1248,17 @@ func pruneOrphanedImports(src []byte) []byte {
 		}
 		orphans = append(orphans, orphan{name, path})
 	}
-	if len(orphans) == 0 {
-		return src
-	}
 	for _, o := range orphans {
 		astutil.DeleteNamedImport(fset, f, o.name, o.path)
+	}
+	// DeleteNamedImport removes specs but intentionally leaves their GenDecl.
+	// When independent fixes collectively orphan every import in a block, that
+	// otherwise formats as `import ()`: legal, but not a clean fixed point. Drop
+	// only comment-free empty declarations; comments inside or attached to an
+	// import block are user content and keep the declaration in place.
+	droppedEmpty := dropCommentFreeEmptyImportDecls(f)
+	if len(orphans) == 0 && !droppedEmpty {
+		return src
 	}
 	var buf bytes.Buffer
 	if err := format.Node(&buf, fset, f); err != nil {
@@ -1090,10 +1267,37 @@ func pruneOrphanedImports(src []byte) []byte {
 	return buf.Bytes()
 }
 
+func dropCommentFreeEmptyImportDecls(file *ast.File) bool {
+	dropped := false
+	declarations := file.Decls[:0]
+	for _, declaration := range file.Decls {
+		general, isImport := declaration.(*ast.GenDecl)
+		if isImport && general.Tok == token.IMPORT && len(general.Specs) == 0 && !importDeclHasComment(file, general) {
+			dropped = true
+			continue
+		}
+		declarations = append(declarations, declaration)
+	}
+	file.Decls = declarations
+	return dropped
+}
+
+func importDeclHasComment(file *ast.File, declaration *ast.GenDecl) bool {
+	if declaration.Doc != nil {
+		return true
+	}
+	for _, group := range file.Comments {
+		if group.Pos() >= declaration.Pos() && group.End() <= declaration.End() {
+			return true
+		}
+	}
+	return false
+}
+
 // applyFixes applies the suggested fixes of the reported auto-fixable
 // checks (the enabled set is already MaxLevel-gated), then gofmt-formats
 // touched files.
-func applyFixes(findings []Finding, opts Options) (applied, overlapping, failed int) {
+func applyFixes(findings []Finding, opts *Options) (applied, overlapping, failed int) {
 	files, applied, overlapping, failed := patchedFiles(findings, opts)
 	for path, pf := range files {
 		if err := os.WriteFile(path, pf.fixed, 0o644); err != nil {
@@ -1136,7 +1340,8 @@ type jsonFinding struct {
 
 func emitJSON(w io.Writer, findings []Finding) {
 	out := make([]jsonFinding, 0, len(findings))
-	for _, f := range findings {
+	for i := range findings {
+		f := &findings[i]
 		jf := jsonFinding{
 			ID:       f.Check.ID,
 			Category: f.Check.Category,

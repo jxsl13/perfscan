@@ -1,0 +1,5 @@
+package ps5083multi
+
+func adjacentCloneImports(data []byte) int {
+	return len(data) // want "len consumes 2 throwaway standard-library Clone layer"
+}

@@ -47,6 +47,11 @@ func byteUint8(s string) int {
 	return len([]uint8(s)) // want `len\(\[\]uint8\(s\)\) spells a byte length as a throwaway \[\]byte conversion; len\(s\) is the direct, bit-identical byte count \(allocation-free on every toolchain\)`
 }
 
+// Reported but not fixed: the rewrite would make this a constant expression.
+func byteLiteral() int {
+	return len([]byte("literal")) // want `len\(\[\]byte\("literal"\)\) spells a byte length as a throwaway \[\]byte conversion; len\("literal"\) is the direct, bit-identical byte count \(allocation-free on every toolchain\)`
+}
+
 // Reported but NOT fixed: a comment inside the rewritten scaffolding
 // would be destroyed by the edits.
 func commentedRune(s string) int {

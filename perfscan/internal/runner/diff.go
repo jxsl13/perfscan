@@ -13,7 +13,7 @@ import (
 // original → fixed per changed file to Stdout, modifies NOTHING, and
 // returns 1 when at least one file would change (0 otherwise, 2 never —
 // hard errors were already reported by patchedFiles on Stderr).
-func diffFixes(findings []Finding, opts Options) int {
+func diffFixes(findings []Finding, opts *Options) int {
 	files, applied, overlapping, failed := patchedFiles(findings, opts)
 	paths := make([]string, 0, len(files))
 	for path, pf := range files {

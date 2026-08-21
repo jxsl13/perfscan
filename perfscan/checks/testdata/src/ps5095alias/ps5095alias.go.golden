@@ -1,0 +1,11 @@
+package ps5095alias
+
+import stream "io"
+
+func read(reader stream.Reader, buffer []byte) (int, error) {
+	return (reader).Read(buffer) // want "io.NopCloser chain constructs 2 adapter layer[(]s[)] only to call Read immediately"
+}
+
+func close(reader stream.Reader) error {
+	return stream.NopCloser(reader).Close() // want "io.NopCloser chain constructs 2 adapter layer[(]s[)] only to call Close immediately"
+}

@@ -1,0 +1,78 @@
+package ps5094
+
+import (
+	"bytes"
+	"slices"
+)
+
+type Data []byte
+type Text string
+
+func clonedString(data []byte) string {
+	return string(data) // want "bytes.NewBuffer[(]...[)].String constructs an ephemeral Buffer only to extract its initial value and carries 3 throwaway Clone layer"
+}
+
+func copiedBytes(text string) []byte {
+	return []byte(text) // want "bytes.NewBufferString[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 2 throwaway Clone layer"
+}
+
+func aliasedBytes(data Data) []byte {
+	return []byte(data) // want "bytes.NewBuffer[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 0 throwaway Clone layer"
+}
+
+func aliasedText(text Text) []byte {
+	return []byte(string(text)) // want "bytes.NewBufferString[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 0 throwaway Clone layer"
+}
+
+func nilBytes() []byte {
+	return []byte(nil) // want "bytes.NewBuffer[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 0 throwaway Clone layer"
+}
+
+func nilString() string {
+	return string([]byte(nil)) // want "bytes.NewBuffer[(]...[)].String constructs an ephemeral Buffer only to extract its initial value and carries 0 throwaway Clone layer"
+}
+
+func constantBytes() []byte {
+	return []byte("constant") // want "bytes.NewBufferString[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 0 throwaway Clone layer"
+}
+
+func byteLength(data []byte) int {
+	return len(data) // want "bytes.NewBuffer[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 2 throwaway Clone layer"
+}
+
+func textLength(text string) int {
+	return len(text) // want "bytes.NewBufferString[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 1 throwaway Clone layer"
+}
+
+func preserveSnapshot(data []byte) []byte {
+	return slices.Clone(data) // want "bytes.NewBuffer[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 0 throwaway Clone layer"
+}
+
+// NewBufferString(...).String is a possible retention/detachment boundary.
+func detachedString(text string) string {
+	return bytes.NewBufferString(text).String()
+}
+
+// A specialized outer observer owns this shape.
+func comparedString(data []byte) bool {
+	return bytes.NewBuffer(data).String() == "payload"
+}
+
+// A conversion cannot replace a method call in a bare call-only statement.
+func bareCall(data []byte) {
+	bytes.NewBuffer(data).Bytes() // want "bytes.NewBuffer[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 0 throwaway Clone layer"
+}
+
+func functionValue(data []byte) []byte {
+	constructor := bytes.NewBuffer
+	return constructor(data).Bytes()
+}
+
+type buffer struct{ data []byte }
+
+func (b *buffer) Bytes() []byte     { return b.data }
+func NewBuffer(data []byte) *buffer { return &buffer{data: data} }
+
+func userConstructor(data []byte) []byte {
+	return NewBuffer(data).Bytes()
+}

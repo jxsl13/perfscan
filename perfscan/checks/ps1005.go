@@ -71,7 +71,7 @@ func runPS1005(pass *analysis.Pass) (any, error) {
 			if !ok || fn.Body == nil {
 				continue
 			}
-			ff := collectFuncFacts(fn, ns)
+			ff := collectFuncFacts(fn, &ns)
 			reportedLoop := map[ast.Node]bool{}
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)

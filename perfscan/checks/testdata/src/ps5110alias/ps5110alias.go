@@ -1,0 +1,7 @@
+package ps5110alias
+
+import seq "slices"
+
+func concat(a, b, c []byte) []byte {
+	return seq.Concat(seq.Concat(a, b), c) // want "slices.Concat materializes and recopies 1 intermediate concatenation result"
+}

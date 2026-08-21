@@ -77,3 +77,72 @@ func compose(n int, s string, a, b []byte, xs []int, m map[string]int, zs []int)
 		}
 	}
 }
+
+// TestFixCompareCloneChainReachesFixedPointInOnePass pins composition between
+// PS5082 and PS5106. The inner observer rule deliberately yields ownership to
+// the outer Compare-to-zero rewrite, which must remove both Compare and every
+// strings.Clone layer in one pass. Otherwise overlapping fixes can either
+// leave the allocations behind or require a second -fix run.
+func TestFixCompareCloneChainReachesFixedPointInOnePass(t *testing.T) {
+	const src = `package p
+
+import "strings"
+
+func same(a, b string) bool {
+	return strings.Compare(strings.Clone(strings.Clone(a)), strings.Clone(b)) == 0
+}
+`
+	pass1 := string(runFixMode(t, src))
+	if !strings.Contains(pass1, "return a == b") {
+		t.Fatalf("expected the final direct comparison in pass 1:\n%s", pass1)
+	}
+	if strings.Contains(pass1, "strings.") || strings.Contains(pass1, `"strings"`) {
+		t.Fatalf("Compare/Clone calls and their orphaned import must disappear in pass 1:\n%s", pass1)
+	}
+	pass2 := string(runFixMode(t, pass1))
+	if pass2 != pass1 {
+		t.Fatalf("Compare/Clone rewrite is not idempotent:\n--- pass1 ---\n%s\n--- pass2 ---\n%s", pass1, pass2)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "p.go", pass2, 0); err != nil {
+		t.Fatalf("fixed file does not parse: %v\n%s", err, pass2)
+	}
+}
+
+// TestFixCloneCopyingBuiltinsReachFixedPointInOnePass pins ownership between
+// PS5074's nested-clone simplification and PS5084's more specific terminal
+// rewrite. The terminal rule must remove every clone directly in pass 1,
+// including adjacent imports, without losing a fix to overlapping edits.
+func TestFixCloneCopyingBuiltinsReachFixedPointInOnePass(t *testing.T) {
+	const src = `package p
+
+import (
+	"bytes"
+	"slices"
+	"strings"
+)
+
+func transform(dst, src []byte, text string) (int, int, []byte, []byte, []rune, string) {
+	n := copy(dst, bytes.Clone(bytes.Clone(slices.Clone(src))))
+	textN := copy(dst, bytes.Clone([]byte(strings.Clone(strings.Clone(text)))))
+	out := append(dst[:0], bytes.Clone(src)...)
+	textOut := append(dst[:0], bytes.Clone([]byte(strings.Clone(text)))...)
+	runes := []rune(strings.Clone(strings.Clone(text)))
+	roundTrip := string(bytes.Clone([]byte(strings.Clone(text))))
+	return n, textN, out, textOut, runes, roundTrip
+}
+`
+	pass1 := string(runFixMode(t, src))
+	for _, want := range []string{"copy(dst, src)", "copy(dst, text)", "append(dst[:0], src...)", "append(dst[:0], text...)", "[]rune(text)", "roundTrip := text"} {
+		if !strings.Contains(pass1, want) {
+			t.Errorf("expected terminal fixed point %q in pass 1:\n%s", want, pass1)
+		}
+	}
+	if strings.Contains(pass1, ".Clone(") || strings.Contains(pass1, `"bytes"`) || strings.Contains(pass1, `"slices"`) || strings.Contains(pass1, `"strings"`) {
+		t.Fatalf("all clone layers and orphaned imports must disappear in pass 1:\n%s", pass1)
+	}
+	pass2 := string(runFixMode(t, pass1))
+	if pass2 != pass1 {
+		t.Fatalf("terminal clone rewrite is not idempotent:\n--- pass1 ---\n%s\n--- pass2 ---\n%s", pass1, pass2)
+	}
+	assertFixedCompiles(t, []byte(pass2))
+}

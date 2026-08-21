@@ -1,0 +1,5 @@
+package ps5080alias
+
+func lastImport(input string) string {
+	return input // want `2 adjacent strings Replace/ReplaceAll call\(s\) are content no-ops`
+}

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strings"
 	"text/tabwriter"
 
@@ -68,9 +69,10 @@ func main() {
 	)
 	flag.Usage = printUsage
 	flag.Parse()
+	resolvedVersion := currentVersion()
 
 	if *showVer {
-		fmt.Println("perfscan", version)
+		fmt.Println("perfscan", resolvedVersion)
 		return
 	}
 	if *list {
@@ -82,7 +84,7 @@ func main() {
 		return
 	}
 
-	runner.Version = version
+	runner.Version = resolvedVersion
 	code := runner.Run(checks.All(), runner.Options{
 		Patterns:         flag.Args(),
 		Checks:           *sel,
@@ -100,6 +102,27 @@ func main() {
 		Exclude:          exclude,
 	})
 	os.Exit(code)
+}
+
+// currentVersion prefers the release workflow's explicit ldflag, then falls
+// back to the main module version embedded by `go install module@version`.
+// Local/go-run builds carry "(devel)" and intentionally remain "dev".
+func currentVersion() string {
+	moduleVersion := ""
+	if info, ok := debug.ReadBuildInfo(); ok {
+		moduleVersion = info.Main.Version
+	}
+	return selectVersion(version, moduleVersion)
+}
+
+func selectVersion(stamped, moduleVersion string) string {
+	if stamped != "" && stamped != "dev" && stamped != "(devel)" {
+		return stamped
+	}
+	if moduleVersion != "" && moduleVersion != "dev" && moduleVersion != "(devel)" {
+		return moduleVersion
+	}
+	return "dev"
 }
 
 func printUsage() {

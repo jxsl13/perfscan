@@ -76,6 +76,11 @@ func varSep(s, sep string) string {
 	return strings.Join(strings.Split(s, sep), ";")
 }
 
+// PS5112 owns exact inverse compositions and removes both calls directly.
+func inverseOwnedByPS5112(s string) string {
+	return strings.Join(strings.Split(s, ","), ",")
+}
+
 // The slice stored first may have other consumers — out of scope.
 func storedFirst(s string) string {
 	parts := strings.Split(s, ",")

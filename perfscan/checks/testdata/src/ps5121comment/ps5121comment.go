@@ -1,0 +1,53 @@
+package ps5121comment
+
+import (
+	"bytes"
+	"strings"
+)
+
+func predicateComment(value string) string {
+	if strings.Contains(value /* input remains */, ":" /* separator remains */) { // want `strings.Contains proves.*index 1`
+		return strings.SplitN(value, ":", 2)[1]
+	}
+	return value
+}
+
+func resultComment(value string) string {
+	if strings.Contains(value, ":") { // want `strings.Contains proves.*index 1`
+		return strings.SplitN(value /* keep rationale */, ":", 2)[1]
+	}
+	return value
+}
+
+func localCount(value string) string {
+	const count = 2
+	if strings.Contains(value, ":") { // want `strings.Contains proves.*index 1`
+		return strings.SplitN(value, ":", count)[1]
+	}
+	return value
+}
+
+func localIndex(value string) string {
+	const index = 1
+	if strings.Contains(value, ":") { // want `strings.Contains proves.*index 1`
+		return strings.SplitN(value, ":", 2)[index]
+	}
+	return value
+}
+
+func distinctLocalSeparator(value string) string {
+	const bodySeparator = ":"
+	if strings.Contains(value, ":") { // want `strings.Contains proves.*index 1`
+		return strings.SplitN(value, bodySeparator, 2)[1]
+	}
+	return value
+}
+
+func shadowedLen(value []byte) []byte {
+	len := 1
+	_ = len
+	if bytes.Contains(value, []byte(":")) { // want `bytes.Contains proves.*index 0`
+		return bytes.SplitN(value, []byte(":"), 2)[0]
+	}
+	return value
+}

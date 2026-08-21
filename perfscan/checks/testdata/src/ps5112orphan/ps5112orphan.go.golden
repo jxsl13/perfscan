@@ -1,0 +1,5 @@
+package ps5112orphan
+
+func inverse(s string) string {
+	return s // want `strings.Join exactly reverses strings.Split and reconstructs its original plain-string input`
+}

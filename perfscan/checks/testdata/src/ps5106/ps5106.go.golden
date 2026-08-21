@@ -20,6 +20,12 @@ type pair struct{ x, y string }
 
 func callArg(p pair, f func() string) bool { return f() == p.y } // want `strings\.Compare`
 
+// A Compare-to-zero call that consumes Clone chains reaches the final direct
+// comparison in one pass rather than overlapping with PS5082.
+func clonedArgs(a, b string) bool {
+	return a == b // want `final rewrite also removes 3 throwaway strings\.Clone layer`
+}
+
 // NEGATIVE: compared to a non-zero literal — not a Compare-to-zero shape.
 func nonZero(a, b string) bool { return strings.Compare(a, b) == 1 }
 

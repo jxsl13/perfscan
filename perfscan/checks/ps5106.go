@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -133,11 +134,17 @@ func runPS5106(pass *analysis.Pass) (any, error) {
 				op = ps5106Mirror(op)
 			}
 			opStr := ps5106OpString(op)
+			left, leftClones := ps5106DirectArg(pass, call.Args[0])
+			right, rightClones := ps5106DirectArg(pass, call.Args[1])
+			cloneLayers := leftClones + rightClones
 			msg := "strings.Compare(a, b) " + ps5106OpString(bin.Op) + " 0 round-trips a function call for what `a " + opStr + " b` expresses directly (faster, no ordering computed)"
+			if cloneLayers > 0 {
+				msg += fmt.Sprintf("; final rewrite also removes %d throwaway strings.Clone layer(s)", cloneLayers)
+			}
 
 			var fix *analysis.SuggestedFix
-			aText, okA := ps2107ExprText(call.Args[0])
-			bText, okB := ps2107ExprText(call.Args[1])
+			aText, okA := ps2107ExprText(left)
+			bText, okB := ps2107ExprText(right)
 			// A comment inside the replaced comparison would be silently dropped
 			// by the re-rendered expression — withhold the fix there.
 			if okA && okB && !ps2111CommentIn(f, bin.Pos(), bin.End()) {
@@ -165,6 +172,17 @@ func runPS5106(pass *analysis.Pass) (any, error) {
 		}
 	}
 	return nil, nil
+}
+
+// ps5106DirectArg unwraps a typed strings.Clone chain so the Compare-to-zero
+// rewrite lands directly on its final allocation-free fixed point. Other
+// argument expressions are returned unchanged.
+func ps5106DirectArg(pass *analysis.Pass, expr ast.Expr) (ast.Expr, int) {
+	matched, ok := matchTypedUnaryPackageCallChain(pass, expr, isTypedStringStdlibClone)
+	if !ok {
+		return expr, 0
+	}
+	return matched.base, len(matched.calls)
 }
 
 // ps5106CompareCall returns e as a call of the package-level function

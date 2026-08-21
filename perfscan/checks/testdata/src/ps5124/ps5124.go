@@ -1,0 +1,217 @@
+package ps5124
+
+import (
+	"bytes"
+	"strings"
+)
+
+const (
+	colonA = ":"
+	colonB = ":"
+	zero   = 0
+)
+
+func stringReturn(value string) int {
+	// want +1 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	if strings.Contains(value, colonA) {
+		return strings.Count(value, colonB)
+	}
+	return zero
+}
+
+func stringElse(value, needle string) int {
+	// want +1 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	if strings.Contains(value, needle) {
+		return strings.Count(value, needle)
+	} else {
+		return 0
+	}
+}
+
+func byteReturn(value, needle []byte) int {
+	// want +1 `bytes.Contains searches before bytes.Count repeats the lookup and counts all matches`
+	if bytes.Contains(value, needle) {
+		return bytes.Count(value, needle)
+	}
+	return 0
+}
+
+func emptyNeedle(value string) int {
+	// want +1 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	if strings.Contains(value, "") {
+		return strings.Count(value, "")
+	}
+	return 0
+}
+
+func initialized(value string) int {
+	// want +2 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	count := 0
+	if strings.Contains(value, ":") {
+		count = strings.Count(value, ":")
+	}
+	return count
+}
+
+func existing(value string, count int) int {
+	// want +2 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	count = 0x0
+	if strings.Contains(value, ":") {
+		count = strings.Count(value, ":")
+	}
+	return count
+}
+
+func assignmentElse(value string, count int) int {
+	// want +1 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	if strings.Contains(value, ":") {
+		count = strings.Count(value, ":")
+	} else {
+		count = int(0)
+	}
+	return count
+}
+
+func parenthesized(value string) int {
+	// want +1 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	if strings.Contains((value), (":")) {
+		return (strings.Count((value), (":")))
+	}
+	return (0)
+}
+
+// --- negatives ---
+
+func differentInput(value, other string) int {
+	if strings.Contains(value, ":") {
+		return strings.Count(other, ":")
+	}
+	return 0
+}
+
+func differentNeedle(value string) int {
+	if strings.Contains(value, ":") {
+		return strings.Count(value, ";")
+	}
+	return 0
+}
+
+func constructedBytes(value []byte) int {
+	if bytes.Contains(value, []byte(":")) {
+		return bytes.Count(value, []byte(":"))
+	}
+	return 0
+}
+
+func effectfulNeedle(value string, needle func() string) int {
+	if strings.Contains(value, needle()) {
+		return strings.Count(value, needle())
+	}
+	return 0
+}
+
+func initializedCondition(value string) int {
+	if enabled := true; enabled && strings.Contains(value, ":") {
+		return strings.Count(value, ":")
+	}
+	return 0
+}
+
+func negated(value string) int {
+	if !strings.Contains(value, ":") {
+		return strings.Count(value, ":")
+	}
+	return 0
+}
+
+func additionalWork(value string) int {
+	if strings.Contains(value, ":") {
+		_ = len(value)
+		return strings.Count(value, ":")
+	}
+	return 0
+}
+
+func wrongFallback(value string) int {
+	if strings.Contains(value, ":") {
+		return strings.Count(value, ":")
+	}
+	return -1
+}
+
+func delayedFallback(value string) int {
+	if strings.Contains(value, ":") {
+		return strings.Count(value, ":")
+	}
+	_ = value
+	return 0
+}
+
+func assignmentWithoutInitializer(value string, count int) int {
+	if strings.Contains(value, ":") {
+		count = strings.Count(value, ":")
+	}
+	return count
+}
+
+func separatedInitializer(value string) int {
+	count := 0
+	_ = value
+	if strings.Contains(value, ":") {
+		count = strings.Count(value, ":")
+	}
+	return count
+}
+
+func wrongElse(value string, count int) int {
+	if strings.Contains(value, ":") {
+		count = strings.Count(value, ":")
+	} else {
+		count = 1
+	}
+	return count
+}
+
+func shortDeclaration(value string) int {
+	if strings.Contains(value, ":") {
+		count := strings.Count(value, ":")
+		return count
+	}
+	return 0
+}
+
+func variableFallback(value string, fallback int) int {
+	if strings.Contains(value, ":") {
+		return strings.Count(value, ":")
+	}
+	return fallback
+}
+
+func functionValues(value string) int {
+	contains, count := strings.Contains, strings.Count
+	if contains(value, ":") {
+		return count(value, ":")
+	}
+	return 0
+}
+
+type helper string
+
+func (value helper) Contains(needle string) bool { return needle != "" }
+func (value helper) Count(needle string) int     { return len(value) + len(needle) }
+
+func methods(value helper) int {
+	if value.Contains(":") {
+		return value.Count(":")
+	}
+	return 0
+}
+
+var _ = []any{
+	stringReturn, stringElse, byteReturn, emptyNeedle, initialized, existing,
+	assignmentElse, parenthesized, differentInput, differentNeedle,
+	constructedBytes, effectfulNeedle, initializedCondition, negated,
+	additionalWork, wrongFallback, delayedFallback, assignmentWithoutInitializer,
+	separatedInitializer, wrongElse, shortDeclaration, variableFallback,
+	functionValues, methods,
+}

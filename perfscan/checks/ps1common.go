@@ -26,7 +26,7 @@ type funcFacts struct {
 	parent map[ast.Node]ast.Node
 }
 
-func collectFuncFacts(fn *ast.FuncDecl, ns config.Sets) *funcFacts {
+func collectFuncFacts(fn *ast.FuncDecl, ns *config.Sets) *funcFacts {
 	ff := &funcFacts{
 		numelIdents: map[string]bool{},
 		perElemLoop: map[ast.Node]bool{},
@@ -85,7 +85,7 @@ func collectFuncFacts(fn *ast.FuncDecl, ns config.Sets) *funcFacts {
 
 // isNumelRange reports a range over an element-count call or a local bound
 // to one.
-func isNumelRange(r *ast.RangeStmt, numelIdents map[string]bool, ns config.Sets) bool {
+func isNumelRange(r *ast.RangeStmt, numelIdents map[string]bool, ns *config.Sets) bool {
 	switch x := r.X.(type) {
 	case *ast.CallExpr:
 		return ns.ElementCountMethods[astutil.CalleeName(x.Fun)]
@@ -97,7 +97,7 @@ func isNumelRange(r *ast.RangeStmt, numelIdents map[string]bool, ns config.Sets)
 
 // isNumelForCond reports a 3-clause for loop bounded by an element count:
 // `for i := 0; i < n; i++` with n from a configured count method.
-func isNumelForCond(f *ast.ForStmt, numelIdents map[string]bool, ns config.Sets) bool {
+func isNumelForCond(f *ast.ForStmt, numelIdents map[string]bool, ns *config.Sets) bool {
 	bin, ok := f.Cond.(*ast.BinaryExpr)
 	if !ok {
 		return false
@@ -118,7 +118,7 @@ func isNumelForCond(f *ast.ForStmt, numelIdents map[string]bool, ns config.Sets)
 // into a nested Range/For/FuncLit: an Unravel there belongs to that inner
 // loop, so counting it would misclassify an outer per-row loop as
 // per-element.
-func directlyHasUnravel(body *ast.BlockStmt, ns config.Sets) bool {
+func directlyHasUnravel(body *ast.BlockStmt, ns *config.Sets) bool {
 	found := false
 	ast.Inspect(body, func(n ast.Node) bool {
 		if found {

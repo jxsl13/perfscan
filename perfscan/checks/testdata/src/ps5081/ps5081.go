@@ -1,0 +1,168 @@
+package ps5081
+
+import (
+	"bytes"
+	"crypto"
+	"crypto/dsa"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/hmac"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/sha3"
+	"crypto/subtle"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
+	"maps"
+	"math/big"
+	"net/http"
+	"slices"
+	"unicode/utf8"
+)
+
+func byteEqualDeep(a, b []byte) bool {
+	return bytes.Equal(bytes.Clone(slices.Clone(bytes.Clone(a))), slices.Clone(b)) // want "bytes.Equal read-only observation consumes 4 throwaway clone layer[(]s[)] across 2 argument[(]s[)]"
+}
+
+func sliceEqual(a, b []int) bool {
+	return slices.Equal(slices.Clone(a), slices.Clone(b)) // want "slices.Equal read-only observation consumes 2 throwaway clone layer"
+}
+
+func mapEqual(a, b map[string]int) bool {
+	return maps.Equal(maps.Clone(a), maps.Clone(b)) // want "maps.Equal read-only observation consumes 2 throwaway clone layer"
+}
+
+func validUTF8(data []byte) bool {
+	return utf8.Valid(bytes.Clone(data)) // want "unicode/utf8.Valid read-only observation consumes 1 throwaway clone layer"
+}
+
+func fixedHash(data []byte) [32]byte {
+	return sha256.Sum256(slices.Clone(data)) // want "crypto/sha256.Sum256 read-only observation consumes 1 throwaway clone layer"
+}
+
+func fixedSHA3(data []byte) [32]byte {
+	return sha3.Sum256(bytes.Clone(data)) // want "crypto/sha3.Sum256 read-only observation consumes 1 throwaway clone layer"
+}
+
+func encoded(data []byte) string {
+	return base64.StdEncoding.EncodeToString(bytes.Clone(data)) // want "encoding/base64.EncodeToString read-only observation consumes 1 throwaway clone layer"
+}
+
+func constantTimeEqual(left, right []byte) bool {
+	return hmac.Equal(bytes.Clone(left), slices.Clone(right)) // want "crypto/hmac.Equal read-only observation consumes 2 throwaway clone layer"
+}
+
+func subtleEqual(left, right []byte) int {
+	return subtle.ConstantTimeCompare(bytes.Clone(left), slices.Clone(right)) // want "crypto/subtle.ConstantTimeCompare read-only observation consumes 2 throwaway clone layer"
+}
+
+func verify(publicKey ed25519.PublicKey, message, signature []byte) bool {
+	return ed25519.Verify(slices.Clone(publicKey), bytes.Clone(message), slices.Clone(signature)) // want "crypto/ed25519.Verify read-only observation consumes 3 throwaway clone layer"
+}
+
+func verifyWithOptions(publicKey ed25519.PublicKey, message, signature []byte, options *ed25519.Options) error {
+	return ed25519.VerifyWithOptions(slices.Clone(publicKey), slices.Clone(message), bytes.Clone(signature), options) // want "crypto/ed25519.VerifyWithOptions read-only observation consumes 3 throwaway clone layer"
+}
+
+func verifyDSA(publicKey *dsa.PublicKey, digest []byte, r, s *big.Int) bool {
+	return dsa.Verify(publicKey, bytes.Clone(digest), r, s) // want "crypto/dsa.Verify read-only observation consumes 1 throwaway clone layer"
+}
+
+func verifyECDSA(publicKey *ecdsa.PublicKey, digest []byte, r, s *big.Int) bool {
+	return ecdsa.Verify(publicKey, slices.Clone(digest), r, s) // want "crypto/ecdsa.Verify read-only observation consumes 1 throwaway clone layer"
+}
+
+func verifyECDSAASN1(publicKey *ecdsa.PublicKey, digest, signature []byte) bool {
+	return ecdsa.VerifyASN1(publicKey, bytes.Clone(digest), slices.Clone(signature)) // want "crypto/ecdsa.VerifyASN1 read-only observation consumes 2 throwaway clone layer"
+}
+
+func verifyRSAPKCS1v15(publicKey *rsa.PublicKey, digest, signature []byte) error {
+	return rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, bytes.Clone(digest), slices.Clone(signature)) // want "crypto/rsa.VerifyPKCS1v15 read-only observation consumes 2 throwaway clone layer"
+}
+
+func verifyRSAPSS(publicKey *rsa.PublicKey, digest, signature []byte, options *rsa.PSSOptions) error {
+	return rsa.VerifyPSS(publicKey, crypto.SHA256, slices.Clone(digest), bytes.Clone(signature), options) // want "crypto/rsa.VerifyPSS read-only observation consumes 2 throwaway clone layer"
+}
+
+func checkX509Signature(certificate *x509.Certificate, signed, signature []byte) error {
+	return certificate.CheckSignature(x509.SHA256WithRSA, bytes.Clone(signed), slices.Clone(signature)) // want "crypto/x509.CheckSignature read-only observation consumes 2 throwaway clone layer"
+}
+
+func validJSON(data []byte) bool {
+	return json.Valid(bytes.Clone(data)) // want "encoding/json.Valid read-only observation consumes 1 throwaway clone layer"
+}
+
+func varint(data []byte) (int64, int) {
+	return binary.Varint(bytes.Clone(data)) // want "encoding/binary.Varint read-only observation consumes 1 throwaway clone layer"
+}
+
+func binarySize(values []uint32) int {
+	return binary.Size(slices.Clone(values)) // want "encoding/binary.Size read-only observation consumes 1 throwaway clone layer"
+}
+
+func contentType(data []byte) string {
+	return http.DetectContentType(bytes.Clone(data)) // want "net/http.DetectContentType read-only observation consumes 1 throwaway clone layer"
+}
+
+func commentPreserved(data []byte) bool {
+	return utf8.Valid(bytes.Clone( /* snapshot rationale */ data)) // want "unicode/utf8.Valid read-only observation consumes 1 throwaway clone layer"
+}
+
+func mutateBytes(data []byte) []byte {
+	if len(data) > 0 {
+		data[0] ^= 0xff
+	}
+	return data
+}
+
+// The first Clone snapshots a before-mutation value. Removing it would move
+// the observer onto the mutated backing array, so this call stays silent.
+func laterArgumentMutationNeedsSnapshot(data []byte) bool {
+	return bytes.Equal(bytes.Clone(data), mutateBytes(data))
+}
+
+// A last-argument Clone happens after all preceding mutations and is safe.
+func lastArgumentCloneIsSafe(a, b []byte) bool {
+	return bytes.Equal(mutateBytes(a), bytes.Clone(b)) // want "bytes.Equal read-only observation consumes 1 throwaway clone layer"
+}
+
+// Slice-returning observers can expose clone aliasing and stay silent.
+func cutReturnsView(data, separator []byte) ([]byte, []byte, bool) {
+	return bytes.Cut(bytes.Clone(data), separator)
+}
+
+// Callback observers may mutate the original through a closure.
+func callbackCanObserveSnapshot(a, b []int) bool {
+	return slices.EqualFunc(slices.Clone(a), b, func(x, y int) bool {
+		a[0] = x
+		return x == y
+	})
+}
+
+func mapCallbackCanObserveSnapshot(a, b map[string]int) bool {
+	return maps.EqualFunc(maps.Clone(a), b, func(x, y int) bool {
+		delete(a, "x")
+		return x == y
+	})
+}
+
+// Readers retain their input and therefore retain the snapshot requirement.
+func readerRetains(data []byte) *bytes.Reader {
+	return bytes.NewReader(bytes.Clone(data))
+}
+
+func standaloneClone(data []byte) []byte {
+	return bytes.Clone(data)
+}
+
+type cloner struct{}
+
+func (cloner) Clone(data []byte) []byte { return data }
+
+func userMethod(c cloner, data []byte) bool {
+	return utf8.Valid(c.Clone(data))
+}
+
+var _ = []any{laterArgumentMutationNeedsSnapshot, lastArgumentCloneIsSafe}

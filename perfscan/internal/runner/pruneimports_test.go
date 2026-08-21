@@ -1,6 +1,9 @@
 package runner
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestPruneOrphanedImports pins the post-fix import pruning that keeps
 // cross-check rewrites from leaving an "imported and not used" error (e.g.
@@ -105,4 +108,18 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestPruneOrphanedImportsDropsOnlyCommentFreeEmptyDeclarations(t *testing.T) {
+	plain := "package p\n\nimport (\n\t\"bytes\"\n\t\"strings\"\n)\n\nfunc f() {}\n"
+	plainFixed := string(pruneOrphanedImports([]byte(plain)))
+	if strings.Contains(plainFixed, "import") {
+		t.Fatalf("comment-free fully orphaned import block must disappear:\n%s", plainFixed)
+	}
+
+	commented := "package p\n\nimport (\n\t// retained rationale\n\t\"strings\"\n)\n\nfunc f() {}\n"
+	commentedFixed := string(pruneOrphanedImports([]byte(commented)))
+	if !strings.Contains(commentedFixed, "retained rationale") {
+		t.Fatalf("commented import content must survive pruning:\n%s", commentedFixed)
+	}
 }
