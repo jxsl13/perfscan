@@ -226,7 +226,7 @@ func ps6021ExplicitExactHelper(pass *analysis.Pass, call *ast.CallExpr) bool {
 
 func ps6021FatalExactComparison(pass *analysis.Pass, call *ast.CallExpr, parents map[ast.Node]ast.Node) bool {
 	fn, _, ok := typedCallee(pass, call.Fun)
-	if !ok || !ps6021EqualityFunction(fn.Pkg().Path(), fn.Name()) || !ps6021OutputArgs(call) {
+	if !ok || fn.Pkg() == nil || !ps6021EqualityFunction(fn.Pkg().Path(), fn.Name()) || !ps6021OutputArgs(call) {
 		return false
 	}
 	negated := false

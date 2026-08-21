@@ -15,6 +15,10 @@ type FusedGEMMGate struct {
 
 func TestMPSF16FusedWideGEMMExactOutput(t *testing.T) {
 	// Three MPS f16 projections are concatenated into one wider result shape.
+	var err error
+	if err != nil {
+		_ = err.Error() // A predeclared interface method has no declaring package.
+	}
 	separateOutput := []float32{1, 2}
 	wideOutput := []float32{1, 2}
 	if !slices.Equal(separateOutput, wideOutput) { // want "fused floating-point vendor GEMM shape rewrite makes bit-exact output a mandatory promotion gate; missing replacement evidence: exact operand/expanded-storage bytes, finite bounded numerical error, end-to-end semantic/quality gate"
