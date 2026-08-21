@@ -43,6 +43,19 @@ func stringConstantSwitch(selected string) int {
 	return 0
 }
 
+type definedString string
+
+// A defined string can reach the API only through an explicit conversion; the
+// retained conversion has the same built-in string result type.
+func stringConvertedDefinedInput(s definedString) any {
+	return strings.ReplaceAll(string(s), "x", "x") // want `1 adjacent strings Replace/ReplaceAll call\(s\) are content no-ops`
+}
+
+// Untyped string constants default to the same built-in string result type.
+func stringUntypedInput() any {
+	return strings.ReplaceAll("payload", "x", "x") // want `1 adjacent strings Replace/ReplaceAll call\(s\) are content no-ops`
+}
+
 func bytesDeepMixed(b []byte) []byte {
 	return bytes.ReplaceAll( // want `3 adjacent bytes Replace/ReplaceAll calls preserve content but each copies the slice`
 		bytes.Replace(

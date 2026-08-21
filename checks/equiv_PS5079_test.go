@@ -7,6 +7,7 @@ import (
 )
 
 func TestEquiv_PS5079EmptyBoundaryOperations(t *testing.T) {
+	t.Parallel()
 	stringFns := []struct {
 		name string
 		fn   func(string, string) string
@@ -71,6 +72,20 @@ func TestEquiv_PS5079EmptyBoundaryOperations(t *testing.T) {
 	}
 	if got := bytes.TrimLeft(empty, ""); got != nil || cap(got) != 0 {
 		t.Fatalf("bytes.TrimLeft empty-header boundary changed: %#v cap=%d", got, cap(got))
+	}
+}
+
+func TestEquiv_PS5079DefinedByteInputChangesDynamicType(t *testing.T) {
+	t.Parallel()
+	type namedBytes []byte
+
+	var bytesCall any = bytes.TrimPrefix(namedBytes("payload"), nil)
+	var retainedBytes any = namedBytes("payload")
+	if _, ok := bytesCall.([]byte); !ok {
+		t.Fatalf("bytes.TrimPrefix result has dynamic type %T, want []byte", bytesCall)
+	}
+	if _, ok := retainedBytes.(namedBytes); !ok {
+		t.Fatalf("retained input has dynamic type %T, want namedBytes", retainedBytes)
 	}
 }
 

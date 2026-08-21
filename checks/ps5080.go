@@ -56,7 +56,9 @@ last-use local constants keep the finding advisory. Removing the final strings
 qualifier also removes its import safely; cgo and commented imports remain
 advisory. A constant string input in a switch case or composite-literal key
 also stays advisory, because removing the runtime call could introduce an
-illegal duplicate constant.`,
+illegal duplicate constant. The retained base must also default to the exact
+built-in string result type. Defined strings cannot reach these APIs without an
+explicit string conversion, which the fix retains.`,
 		Before: `clean := strings.ReplaceAll(
 	strings.Replace(payload, "x", "y", 0),
 	"z", "z",
@@ -123,6 +125,9 @@ func runPS5080(pass *analysis.Pass) (any, error) {
 
 func ps5080Fix(pass *analysis.Pass, file *ast.File, matched ps5080Match, parents map[ast.Node]ast.Node) (analysis.SuggestedFix, bool) {
 	if matched.pkgPath == "strings" {
+		if !replacementPreservesStaticType(pass, matched.outer, matched.base) {
+			return analysis.SuggestedFix{}, false
+		}
 		typed, constantBase := pass.TypesInfo.Types[ps2110Unparen(matched.base)]
 		if constantBase && typed.Value != nil && replacementIntroducesConstantInUniqueContext(pass, matched.outer, parents) {
 			return analysis.SuggestedFix{}, false

@@ -1622,6 +1622,17 @@ func typedPackageBinding(pass *analysis.Pass, fun ast.Expr) (*types.PkgName, boo
 	return pkg, ok
 }
 
+// replacementPreservesStaticType reports whether retaining replacement in
+// place of original preserves the expression's concrete type. Untyped
+// constants are compared after defaulting because their interface dynamic type
+// and ordinary inference default match the typed standard-library result.
+func replacementPreservesStaticType(pass *analysis.Pass, original, replacement ast.Expr) bool {
+	originalType := pass.TypesInfo.TypeOf(ps2110Unparen(original))
+	replacementType := pass.TypesInfo.TypeOf(ps2110Unparen(replacement))
+	return originalType != nil && replacementType != nil &&
+		types.Identical(originalType, types.Default(replacementType))
+}
+
 // replacementIntroducesConstantInUniqueContext reports whether replacing node
 // with a constant would make an enclosing switch case or composite-literal key
 // a constant expression. Go permits duplicate runtime case/key expressions but

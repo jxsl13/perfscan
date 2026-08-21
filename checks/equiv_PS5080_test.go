@@ -7,6 +7,7 @@ import (
 )
 
 func TestEquiv_PS5080NoopReplacementChain(t *testing.T) {
+	t.Parallel()
 	stringInputs := []string{
 		"",
 		"payload",
@@ -67,6 +68,21 @@ func TestEquiv_PS5080NoopReplacementChain(t *testing.T) {
 			after = ps5080BytesReplace(afterInput, pattern, []byte("different"), 0)
 			ps5080CheckByteContract(t, inputIndex, patternIndex, beforeInput, afterInput, before, after)
 		}
+	}
+}
+
+func TestEquiv_PS5080ExplicitStringConversionPreservesDynamicType(t *testing.T) {
+	t.Parallel()
+	type namedString string
+
+	value := namedString("payload")
+	var call any = strings.ReplaceAll(string(value), "x", "x")
+	var retained any = string(value)
+	if _, ok := call.(string); !ok {
+		t.Fatalf("strings.ReplaceAll result has dynamic type %T, want string", call)
+	}
+	if _, ok := retained.(string); !ok {
+		t.Fatalf("retained conversion has dynamic type %T, want string", retained)
 	}
 }
 

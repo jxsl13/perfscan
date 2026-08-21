@@ -45,6 +45,31 @@ func constantSwitch(selected string) int {
 	return 0
 }
 
+type definedString string
+type definedBytes []byte
+
+// A defined string can reach the API only through an explicit conversion; the
+// retained conversion has the same built-in string result type.
+func convertedDefinedStringInput(s definedString) any {
+	return strings.TrimPrefix(string(s), "") // want `1 adjacent strings boundary operation\(s\) use an empty prefix`
+}
+
+// Removing the call would change the interface dynamic type from []byte to
+// definedBytes.
+func definedBytesInput(b definedBytes) any {
+	return bytes.TrimPrefix(b, nil) // want `1 adjacent bytes boundary operation\(s\) use an empty prefix`
+}
+
+// Replacing the typed []byte result with untyped nil would not infer a type.
+func untypedNilInput() any {
+	return bytes.TrimPrefix(nil, nil) // want `1 adjacent bytes boundary operation\(s\) use an empty prefix`
+}
+
+// Untyped string constants default to the same built-in string result type.
+func untypedStringInput() any {
+	return strings.TrimPrefix("payload", "") // want `1 adjacent strings boundary operation\(s\) use an empty prefix`
+}
+
 // --- negatives ---
 
 func nonempty(s string) string { return strings.Trim(s, "x") }

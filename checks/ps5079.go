@@ -41,6 +41,12 @@ unknown provenance.
 When a constant string input appears in a switch case or composite-literal
 key, the finding stays advisory. Removing the runtime call there could create
 a duplicate constant case or key and make valid source stop compiling.
+A defined byte-slice input or untyped nil byte-slice input also stays advisory:
+the standard-library call returns built-in []byte, whereas retaining such an
+input directly would change the static and interface-dynamic result type or
+fail to infer a type. The same exact-result-type guard applies to string calls;
+defined strings cannot be passed to the standard-library string parameters
+without an explicit conversion, which the fix retains.
 
 The rewrite is BIT-IDENTICAL. Empty boundary sets cannot consume a byte or
 rune. The original string is returned unchanged; bytes operations return the
@@ -198,6 +204,9 @@ func ps5079EmptyBytes(pass *analysis.Pass, expr ast.Expr) bool {
 }
 
 func ps5079Fix(pass *analysis.Pass, file *ast.File, matched ps5079Match, parents map[ast.Node]ast.Node) (analysis.SuggestedFix, bool) {
+	if !replacementPreservesStaticType(pass, matched.outer, matched.base) {
+		return analysis.SuggestedFix{}, false
+	}
 	typed, constantBase := pass.TypesInfo.Types[ps2110Unparen(matched.base)]
 	if constantBase && typed.Value != nil && replacementIntroducesConstantInUniqueContext(pass, matched.outer, parents) {
 		return analysis.SuggestedFix{}, false
