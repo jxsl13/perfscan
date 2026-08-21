@@ -52,6 +52,17 @@ func untypedConstant() any {
 	return payload // want `strings.Join exactly reverses strings.Split and reconstructs its original plain-string input`
 }
 
+// Removing the composition would introduce a duplicate constant switch case.
+func constantSwitch(selected string) int {
+	switch selected {
+	case "x":
+		return 1
+	case strings.Join(strings.Split("x", ":"), ":"): // want `strings.Join exactly reverses strings.Split and reconstructs its original plain-string input`
+		return 2
+	}
+	return 0
+}
+
 type stringAlias = string
 
 func aliasInput(s stringAlias) any {

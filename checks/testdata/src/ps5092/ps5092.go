@@ -35,6 +35,17 @@ func commentPreserved(left, right string) bool {
 	return strings.Clone( /* comparison rationale */ left) == right // want "== comparison consumes 1 throwaway standard-library Clone layer"
 }
 
+// Removing the Clone call would introduce a duplicate constant switch case.
+func constantComparisonSwitch() int {
+	switch {
+	case true:
+		return 1
+	case strings.Clone("x") == "x": // want "== comparison consumes 1 throwaway standard-library Clone layer"
+		return 2
+	}
+	return 0
+}
+
 // Result-producing and retention-sensitive consumers remain untouched.
 func standaloneClone(value string) string {
 	return strings.Clone(value)

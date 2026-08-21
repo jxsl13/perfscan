@@ -32,6 +32,17 @@ func stringLocalConstant(s string) string {
 	return strings.ReplaceAll(s, same, same) // want `1 adjacent strings Replace/ReplaceAll call\(s\) are content no-ops`
 }
 
+// Removing the call would introduce a duplicate constant switch case.
+func stringConstantSwitch(selected string) int {
+	switch selected {
+	case "x":
+		return 1
+	case strings.ReplaceAll("x", "y", "y"): // want `1 adjacent strings Replace/ReplaceAll call\(s\) are content no-ops`
+		return 2
+	}
+	return 0
+}
+
 func bytesDeepMixed(b []byte) []byte {
 	return bytes.ReplaceAll( // want `3 adjacent bytes Replace/ReplaceAll calls preserve content but each copies the slice`
 		b,

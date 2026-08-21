@@ -52,7 +52,10 @@ is evaluated once in the same left-to-right position. Only allocation and
 copy scaffolding disappears. Comments keep the finding advisory. The shared
 multi-package deletion engine removes orphaned Clone imports safely, while
 terminal ownership prevents overlapping nested-Clone diagnostics and reaches
-the allocation-free comparison in one -fix pass.`,
+the allocation-free comparison in one -fix pass. If removing string Clone
+calls would turn a comparison into a constant switch case or map key, the
+finding remains advisory so the fix cannot introduce an illegal duplicate
+constant.`,
 		Before: `same := strings.Clone(left) == strings.Clone(right)
 missing := bytes.Clone(data) == nil`,
 		After: `same := left == right
@@ -71,6 +74,7 @@ through three forced Clone layers measured 12,517 ns/op, 196,608 B/op,
 
 func runPS5092(pass *analysis.Pass) (any, error) {
 	for _, file := range pass.Files {
+		parents := ps6071Parents(file)
 		ast.Inspect(file, func(node ast.Node) bool {
 			comparison, ok := node.(*ast.BinaryExpr)
 			if !ok {
@@ -94,14 +98,32 @@ func runPS5092(pass *analysis.Pass) (any, error) {
 				End:     comparison.End(),
 				Message: fmt.Sprintf("%s comparison consumes %d throwaway standard-library Clone layer(s) across %d operand(s); compare the original values directly", comparison.Op, totalLayers, len(matches)),
 			}
-			if fix, ok := fixDeletedCallScaffoldingPaths(pass, file, paths, "remove clones before non-retaining comparison", spans...); ok {
-				diagnostic.SuggestedFixes = []analysis.SuggestedFix{fix}
+			if !ps5092ReplacementIntroducesConstant(pass, comparison, parents) {
+				if fix, ok := fixDeletedCallScaffoldingPaths(pass, file, paths, "remove clones before non-retaining comparison", spans...); ok {
+					diagnostic.SuggestedFixes = []analysis.SuggestedFix{fix}
+				}
 			}
 			pass.Report(diagnostic)
 			return true
 		})
 	}
 	return nil, nil
+}
+
+func ps5092ReplacementIntroducesConstant(pass *analysis.Pass, comparison *ast.BinaryExpr, parents map[ast.Node]ast.Node) bool {
+	if !ps5084StringType(pass.TypesInfo.TypeOf(comparison.X)) || !ps5084StringType(pass.TypesInfo.TypeOf(comparison.Y)) {
+		return false
+	}
+	for _, operand := range []ast.Expr{comparison.X, comparison.Y} {
+		if chain, ok := matchTypedUnaryPackageCallChain(pass, operand, isTypedStringStdlibClone); ok {
+			operand = chain.base
+		}
+		typed, ok := pass.TypesInfo.Types[ps2110Unparen(operand)]
+		if !ok || typed.Value == nil {
+			return false
+		}
+	}
+	return replacementIntroducesConstantInUniqueContext(pass, comparison, parents)
 }
 
 func ps5092ComparisonMatches(pass *analysis.Pass, comparison *ast.BinaryExpr) []typedUnaryCallChain {

@@ -38,6 +38,10 @@ only nil, []byte{}, and []byte("") are accepted; dynamic zero-length slices and
 make calls are excluded so the rewrite never removes an evaluation with
 unknown provenance.
 
+When a constant string input appears in a switch case or composite-literal
+key, the finding stays advisory. Removing the runtime call there could create
+a duplicate constant case or key and make valid source stop compiling.
+
 The rewrite is BIT-IDENTICAL. Empty boundary sets cannot consume a byte or
 rune. The original string is returned unchanged; bytes operations return the
 same slice header, preserving nil state, backing pointer, length, and capacity.
@@ -81,6 +85,7 @@ type ps5079Match struct {
 
 func runPS5079(pass *analysis.Pass) (any, error) {
 	for _, file := range pass.Files {
+		parents := ps6071Parents(file)
 		covered := make(map[*ast.CallExpr]bool)
 		ast.Inspect(file, func(node ast.Node) bool {
 			outer, ok := node.(*ast.CallExpr)
@@ -96,7 +101,7 @@ func runPS5079(pass *analysis.Pass) (any, error) {
 				End:     outer.End(),
 				Message: fmt.Sprintf("%d adjacent %s boundary operation(s) use an empty prefix, suffix, or cutset and return the input unchanged", len(matched.calls), matched.pkgPath),
 			}
-			if fix, ok := ps5079Fix(pass, file, matched); ok {
+			if fix, ok := ps5079Fix(pass, file, matched, parents); ok {
 				diagnostic.SuggestedFixes = []analysis.SuggestedFix{fix}
 			}
 			pass.Report(diagnostic)
@@ -192,6 +197,10 @@ func ps5079EmptyBytes(pass *analysis.Pass, expr ast.Expr) bool {
 	}
 }
 
-func ps5079Fix(pass *analysis.Pass, file *ast.File, matched ps5079Match) (analysis.SuggestedFix, bool) {
+func ps5079Fix(pass *analysis.Pass, file *ast.File, matched ps5079Match, parents map[ast.Node]ast.Node) (analysis.SuggestedFix, bool) {
+	typed, constantBase := pass.TypesInfo.Types[ps2110Unparen(matched.base)]
+	if constantBase && typed.Value != nil && replacementIntroducesConstantInUniqueContext(pass, matched.outer, parents) {
+		return analysis.SuggestedFix{}, false
+	}
 	return fixDeletedCallScaffolding(pass, file, matched.pkgPath, "remove empty boundary operations", matched.spans...)
 }

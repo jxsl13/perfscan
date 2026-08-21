@@ -54,7 +54,9 @@ shadowed helpers, methods, dynamic byte slices, dynamic counts, ellipsis,
 cross-package chains, and a changed import binding do not match. Comments and
 last-use local constants keep the finding advisory. Removing the final strings
 qualifier also removes its import safely; cgo and commented imports remain
-advisory.`,
+advisory. A constant string input in a switch case or composite-literal key
+also stays advisory, because removing the runtime call could introduce an
+illegal duplicate constant.`,
 		Before: `clean := strings.ReplaceAll(
 	strings.Replace(payload, "x", "y", 0),
 	"z", "z",
@@ -83,6 +85,7 @@ type ps5080Match struct {
 
 func runPS5080(pass *analysis.Pass) (any, error) {
 	for _, file := range pass.Files {
+		parents := ps6071Parents(file)
 		covered := make(map[*ast.CallExpr]bool)
 		ownedByTerminalReplacement := ps5118OwnedIndependentNoops(pass, file)
 		ast.Inspect(file, func(node ast.Node) bool {
@@ -108,7 +111,7 @@ func runPS5080(pass *analysis.Pass) (any, error) {
 				End:     outer.End(),
 				Message: message,
 			}
-			if fix, ok := fixDeletedCallScaffolding(pass, file, matched.pkgPath, "collapse no-op replacement calls", matched.spans...); ok {
+			if fix, ok := ps5080Fix(pass, file, matched, parents); ok {
 				diagnostic.SuggestedFixes = []analysis.SuggestedFix{fix}
 			}
 			pass.Report(diagnostic)
@@ -116,6 +119,16 @@ func runPS5080(pass *analysis.Pass) (any, error) {
 		})
 	}
 	return nil, nil
+}
+
+func ps5080Fix(pass *analysis.Pass, file *ast.File, matched ps5080Match, parents map[ast.Node]ast.Node) (analysis.SuggestedFix, bool) {
+	if matched.pkgPath == "strings" {
+		typed, constantBase := pass.TypesInfo.Types[ps2110Unparen(matched.base)]
+		if constantBase && typed.Value != nil && replacementIntroducesConstantInUniqueContext(pass, matched.outer, parents) {
+			return analysis.SuggestedFix{}, false
+		}
+	}
+	return fixDeletedCallScaffolding(pass, file, matched.pkgPath, "collapse no-op replacement calls", matched.spans...)
 }
 
 func ps5080MatchChain(pass *analysis.Pass, outer *ast.CallExpr) (ps5080Match, bool) {

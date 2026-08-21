@@ -56,7 +56,9 @@ values, shadowed lookalikes, stored intermediate slices, bytes operations,
 limited counts other than one, and mismatched separators do not match. PS5112
 owns exact inverse Split shapes ahead of PS2015, so one fix pass reaches the
 allocation-free input rather than first spelling strings.ReplaceAll(s, sep,
-sep).
+sep). A constant input in a switch case or composite-literal key stays
+advisory, because replacing the runtime composition could introduce an illegal
+duplicate constant.
 
 The rewrite is BIT-IDENTICAL and retains the input expression byte-for-byte,
 evaluated exactly once in its original position. It deletes only the pure
@@ -88,6 +90,7 @@ type ps5112Match struct {
 
 func runPS5112(pass *analysis.Pass) (any, error) {
 	for _, file := range pass.Files {
+		parents := ps6071Parents(file)
 		ast.Inspect(file, func(node ast.Node) bool {
 			join, ok := node.(*ast.CallExpr)
 			if !ok {
@@ -106,8 +109,12 @@ func runPS5112(pass *analysis.Pass) (any, error) {
 				{start: join.Pos(), end: match.input.Pos()},
 				{start: match.input.End(), end: join.End()},
 			}
-			if fix, ok := fixDeletedCallScaffoldingPaths(pass, file, []string{"strings"}, "replace the inverse Split/Join composition with its input", spans...); ok {
-				diagnostic.SuggestedFixes = []analysis.SuggestedFix{fix}
+			typed, constantInput := pass.TypesInfo.Types[ps2110Unparen(match.input)]
+			introducesConstant := constantInput && typed.Value != nil && replacementIntroducesConstantInUniqueContext(pass, join, parents)
+			if !introducesConstant {
+				if fix, ok := fixDeletedCallScaffoldingPaths(pass, file, []string{"strings"}, "replace the inverse Split/Join composition with its input", spans...); ok {
+					diagnostic.SuggestedFixes = []analysis.SuggestedFix{fix}
+				}
 			}
 			pass.Report(diagnostic)
 			return true

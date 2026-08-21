@@ -34,6 +34,17 @@ func orphanLocal(s string) string {
 	return strings.Trim(s, local) // want `1 adjacent strings boundary operation\(s\) use an empty prefix`
 }
 
+// Removing the call would introduce a duplicate constant switch case.
+func constantSwitch(selected string) int {
+	switch selected {
+	case "x":
+		return 1
+	case strings.Trim("x", ""): // want `1 adjacent strings boundary operation\(s\) use an empty prefix`
+		return 2
+	}
+	return 0
+}
+
 // --- negatives ---
 
 func nonempty(s string) string { return strings.Trim(s, "x") }
