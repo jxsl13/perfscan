@@ -33,9 +33,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          # staticcheck 2026.1 cannot decode Go 1.27 export data yet. The
-          # test matrix above still builds and race-tests stable Go.
-          go-version: oldstable
+          go-version: stable
           cache-dependency-path: go.sum
       - name: gofmt
         run: |
@@ -45,6 +43,13 @@ jobs:
           if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
       - name: go vet
         run: go vet ./...
+      - name: Set up oldstable Go for staticcheck
+        # staticcheck 2026.1 cannot decode Go 1.27 export data yet. Build,
+        # race tests, formatting, and vet above still use stable Go.
+        uses: actions/setup-go@v7
+        with:
+          go-version: oldstable
+          cache-dependency-path: go.sum
       - name: staticcheck
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@latest
