@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**373 checks total** — **262 with a bit-identical auto-fix**, 111 advisory. By fix level: **245 L1** (idiomatic), **109 L2** (structured), **19 L3** (aggressive).
+**374 checks total** — **263 with a bit-identical auto-fix**, 111 advisory. By fix level: **246 L1** (idiomatic), **109 L2** (structured), **19 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -310,6 +310,7 @@ checks' fixes.
 | [PS5125](PS5125.md) | arith | L1 | yes | strings.Contains guards a Replace call that already preserves misses |
 | [PS5126](PS5126.md) | arith | L1 | yes | Contains guards a backward index call that already returns the absence sentinel |
 | [PS5127](PS5127.md) | arith | L1 | yes | utf8.ValidString guards a sanitizer that already preserves valid strings |
+| [PS5128](PS5128.md) | arith | L1 | yes | Contains guards a split call whose miss result is already the singleton input |
 | [PS6004](PS6004.md) | verify | L2 |  | a fast-path/fallback dual path whose bit-identity claim needs coverage on both arms |
 | [PS6005](PS6005.md) | verify | L2 |  | an external accelerator benchmark pins workload size but leaves material semantic axes implicit |
 | [PS6006](PS6006.md) | verify | L2 |  | a production selector or default toggle appears in a repeated leaf benchmark |

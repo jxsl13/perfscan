@@ -1,0 +1,8 @@
+package ps5128alias
+
+import text "strings"
+
+func split(value, separator string) []string {
+	// want +1 `strings.Contains scans before strings.Split repeats the separator search`
+	return text.Split(value, separator)
+}

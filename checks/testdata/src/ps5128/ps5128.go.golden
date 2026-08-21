@@ -1,0 +1,194 @@
+package ps5128
+
+import (
+	"bytes"
+	"strings"
+)
+
+const (
+	colonA  = ":"
+	colonB  = ":"
+	all     = -1
+	limited = 1
+)
+
+func stringSplit(value string) []string {
+	// want +1 `strings.Contains scans before strings.Split repeats the separator search`
+	return strings.Split(value, colonB)
+}
+
+func stringAfter(value, separator string) []string {
+	// want +1 `strings.Contains scans before strings.SplitAfter repeats the separator search`
+	return strings.SplitAfter(value, separator)
+}
+
+func stringN(value string) []string {
+	// want +2 `strings.Contains scans before strings.SplitN repeats the separator search`
+	parts := strings.SplitN(value, ":", all)
+	return parts
+}
+
+func stringAfterN(value string, parts []string) []string {
+	// want +1 `strings.Contains scans before strings.SplitAfterN repeats the separator search`
+	parts = strings.SplitAfterN(value, ":", limited)
+	return parts
+}
+
+func byteSplit(value, separator []byte) [][]byte {
+	// want +1 `bytes.Contains scans before bytes.Split repeats the separator search`
+	return bytes.Split(value, separator)
+}
+
+func byteAfter(value, separator []byte) [][]byte {
+	// want +1 `bytes.Contains scans before bytes.SplitAfter repeats the separator search`
+	return bytes.SplitAfter(value, separator)
+}
+
+func byteN(value, separator []byte) [][]byte {
+	// want +2 `bytes.Contains scans before bytes.SplitN repeats the separator search`
+	parts := bytes.SplitN(value, separator, 1)
+	return parts
+}
+
+func byteAfterN(value, separator []byte, parts [][]byte) [][]byte {
+	// want +1 `bytes.Contains scans before bytes.SplitAfterN repeats the separator search`
+	parts = bytes.SplitAfterN(value, separator, -2)
+	return parts
+}
+
+func parenthesized(value string) []string {
+	// want +1 `strings.Contains scans before strings.Split repeats the separator search`
+	return (strings.Split((value), ("")))
+}
+
+// --- negatives ---
+
+func zeroCount(value string) []string {
+	if strings.Contains(value, ":") {
+		return strings.SplitN(value, ":", 0)
+	}
+	return []string{value}
+}
+
+func dynamicCount(value string, count int) []string {
+	if strings.Contains(value, ":") {
+		return strings.SplitN(value, ":", count)
+	}
+	return []string{value}
+}
+
+func positiveCapacity(value string) []string {
+	if strings.Contains(value, ":") {
+		return strings.SplitN(value, ":", 3)
+	}
+	return []string{value}
+}
+
+func differentInput(value, other string) []string {
+	if strings.Contains(value, ":") {
+		return strings.Split(other, ":")
+	}
+	return []string{value}
+}
+
+func differentSeparator(value string) []string {
+	if strings.Contains(value, ":") {
+		return strings.Split(value, ";")
+	}
+	return []string{value}
+}
+
+func constructedBytes(value []byte) [][]byte {
+	if bytes.Contains(value, []byte(":")) {
+		return bytes.Split(value, []byte(":"))
+	}
+	return [][]byte{value}
+}
+
+func wrongFallback(value string) []string {
+	if strings.Contains(value, ":") {
+		return strings.Split(value, ":")
+	}
+	return []string{""}
+}
+
+func multipleFallback(value string) []string {
+	if strings.Contains(value, ":") {
+		return strings.Split(value, ":")
+	}
+	return []string{value, value}
+}
+
+type namedParts []string
+
+func namedFallback(value string) []string {
+	if strings.Contains(value, ":") {
+		return strings.Split(value, ":")
+	}
+	return namedParts{value}
+}
+
+func initializedCondition(value string) []string {
+	if enabled := true; enabled && strings.Contains(value, ":") {
+		return strings.Split(value, ":")
+	}
+	return []string{value}
+}
+
+func negated(value string) []string {
+	if !strings.Contains(value, ":") {
+		return strings.Split(value, ":")
+	}
+	return []string{value}
+}
+
+func additionalWork(value string) []string {
+	if strings.Contains(value, ":") {
+		_ = len(value)
+		return strings.Split(value, ":")
+	}
+	return []string{value}
+}
+
+func delayedFallback(value string) []string {
+	if strings.Contains(value, ":") {
+		return strings.Split(value, ":")
+	}
+	_ = len(value)
+	return []string{value}
+}
+
+func indexedPiece(value string) string {
+	if strings.Contains(value, ":") {
+		return strings.SplitN(value, ":", 2)[0]
+	}
+	return value
+}
+
+func functionValues(value string) []string {
+	contains, split := strings.Contains, strings.Split
+	if contains(value, ":") {
+		return split(value, ":")
+	}
+	return []string{value}
+}
+
+type helper string
+
+func (helper) Contains(string) bool  { return true }
+func (helper) Split(string) []string { return nil }
+
+func methods(value helper) []string {
+	if value.Contains(":") {
+		return value.Split(":")
+	}
+	return []string{string(value)}
+}
+
+var _ = []any{
+	stringSplit, stringAfter, stringN, stringAfterN, byteSplit, byteAfter,
+	byteN, byteAfterN, parenthesized, zeroCount, dynamicCount, positiveCapacity, differentInput,
+	differentSeparator, constructedBytes, wrongFallback, multipleFallback,
+	namedFallback, initializedCondition, negated, additionalWork,
+	delayedFallback, indexedPiece, functionValues, methods,
+}
