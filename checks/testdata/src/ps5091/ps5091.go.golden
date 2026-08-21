@@ -33,6 +33,17 @@ func commentPreserved(values map[string]int, key string) int {
 	return values[strings.Clone( /* retention rationale */ key)] // want "read-only map lookup key consumes 1 throwaway strings.Clone layer"
 }
 
+// Constant string indexes stay runtime-valued: removing Clone could turn an
+// out-of-range access into a compile error or change an in-range value's
+// default type when boxed in an interface.
+func constantOutOfRange() byte {
+	return strings.Clone("")[0] // want "string byte index consumes 1 throwaway strings.Clone layer"
+}
+
+func constantIndexInterface() any {
+	return strings.Clone("x")[0] // want "string byte index consumes 1 throwaway strings.Clone layer"
+}
+
 // Storage contexts may intentionally detach a short key from a large backing
 // string and must remain untouched.
 func mapWrite(values map[string]int, key string) {

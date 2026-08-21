@@ -48,7 +48,10 @@ strings.Compare takes plain strings and the result is an untyped bool exactly
 like a == b, so no type guard is needed. The report stays advisory when a
 comment sits inside the replaced range (the re-rendered expression could not
 reproduce it) and, in a cgo file whose import block must not be edited, when the
-rewrite would orphan the strings import.`,
+rewrite would orphan the strings import. A rewrite that would turn the
+comparison into a constant switch case or composite-literal key also stays
+advisory, because an equal constant may already exist and become an illegal
+duplicate.`,
 		Before: `if strings.Compare(a, b) == 0 {
 	return true
 }`,
@@ -104,6 +107,7 @@ func ps5106Mirror(op token.Token) token.Token {
 
 func runPS5106(pass *analysis.Pass) (any, error) {
 	for _, f := range pass.Files {
+		parents := ps6071Parents(f)
 		type site struct {
 			bin *ast.BinaryExpr
 			msg string
@@ -147,7 +151,8 @@ func runPS5106(pass *analysis.Pass) (any, error) {
 			bText, okB := ps2107ExprText(right)
 			// A comment inside the replaced comparison would be silently dropped
 			// by the re-rendered expression — withhold the fix there.
-			if okA && okB && !ps2111CommentIn(f, bin.Pos(), bin.End()) {
+			if okA && okB && !ps2111CommentIn(f, bin.Pos(), bin.End()) &&
+				!ps5106ReplacementIntroducesConstant(pass, bin, left, right, parents) {
 				repl := aText + " " + opStr + " " + bText
 				fix = &analysis.SuggestedFix{
 					Message:   "replace with " + repl,
@@ -172,6 +177,13 @@ func runPS5106(pass *analysis.Pass) (any, error) {
 		}
 	}
 	return nil, nil
+}
+
+func ps5106ReplacementIntroducesConstant(pass *analysis.Pass, bin *ast.BinaryExpr, left, right ast.Expr, parents map[ast.Node]ast.Node) bool {
+	leftValue, leftOK := pass.TypesInfo.Types[ps2110Unparen(left)]
+	rightValue, rightOK := pass.TypesInfo.Types[ps2110Unparen(right)]
+	return leftOK && leftValue.Value != nil && rightOK && rightValue.Value != nil &&
+		replacementIntroducesConstantInUniqueContext(pass, bin, parents)
 }
 
 // ps5106DirectArg unwraps a typed strings.Clone chain so the Compare-to-zero

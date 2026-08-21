@@ -26,6 +26,13 @@ func clonedArgs(a, b string) bool {
 	return strings.Compare(strings.Clone(strings.Clone(a)), strings.Clone(b)) == 0 // want `final rewrite also removes 3 throwaway strings\.Clone layer`
 }
 
+// Replacing the runtime comparison would introduce a duplicate constant map
+// key and make this valid source stop compiling.
+var constantKey = map[bool]int{
+	false:                          0,
+	strings.Compare("a", "b") == 0: 1, // want `strings\.Compare`
+}
+
 // NEGATIVE: compared to a non-zero literal — not a Compare-to-zero shape.
 func nonZero(a, b string) bool { return strings.Compare(a, b) == 1 }
 

@@ -52,7 +52,10 @@ copy disappears. Parent-aware AST classification distinguishes reads from
 storage contexts before offering a fix. Comments keep the finding advisory,
 and the shared import-liveness editor safely removes newly unused strings
 imports. Terminal ownership also prevents overlapping nested-Clone fixes, so
-one -fix pass reaches the allocation-free form.`,
+one -fix pass reaches the allocation-free form. A string byte index remains
+advisory when both the retained string and index are compile-time constants:
+removing Clone could turn an out-of-range runtime panic into a compile error,
+or give an in-range result new constant/default-typing behavior.`,
 		Before: `b := strings.Clone(text)[index]
 value := values[strings.Clone(key)]
 delete(values, strings.Clone(key))`,
@@ -94,14 +97,32 @@ func runPS5091(pass *analysis.Pass) (any, error) {
 				End:     node.End(),
 				Message: fmt.Sprintf("%s consumes %d throwaway strings.Clone layer(s); use the original string directly", kind, len(chain.calls)),
 			}
-			if fix, ok := fixDeletedCallScaffoldingPaths(pass, file, chain.paths, "remove clones before non-retaining index or lookup", chain.spans...); ok {
-				diagnostic.SuggestedFixes = []analysis.SuggestedFix{fix}
+			index, stringIndex := node.(*ast.IndexExpr)
+			if !stringIndex || !ps5091ConstantStringIndex(pass, index, chain) {
+				if fix, ok := fixDeletedCallScaffoldingPaths(pass, file, chain.paths, "remove clones before non-retaining index or lookup", chain.spans...); ok {
+					diagnostic.SuggestedFixes = []analysis.SuggestedFix{fix}
+				}
 			}
 			pass.Report(diagnostic)
 			return true
 		})
 	}
 	return nil, nil
+}
+
+// ps5091ConstantStringIndex reports the one string-index shape where removing
+// Clone changes compile-time behavior. If both the retained string and index
+// are constants, the replacement becomes a constant index expression: an
+// out-of-range index stops compiling, while an in-range result can acquire
+// constant/default-typing behavior that the original runtime index did not
+// have. Keeping the finding advisory preserves both contracts.
+func ps5091ConstantStringIndex(pass *analysis.Pass, index *ast.IndexExpr, chain typedUnaryCallChain) bool {
+	if index == nil || !ps5084StringType(pass.TypesInfo.TypeOf(index.X)) {
+		return false
+	}
+	base, baseOK := pass.TypesInfo.Types[ps2110Unparen(chain.base)]
+	offset, offsetOK := pass.TypesInfo.Types[ps2110Unparen(index.Index)]
+	return baseOK && base.Value != nil && offsetOK && offset.Value != nil
 }
 
 func ps5091IndexMatch(pass *analysis.Pass, index *ast.IndexExpr, stack []ast.Node) (typedUnaryCallChain, string, bool) {
