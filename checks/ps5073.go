@@ -3,6 +3,7 @@ package checks
 import (
 	"go/ast"
 	"go/types"
+	"go/version"
 
 	"golang.org/x/tools/go/analysis"
 
@@ -50,7 +51,9 @@ For Logger.Log, the receiver's static type must be exactly slog.Logger or
 intercepting the replacement.
 
 The fix changes only the resolved selector name, preserving receivers,
-arguments, comments, evaluation order, and imports byte-for-byte.`,
+arguments, comments, evaluation order, and imports byte-for-byte. GroupAttrs
+was added in Go 1.25, so Group findings remain advisory when the file's known
+effective language version is older.`,
 		Before: `logger.Log(ctx, slog.LevelInfo, "ready",
     slog.String("service", service),
     slog.Int("port", port),
@@ -78,12 +81,13 @@ type ps5073Variant struct {
 	kind        typedCallKind
 	fixedArgs   int
 	receiver    string
+	fixVersion  string
 }
 
 var ps5073Variants = []ps5073Variant{
 	{name: "Log", replacement: "LogAttrs", kind: typedPackageFunc, fixedArgs: 3},
 	{name: "Log", replacement: "LogAttrs", kind: typedMethod, fixedArgs: 3, receiver: "Logger"},
-	{name: "Group", replacement: "GroupAttrs", kind: typedPackageFunc, fixedArgs: 1},
+	{name: "Group", replacement: "GroupAttrs", kind: typedPackageFunc, fixedArgs: 1, fixVersion: "go1.25"},
 }
 
 func runPS5073(pass *analysis.Pass) (any, error) {
@@ -97,23 +101,43 @@ func runPS5073(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			pass.Report(analysis.Diagnostic{
+			diagnostic := analysis.Diagnostic{
 				Pos:     call.Pos(),
 				End:     call.End(),
 				Message: "log/slog " + variant.name + " receives only slog.Attr values; " + variant.replacement + " avoids ...any boxing and argument classification",
-				SuggestedFixes: []analysis.SuggestedFix{{
+			}
+			if ps5073FixAvailable(pass, file, variant) {
+				diagnostic.SuggestedFixes = []analysis.SuggestedFix{{
 					Message: "use the Attr-only slog fast path",
 					TextEdits: []analysis.TextEdit{{
 						Pos:     selector.Sel.Pos(),
 						End:     selector.Sel.End(),
 						NewText: []byte(variant.replacement),
 					}},
-				}},
-			})
+				}}
+			}
+			pass.Report(diagnostic)
 			return true
 		})
 	}
 	return nil, nil
+}
+
+func ps5073FixAvailable(pass *analysis.Pass, file *ast.File, variant ps5073Variant) bool {
+	if variant.fixVersion == "" {
+		return true
+	}
+	value := ""
+	if pass.TypesInfo.FileVersions != nil {
+		value = pass.TypesInfo.FileVersions[file]
+	}
+	if value == "" && pass.Pkg != nil {
+		value = pass.Pkg.GoVersion()
+	}
+	if value == "" || version.Lang(value) == "" {
+		return true
+	}
+	return version.Compare(version.Lang(value), variant.fixVersion) >= 0
 }
 
 func ps5073Match(pass *analysis.Pass, call *ast.CallExpr) (ps5073Variant, *ast.SelectorExpr, bool) {

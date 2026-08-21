@@ -188,8 +188,10 @@ func ps5072MaphashReceiver(pass *analysis.Pass, call *ast.CallExpr) (ast.Expr, b
 	if !ok {
 		return nil, false
 	}
-	recv := ps2110Unparen(fun.X)
-	t := types.Unalias(pass.TypesInfo.TypeOf(recv))
+	// Keep the receiver's original source extent for the fix. Parentheses may
+	// be required for selector syntax, as in (*p).Sum64().
+	recv := fun.X
+	t := types.Unalias(pass.TypesInfo.TypeOf(ps2110Unparen(recv)))
 	if ptr, ok := t.(*types.Pointer); ok {
 		t = types.Unalias(ptr.Elem())
 	}

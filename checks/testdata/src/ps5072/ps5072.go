@@ -22,6 +22,10 @@ func parenthesized(h *maphash.Hash) uint64 {
 	return (binary.LittleEndian.Uint64)((h).Sum((nil))) // want `binary\.LittleEndian\.Uint64\(h\.Sum\(nil\)\) makes and decodes an 8-byte representation`
 }
 
+func parenthesizedDereference(h **maphash.Hash) uint64 {
+	return binary.LittleEndian.Uint64((*h).Sum(nil)) // want `binary\.LittleEndian\.Uint64\(h\.Sum\(nil\)\) makes and decodes an 8-byte representation`
+}
+
 // A comment in deleted scaffolding keeps the diagnostic but withholds its fix.
 func commented(h *maphash.Hash) uint64 {
 	return binary.LittleEndian.Uint64( /* keep */ h.Sum(nil)) // want `binary\.LittleEndian\.Uint64\(h\.Sum\(nil\)\) makes and decodes an 8-byte representation`
