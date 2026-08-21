@@ -39,6 +39,22 @@ func literal() bool {
 	return true // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
 }
 
+// Replacing either runtime expression with true would create a duplicate
+// constant case/key and make this valid source stop compiling.
+func constantnessContexts(payload string, selected bool) int {
+	switch selected {
+	case true:
+		return 1
+	case utf8.ValidString(strings.ToValidUTF8(payload, "?")): // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+		return 2
+	}
+	values := map[bool]int{
+		true: 3,
+		utf8.ValidString(strings.ToValidUTF8(payload, "?")): 4, // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+	}
+	return values[selected]
+}
+
 // The local declaration would become unused, so this valid finding remains
 // advisory even though reading clean is otherwise inert.
 func localLastUse(payload string) bool {

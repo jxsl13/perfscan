@@ -1621,3 +1621,48 @@ func typedPackageBinding(pass *analysis.Pass, fun ast.Expr) (*types.PkgName, boo
 	pkg, ok := pass.TypesInfo.Uses[id].(*types.PkgName)
 	return pkg, ok
 }
+
+// replacementIntroducesConstantInUniqueContext reports whether replacing node
+// with a constant would make an enclosing switch case or composite-literal key
+// a constant expression. Go permits duplicate runtime case/key expressions but
+// rejects duplicate constants, so an otherwise value-identical rewrite can
+// make valid source stop compiling in these contexts.
+func replacementIntroducesConstantInUniqueContext(pass *analysis.Pass, node ast.Expr, parents map[ast.Node]ast.Node) bool {
+	var current ast.Node = node
+	for parent := parents[current]; parent != nil; parent = parents[current] {
+		switch expression := parent.(type) {
+		case *ast.ParenExpr, *ast.UnaryExpr:
+			current = parent
+		case *ast.BinaryExpr:
+			other := expression.X
+			if current == expression.X {
+				other = expression.Y
+			}
+			if typed, ok := pass.TypesInfo.Types[other]; !ok || typed.Value == nil {
+				return false
+			}
+			current = parent
+		case *ast.CallExpr:
+			if len(expression.Args) != 1 || current != expression.Args[0] {
+				return false
+			}
+			typed, ok := pass.TypesInfo.Types[ps2110Unparen(expression.Fun)]
+			if !ok || !typed.IsType() {
+				return false
+			}
+			current = parent
+		case *ast.CaseClause:
+			for _, candidate := range expression.List {
+				if candidate == current {
+					return true
+				}
+			}
+			return false
+		case *ast.KeyValueExpr:
+			return expression.Key == current
+		default:
+			return false
+		}
+	}
+	return false
+}

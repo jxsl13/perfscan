@@ -3,6 +3,7 @@ package ps5083
 import (
 	"bytes"
 	"slices"
+	"strings"
 )
 
 func byteLengthDeep(data []byte) int {
@@ -19,6 +20,17 @@ func mapLength(index map[string]int) int {
 
 func stringLength(value string) int {
 	return len(value) // want "len consumes 1 throwaway standard-library Clone layer"
+}
+
+// Removing Clone would make the second case a duplicate constant 3.
+func constantStringCase(selected int) int {
+	switch selected {
+	case 3:
+		return 1
+	case len(strings.Clone("abc")): // want "len consumes 1 throwaway standard-library Clone layer"
+		return 2
+	}
+	return 0
 }
 
 func explicitGeneric(values []int) int {

@@ -62,7 +62,10 @@ every byte sequence and every accepted valid replacement, and all removed
 evaluations are proven inert. It replaces the full expression with the
 predeclared true constant, removes newly orphaned ordinary imports, and loses
 no comments. Comments, cgo imports, or required local/import uses keep the
-diagnostic advisory.`,
+diagnostic advisory. A replacement that would introduce a constant switch case
+or map key also stays advisory: the runtime expression may legally coexist with
+an equal constant, while replacing it with true could create an illegal
+duplicate constant.`,
 		Before: `ok := utf8.ValidString(strings.ToValidUTF8(payload, "�"))`,
 		After:  `ok := true`,
 		MeasuredWin: `benchmarks/ps5116_test.go measures validation of a sanitized
@@ -86,6 +89,7 @@ type ps5116Match struct {
 
 func runPS5116(pass *analysis.Pass) (any, error) {
 	for _, file := range pass.Files {
+		parents := ps6071Parents(file)
 		ast.Inspect(file, func(node ast.Node) bool {
 			consumer, ok := node.(*ast.CallExpr)
 			if !ok {
@@ -99,7 +103,7 @@ func runPS5116(pass *analysis.Pass) (any, error) {
 				Pos: consumer.Pos(), End: consumer.End(),
 				Message: "utf8." + match.composition.consumerFunction.Name() + " validates " + match.producerPkg + ".ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true",
 			}
-			if fix, ok := ps5116SuggestedFix(pass, file, match); ok {
+			if fix, ok := ps5116SuggestedFix(pass, file, match, parents); ok {
 				diagnostic.SuggestedFixes = []analysis.SuggestedFix{fix}
 			}
 			pass.Report(diagnostic)
@@ -109,9 +113,10 @@ func runPS5116(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
-func ps5116SuggestedFix(pass *analysis.Pass, file *ast.File, match ps5116Match) (analysis.SuggestedFix, bool) {
+func ps5116SuggestedFix(pass *analysis.Pass, file *ast.File, match ps5116Match, parents map[ast.Node]ast.Node) (analysis.SuggestedFix, bool) {
 	consumer := match.composition.consumer
 	if !ps5116DiscardableSanitizer(pass, match.composition.producer, match.producerPkg, match.composition.producerBinding) ||
+		replacementIntroducesConstantInUniqueContext(pass, consumer, parents) ||
 		!deletionsKeepRequiredLocalVariables(pass, file, tokenSpan{start: consumer.Pos(), end: consumer.End()}) {
 		return analysis.SuggestedFix{}, false
 	}
@@ -183,6 +188,7 @@ func ps5116TypedSanitizerCall(pass *analysis.Pass, call *ast.CallExpr, pkgPath s
 // overlapping fixes; advisory PS5116 sites own nothing.
 func ps5116OwnedStringSanitizers(pass *analysis.Pass, file *ast.File) map[*ast.CallExpr]bool {
 	owned := make(map[*ast.CallExpr]bool)
+	parents := ps6071Parents(file)
 	ast.Inspect(file, func(node ast.Node) bool {
 		consumer, ok := node.(*ast.CallExpr)
 		if !ok {
@@ -192,7 +198,7 @@ func ps5116OwnedStringSanitizers(pass *analysis.Pass, file *ast.File) map[*ast.C
 		if !ok || match.producerPkg != "strings" {
 			return true
 		}
-		if _, fixable := ps5116SuggestedFix(pass, file, match); !fixable {
+		if _, fixable := ps5116SuggestedFix(pass, file, match, parents); !fixable {
 			return true
 		}
 		for current := match.composition.producer; ps5116TypedSanitizerCall(pass, current, "strings", match.composition.producerBinding); {

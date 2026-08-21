@@ -48,9 +48,9 @@ identity len([]byte(s)) == len(s). A byte Clone chain around an unnamed
 []byte conversion, including nested strings.Clone layers, is collapsed to the
 original non-constant string in the SAME fix. This avoids overlapping PS5084
 and PS2125 diagnostics and reaches the O(1) length read in one pass. A string
-constant deliberately keeps the conversion: removing it would turn a runtime
-len expression into a compile-time constant and can invalidate a switch with
-duplicate cases.
+constant deliberately keeps every Clone/conversion layer: removing it would
+turn a runtime len expression into a compile-time constant and can invalidate
+a switch or map literal with duplicate constant cases or keys.
 
 Comments keep the finding advisory. The shared multi-package deletion engine
 removes all newly unused clone imports—including adjacent aliases in one import
@@ -91,6 +91,10 @@ func runPS5083(pass *analysis.Pass) (any, error) {
 				End:     lengthCall.End(),
 				Message: fmt.Sprintf("len consumes %d throwaway standard-library Clone layer(s); read the original value's identical length directly", len(matched.calls)),
 			}
+			if ps5083WouldIntroduceConstant(pass, matched) {
+				pass.Report(diagnostic)
+				return true
+			}
 			if fix, ok := ps5083FixedPointFix(pass, file, lengthCall, matched); ok {
 				diagnostic.SuggestedFixes = []analysis.SuggestedFix{fix}
 			} else if fix, ok := fixDeletedCallScaffoldingPaths(pass, file, matched.paths, "remove clones before len", matched.spans...); ok {
@@ -101,6 +105,11 @@ func runPS5083(pass *analysis.Pass) (any, error) {
 		})
 	}
 	return nil, nil
+}
+
+func ps5083WouldIntroduceConstant(pass *analysis.Pass, chain typedUnaryCallChain) bool {
+	typed, ok := pass.TypesInfo.Types[ps2110Unparen(chain.base)]
+	return ok && typed.Value != nil
 }
 
 func ps5083LenBuiltin(pass *analysis.Pass, expr ast.Expr) bool {

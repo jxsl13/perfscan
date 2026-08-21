@@ -23,6 +23,17 @@ func stringLength(value string) int {
 	return len(strings.Clone(value)) // want "len consumes 1 throwaway standard-library Clone layer"
 }
 
+// Removing Clone would make the second case a duplicate constant 3.
+func constantStringCase(selected int) int {
+	switch selected {
+	case 3:
+		return 1
+	case len(strings.Clone("abc")): // want "len consumes 1 throwaway standard-library Clone layer"
+		return 2
+	}
+	return 0
+}
+
 func explicitGeneric(values []int) int {
 	return len(slices.Clone[[]int](values)) // want "len consumes 1 throwaway standard-library Clone layer"
 }
