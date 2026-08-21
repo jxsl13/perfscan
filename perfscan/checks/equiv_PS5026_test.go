@@ -124,15 +124,15 @@ func TestEquiv_PS5026_TargetedSeeds(t *testing.T) {
 		[]byte("only one z here"),
 		[]byte("z at both ends and in the z middle z"),
 		[]byte("no needle at all"),
-		[]byte("\x00\x00a\x00"),                 // NUL runs
-		[]byte("\xff\xfe\xfd"),                  // invalid UTF-8 throughout
-		[]byte("\xc3\xa9\xc3\xa9z"),             // needle after complete multi-byte runes
-		[]byte("\xc3z\xa9"),                     // needle between the bytes of a split rune
-		[]byte("éz…z€"),                         // multi-byte runes around the needle
-		bytes.Repeat([]byte("z"), 1000),         // needle everywhere
-		long,                                    // long, needle absent
-		append(long[:len(long):len(long)], 'z'), // long, needle only at the very end
-		append([]byte("z"), long...),            // long, needle only at the very start
+		[]byte("\x00\x00a\x00"),                                    // NUL runs
+		[]byte("\xff\xfe\xfd"),                                     // invalid UTF-8 throughout
+		[]byte("\xc3\xa9\xc3\xa9z"),                                // needle after complete multi-byte runes
+		[]byte("\xc3z\xa9"),                                        // needle between the bytes of a split rune
+		[]byte("éz…z€"),                                            // multi-byte runes around the needle
+		bytes.Repeat([]byte("z"), 1000),                            // needle everywhere
+		long,                                                       // long, needle absent
+		append(long[:len(long):len(long)], 'z'),                    // long, needle only at the very end
+		append([]byte("z"), long...),                               // long, needle only at the very start
 		append(append(append([]byte(nil), long...), 'z'), long...), // long, needle in the middle
 	}
 	probes := []rune{'z', 'a', '=', 0x00, 0x7F, '/'}
