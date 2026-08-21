@@ -293,10 +293,10 @@ checks' fixes.
 | [PS5108](PS5108.md) | alloc | L1 | yes | nested strings/bytes/slices.Repeat materializes intermediate repetitions |
 | [PS5109](PS5109.md) | alloc | L1 | yes | path.Join repeatedly cleans and allocates the same completed prefix |
 | [PS5110](PS5110.md) | alloc | L1 | yes | nested slices.Concat calls allocate and recopy intermediate slices |
-| [PS5111](PS5111.md) | arith | L1 | yes | path.Clean or filepath.Clean rescans an already canonical standard-library result |
+| [PS5111](PS5111.md) | arith | L1 | yes | path.Clean rescans an already canonical standard-library result |
 | [PS5112](PS5112.md) | arith | L1 | yes | strings.Join exactly reverses an adjacent Split operation and reconstructs its input |
 | [PS5113](PS5113.md) | arith | L1 | yes | nested filepath.ToSlash and FromSlash calls are absorbed by the outermost normalizer |
-| [PS5114](PS5114.md) | arith | L1 | yes | filepath.FromSlash rescans a result that is already in native filepath form |
+| [PS5114](PS5114.md) | arith | L1 | yes | filepath.FromSlash rescans a separator-free filepath result |
 | [PS5115](PS5115.md) | arith | L1 | yes | strings.ToValidUTF8 rescans the already-valid result of another ToValidUTF8 call |
 | [PS5116](PS5116.md) | arith | L1 | yes | unicode/utf8 validates a ToValidUTF8 result that is guaranteed to be valid |
 | [PS5117](PS5117.md) | alloc | L1 | yes | Join+Fields canonicalizes an already canonicalized string or byte slice |

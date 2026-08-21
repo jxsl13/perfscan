@@ -34,15 +34,18 @@ outermost mapping completely determines the result. On Unix and Plan 9 the OS
 separator is already '/', so both functions return the input and the same
 identity follows trivially.
 
-When a mixed chain ends in a filepath producer that already returns native
-separators, an outermost FromSlash restores that producer result exactly and
-the complete chain disappears:
+When a mixed chain ends in a filepath producer whose result cannot contain a
+forward slash, an outermost FromSlash restores that producer result exactly
+and the complete chain disappears:
 
-  filepath.FromSlash(filepath.ToSlash(filepath.Clean(path))) -> filepath.Clean(path)
+  filepath.FromSlash(filepath.ToSlash(filepath.Base(path))) -> filepath.Base(path)
 
 PS5114 owns a pure FromSlash chain around such a producer. PS5113 owns the
 mixed form, including any nested PS5114 candidate, so fix mode emits one
-non-overlapping edit and reaches the shared fixed point in one pass.
+non-overlapping edit and reaches the shared fixed point in one pass. Clean and
+Join do not use this stronger collapse because Windows volume-like inputs can
+leave a leading slash in their results; their outer FromSlash is retained while
+only the nested slash normalizers are removed.
 
 The shared typed unary call-chain abstraction resolves every layer through
 go/types and accepts only package-level path/filepath.ToSlash and FromSlash

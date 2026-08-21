@@ -11,7 +11,7 @@ import (
 	"github.com/jxsl13/perfscan/lint"
 )
 
-// PS5111 removes path/filepath Clean layers around producers whose result is
+// PS5111 removes path.Clean layers around producers whose result is
 // already a canonical, nonempty fixed point for Clean.
 var PS5111 = register(&lint.Check{
 	ID:       "PS5111",
@@ -20,17 +20,14 @@ var PS5111 = register(&lint.Check{
 	Level:    lint.LevelIdiomatic,
 	AutoFix:  true,
 	Doc: lint.Documentation{
-		Title: "path.Clean or filepath.Clean rescans an already canonical standard-library result",
+		Title: "path.Clean rescans an already canonical standard-library result",
 		Text: `Several path producers already return a canonical, nonempty value.
-Wrapping them in path.Clean or filepath.Clean repeats lexical path processing
-without changing a byte:
+Wrapping them in path.Clean repeats lexical path processing without changing a
+byte:
 
   path.Clean(path.Dir(name))                    -> path.Dir(name)
   path.Clean(path.Base(name))                   -> path.Base(name)
-  filepath.Clean(filepath.Dir(name))            -> filepath.Dir(name)
-  filepath.Clean(filepath.Base(name))           -> filepath.Base(name)
   path.Clean(path.Join(root, "fixed"))          -> path.Join(root, "fixed")
-  filepath.Clean(filepath.Join("fixed", tail))  -> filepath.Join("fixed", tail)
 
 Dir explicitly cleans the directory it returns and never returns an empty
 string. Base returns either a separator/root, ".", "..", or one separator-free
@@ -44,25 +41,26 @@ evaluates every argument exactly once in the original order.
 The rule uses the shared typed repeated-wrapper/fixed-point-producer
 abstraction. It follows arbitrarily many Clean layers and removes them all in
 one fix. Wrapper and producer must resolve through go/types to the same ordinary
-path or path/filepath package binding, every intermediate result must have the
+path package binding, every intermediate result must have the
 same concrete string type, and the producer shape must satisfy the rule above.
 Aliases, parentheses, named constants, and constant string expressions work. Dot imports,
-function values, methods, user lookalikes, cross-package compositions, empty or
-all-dynamic Join calls, and type mismatches stay silent.
+function values, methods, user lookalikes, path/filepath compositions, empty
+or all-dynamic Join calls, and type mismatches stay silent.
 
-The rewrite is BIT-IDENTICAL on every supported OS. Path Dir/Join call Clean
-directly. Filepath Dir/Join use filepathlite or platform join logic ending in
-Clean, including Windows volume/UNC rules. Base removes the volume and final
-separator-delimited prefix before returning one stable element. Because every
-accepted producer result is nonempty, Clean's empty-string special case cannot
-apply. Removing the pure outer scans cannot move, duplicate, or suppress any
-producer argument evaluation, panic, or allocation.
+The rewrite is BIT-IDENTICAL on every supported OS because path always uses
+slash-separated URL-style syntax. Dir and Join call path.Clean directly, while
+Base returns one nonempty slash-free element (or a root separator). Because
+every accepted producer result is nonempty, Clean's empty-string special case
+cannot apply. Path/filepath producers are deliberately excluded: on Windows,
+arbitrary volume-like strings can make Dir, Base, or Join return a value that a
+second filepath.Clean changes. Removing the pure outer scans cannot move,
+duplicate, or suppress any producer argument evaluation, panic, or allocation.
 
 The fix retains the complete producer expression byte-for-byte and deletes only
 outer Clean scaffolding. Comments or local/import uses inside removed syntax
 keep the diagnostic advisory through the shared call-chain editor.`,
-		Before: `directory := filepath.Clean(filepath.Clean(filepath.Dir(name)))`,
-		After:  `directory := filepath.Dir(name)`,
+		Before: `directory := path.Clean(path.Clean(path.Dir(name)))`,
+		After:  `directory := path.Dir(name)`,
 		MeasuredWin: `On an Apple M2 Pro, benchmarks/ps5111_test.go (10 runs,
 single CPU) measured Clean(Dir(path)) on a canonical 72 KiB path at a median
 149,831 ns/op, versus 73,504 ns/op for Dir(path): about 2.04x faster. Both
@@ -71,7 +69,7 @@ lexical scan.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS5111",
-		Doc:  "path/filepath Clean wraps a canonical nonempty Dir, Base, or proven-nonempty Join result",
+		Doc:  "path.Clean wraps a canonical nonempty Dir, Base, or proven-nonempty Join result",
 		Run:  runPS5111,
 	},
 })
@@ -116,7 +114,7 @@ func ps5111CleanedProducerChain(pass *analysis.Pass, root *ast.CallExpr) (typedP
 		return typedPackageWrapperProducerChain{}, false
 	}
 	pkgPath := function.Pkg().Path()
-	if pkgPath != "path" && pkgPath != "path/filepath" {
+	if pkgPath != "path" {
 		return typedPackageWrapperProducerChain{}, false
 	}
 	return matchTypedPackageWrapperProducerChain(pass, root, pkgPath, "Clean", func(

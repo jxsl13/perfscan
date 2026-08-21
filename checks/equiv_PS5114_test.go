@@ -4,11 +4,13 @@ import (
 	"math/rand"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestEquiv_PS5114NativeFilepathProducersRandom(t *testing.T) {
+	t.Parallel()
 	random := rand.New(rand.NewSource(5114))
 	alphabet := []byte("./abc\\:\x00\xff")
 	word := func() string {
@@ -25,19 +27,35 @@ func TestEquiv_PS5114NativeFilepathProducersRandom(t *testing.T) {
 			before string
 			after  string
 		}{
-			{"Clean", filepath.FromSlash(filepath.Clean(name)), filepath.Clean(name)},
-			{"Join", filepath.FromSlash(filepath.Join(name, tail)), filepath.Join(name, tail)},
-			{"empty Join", filepath.FromSlash(filepath.Join()), filepath.Join()},
 			{"Dir", filepath.FromSlash(filepath.Dir(name)), filepath.Dir(name)},
 			{"Base", filepath.FromSlash(filepath.Base(name)), filepath.Base(name)},
 			{"Ext", filepath.FromSlash(filepath.Ext(name)), filepath.Ext(name)},
 			{"VolumeName", filepath.FromSlash(filepath.VolumeName(name)), filepath.VolumeName(name)},
-			{"deep Clean", filepath.FromSlash(filepath.FromSlash(filepath.FromSlash(filepath.Clean(name)))), filepath.Clean(name)},
 		}
 		for _, check := range checks {
 			if check.before != check.after {
 				t.Fatalf("iteration %d %s differs for name=%q tail=%q: before=%q after=%q", iteration, check.label, name, tail, check.before, check.after)
 			}
+		}
+	}
+}
+
+func TestEquiv_PS5114WindowsProducerCounterexamples(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows filepath volume grammar")
+	}
+	checks := []struct {
+		label  string
+		before string
+		after  string
+	}{
+		{"Clean", filepath.FromSlash(filepath.Clean("/:")), filepath.Clean("/:")},
+		{"Join", filepath.FromSlash(filepath.Join("/:")), filepath.Join("/:")},
+	}
+	for _, check := range checks {
+		if check.before == check.after {
+			t.Fatalf("%s counterexample no longer differs: %q", check.label, check.before)
 		}
 	}
 }
@@ -48,6 +66,7 @@ func TestEquiv_PS5114NativeFilepathProducersRandom(t *testing.T) {
 // prefixes, roots, empty strings, and path-element outputs against Go's exact
 // FromSlash byte mapping.
 func TestEquiv_PS5114WindowsNativeOutputInvariant(t *testing.T) {
+	t.Parallel()
 	random := rand.New(rand.NewSource(0x5114))
 	inputs := []string{"", `.`, `\\`, `C:`, `C:\\`, `\\host\\share`, `.ext`, string([]byte{0xff, '\\', 0})}
 	for range 50_000 {

@@ -10,8 +10,8 @@ import (
 	"github.com/jxsl13/perfscan/lint"
 )
 
-// PS5114 removes filepath.FromSlash layers around filepath producers that
-// already return native-separator paths or separator-free path elements.
+// PS5114 removes filepath.FromSlash layers around filepath producers whose
+// results cannot contain a forward slash.
 var PS5114 = register(&lint.Check{
 	ID:       "PS5114",
 	Category: "arith",
@@ -19,48 +19,48 @@ var PS5114 = register(&lint.Check{
 	Level:    lint.LevelIdiomatic,
 	AutoFix:  true,
 	Doc: lint.Documentation{
-		Title: "filepath.FromSlash rescans a result that is already in native filepath form",
+		Title: "filepath.FromSlash rescans a separator-free filepath result",
 		Text: `Several path/filepath producers already return strings on which
 filepath.FromSlash is an identity:
 
-  filepath.FromSlash(filepath.Clean(name))       -> filepath.Clean(name)
-  filepath.FromSlash(filepath.Join(root, tail))  -> filepath.Join(root, tail)
   filepath.FromSlash(filepath.Dir(name))         -> filepath.Dir(name)
   filepath.FromSlash(filepath.Base(name))        -> filepath.Base(name)
   filepath.FromSlash(filepath.Ext(name))         -> filepath.Ext(name)
   filepath.FromSlash(filepath.VolumeName(name))  -> filepath.VolumeName(name)
 
-On Windows, Clean finishes by converting every slash to the native separator;
-Join finishes with Clean, and Dir cleans the directory portion it returns.
-VolumeName applies the same conversion itself. Base and Ext return only the
-final separator-delimited element (or, for an all-separator Base input, one
-native separator), so their results cannot contain '/'. On every system whose
-native separator is '/', FromSlash is an identity for all strings. Empty
-results from Join, Ext, or VolumeName remain empty, so no nonempty proof is
+Dir cleans a directory substring that ends at a separator, so its result uses
+native separators even for unusual volume-like input. Base and Ext return only
+the final separator-delimited element (or, for an all-separator Base input, one
+native separator), so their results cannot contain '/'. On Windows, VolumeName
+applies FromSlash itself before returning; on other systems it is empty. On
+every system whose native separator is '/', FromSlash is an identity for all
+strings. Empty Ext and VolumeName results remain empty, so no nonempty proof is
 needed.
 
 The rule uses the shared typed repeated-wrapper/fixed-point-producer
 abstraction. It follows arbitrarily many FromSlash layers and removes them in
 one fix. Wrapper and producer must resolve through go/types to the same
 ordinary path/filepath import binding, every intermediate result must have the
-same concrete string type, and the producer must be Clean, Join, Dir, Base,
-Ext, or VolumeName. Aliases, parentheses, variadic Join calls, and Join calls
-with no elements work. Dot imports, function values, methods, user lookalikes,
-path package calls, explicit type changes, and other producers stay silent.
+same concrete string type, and the producer must be Dir, Base, Ext, or VolumeName.
+Aliases and parentheses work. Dot imports, function values, methods, user
+lookalikes, path package calls, explicit type changes, and other producers stay
+silent.
 
 The rewrite is BIT-IDENTICAL on every supported GOOS. It retains the complete
 producer expression byte-for-byte, including all argument evaluation, and
 deletes only pure outer FromSlash scaffolding. Comments or local/import uses
 inside removed syntax keep the diagnostic advisory through the shared
-call-chain editor.
+call-chain editor. Clean and Join are deliberately excluded: Windows
+volume-like strings can make them return a leading slash that FromSlash still
+changes.
 
 On slash-separator systems the standard library and compiler reduce
 FromSlash to identity work, so no portable speedup is claimed. On Windows each
 removed layer avoids an IndexByte scan of the complete producer result. The
-benefit is largest for long Clean, Join, or Dir results; the rule remains a
-small correctness-preserving simplification for short element results.`,
-		Before: `native := filepath.FromSlash(filepath.Clean(name))`,
-		After:  `native := filepath.Clean(name)`,
+benefit is normally small for Base and Ext, but can grow with a long UNC or
+device VolumeName.`,
+		Before: `native := filepath.FromSlash(filepath.VolumeName(name))`,
+		After:  `native := filepath.VolumeName(name)`,
 		MeasuredWin: `benchmarks/ps5114_test.go isolates the deleted Windows
 operation with Go 1.26's exact filepathlite FromSlash replacement algorithm
 over a precomputed canonical 92 KiB native-separator producer result. On an
@@ -72,7 +72,7 @@ producer's own cost.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS5114",
-		Doc:  "filepath.FromSlash wraps a filepath producer whose result is already in native-separator form",
+		Doc:  "filepath.FromSlash wraps a native filepath Dir, Base, Ext, or normalized VolumeName result",
 		Run:  runPS5114,
 	},
 })
@@ -126,10 +126,8 @@ func ps5114AcceptNativeFilepathProducer(producer *types.Func, signature *types.S
 		return false
 	}
 	switch producer.Name() {
-	case "Clean", "Dir", "Base", "Ext", "VolumeName":
+	case "Dir", "Base", "Ext", "VolumeName":
 		return len(call.Args) == 1 && !call.Ellipsis.IsValid()
-	case "Join":
-		return true
 	default:
 		return false
 	}

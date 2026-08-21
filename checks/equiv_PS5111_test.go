@@ -4,10 +4,12 @@ import (
 	"math/rand"
 	"path"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestEquiv_PS5111CanonicalProducersRandom(t *testing.T) {
+	t.Parallel()
 	random := rand.New(rand.NewSource(5111))
 	alphabet := []byte("./abc\\:\x00")
 	word := func() string {
@@ -26,10 +28,7 @@ func TestEquiv_PS5111CanonicalProducersRandom(t *testing.T) {
 		}{
 			{"path.Dir", path.Clean(path.Dir(name)), path.Dir(name)},
 			{"path.Base", path.Clean(path.Base(name)), path.Base(name)},
-			{"filepath.Dir", filepath.Clean(filepath.Dir(name)), filepath.Dir(name)},
-			{"filepath.Base", filepath.Clean(filepath.Base(name)), filepath.Base(name)},
 			{"path.Join", path.Clean(path.Join(name, "fixed", tail)), path.Join(name, "fixed", tail)},
-			{"filepath.Join", filepath.Clean(filepath.Join(name, "fixed", tail)), filepath.Join(name, "fixed", tail)},
 			{"deep path.Dir", path.Clean(path.Clean(path.Clean(path.Dir(name)))), path.Dir(name)},
 		}
 		for _, check := range checks {
@@ -41,9 +40,31 @@ func TestEquiv_PS5111CanonicalProducersRandom(t *testing.T) {
 }
 
 func TestEquiv_PS5111JoinEmptyCounterexample(t *testing.T) {
+	t.Parallel()
 	joined := path.Join("", "")
 	cleaned := path.Clean(joined)
 	if joined != "" || cleaned != "." {
 		t.Fatalf("empty-Join guard counterexample changed: Join=%q Clean(Join)=%q", joined, cleaned)
+	}
+}
+
+func TestEquiv_PS5111WindowsFilepathCounterexamples(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows filepath volume grammar")
+	}
+	checks := []struct {
+		label  string
+		before string
+		after  string
+	}{
+		{"filepath.Dir", filepath.Clean(filepath.Dir("a:/\\b/c")), filepath.Dir("a:/\\b/c")},
+		{"filepath.Base", filepath.Clean(filepath.Base("x/a:")), filepath.Base("x/a:")},
+		{"filepath.Join", filepath.Clean(filepath.Join("/:")), filepath.Join("/:")},
+	}
+	for _, check := range checks {
+		if check.before == check.after {
+			t.Fatalf("%s counterexample no longer differs: %q", check.label, check.before)
+		}
 	}
 }

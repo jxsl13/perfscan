@@ -17,11 +17,11 @@ func pathBase(name string) string {
 }
 
 func filepathDir(name string) string {
-	return filepath.Clean(filepath.Dir(name)) // want `path/filepath.Clean rescans the canonical nonempty result of path/filepath.Dir through 1 redundant Clean layer`
+	return filepath.Clean(filepath.Dir(name))
 }
 
 func filepathBase(name string) string {
-	return filepath.Clean(filepath.Base(name)) // want `path/filepath.Clean rescans the canonical nonempty result of path/filepath.Base through 1 redundant Clean layer`
+	return filepath.Clean(filepath.Base(name))
 }
 
 func deep(name string) string {
@@ -37,7 +37,7 @@ func foldedJoin(root string) string {
 }
 
 func knownFilepathJoin(tail string) string {
-	return filepath.Clean(filepath.Join("root", tail)) // want `path/filepath.Clean rescans the canonical nonempty result of path/filepath.Join through 1 redundant Clean layer`
+	return filepath.Clean(filepath.Join("root", tail))
 }
 
 // Join can return "" when every argument is empty, but Clean("") is ".".

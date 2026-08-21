@@ -27,7 +27,11 @@ func parenthesized(path string) string {
 }
 
 func nativeProducer(path string) string {
-	return filepath.Clean(path) // want `filepath.FromSlash restores the already-native filepath producer after 2 mixed slash-normalizer layer`
+	return filepath.Base(path) // want `filepath.FromSlash restores the already-native filepath producer after 2 mixed slash-normalizer layer`
+}
+
+func windowsVolumeProducer(path string) string {
+	return filepath.FromSlash(filepath.Clean(path)) // want `filepath.FromSlash absorbs 2 nested ToSlash/FromSlash layer`
 }
 
 type definedString string

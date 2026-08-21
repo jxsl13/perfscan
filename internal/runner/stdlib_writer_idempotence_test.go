@@ -745,7 +745,7 @@ func dynamicJoin(root string) string {
 	pass1 := string(runFixMode(t, source))
 	for _, want := range []string{
 		"return path.Dir(name)",
-		"return filepath.Base(name)",
+		"return filepath.Clean(filepath.Base(name))",
 		`return path.Join(root, "fixed")`,
 		"return path.Clean(path.Join(root))",
 	} {
@@ -753,8 +753,8 @@ func dynamicJoin(root string) string {
 			t.Errorf("expected canonical-producer fixed point %q in pass 1:\n%s", want, pass1)
 		}
 	}
-	if strings.Count(pass1, "path.Clean") != 1 || strings.Count(pass1, "filepath.Clean") != 0 {
-		t.Fatalf("only the unsafe dynamic-Join Clean should remain:\n%s", pass1)
+	if strings.Count(pass1, "return path.Clean") != 1 || strings.Count(pass1, "return filepath.Clean") != 1 {
+		t.Fatalf("the dynamic path.Join and Windows filepath.Base counterexamples should remain guarded:\n%s", pass1)
 	}
 	pass2 := string(runFixMode(t, pass1))
 	if pass2 != pass1 {
@@ -842,6 +842,22 @@ func join(parts []string) string {
 	return filepath.FromSlash(filepath.Join(parts...))
 }
 
+func dir(name string) string {
+	return filepath.FromSlash(filepath.FromSlash(filepath.Dir(name)))
+}
+
+func base(name string) string {
+	return filepath.FromSlash(filepath.Base(name))
+}
+
+func ext(name string) string {
+	return filepath.FromSlash(filepath.Ext(name))
+}
+
+func volume(name string) string {
+	return filepath.FromSlash(filepath.VolumeName(name))
+}
+
 func mixed(name string) string {
 	return filepath.FromSlash(filepath.ToSlash(filepath.FromSlash(filepath.Clean(name))))
 }
@@ -852,16 +868,20 @@ func dynamic(name string) string {
 `
 	pass1 := string(runFixMode(t, source))
 	for _, want := range []string{
-		"return filepath.Clean(name)",
-		"return filepath.Join(parts...)",
+		"return filepath.FromSlash(filepath.Clean(name))",
+		"return filepath.FromSlash(filepath.Join(parts...))",
+		"return filepath.Dir(name)",
+		"return filepath.Base(name)",
+		"return filepath.Ext(name)",
+		"return filepath.VolumeName(name)",
 		"return filepath.FromSlash(name)",
 	} {
 		if !strings.Contains(pass1, want) {
 			t.Errorf("expected native filepath-producer fixed point %q in pass 1:\n%s", want, pass1)
 		}
 	}
-	if strings.Count(pass1, "filepath.FromSlash") != 1 || strings.Count(pass1, "filepath.ToSlash") != 0 {
-		t.Fatalf("only the dynamic FromSlash call should remain:\n%s", pass1)
+	if strings.Count(pass1, "filepath.FromSlash") != 4 || strings.Count(pass1, "filepath.ToSlash") != 0 {
+		t.Fatalf("only unsafe Clean/Join and dynamic FromSlash calls should remain:\n%s", pass1)
 	}
 	pass2 := string(runFixMode(t, pass1))
 	if pass2 != pass1 {

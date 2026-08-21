@@ -6,19 +6,19 @@ import (
 )
 
 func clean(name string) string {
-	return filepath.Clean(name) // want `filepath.FromSlash rescans the already-native result of filepath.Clean through 1 redundant FromSlash layer`
+	return filepath.FromSlash(filepath.Clean(name))
 }
 
 func join(root, tail string) string {
-	return filepath.Join(root, tail) // want `filepath.FromSlash rescans the already-native result of filepath.Join through 1 redundant FromSlash layer`
+	return filepath.FromSlash(filepath.Join(root, tail))
 }
 
 func emptyJoin() string {
-	return filepath.Join() // want `filepath.FromSlash rescans the already-native result of filepath.Join through 1 redundant FromSlash layer`
+	return filepath.FromSlash(filepath.Join())
 }
 
 func spreadJoin(parts []string) string {
-	return filepath.Join(parts...) // want `filepath.FromSlash rescans the already-native result of filepath.Join through 1 redundant FromSlash layer`
+	return filepath.FromSlash(filepath.Join(parts...))
 }
 
 func dir(name string) string {
@@ -38,7 +38,7 @@ func volume(name string) string {
 }
 
 func deep(name string) string {
-	return filepath.Clean(name) // want `filepath.FromSlash rescans the already-native result of filepath.Clean through 3 redundant FromSlash layer`
+	return filepath.Base(name) // want `filepath.FromSlash rescans the already-native result of filepath.Base through 3 redundant FromSlash layer`
 }
 
 // ToSlash chooses a different representation on Windows. Functions outside
