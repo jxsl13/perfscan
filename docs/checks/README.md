@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**374 checks total** — **263 with a bit-identical auto-fix**, 111 advisory. By fix level: **246 L1** (idiomatic), **109 L2** (structured), **19 L3** (aggressive).
+**375 checks total** — **263 with a bit-identical auto-fix**, 112 advisory. By fix level: **246 L1** (idiomatic), **110 L2** (structured), **19 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -386,4 +386,5 @@ checks' fixes.
 | [PS6076](PS6076.md) | verify | L2 |  | a parallel band callback rebuilds the same invariant packed data |
 | [PS6077](PS6077.md) | verify | L2 |  | same-signature architecture siblings select scalar transcendental and vector implementations |
 | [PS6078](PS6078.md) | verify | L2 |  | an architecture capability flag constant-folds optimized branches out of public operations |
+| [PS6079](PS6079.md) | verify | L2 |  | a benchmark fixture does not prove that its guarded optimized route is entered |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |
