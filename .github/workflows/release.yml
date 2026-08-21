@@ -1,17 +1,11 @@
 name: Release
 
-# Each tool is a Go module in a subdirectory, so Go requires per-tool tag
-# prefixes for versioned installs. Releasing is therefore per-tool:
-#   git tag perfscan/v1.2.3   && git push origin perfscan/v1.2.3
-#   git tag perfscanxx/v0.1.0 && git push origin perfscanxx/v0.1.0
-# The tag prefix selects the module; the vX.Y.Z part is the version. A plain
-# cross-compile matrix is used because GoReleaser's monorepo (prefixed-tag)
-# support is Pro-only.
+# Releases use version-only tags at the repository root:
+#   git tag v1.2.3 && git push origin v1.2.3
 on:
   push:
     tags:
-      - "perfscan/v*"
-      - "perfscanxx/v*"
+      - "v*"
 
 permissions:
   contents: write
@@ -29,6 +23,13 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: stable
+      - name: Validate version tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release tag must be exactly vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
       - name: Build and archive
         env:
           GOOS: ${{ matrix.goos }}
@@ -36,13 +37,11 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"       # e.g. perfscan/v1.2.3
-          module="${tag%%/*}"            # perfscan | perfscanxx
-          version="${tag##*/}"           # v1.2.3
-          bin="$module"; [ "$GOOS" = "windows" ] && bin="$module.exe"
-          go -C "$module" build -trimpath \
-            -ldflags "-s -w -X main.version=${version}" -o "${GITHUB_WORKSPACE}/${bin}" .
-          name="${module}_${version}_${GOOS}_${GOARCH}"
+          version="$GITHUB_REF_NAME"
+          bin="perfscan"; [ "$GOOS" = "windows" ] && bin="perfscan.exe"
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${version}" -o "$bin" .
+          name="perfscan_${version}_${GOOS}_${GOARCH}"
           mkdir -p out
           if [ "$GOOS" = "windows" ]; then
             zip -q "out/${name}.zip" "$bin"
@@ -64,10 +63,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Checksums
-        run: |
-          set -euo pipefail
-          module="${GITHUB_REF_NAME%%/*}"
-          cd dist && sha256sum ./* > "${module}_checksums.txt"
+        run: cd dist && sha256sum ./* > perfscan_checksums.txt
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:

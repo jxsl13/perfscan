@@ -1,11 +1,8 @@
-# built binaries (per module)
-/perfscan/perfscan
-/perfscanxx/perfscanxx
+# built binaries
+/perfscan
 /dist/
-/perfscan/dist/
 *.test
 *.out
 .DS_Store
 .claude/
 /corpus/
-/perfscanxx/dist/
