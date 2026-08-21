@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 type testJob struct {
@@ -27,10 +28,22 @@ type testJob struct {
 
 func main() {
 	workers := flag.Int("workers", runtime.GOMAXPROCS(0), "maximum concurrent go test processes")
+	// Shards already provide cross-test concurrency. Keeping the per-process
+	// test semaphore at one avoids multiplying GOMAXPROCS-heavy analyzer loads.
+	parallel := flag.Int("parallel", 1, "maximum tests run in parallel within each shard")
+	timeout := flag.Duration("timeout", 20*time.Minute, "timeout for each test shard")
 	race := flag.Bool("race", false, "run each shard with the race detector")
 	flag.Parse()
 	if *workers < 1 {
 		_, _ = io.WriteString(os.Stderr, "testparallel: -workers must be at least 1\n")
+		os.Exit(2)
+	}
+	if *parallel < 1 {
+		_, _ = io.WriteString(os.Stderr, "testparallel: -parallel must be at least 1\n")
+		os.Exit(2)
+	}
+	if *timeout <= 0 {
+		_, _ = io.WriteString(os.Stderr, "testparallel: -timeout must be greater than zero\n")
 		os.Exit(2)
 	}
 	patterns := flag.Args()
@@ -56,7 +69,7 @@ func main() {
 			jobs = append(jobs, testJob{pkg: pkg, shard: shard, shardCount: min(*workers, len(names)), names: group})
 		}
 	}
-	if err := runJobs(ctx, jobs, *workers, *race); err != nil {
+	if err := runJobs(ctx, jobs, *workers, *parallel, *timeout, *race); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -111,7 +124,7 @@ func partition(names []string, workers int) [][]string {
 	return groups
 }
 
-func runJobs(ctx context.Context, jobs []testJob, workers int, race bool) error {
+func runJobs(ctx context.Context, jobs []testJob, workers, parallel int, timeout time.Duration, race bool) error {
 	queue := make(chan testJob)
 	errs := make(chan error, len(jobs))
 	var outputMu sync.Mutex
@@ -121,11 +134,7 @@ func runJobs(ctx context.Context, jobs []testJob, workers int, race bool) error 
 		go func() {
 			defer wg.Done()
 			for job := range queue {
-				args := []string{"test", "-count=1", "-run", testPattern(job.names)}
-				if race {
-					args = append(args, "-race")
-				}
-				args = append(args, job.pkg)
+				args := testArgs(job, parallel, timeout, race)
 				cmd := exec.CommandContext(ctx, "go", args...)
 				var output bytes.Buffer
 				cmd.Stdout = &output
@@ -164,6 +173,21 @@ func runJobs(ctx context.Context, jobs []testJob, workers int, race bool) error 
 		return fmt.Errorf("testparallel: %d shard(s) failed:\n%s", len(failures), strings.Join(failures, "\n"))
 	}
 	return nil
+}
+
+func testArgs(job testJob, parallel int, timeout time.Duration, race bool) []string {
+	args := []string{
+		"test",
+		"-count=1",
+		fmt.Sprintf("-timeout=%s", timeout),
+		fmt.Sprintf("-parallel=%d", parallel),
+		"-run",
+		testPattern(job.names),
+	}
+	if race {
+		args = append(args, "-race")
+	}
+	return append(args, job.pkg)
 }
 
 func testPattern(names []string) string {
