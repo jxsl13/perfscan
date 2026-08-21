@@ -22,7 +22,7 @@ say "quality + parallel race tests"
   if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
   go vet ./... || exit 1
   go build ./... || exit 1
-  go run ./internal/testparallel -race -workers 4 ./... || exit 1
+  go run ./internal/testparallel -race -workers 2 ./... || exit 1
   "$SC" ./... || exit 1
 ) || err "quality"
 

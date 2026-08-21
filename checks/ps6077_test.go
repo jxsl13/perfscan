@@ -8,6 +8,9 @@ import (
 )
 
 func TestPS6077(t *testing.T) {
+	// The diagnostic is anchored in the arm64 scalar partition. Pin the
+	// analysistest package load so // want expectations are host-independent.
+	t.Setenv("GOARCH", "arm64")
 	analysistest.Run(t, analysistest.TestData(), PS6077.Analyzer, "ps6077")
 }
 

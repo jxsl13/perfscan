@@ -25,13 +25,13 @@ func UnknownSibling(values []float64) float64 {
 }
 
 func DifferentSignature(values []float32) float32 {
-	return expVector4(values)
+	return expVector4F32(values)
 }
 
 func DotImported(values []float64) float64 {
-	return expVector4(values)
+	return expVector4F64(values)
 }
 
 func Validated(values []float64) float64 {
-	return expVector4(values)
+	return expVector4F64(values)
 }
