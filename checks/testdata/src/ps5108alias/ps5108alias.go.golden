@@ -1,0 +1,7 @@
+package ps5108alias
+
+import sequence "bytes"
+
+func repeat(data []byte) []byte {
+	return sequence.Repeat(data, 42) // want "bytes.Repeat is nested 2 times with positive constant counts; combine them to 42"
+}

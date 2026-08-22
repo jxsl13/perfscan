@@ -1,0 +1,11 @@
+package ps5093alias
+
+import (
+	fmtalias "fmt"
+)
+
+var _ = fmtalias.Sprintf
+
+func sizes(data []byte, value string) (int, int64) {
+	return len(data), int64(len(value)) // want "bytes.NewReader[(]...[)].Len constructs an ephemeral container only to recover its input length and carries 2 throwaway Clone layer" "strings.NewReader[(]...[)].Size constructs an ephemeral container only to recover its input length and carries 1 throwaway Clone layer"
+}

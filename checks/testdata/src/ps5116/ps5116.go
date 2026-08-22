@@ -1,0 +1,121 @@
+package ps5116
+
+import (
+	"bytes"
+	"strings"
+	"unicode/utf8"
+)
+
+const validText = "\uFFFD"
+const invalidText = "\xff"
+
+func text(payload string) bool {
+	return utf8.ValidString(strings.ToValidUTF8(payload, validText)) // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+}
+
+func data(payload []byte) bool {
+	return utf8.Valid(bytes.ToValidUTF8(payload, []byte("?"))) // want `utf8.Valid validates bytes.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+}
+
+func nilReplacement(payload []byte) bool {
+	return utf8.Valid(bytes.ToValidUTF8(payload, nil)) // want `utf8.Valid validates bytes.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+}
+
+func deep(payload string) bool {
+	return utf8.ValidString(strings.ToValidUTF8(strings.ToValidUTF8(strings.ToValidUTF8(payload, invalidText), "?"), "outer")) // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+}
+
+type holder struct {
+	text string
+	data []byte
+}
+
+func valueFields(value holder) (bool, bool) {
+	return utf8.ValidString(strings.ToValidUTF8(value.text, "?")), // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+		utf8.Valid(bytes.ToValidUTF8(value.data, []byte("?"))) // want `utf8.Valid validates bytes.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+}
+
+func literal() bool {
+	return utf8.ValidString(strings.ToValidUTF8("\xff", "?")) // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+}
+
+// Replacing either runtime expression with true would create a duplicate
+// constant case/key and make this valid source stop compiling.
+func constantnessContexts(payload string, selected bool) int {
+	switch selected {
+	case true:
+		return 1
+	case utf8.ValidString(strings.ToValidUTF8(payload, "?")): // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+		return 2
+	}
+	values := map[bool]int{
+		true: 3,
+		utf8.ValidString(strings.ToValidUTF8(payload, "?")): 4, // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+	}
+	return values[selected]
+}
+
+// The local declaration would become unused, so this valid finding remains
+// advisory even though reading clean is otherwise inert.
+func localLastUse(payload string) bool {
+	clean := payload
+	return utf8.ValidString(strings.ToValidUTF8(clean, "?")) // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+}
+
+func retainedLocalUse(payload string) (bool, string) {
+	clean := payload
+	return utf8.ValidString(strings.ToValidUTF8(clean, "?")), clean // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+}
+
+func load() string { return "\xff" }
+
+// Calls, indexing, and indirect field selections may have effects or panic.
+func callInput() bool {
+	return utf8.ValidString(strings.ToValidUTF8(load(), "?")) // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+}
+
+func indexInput(values []string) bool {
+	return utf8.ValidString(strings.ToValidUTF8(values[0], "?")) // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+}
+
+func pointerField(value *holder) bool {
+	return utf8.ValidString(strings.ToValidUTF8(value.text, "?")) // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+}
+
+// --- negatives ---
+
+func invalidStringReplacement(payload string) bool {
+	return utf8.ValidString(strings.ToValidUTF8(payload, invalidText))
+}
+
+func invalidBytesReplacement(payload []byte) bool {
+	return utf8.Valid(bytes.ToValidUTF8(payload, []byte("\xff")))
+}
+
+func dynamicReplacement(payload, replacement string) bool {
+	return utf8.ValidString(strings.ToValidUTF8(payload, replacement))
+}
+
+func otherProducer(payload string) bool {
+	return utf8.ValidString(strings.Clone(payload))
+}
+
+func functionValues(payload string) bool {
+	valid := utf8.ValidString
+	sanitize := strings.ToValidUTF8
+	return valid(sanitize(payload, "?"))
+}
+
+type validator struct{}
+
+func (validator) ValidString(string) bool { return true }
+
+func method(payload string) bool {
+	return (validator{}).ValidString(strings.ToValidUTF8(payload, "?"))
+}
+
+func ToValidUTF8(value, replacement string) string { return value + replacement }
+
+func user(payload string) bool {
+	return utf8.ValidString(ToValidUTF8(payload, "?"))
+}

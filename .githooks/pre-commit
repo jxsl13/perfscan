@@ -1,24 +1,21 @@
 #!/bin/sh
-# perfscan monorepo pre-commit hook: gofmt, vet, build, tests per module,
-# plus perfscan self-scan. Install with `make hooks` (core.hooksPath=.githooks).
+# Root-module pre-commit hook: gofmt, vet, build, parallel tests, and self-scan.
+# Install with `make hooks` (core.hooksPath=.githooks).
 set -e
 
-for mod in perfscan perfscanxx; do
-	echo "pre-commit [$mod]: gofmt"
-	# Scope gofmt to THIS module with `gofmt -l .` (recursive, relative). Do NOT
-	# use `git ls-files '*.go'`: inside a hook, git lists repo-root-relative paths
-	# for every module, so the sibling module's files leak in and gofmt (run from
-	# $mod/) fails on paths that don't exist under it — aborting every commit.
-	# Exclude testdata (analysistest fixtures need exact // want anchoring).
-	out=$(cd "$mod" && gofmt -l . | grep -v /testdata/ || true)
-	if [ -n "$out" ]; then
-		echo "gofmt needed on (in $mod):"; echo "$out"; echo "run: gofmt -w $mod"; exit 1
-	fi
-	echo "pre-commit [$mod]: vet + build + test"
-	( cd "$mod" && go vet ./... && go build ./... && go test ./... )
-done
+echo "pre-commit: gofmt"
+# Exclude testdata: analysistest fixtures need exact // want anchoring.
+out=$(gofmt -l . | grep -v /testdata/ || true)
+if [ -n "$out" ]; then
+	echo "gofmt needed on:"; echo "$out"; echo "run: gofmt -w ."; exit 1
+fi
 
-echo "pre-commit: perfscan self-scan (all levels)"
-( cd perfscan && go run . -level 3 -baseline .perfscan-baseline.yaml ./... )
+echo "pre-commit: vet + build + parallel tests"
+go vet ./...
+go build ./...
+go run ./internal/testparallel -workers 2 ./...
+
+echo "pre-commit: self-scan (all levels)"
+go run . -level 3 -baseline .perfscan-baseline.yaml ./...
 
 echo "pre-commit: ok"

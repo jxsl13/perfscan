@@ -1,0 +1,11 @@
+package ps5094alias
+
+import (
+	fmtalias "fmt"
+)
+
+var _ = fmtalias.Sprintf
+
+func extract(data []byte, value string) (string, []byte, int) {
+	return string(data), []byte(value), len(data) // want "bytes.NewBuffer[(]...[)].String constructs an ephemeral Buffer only to extract its initial value and carries 2 throwaway Clone layer" "bytes.NewBufferString[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 1 throwaway Clone layer" "bytes.NewBuffer[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 1 throwaway Clone layer"
+}

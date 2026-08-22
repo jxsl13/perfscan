@@ -1,0 +1,48 @@
+package ps5085
+
+import (
+	"bytes"
+	"slices"
+	"strings"
+)
+
+func bufferWrite(buffer *bytes.Buffer, data []byte) (int, error) {
+	return buffer.Write(bytes.Clone(slices.Clone(bytes.Clone(data)))) // want `bytes.Buffer.Write copies the argument before returning but receives 3 throwaway standard-library Clone layer`
+}
+
+func builderWrite(builder *strings.Builder, data []byte) (int, error) {
+	return builder.Write(slices.Clone[[]byte](data)) // want `strings.Builder.Write copies the argument before returning but receives 1 throwaway standard-library Clone layer`
+}
+
+func bufferWriteString(buffer *bytes.Buffer, text string) (int, error) {
+	return buffer.WriteString(strings.Clone(text)) // want `bytes.Buffer.WriteString copies the argument before returning but receives 1 throwaway standard-library Clone layer`
+}
+
+func builderWriteString(builder *strings.Builder, text string) (int, error) {
+	return builder.WriteString(strings.Clone(strings.Clone(text))) // want `strings.Builder.WriteString copies the argument before returning but receives 2 throwaway standard-library Clone layer`
+}
+
+func commentPreserved(buffer *bytes.Buffer, data []byte) (int, error) {
+	return buffer.Write(bytes.Clone( /* independent snapshot */ data)) // want `bytes.Buffer.Write copies the argument before returning but receives 1 throwaway standard-library Clone layer`
+}
+
+type writer struct{}
+
+func (writer) Write(data []byte) (int, error)       { return len(data), nil }
+func (writer) WriteString(text string) (int, error) { return len(text), nil }
+
+func userMethods(w writer, data []byte, text string) {
+	_, _ = w.Write(bytes.Clone(data))
+	_, _ = w.WriteString(strings.Clone(text))
+}
+
+func retainedReader(data []byte) *bytes.Reader {
+	return bytes.NewReader(bytes.Clone(data))
+}
+
+func methodValue(buffer *bytes.Buffer, data []byte) (int, error) {
+	write := buffer.Write
+	return write(bytes.Clone(data))
+}
+
+var _ = []any{bufferWrite, builderWrite, bufferWriteString, builderWriteString, commentPreserved, userMethods, retainedReader, methodValue}

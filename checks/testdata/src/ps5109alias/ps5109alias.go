@@ -1,0 +1,7 @@
+package ps5109alias
+
+import slash "path"
+
+func join(a, b, c string) string {
+	return slash.Join(slash.Join(a, b), c) // want "path.Join cleans and materializes 1 completed prefix layer"
+}

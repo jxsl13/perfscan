@@ -1,0 +1,13 @@
+package ps5072alias
+
+import (
+	bin "encoding/binary"
+	mh "hash/maphash"
+)
+
+func sum(h *mh.Hash) uint64 {
+	return h.Sum64() // want `binary\.LittleEndian\.Uint64\(h\.Sum\(nil\)\) makes and decodes an 8-byte representation`
+}
+
+// Keep the aliased binary import live after the rewrite.
+func keep(b []byte) uint32 { return bin.BigEndian.Uint32(b) }

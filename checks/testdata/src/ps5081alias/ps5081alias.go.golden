@@ -1,0 +1,9 @@
+package ps5081alias
+
+import (
+	u "unicode/utf8"
+)
+
+func lastCloneImport(data []byte) bool {
+	return u.Valid(data) // want "unicode/utf8.Valid read-only observation consumes 1 throwaway clone layer"
+}

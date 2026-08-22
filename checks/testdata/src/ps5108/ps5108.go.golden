@@ -1,0 +1,94 @@
+package ps5108
+
+import (
+	"bytes"
+	"slices"
+	"strings"
+)
+
+func stringRepeat(text string) string {
+	return strings.Repeat(text, 12) // want "strings.Repeat is nested 2 times with positive constant counts; combine them to 12"
+}
+
+func byteRepeat(data []byte) []byte {
+	return bytes.Repeat(data, 16) // want "bytes.Repeat is nested 2 times with positive constant counts; combine them to 16"
+}
+
+type ints []int
+
+func sliceRepeat(values ints) ints {
+	return slices.Repeat[ints](values, 15) // want "slices.Repeat is nested 2 times with positive constant counts; combine them to 15"
+}
+
+func triple(text string) string {
+	return strings.Repeat(text, 24) // want "strings.Repeat is nested 3 times with positive constant counts; combine them to 24"
+}
+
+const innerCount = 2
+const outerCount = 3
+
+func namedCounts(text string) string {
+	return strings.Repeat(text, 6) // want "strings.Repeat is nested 2 times with positive constant counts; combine them to 6"
+}
+
+func unitOuterKeepsLocal(text string) string {
+	const count = 7
+	return strings.Repeat(text, count) // want "strings.Repeat is nested 2 times with positive constant counts; combine them to 7"
+}
+
+// --- negatives ---
+
+func dynamicOuter(text string, count int) string {
+	return strings.Repeat(strings.Repeat(text, 2), count)
+}
+
+func dynamicInner(text string, count int) string {
+	return strings.Repeat(strings.Repeat(text, count), 2)
+}
+
+func zeroOuter(text string) string {
+	return strings.Repeat(strings.Repeat(text, 2), 0)
+}
+
+func zeroInner(text string) string {
+	return strings.Repeat(strings.Repeat(text, 0), 2)
+}
+
+func negative(text string) string {
+	return strings.Repeat(strings.Repeat(text, -1), 2)
+}
+
+func portableOverflow(text string) string {
+	return strings.Repeat(strings.Repeat(text, 65536), 65536)
+}
+
+func single(text string) string {
+	return strings.Repeat(text, 2)
+}
+
+func functionOuter(text string) string {
+	repeat := strings.Repeat
+	return repeat(strings.Repeat(text, 2), 3)
+}
+
+func functionInner(text string) string {
+	repeat := strings.Repeat
+	return strings.Repeat(repeat(text, 2), 3)
+}
+
+func crossPackage(text string) []byte {
+	return bytes.Repeat([]byte(strings.Repeat(text, 2)), 3)
+}
+
+type namedInts []int
+
+// The outer call deliberately changes the result from namedInts to []int.
+func mixedGenericResult(values namedInts) any {
+	return slices.Repeat[[]int](slices.Repeat[namedInts](values, 2), 3)
+}
+
+func Repeat(value string, count int) string { return value }
+
+func userRepeat(text string) string {
+	return Repeat(Repeat(text, 2), 3)
+}

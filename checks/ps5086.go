@@ -1,0 +1,184 @@
+package checks
+
+import (
+	"fmt"
+	"go/ast"
+	"go/types"
+
+	"golang.org/x/tools/go/analysis"
+
+	"github.com/jxsl13/perfscan/lint"
+)
+
+// PS5086 removes Clone layers immediately consumed by a standard-library
+// transformer that promises independent output.
+var PS5086 = register(&lint.Check{
+	ID:       "PS5086",
+	Category: "alloc",
+	Slug:     "clone-fed-independent-stdlib-transformer",
+	Level:    lint.LevelIdiomatic,
+	AutoFix:  true,
+	Doc: lint.Documentation{
+		Title: "an independently allocating stdlib transformer receives throwaway clones",
+		Text: `Several bytes and slices operations already return storage independent
+of every slice argument. Cloning an input immediately before one of these
+operations adds a full allocation and copy that cannot affect the result:
+
+  bytes.ToUpper(bytes.Clone(data))
+  bytes.Replace(slices.Clone(data), bytes.Clone(old), bytes.Clone(new), -1)
+  bytes.Join(slices.Clone(parts), bytes.Clone(separator))
+  slices.Concat(slices.Clone(left), slices.Clone(right))
+  slices.Repeat(slices.Clone(values), count)
+
+This check removes all safe Clone chains from one transformer call in one fix.
+The allowlist is deliberately proof-based: bytes.Join, Repeat, Replace,
+ReplaceAll, Runes, Title, ToLower, ToUpper, ToTitle, their SpecialCase forms,
+and ToValidUTF8 all document or inherently produce independent output;
+slices.Concat and slices.Repeat explicitly return a new slice. The same proof
+also covers encoding/hex.Dump, unicode/utf16 Encode/Decode, and crypto/sha3
+SumSHAKE128/SumSHAKE256.
+Generic instantiations, package aliases, named slice types through
+slices.Clone, variadic slices.Concat calls, and heterogeneous
+bytes.Clone/slices.Clone chains are resolved through go/types.
+
+APIs that may expose input storage remain excluded: Cut, Fields, Split, Trim,
+reader constructors, and iterator-returning functions can retain or return a
+subslice. In-place slices operations are excluded because cloning may be how
+the caller protects the original. bytes.Map is excluded because its callback
+can mutate an original byte slice between reads. String transformers are not
+included: some may return the input string unchanged, where strings.Clone can
+be an intentional backing-retention boundary.
+
+Argument order is also part of the proof. A Clone in an early argument is
+removed only if later arguments contain no arbitrary call or channel receive
+that could mutate the original before the transformer reads it. Conversions,
+len/cap, and recursively inspected stdlib Clone calls are known non-mutating.
+Thus bytes.Replace(bytes.Clone(data), mutate(data), new, -1) retains the first
+snapshot, while Clone layers in safe or final arguments are still removed.
+
+For race-free safe Go programs the rewrite preserves element values, nil/empty
+behavior, UTF-8 handling, output length/capacity, panics, and output aliasing.
+Each base expression is evaluated once in the same argument position; only
+the redundant pre-copy disappears. Comments keep a finding advisory. The
+shared call-chain and import-liveness editor removes arbitrary Clone depth and
+newly orphaned imports, while terminal ownership prevents overlapping nested
+Clone diagnostics.`,
+		Before: `upper := bytes.ToUpper(bytes.Clone(data))
+joined := bytes.Join(slices.Clone(parts), bytes.Clone(separator))`,
+		After: `upper := bytes.ToUpper(data)
+joined := bytes.Join(parts, separator)`,
+		MeasuredWin: `On Apple M2 Pro with a 68,275-byte lowercase ASCII input
+(median of five 100-iteration runs), bytes.ToUpper(bytes.Clone(data)) measured
+105,490 ns/op, 147,456 B/op, 2 allocs/op versus bytes.ToUpper(data) at
+80,706 ns/op, 73,728 B/op, 1 alloc/op: 1.31x faster and 23.5% less time while
+removing one full-size allocation and half the allocated bytes.`,
+	},
+	Analyzer: &analysis.Analyzer{
+		Name: "PS5086",
+		Doc:  "independent stdlib transformer consumes throwaway Clone chains",
+		Run:  runPS5086,
+	},
+})
+
+type ps5086Transformer struct {
+	indices       []int
+	allArgs       bool
+	allowEllipsis bool
+}
+
+var ps5086Transformers = map[string]map[string]ps5086Transformer{
+	"bytes": {
+		"Join":           {indices: []int{0, 1}},
+		"Repeat":         {indices: []int{0}},
+		"Replace":        {indices: []int{0, 1, 2}},
+		"ReplaceAll":     {indices: []int{0, 1, 2}},
+		"Runes":          {indices: []int{0}},
+		"Title":          {indices: []int{0}},
+		"ToLower":        {indices: []int{0}},
+		"ToLowerSpecial": {indices: []int{1}},
+		"ToTitle":        {indices: []int{0}},
+		"ToTitleSpecial": {indices: []int{1}},
+		"ToUpper":        {indices: []int{0}},
+		"ToUpperSpecial": {indices: []int{1}},
+		"ToValidUTF8":    {indices: []int{0, 1}},
+	},
+	"slices": {
+		"Concat": {allArgs: true, allowEllipsis: true},
+		"Repeat": {indices: []int{0}},
+	},
+	"unicode/utf16": {
+		"Decode": {indices: []int{0}},
+		"Encode": {indices: []int{0}},
+	},
+	"crypto/sha3": {
+		"SumSHAKE128": {indices: []int{0}},
+		"SumSHAKE256": {indices: []int{0}},
+	},
+	"encoding/hex": {
+		"Dump": {indices: []int{0}},
+	},
+}
+
+func runPS5086(pass *analysis.Pass) (any, error) {
+	for _, file := range pass.Files {
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			function, matches, matched := ps5086CloneChains(pass, call)
+			if !matched {
+				return true
+			}
+
+			totalLayers := 0
+			var spans []tokenSpan
+			var paths []string
+			for _, chain := range matches {
+				totalLayers += len(chain.calls)
+				spans = append(spans, chain.spans...)
+				paths = append(paths, chain.paths...)
+			}
+			diagnostic := analysis.Diagnostic{
+				Pos:     call.Pos(),
+				End:     call.End(),
+				Message: fmt.Sprintf("%s.%s already creates independent output but receives %d throwaway Clone layer(s) across %d argument(s); transform the original values directly", function.Pkg().Path(), function.Name(), totalLayers, len(matches)),
+			}
+			if fix, ok := fixDeletedCallScaffoldingPaths(pass, file, paths, "remove clones before independent standard-library transformation", spans...); ok {
+				diagnostic.SuggestedFixes = []analysis.SuggestedFix{fix}
+			}
+			pass.Report(diagnostic)
+			return true
+		})
+	}
+	return nil, nil
+}
+
+func ps5086CloneChains(pass *analysis.Pass, call *ast.CallExpr) (*types.Func, []typedUnaryCallChain, bool) {
+	function, signature, ok := typedCallee(pass, call.Fun)
+	if !ok || signature.Recv() != nil || function.Pkg() == nil {
+		return nil, nil, false
+	}
+	spec, ok := ps5086Transformers[function.Pkg().Path()][function.Name()]
+	if !ok || call.Ellipsis.IsValid() && !spec.allowEllipsis {
+		return nil, nil, false
+	}
+
+	indices := spec.indices
+	if spec.allArgs {
+		indices = make([]int, len(call.Args))
+		for index := range call.Args {
+			indices[index] = index
+		}
+	}
+	var matches []typedUnaryCallChain
+	for _, index := range indices {
+		if index < 0 || index >= len(call.Args) || !cloneRemovalLaterArgumentsStable(pass, call, index) {
+			continue
+		}
+		if chain, ok := matchTypedUnaryPackageCallChain(pass, call.Args[index], isTypedSliceStdlibClone); ok {
+			matches = append(matches, chain)
+		}
+	}
+	return function, matches, len(matches) > 0
+}

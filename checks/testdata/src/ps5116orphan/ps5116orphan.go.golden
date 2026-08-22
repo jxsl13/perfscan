@@ -1,0 +1,5 @@
+package ps5116orphan
+
+func validate(payload string) bool {
+	return true // want `utf8.ValidString validates strings.ToValidUTF8 output whose replacement already guarantees valid UTF-8; the result is always true`
+}

@@ -1,0 +1,42 @@
+package ps5124comment
+
+import "strings"
+
+func guardComment(value string) int {
+	// want +1 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	if strings.Contains(value /* retain guard rationale */, ":") {
+		return strings.Count(value, ":")
+	}
+	return 0
+}
+
+func fallbackComment(value string) int {
+	// want +1 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	if strings.Contains(value, ":") {
+		return strings.Count(value, ":")
+	}
+	return 0 // retain fallback rationale
+}
+
+func localGuardNeedle(value string) int {
+	const guardNeedle = ":"
+	// want +1 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	if strings.Contains(value, guardNeedle) {
+		return strings.Count(value, ":")
+	}
+	return 0
+}
+
+func initializerComment(value string) int {
+	// want +2 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	count := 0 // retain sentinel rationale
+	if strings.Contains(value, ":") {
+		count = strings.Count(value, ":")
+	}
+	return count
+}
+
+func keptComment(value string) int {
+	// want +1 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	return strings.Count(value /* retain count rationale */, ":")
+}

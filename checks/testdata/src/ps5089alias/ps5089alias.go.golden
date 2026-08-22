@@ -1,0 +1,9 @@
+package ps5089alias
+
+import (
+	o "os"
+)
+
+func aliasedPackages(file *o.File, data []byte) (int, error) {
+	return file.Write(data) // want `os.File.Write consumes its input synchronously but receives 2 throwaway standard-library Clone layer`
+}

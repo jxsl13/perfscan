@@ -1,0 +1,5 @@
+package ps5079orphan
+
+func orphan(s string) string {
+	return s // want `1 adjacent strings boundary operation\(s\) use an empty prefix`
+}

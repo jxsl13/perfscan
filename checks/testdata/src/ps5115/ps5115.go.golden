@@ -1,0 +1,89 @@
+package ps5115
+
+import (
+	"bytes"
+	"strings"
+)
+
+const validReplacement = "\uFFFD"
+const invalidReplacement = "\xff"
+
+func pair(payload string) string {
+	return strings.ToValidUTF8(payload, validReplacement) // want `strings.ToValidUTF8 is applied 2 times even though the retained call's valid replacement already guarantees valid UTF-8`
+}
+
+func emptyReplacement(payload string) string {
+	return strings.ToValidUTF8(payload, "") // want `strings.ToValidUTF8 is applied 2 times even though the retained call's valid replacement already guarantees valid UTF-8`
+}
+
+func deep(payload string) string {
+	return strings.ToValidUTF8(payload, "?") // want `strings.ToValidUTF8 is applied 3 times even though the retained call's valid replacement already guarantees valid UTF-8`
+}
+
+// The deepest replacement is invalid, but the middle call repairs it. Retain
+// that middle sanitizer and remove only its redundant outer layer.
+func partial(payload string) string {
+	return strings.ToValidUTF8(strings.ToValidUTF8(payload, "\xff"), "?") // want `strings.ToValidUTF8 is applied 2 times even though the retained call's valid replacement already guarantees valid UTF-8`
+}
+
+func parenthesized(payload string) string {
+	return strings.ToValidUTF8((payload), "ok") // want `strings.ToValidUTF8 is applied 2 times even though the retained call's valid replacement already guarantees valid UTF-8`
+}
+
+func retainedLocalUse(payload string) string {
+	const outer = "unused"
+	return strings.ToValidUTF8(payload, "ok") + outer // want `strings.ToValidUTF8 is applied 2 times even though the retained call's valid replacement already guarantees valid UTF-8`
+}
+
+// Removing the only use of a function-local constant would stop the file from
+// compiling, so the diagnostic remains advisory.
+func localLastUse(payload string) string {
+	const outer = "unused"
+	return strings.ToValidUTF8(strings.ToValidUTF8(payload, "ok"), outer) // want `strings.ToValidUTF8 is applied 2 times even though the retained call's valid replacement already guarantees valid UTF-8`
+}
+
+// --- negatives ---
+
+// The outer sanitizer is necessary when the retained replacement is invalid.
+func invalidInner(payload string) string {
+	return strings.ToValidUTF8(strings.ToValidUTF8(payload, invalidReplacement), validReplacement)
+}
+
+// Dynamic replacements are evaluated even when no invalid byte is found.
+func dynamicOuter(payload, replacement string) string {
+	return strings.ToValidUTF8(strings.ToValidUTF8(payload, validReplacement), replacement)
+}
+
+func dynamicInner(payload, replacement string) string {
+	return strings.ToValidUTF8(strings.ToValidUTF8(payload, replacement), validReplacement)
+}
+
+// bytes.ToValidUTF8 always returns a fresh slice, so removing its outer call
+// would change slice capacity and aliasing.
+func byteSlices(payload []byte) []byte {
+	return bytes.ToValidUTF8(bytes.ToValidUTF8(payload, []byte("?")), []byte("!"))
+}
+
+func functionValue(payload string) string {
+	valid := strings.ToValidUTF8
+	return valid(valid(payload, "?"), "!")
+}
+
+func producerValue(payload string) string {
+	valid := strings.ToValidUTF8
+	return strings.ToValidUTF8(valid(payload, "?"), "!")
+}
+
+type sanitizer string
+
+func (s sanitizer) ToValidUTF8(string) sanitizer { return s }
+
+func method(value sanitizer) sanitizer {
+	return value.ToValidUTF8("?").ToValidUTF8("!")
+}
+
+func ToValidUTF8(value, replacement string) string { return value + replacement }
+
+func user(payload string) string {
+	return ToValidUTF8(ToValidUTF8(payload, "?"), "!")
+}

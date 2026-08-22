@@ -1,0 +1,195 @@
+# perfscan domain-check vocabulary — a GENERIC template.
+#
+# perfscan's language/stdlib checks need no config and run on any Go module.
+# The DOMAIN checks (opt-in) key on YOUR project's own vocabulary — the names of
+# your element accessors, allocators, fast-path helpers, fan-out entry points and
+# so on. List those names here so the domain checks can recognise them; leave any
+# field empty (or omit it) to keep the checks that depend on it silent.
+#
+# Every value below is a PLACEHOLDER — replace it with the real identifiers from
+# your codebase. Nothing here is built in; perfscan ships no vocabulary of its
+# own. Supply this file with `-config perfscan.yaml`, or drop a perfscan.yaml /
+# .perfscan.yaml in your module root (auto-discovered). YAML is the format; JSON
+# also parses.
+#
+# The n-dimensional-data fields (shapeMethods, indexDecomposeFuncs, dtypeMethods)
+# are only meaningful for tensor/array libraries — omit them otherwise.
+
+# Optional human-readable metadata. It is accepted by the schema but never fed
+# to an analyzer.
+_comment: Replace every placeholder below with this repository's vocabulary.
+
+# Target data-cache line size used by locality advisories. Omit for the
+# conservative 64-byte default; Apple M-series CPUs use 128-byte cache lines.
+cacheLineBytes: 128
+
+# Per-element getter/setter methods whose per-call dispatch inside a hot loop the
+# PS1xxx checks report. (matrix lib: At/Set — tensor lib: AtF64/SetF64)
+elementAccessors:
+  - At
+  - Set
+
+# Typed fast-path helpers whose presence marks a loop as already optimized, so a
+# fallback per-element loop beside them is expected. Keep this list COMPLETE — a
+# helper missing here makes the per-element checks flag the very fast path.
+fastPathHelpers:
+  - flatSlice
+  - rawData
+
+# Production selector helpers, default toggles, or selected kernel entry points
+# whose use in a repeated leaf benchmark PS6006 audits. List only symbols whose
+# promotion changes a production GPU/accelerator path; a finding asks for an
+# order-alternating resident integration benchmark, not another leaf timing.
+selectorPromotionSymbols:
+  - selectKernel
+  - useFusedAttention
+  # Optional trusted caller-level promotion contract used by PS6054. Keep the
+  # plain symbol above for other selector checks; quote contracts because they
+  # contain YAML-significant punctuation.
+  - "selectKernel=>BenchmarkPipelineEndToEnd|samples=10|independent|alternating|equivalent-outputs|retained-shapes<=0.5%"
+
+# Methods whose result is used as a loop bound, marking the loop as per-element.
+# (e.g. Len, Size, Count)
+elementCountMethods:
+  - Len
+
+# Methods returning a dimension/shape slice; a loop bounded by x.Shape()[i] walks
+# elements just as an element count does. (n-dimensional data only)
+shapeMethods:
+  - Shape
+
+# Functions converting a flat index into a multi-index; their use marks a
+# per-element loop. (n-dimensional data only)
+indexDecomposeFuncs:
+  - Unravel
+
+# Allocation entry points that PS2001 reports when called inside a per-element
+# loop. (e.g. New, Alloc, Zeros)
+allocatorFuncs:
+  - New
+  - Alloc
+
+# Helpers fed a per-element closure (one indirect call per element) that PS1002
+# reports. (e.g. ForEach, Map, VisitEach)
+perElementVisitors:
+  - ForEach
+
+# Bulk copy routines whose presence silences the genuine-decode path for PS4001.
+# (e.g. a raw block copy)
+bulkCopyHelpers:
+  - bulkCopy
+
+# SIMD / vectorized kernels that exist beside a scalar math.X call; PS4002 reports
+# the scalar call when a vectorized sibling is available. (e.g. vExp, vTanh)
+vectorizedSiblingFuncs:
+  - vExp
+
+# The project's parallel fan-out entry points. PS3xxx checks inspect serial
+# work and closure escapes around them; PS6076 detects invariant packing
+# repeated by every callback band. (e.g. parallel.For)
+fanOutHelpers:
+  - parallel.For
+
+# Element-type discriminator methods whose switch PS1009 inspects for a case left
+# on the per-element accessor while a sibling case takes typed storage.
+# (n-dimensional data only; e.g. Dtype, Kind)
+dtypeMethods:
+  - Dtype
+
+# Element type names of hot operation-result buffers. PS2140 flags an operation
+# that allocates an input-sized []T result, fully overwrites it, and returns it
+# (denying hot callers buffer reuse) and recommends a caller-owned Into variant.
+# List the element types your hot kernels produce (e.g. float64, float32, or a
+# named scalar type). Empty -> PS2140 stays silent.
+outputBufferElemTypes:
+  - float64
+  - float32
+
+# Constructor/bridge calls that build an EXPENSIVE compiled artifact (a graph,
+# pipeline, shader, plan, kernel or executable). PS3091 flags a single-slot cache
+# that recompiles whenever a stored signature changes (thrashing under
+# alternating shapes); list the names so the check can tell a costly compile from
+# cheap last-value memoization. Empty -> PS3091 stays silent.
+compiledResourceFuncs:
+  - compileGraph
+  - newPipeline
+
+# Entry-point names of GPU compute kernels (Metal) embedded as Go string literals
+# that PS7001 should scan for a serial-K reduction — one thread per output row
+# looping the whole reduction dimension with no SIMD-group cooperative reduction,
+# which leaves lanes idle at batch M=1. The list is both opt-in and scope (only
+# these kernels are inspected), because whether a serial reduction is wrong is
+# shape/dtype/device-dependent. Empty -> PS7001 stays silent.
+gpuReductionKernels:
+  - matvec_q4k
+
+# Helpers known to perform computation without changing tensor layout or
+# ownership. Graph checks use these to distinguish compute from movement.
+pureComputeFuncs:
+  - forward
+
+# Operation constants that represent layout/view or movement boundaries.
+layoutOpConstants:
+  - OpSlice
+  - OpConcat
+
+# Project types whose pointer identity or aliasing matters to ownership checks.
+pointerTypeNames:
+  - Tensor
+  - Storage
+
+# Variadic wrappers that submit their operands as one backend dispatch.
+variadicDispatchWrappers:
+  - exec
+
+# Selectors that consume only a small ranked subset of a larger device result.
+topKSelectorFuncs:
+  - topKIndices
+
+# Helpers exposing typed input views and caller-owned output views.
+inputViewFuncs:
+  - f64Data
+outputViewFuncs:
+  - outF64
+
+# Reference backend package and optimized production backend packages.
+referenceBackendPkg: ref
+optimizedBackendPkgs:
+  - cpu
+
+# Functions that register operation/dtype/backend implementations.
+kernelRegisterFuncs:
+  - registerKernel
+
+# ---------------------------------------------------------------------------
+# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 26
+# fields, filled with that project's real vocabulary. Copy the SHAPE, not the
+# names:
+#
+#   cacheLineBytes:        128
+#   elementAccessors:       [AtF64, SetF64]
+#   fastPathHelpers:        [flatF64, flatF32, flatContig, F64, F32]
+#   selectorPromotionSymbols: [selectAttentionKernel, useSplitK, "selectAttentionKernel=>BenchmarkDecodeEndToEnd|samples=10|independent|alternating|equivalent-outputs|retained-shapes<=0.5%"]
+#   elementCountMethods:    [Numel]
+#   shapeMethods:           [Shape]
+#   indexDecomposeFuncs:    [Unravel]
+#   allocatorFuncs:         [New, NewOn, Zeros, Ones, Full, Cast]
+#   perElementVisitors:     [forEach, eachElem, visitGen]
+#   bulkCopyHelpers:        [rawCopyLE, rawStoreLE]
+#   vectorizedSiblingFuncs: [vexpF32, vtanhF32, vsiluF32, vgeluF32]
+#   fanOutHelpers:          [parallel.For]
+#   dtypeMethods:           [Dtype]
+#   outputBufferElemTypes:  [float64, float32]
+#   compiledResourceFuncs:  [NewMPSGraph, compilePipeline, buildProgram]
+#   gpuReductionKernels:    [matvec_q4k, mul_mat_vec_q4_K_f32]
+#   pureComputeFuncs:       [forward]
+#   layoutOpConstants:      [OpSlice, OpReshape, OpTranspose, OpConcat]
+#   pointerTypeNames:       [Shape, Strides, Tensor, Storage, Device, Context]
+#   variadicDispatchWrappers: [bitExec, exec, hcExec, rdropExec, visExecN]
+#   topKSelectorFuncs:      [topKIndices]
+#   inputViewFuncs:         [f64Data, f32Data]
+#   outputViewFuncs:        [outF64, outF32]
+#   referenceBackendPkg:    ref
+#   optimizedBackendPkgs:   [cpu]
+#   kernelRegisterFuncs:    [add]
+# ---------------------------------------------------------------------------

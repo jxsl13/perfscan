@@ -1,0 +1,55 @@
+package ps5090
+
+import (
+	"strconv"
+	"strings"
+)
+
+func quoteDeep(text string) string {
+	return strconv.Quote(strings.Clone(strings.Clone(text))) // want `strconv.Quote materializes an independent quoted representation but receives 2 throwaway strings.Clone layer`
+}
+
+func quoteASCII(text string) string {
+	return strconv.QuoteToASCII(strings.Clone(text)) // want `strconv.QuoteToASCII materializes an independent quoted representation but receives 1 throwaway strings.Clone layer`
+}
+
+func quoteGraphic(text string) string {
+	return strconv.QuoteToGraphic(strings.Clone(text)) // want `strconv.QuoteToGraphic materializes an independent quoted representation but receives 1 throwaway strings.Clone layer`
+}
+
+func appendQuote(dst []byte, text string) []byte {
+	return strconv.AppendQuote(dst, strings.Clone(text)) // want `strconv.AppendQuote materializes an independent quoted representation but receives 1 throwaway strings.Clone layer`
+}
+
+func appendASCII(dst []byte, text string) []byte {
+	return strconv.AppendQuoteToASCII(dst, strings.Clone(strings.Clone(text))) // want `strconv.AppendQuoteToASCII materializes an independent quoted representation but receives 2 throwaway strings.Clone layer`
+}
+
+func appendGraphic(dst []byte, text string) []byte {
+	return strconv.AppendQuoteToGraphic(dst, strings.Clone(text)) // want `strconv.AppendQuoteToGraphic materializes an independent quoted representation but receives 1 throwaway strings.Clone layer`
+}
+
+func commentPreserved(text string) string {
+	return strconv.Quote(strings.Clone( /* retention rationale */ text)) // want `strconv.Quote materializes an independent quoted representation but receives 1 throwaway strings.Clone layer`
+}
+
+func unquoteMayRetain(text string) (string, error) {
+	return strconv.Unquote(strings.Clone(text))
+}
+
+func parserErrorMayRetain(text string) (int, error) {
+	return strconv.Atoi(strings.Clone(text))
+}
+
+func functionValue(text string) string {
+	quote := strconv.Quote
+	return quote(strings.Clone(text))
+}
+
+func Quote(text string) string { return text }
+
+func userFunction(text string) string {
+	return Quote(strings.Clone(text))
+}
+
+var _ = []any{quoteDeep, quoteASCII, quoteGraphic, appendQuote, appendASCII, appendGraphic, commentPreserved, unquoteMayRetain, parserErrorMayRetain, functionValue, userFunction}

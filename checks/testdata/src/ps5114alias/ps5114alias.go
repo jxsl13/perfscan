@@ -1,0 +1,7 @@
+package ps5114alias
+
+import fp "path/filepath"
+
+func normalize(name string) string {
+	return fp.FromSlash(fp.FromSlash(fp.Base(name))) // want `filepath.FromSlash rescans the already-native result of filepath.Base through 2 redundant FromSlash layer`
+}

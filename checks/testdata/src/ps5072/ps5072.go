@@ -1,0 +1,58 @@
+package ps5072
+
+import (
+	"encoding/binary"
+	"hash"
+	"hash/maphash"
+)
+
+func pointer(h *maphash.Hash) uint64 {
+	return binary.LittleEndian.Uint64(h.Sum(nil)) // want `binary\.LittleEndian\.Uint64\(h\.Sum\(nil\)\) makes and decodes an 8-byte representation`
+}
+
+func value(h maphash.Hash) uint64 {
+	return binary.LittleEndian.Uint64(h.Sum(nil)) // want `binary\.LittleEndian\.Uint64\(h\.Sum\(nil\)\) makes and decodes an 8-byte representation`
+}
+
+func expression() uint64 {
+	return binary.LittleEndian.Uint64(new(maphash.Hash).Sum(nil)) // want `binary\.LittleEndian\.Uint64\(h\.Sum\(nil\)\) makes and decodes an 8-byte representation`
+}
+
+func parenthesized(h *maphash.Hash) uint64 {
+	return (binary.LittleEndian.Uint64)((h).Sum((nil))) // want `binary\.LittleEndian\.Uint64\(h\.Sum\(nil\)\) makes and decodes an 8-byte representation`
+}
+
+func parenthesizedDereference(h **maphash.Hash) uint64 {
+	return binary.LittleEndian.Uint64((*h).Sum(nil)) // want `binary\.LittleEndian\.Uint64\(h\.Sum\(nil\)\) makes and decodes an 8-byte representation`
+}
+
+// A comment in deleted scaffolding keeps the diagnostic but withholds its fix.
+func commented(h *maphash.Hash) uint64 {
+	return binary.LittleEndian.Uint64( /* keep */ h.Sum(nil)) // want `binary\.LittleEndian\.Uint64\(h\.Sum\(nil\)\) makes and decodes an 8-byte representation`
+}
+
+// --- negatives ---
+
+func bigEndian(h *maphash.Hash) uint64 {
+	return binary.BigEndian.Uint64(h.Sum(nil))
+}
+
+func runtimeOrder(order binary.ByteOrder, h *maphash.Hash) uint64 {
+	return order.Uint64(h.Sum(nil))
+}
+
+func prefixed(h *maphash.Hash) uint64 {
+	return binary.LittleEndian.Uint64(h.Sum(make([]byte, 8)))
+}
+
+func otherHash(h hash.Hash64) uint64 {
+	return binary.LittleEndian.Uint64(h.Sum(nil))
+}
+
+type wrapper struct{ *maphash.Hash }
+
+func (wrapper) Sum64() uint64 { return 0 }
+
+func embedded(w wrapper) uint64 {
+	return binary.LittleEndian.Uint64(w.Sum(nil))
+}

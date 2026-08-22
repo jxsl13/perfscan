@@ -1,0 +1,7 @@
+package ps5117alias
+
+import text "strings"
+
+func canonical(payload string) string {
+	return text.Join(text.Fields(payload), " ") // want `strings.Join\+Fields canonicalization is applied 2 times to an already canonical result; remove 1 redundant scan/allocation layer`
+}

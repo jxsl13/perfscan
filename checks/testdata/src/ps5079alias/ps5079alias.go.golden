@@ -1,0 +1,5 @@
+package ps5079alias
+
+func alias(s string) string {
+	return s // want `2 adjacent strings boundary operation\(s\) use an empty prefix`
+}

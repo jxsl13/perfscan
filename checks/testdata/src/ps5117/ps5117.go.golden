@@ -1,0 +1,108 @@
+package ps5117
+
+import (
+	"bytes"
+	"strings"
+)
+
+type namedString string
+type namedBytes []byte
+
+func stringWhitespacePair(payload string) string {
+	return strings.Join(strings.Fields(payload), " ") // want `strings.Join\+Fields canonicalization is applied 2 times to an already canonical result; remove 1 redundant scan/allocation layer`
+}
+
+func stringWhitespaceDeep(payload namedString) string {
+	return strings.Join(strings.Fields(string(payload)), "\t") // want `strings.Join\+Fields canonicalization is applied 3 times to an already canonical result; remove 2 redundant scan/allocation layer`
+}
+
+// A terminal no-whitespace separator yields an output with no whitespace.
+// Every enclosing constant-separator stage is then an identity, including the
+// otherwise non-idempotent mixed separator in the middle.
+func stringNoWhitespaceTerminal(payload string) string {
+	return strings.Join(strings.Fields(payload), ",") // want `strings.Join\+Fields canonicalization is applied 3 times to an already canonical result; remove 2 redundant scan/allocation layer`
+}
+
+func stringEmptyTerminal(payload string) string {
+	return strings.Join(strings.Fields(payload), "") // want `strings.Join\+Fields canonicalization is applied 2 times to an already canonical result; remove 1 redundant scan/allocation layer`
+}
+
+func stringParenthesized(payload string) string {
+	return strings.Join(strings.Fields((payload)), " ") // want `strings.Join\+Fields canonicalization is applied 2 times to an already canonical result; remove 1 redundant scan/allocation layer`
+}
+
+func bytesWhitespacePair(payload []byte) []byte {
+	return bytes.Join(bytes.Fields(payload), []byte(" ")) // want `bytes.Join\+Fields canonicalization is applied 2 times to an already canonical result; remove 1 redundant scan/allocation layer`
+}
+
+func bytesWhitespaceDeep(payload namedBytes) []byte {
+	return bytes.Join(bytes.Fields([]byte(payload)), []byte("\r\n")) // want `bytes.Join\+Fields canonicalization is applied 3 times to an already canonical result; remove 2 redundant scan/allocation layer`
+}
+
+func bytesUnicodeWhitespace(payload []byte) []byte {
+	return bytes.Join(bytes.Fields(payload), []byte("\u00a0")) // want `bytes.Join\+Fields canonicalization is applied 2 times to an already canonical result; remove 1 redundant scan/allocation layer`
+}
+
+func retainedLocalUse(payload string) string {
+	const outer = " - "
+	return strings.Join(strings.Fields(payload), ",") + outer // want `strings.Join\+Fields canonicalization is applied 2 times to an already canonical result; remove 1 redundant scan/allocation layer`
+}
+
+// Removing the outer stage would orphan outer, so the diagnostic remains
+// advisory and the golden file keeps this function unchanged.
+func localLastUse(payload string) string {
+	const outer = " - "
+	return strings.Join(strings.Fields(strings.Join(strings.Fields(payload), ",")), outer) // want `strings.Join\+Fields canonicalization is applied 2 times to an already canonical result; remove 1 redundant scan/allocation layer`
+}
+
+// --- negatives ---
+
+func differentWhitespace(payload string) string {
+	return strings.Join(strings.Fields(strings.Join(strings.Fields(payload), " ")), "\t")
+}
+
+func mixedTerminal(payload string) string {
+	return strings.Join(strings.Fields(strings.Join(strings.Fields(payload), " - ")), " - ")
+}
+
+func dynamicSeparator(payload, separator string) string {
+	return strings.Join(strings.Fields(strings.Join(strings.Fields(payload), separator)), separator)
+}
+
+// Equal no-whitespace byte separators preserve elements but can change the
+// final slice capacity through bytes.Join's one-field allocation path.
+func byteNoWhitespace(payload []byte) []byte {
+	return bytes.Join(bytes.Fields(bytes.Join(bytes.Fields(payload), []byte(","))), []byte(","))
+}
+
+func byteDifferentWhitespace(payload []byte) []byte {
+	return bytes.Join(bytes.Fields(bytes.Join(bytes.Fields(payload), []byte(" "))), []byte("\t"))
+}
+
+func functionValues(payload string) string {
+	fields := strings.Fields
+	join := strings.Join
+	return join(fields(join(fields(payload), " ")), " ")
+}
+
+func Fields(payload string) []string { return []string{payload} }
+func Join(fields []string, separator string) string {
+	return strings.Join(fields, separator)
+}
+
+func userFunctions(payload string) string {
+	return Join(Fields(Join(Fields(payload), " ")), " ")
+}
+
+func fieldsFunc(payload string) string {
+	space := func(character rune) bool { return character == ' ' }
+	return strings.Join(strings.FieldsFunc(strings.Join(strings.FieldsFunc(payload, space), " "), space), " ")
+}
+
+var _ = []any{
+	stringWhitespacePair, stringWhitespaceDeep, stringNoWhitespaceTerminal,
+	stringEmptyTerminal, stringParenthesized, bytesWhitespacePair,
+	bytesWhitespaceDeep, bytesUnicodeWhitespace, retainedLocalUse, localLastUse,
+	differentWhitespace, mixedTerminal, dynamicSeparator, byteNoWhitespace,
+	byteDifferentWhitespace, functionValues, userFunctions, fieldsFunc,
+}

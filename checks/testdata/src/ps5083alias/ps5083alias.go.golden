@@ -1,0 +1,5 @@
+package ps5083alias
+
+func lastCloneImport(value string) int {
+	return len(value) // want "len consumes 1 throwaway standard-library Clone layer"
+}

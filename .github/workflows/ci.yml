@@ -9,12 +9,10 @@ permissions:
   contents: read
 
 jobs:
-  # Build + race-test each module independently, across OSes and Go versions.
   test:
     strategy:
       fail-fast: false
       matrix:
-        module: [perfscan, perfscanxx]
         os: [ubuntu-latest, macos-latest, windows-latest]
         go: [stable, oldstable]
     runs-on: ${{ matrix.os }}
@@ -23,61 +21,54 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
-          cache-dependency-path: ${{ matrix.module }}/go.sum
+          cache-dependency-path: go.sum
       - name: Build
-        working-directory: ${{ matrix.module }}
         run: go build ./...
-      - name: Test
-        working-directory: ${{ matrix.module }}
-        run: go test -race ./...
+      - name: Test in parallel
+        run: go run ./internal/testparallel -race -workers 2 ./...
 
-  # Shared quality gates for BOTH modules: formatting, vet, staticcheck.
   quality:
-    strategy:
-      fail-fast: false
-      matrix:
-        module: [perfscan, perfscanxx]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: stable
-          cache-dependency-path: ${{ matrix.module }}/go.sum
+          cache-dependency-path: go.sum
       - name: gofmt
-        working-directory: ${{ matrix.module }}
         run: |
           # analysistest fixtures under testdata/ need exact // want anchoring
           # (single-line loops etc.) that gofmt would break, so exclude them.
           out=$(gofmt -l . | grep -v /testdata/ || true)
           if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
       - name: go vet
-        working-directory: ${{ matrix.module }}
         run: go vet ./...
+      - name: Set up oldstable Go for staticcheck
+        # staticcheck 2026.1 cannot decode Go 1.27 export data yet. Build,
+        # race tests, formatting, and vet above still use stable Go.
+        uses: actions/setup-go@v7
+        with:
+          go-version: oldstable
+          cache-dependency-path: go.sum
       - name: staticcheck
-        working-directory: ${{ matrix.module }}
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@latest
           "$(go env GOPATH)/bin/staticcheck" ./...
 
-  # perfscan-specific gates: generated docs, plugin module, benchmarks, dogfood.
-  perfscan-extras:
+  extras:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: perfscan
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: stable
-          cache-dependency-path: perfscan/go.sum
+          cache-dependency-path: go.sum
       - name: docs up to date
         run: |
           go run ./gendocs
           git diff --exit-code docs/checks/
-      - name: golangci-lint plugin module builds
-        run: cd plugin && go build ./...
+      - name: golangci-lint plugin builds
+        run: go build ./plugin/...
       - name: micro-benchmarks compile and run once
         run: go test -run '^$' -bench . -benchtime=1x ./benchmarks/
       - name: 'perfscan on perfscan (dogfood ratchet: fail on NEW self-findings)'

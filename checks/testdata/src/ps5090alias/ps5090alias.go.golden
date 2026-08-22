@@ -1,0 +1,9 @@
+package ps5090alias
+
+import (
+	q "strconv"
+)
+
+func aliasedPackages(text string) string {
+	return q.Quote(text) // want `strconv.Quote materializes an independent quoted representation but receives 1 throwaway strings.Clone layer`
+}

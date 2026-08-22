@@ -1,0 +1,8 @@
+package ps5124alias
+
+import text "strings"
+
+func count(value string) int {
+	// want +1 `strings.Contains searches before strings.Count repeats the lookup and counts all matches`
+	return text.Count(value, ":")
+}

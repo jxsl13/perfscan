@@ -1,0 +1,54 @@
+package ps5099
+
+import "io"
+
+func readAll(first, second, third, fourth io.Reader) ([]byte, error) {
+	return io.ReadAll(io.MultiReader(first, second, third, fourth)) // want "io.ReadAll consumes only the flattened behavior of io.MultiReader; 2 nested adapter"
+}
+
+func readFull(first, second, third io.Reader, buffer []byte) (int, error) {
+	return io.ReadFull(io.MultiReader(first, second, third), buffer) // want "io.ReadFull consumes only the flattened behavior of io.MultiReader; 1 nested adapter"
+}
+
+func readAtLeast(first, second, third io.Reader, buffer []byte, minimum int) (int, error) {
+	return io.ReadAtLeast(io.MultiReader(first, second, third), buffer, minimum) // want "io.ReadAtLeast consumes only the flattened behavior of io.MultiReader; 1 nested adapter"
+}
+
+func writeString(first, second, third, fourth io.Writer, text string) (int, error) {
+	return io.WriteString(io.MultiWriter(first, second, third, fourth), text) // want "io.WriteString consumes only the flattened behavior of io.MultiWriter; 2 nested adapter"
+}
+
+func parenthesized(first, second, third io.Reader) ([]byte, error) {
+	return io.ReadAll((io.MultiReader(first, second, third))) // want "io.ReadAll consumes only the flattened behavior of io.MultiReader; 1 nested adapter"
+}
+
+// Copy may expose src to a user-defined ReaderFrom implementation.
+func copyTo(destination io.Writer, first, second, third io.Reader) (int64, error) {
+	return io.Copy(destination, io.MultiReader(io.MultiReader(first, second), third))
+}
+
+func general(consume func(io.Reader) error, first, second, third io.Reader) error {
+	return consume(io.MultiReader(io.MultiReader(first, second), third))
+}
+
+func functionConsumer(first, second, third io.Reader) ([]byte, error) {
+	readAll := io.ReadAll
+	return readAll(io.MultiReader(io.MultiReader(first, second), third))
+}
+
+func functionConstructor(first, second, third io.Reader) ([]byte, error) {
+	constructor := io.MultiReader
+	return io.ReadAll(io.MultiReader(constructor(first, second), third))
+}
+
+func empty(first io.Reader) ([]byte, error) {
+	return io.ReadAll(io.MultiReader(io.MultiReader(), first))
+}
+
+func spread(readers []io.Reader) ([]byte, error) {
+	return io.ReadAll(io.MultiReader(io.MultiReader(readers...)))
+}
+
+func single(first, second io.Reader) ([]byte, error) {
+	return io.ReadAll(io.MultiReader(first, second))
+}

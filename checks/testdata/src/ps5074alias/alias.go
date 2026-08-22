@@ -1,0 +1,7 @@
+package ps5074alias
+
+import b "bytes"
+
+func clone(v []byte) []byte {
+	return b.Clone((b.Clone(v))) // want `bytes\.Clone is nested 2 times`
+}

@@ -1,0 +1,45 @@
+package ps5095
+
+import "io"
+
+func read(reader io.Reader, buffer []byte) (int, error) {
+	return io.NopCloser(reader).Read(buffer) // want "io.NopCloser chain constructs 1 adapter layer[(]s[)] only to call Read immediately; 1 layer[(]s[)] add no observable behavior"
+}
+
+func nestedRead(reader io.Reader, buffer []byte) (int, error) {
+	return io.NopCloser(io.NopCloser(io.NopCloser(reader))).Read(buffer) // want "io.NopCloser chain constructs 3 adapter layer[(]s[)] only to call Read immediately; 3 layer[(]s[)] add no observable behavior"
+}
+
+func nestedClose(reader io.Reader) error {
+	return io.NopCloser(io.NopCloser(io.NopCloser(reader))).Close() // want "io.NopCloser chain constructs 3 adapter layer[(]s[)] only to call Close immediately; 2 layer[(]s[)] add no observable behavior"
+}
+
+func supplied(reader io.Reader, buffer []byte) (int, error) {
+	makeReader := func() io.Reader { return reader }
+	return io.NopCloser(makeReader()).Read(buffer) // want "io.NopCloser chain constructs 1 adapter layer[(]s[)] only to call Read immediately"
+}
+
+// A standalone wrapper's nested structure can be observed.
+func expose(reader io.Reader) io.ReadCloser {
+	return io.NopCloser(io.NopCloser(reader))
+}
+
+// One NopCloser is required to supply the deliberate no-op Close.
+func singleClose(reader io.Reader) error {
+	return io.NopCloser(reader).Close()
+}
+
+func functionValue(reader io.Reader, buffer []byte) (int, error) {
+	constructor := io.NopCloser
+	return constructor(reader).Read(buffer)
+}
+
+type closer struct{ io.Reader }
+
+func (closer) Close() error { return nil }
+
+func NopCloser(reader io.Reader) closer { return closer{Reader: reader} }
+
+func userConstructor(reader io.Reader, buffer []byte) (int, error) {
+	return NopCloser(reader).Read(buffer)
+}

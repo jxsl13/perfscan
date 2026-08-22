@@ -1,0 +1,127 @@
+package ps2015
+
+import (
+	"bytes"
+	"strings"
+)
+
+// The classic shape: rebuild s with a new separator via a throwaway slice.
+func rebuild(s string) string {
+	out := strings.ReplaceAll(s, ",", "; ") // want `strings\.Join\(strings\.Split\(s, sep\), new\) with a constant non-empty separator allocates a throwaway \[\]string of every fragment; strings\.ReplaceAll\(s, sep, new\) is bit-identical in one scan`
+	return out
+}
+
+// Directly returned.
+func direct(s string) string {
+	return strings.ReplaceAll(s, "/", "-") // want `strings\.Join\(strings\.Split\(s, sep\), new\) with a constant non-empty separator allocates a throwaway \[\]string of every fragment; strings\.ReplaceAll\(s, sep, new\) is bit-identical in one scan`
+}
+
+// An EMPTY replacement is deletion — the identity holds for every new,
+// only the separator is gated.
+func deletion(s string) string {
+	return strings.ReplaceAll(s, "\t", "") // want `strings\.Join\(strings\.Split\(s, sep\), new\) with a constant non-empty separator allocates a throwaway \[\]string of every fragment; strings\.ReplaceAll\(s, sep, new\) is bit-identical in one scan`
+}
+
+// A NAMED constant separator is still a compile-time non-empty constant;
+// the replacement may be a variable — it is evaluated once either way.
+const fieldSep = "|"
+
+func namedSep(s, repl string) string {
+	return strings.ReplaceAll(s, fieldSep, repl) // want `strings\.Join\(strings\.Split\(s, sep\), new\) with a constant non-empty separator allocates a throwaway \[\]string of every fragment; strings\.ReplaceAll\(s, sep, new\) is bit-identical in one scan`
+}
+
+// Multibyte constant separator: Index is byte-oriented and both forms
+// match it identically.
+func multibyte(s string) string {
+	return strings.ReplaceAll(s, "é", "e") // want `strings\.Join\(strings\.Split\(s, sep\), new\) with a constant non-empty separator allocates a throwaway \[\]string of every fragment; strings\.ReplaceAll\(s, sep, new\) is bit-identical in one scan`
+}
+
+// Parenthesized inner call: still directly the Join argument.
+func parenthesized(s string) string {
+	return strings.ReplaceAll(s, ",", " ") // want `strings\.Join\(strings\.Split\(s, sep\), new\) with a constant non-empty separator allocates a throwaway \[\]string of every fragment; strings\.ReplaceAll\(s, sep, new\) is bit-identical in one scan`
+}
+
+// A comment between s and the separator sits inside an untouched span
+// and survives the rewrite.
+func commented(s string) string {
+	return strings.ReplaceAll(s /* input */, ",", ";") // want `strings\.Join\(strings\.Split\(s, sep\), new\) with a constant non-empty separator allocates a throwaway \[\]string of every fragment; strings\.ReplaceAll\(s, sep, new\) is bit-identical in one scan`
+}
+
+// A side-effecting replacement expression is safe: it is evaluated
+// exactly once in both forms, and Split/ReplaceAll are pure, so moving
+// the call boundary is unobservable.
+func sideEffect(s string, f func() string) string {
+	return strings.ReplaceAll(s, ",", f()) // want `strings\.Join\(strings\.Split\(s, sep\), new\) with a constant non-empty separator allocates a throwaway \[\]string of every fragment; strings\.ReplaceAll\(s, sep, new\) is bit-identical in one scan`
+}
+
+// --- guards: none of the following may be reported or rewritten ---
+
+// The EMPTY separator is the one divergence: Split(s, "") rune-explodes
+// and Join fills the k-1 gaps, while ReplaceAll(s, "", new) inserts new
+// k+1 times.
+func emptySep(s string) string {
+	return strings.Join(strings.Split(s, ""), ";")
+}
+
+// A named constant that is empty is the same divergence.
+const emptyConst = ""
+
+func emptyNamed(s string) string {
+	return strings.Join(strings.Split(s, emptyConst), ";")
+}
+
+// A VARIABLE separator may be "" at run time — never reported, because
+// the suggestion would be wrong for that value.
+func varSep(s, sep string) string {
+	return strings.Join(strings.Split(s, sep), ";")
+}
+
+// PS5112 owns exact inverse compositions and removes both calls directly.
+func inverseOwnedByPS5112(s string) string {
+	return strings.Join(strings.Split(s, ","), ",")
+}
+
+// The slice stored first may have other consumers — out of scope.
+func storedFirst(s string) string {
+	parts := strings.Split(s, ",")
+	return strings.Join(parts, ";")
+}
+
+// SplitN limits the pieces: the tail keeps its separators and the
+// identity does not hold.
+func splitN(s string) string {
+	return strings.Join(strings.SplitN(s, ",", 3), ";")
+}
+
+// SplitAfter keeps the separator attached to each piece — Join over it
+// is not a replacement.
+func splitAfter(s string) string {
+	return strings.Join(strings.SplitAfter(s, ","), ";")
+}
+
+// Fields splits on runs of whitespace and drops them — not a
+// replacement either.
+func fields(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// Joining any other slice is out of scope.
+func otherSlice(parts []string) string {
+	return strings.Join(parts, ",")
+}
+
+// The bytes twin is out of scope for this check (strings only).
+func bytesTwin(b []byte) []byte {
+	return bytes.Join(bytes.Split(b, []byte(",")), []byte(";"))
+}
+
+// A shadowed strings is not the strings package.
+type fakeStrings struct{}
+
+func (fakeStrings) Split(s, sep string) []string       { return []string{s} }
+func (fakeStrings) Join(p []string, sep string) string { return sep }
+
+func shadowedPkg(s string) string {
+	strings := fakeStrings{}
+	return strings.Join(strings.Split(s, ","), ";")
+}

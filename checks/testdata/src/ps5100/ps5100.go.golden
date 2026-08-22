@@ -1,0 +1,51 @@
+package ps5100
+
+import "io"
+
+func copyTo(destination io.Writer, first, second, third, fourth io.Reader) (int64, error) {
+	return io.Copy(destination, io.MultiReader(first, second, third, fourth)) // want "io.Copy uses MultiReader's WriterTo path; 2 nested source adapter"
+}
+
+func copyBuffer(destination io.Writer, first, second, third io.Reader, buffer []byte) (int64, error) {
+	return io.CopyBuffer(destination, io.MultiReader(first, second, third), buffer) // want "io.CopyBuffer uses MultiReader's WriterTo path; 1 nested source adapter"
+}
+
+func parenthesized(destination io.Writer, first, second, third io.Reader) (int64, error) {
+	return io.Copy(destination, (io.MultiReader(first, second, third))) // want "io.Copy uses MultiReader's WriterTo path; 1 nested source adapter"
+}
+
+// CopyN wraps the source in LimitedReader and may dispatch to ReaderFrom.
+func copyN(destination io.Writer, first, second, third io.Reader, count int64) (int64, error) {
+	return io.CopyN(destination, io.MultiReader(io.MultiReader(first, second), third), count)
+}
+
+// A MultiWriter destination can be exposed to a source WriterTo.
+func multiDestination(first, second, third io.Writer, source io.Reader) (int64, error) {
+	return io.Copy(io.MultiWriter(io.MultiWriter(first, second), third), source)
+}
+
+func general(copyLike func(io.Writer, io.Reader) (int64, error), destination io.Writer, first, second, third io.Reader) (int64, error) {
+	return copyLike(destination, io.MultiReader(io.MultiReader(first, second), third))
+}
+
+func functionConsumer(destination io.Writer, first, second, third io.Reader) (int64, error) {
+	copyFunction := io.Copy
+	return copyFunction(destination, io.MultiReader(io.MultiReader(first, second), third))
+}
+
+func functionConstructor(destination io.Writer, first, second, third io.Reader) (int64, error) {
+	constructor := io.MultiReader
+	return io.Copy(destination, io.MultiReader(constructor(first, second), third))
+}
+
+func empty(destination io.Writer, first io.Reader) (int64, error) {
+	return io.Copy(destination, io.MultiReader(io.MultiReader(), first))
+}
+
+func spread(destination io.Writer, readers []io.Reader) (int64, error) {
+	return io.Copy(destination, io.MultiReader(io.MultiReader(readers...)))
+}
+
+func single(destination io.Writer, first, second io.Reader) (int64, error) {
+	return io.Copy(destination, io.MultiReader(first, second))
+}
