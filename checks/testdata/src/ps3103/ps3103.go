@@ -142,3 +142,21 @@ func genericPair[T any](xs []pair[T], f func(T)) {
 		f(v.a)
 	}
 }
+
+func fixedFunctionHeader[T any](xs []struct {
+	Pad [256]byte
+	F   func(T)
+}) {
+	for _, value := range xs { // want `ranging by value copies a 264-byte struct.*element on every iteration`
+		_ = value.Pad[0]
+	}
+}
+
+func fixedInterfaceHeader[T any](xs []struct {
+	Pad [256]byte
+	I   interface{ M(T) }
+}) {
+	for _, value := range xs { // want `ranging by value copies a 272-byte struct.*element on every iteration`
+		_ = value.Pad[0]
+	}
+}
