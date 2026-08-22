@@ -54,8 +54,9 @@ indexes, and independently constructed byte slices stay silent because
 combining them would delete a potentially observable second evaluation.
 
 The automatic fix changes only the predicate name, introduces collision-free
-remainder/found variables in the if initializer, and replaces the guarded Trim
-expression with that remainder. It preserves the branch and else decision,
+remainder/found variables in the if initializer (including against visible
+parameters and named results), and replaces the guarded Trim expression with
+that remainder. It preserves the branch and else decision,
 the assignment/return scope, the original input and companion spellings, and
 all other body statements. A comment inside the removed Trim expression keeps
 the finding advisory. The check runs only when the file's effective language
@@ -139,7 +140,7 @@ func ps5119GuardedCut(pass *analysis.Pass, statement *ast.IfStmt) (ps5119Match, 
 			if !ok || !ps5119SameCompanion(pass, pkgPath, composition.predicateCompanion, composition.transformerCompanion) {
 				continue
 			}
-			afterName, foundName := ps5119FreshNames(statement)
+			afterName, foundName := ps5119FreshNames(pass, statement)
 			return ps5119Match{
 				composition: composition,
 				pkgPath:     pkgPath,
@@ -176,7 +177,7 @@ func ps5119StringConstant(pass *analysis.Pass, expression ast.Expr) (string, boo
 	return constant.StringVal(value.Value), true
 }
 
-func ps5119FreshNames(statement *ast.IfStmt) (string, string) {
+func ps5119FreshNames(pass *analysis.Pass, statement *ast.IfStmt) (string, string) {
 	used := make(map[string]bool)
 	ast.Inspect(statement, func(node ast.Node) bool {
 		if identifier, ok := node.(*ast.Ident); ok {
@@ -191,7 +192,9 @@ func ps5119FreshNames(statement *ast.IfStmt) (string, string) {
 			after = "after" + number
 			found = "found" + number
 		}
-		if !used[after] && !used[found] {
+		if !used[after] && !used[found] &&
+			!ps5121Visible(pass, statement.Pos(), after) &&
+			!ps5121Visible(pass, statement.Pos(), found) {
 			return after, found
 		}
 	}

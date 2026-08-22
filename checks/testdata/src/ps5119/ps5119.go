@@ -66,6 +66,14 @@ func collision(value, prefix, after, found string) string {
 	return value
 }
 
+func namedFoundResult(value, prefix string) (found string) {
+	if strings.HasPrefix(value, prefix) { // want `strings.HasPrefix proves the boundary and strings.TrimPrefix immediately repeats that proof; strings.CutPrefix returns the identical remainder and predicate in one direct call`
+		return strings.TrimPrefix(value, prefix)
+	} else {
+		return
+	}
+}
+
 // --- negatives ---
 
 func empty(value string) string {
@@ -163,7 +171,7 @@ func methods(value helper, prefix string) helper {
 
 var _ = []any{
 	assignPrefix, declarePrefix, returnSuffix, constantSpellings, bytePrefix,
-	byteSuffix, parenthesized, collision, empty, differentPrefix, differentValue,
+	byteSuffix, parenthesized, collision, namedFoundResult, empty, differentPrefix, differentValue,
 	mismatchedDirection, delayed, existingInit, compound, dynamic, selected,
 	constructedBytes, functionValues, methods,
 }
