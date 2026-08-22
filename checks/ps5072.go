@@ -52,8 +52,10 @@ replacement cannot be intercepted by a wrapper's own Sum64 method.
 The fix preserves the receiver expression byte-for-byte and changes only the
 surrounding call chain to .Sum64(). A comment inside removed scaffolding keeps
 the report advisory. If the rewrite removes the file's last encoding/binary
-reference, the fix removes that import too (except in a cgo file, whose import
-layout is left untouched).`,
+reference, one file-wide suggestion rewrites every such site and removes that
+import atomically. This keeps each editor quick-fix independently compilable.
+In a cgo file, whose import layout is left untouched, those final-reference
+fixes remain advisory.`,
 		Before: `sum := binary.LittleEndian.Uint64(h.Sum(nil))`,
 		After:  `sum := h.Sum64()`,
 		MeasuredWin: `BenchmarkPS5072 (Apple M2 Pro, go1.26; five runs):
@@ -127,12 +129,21 @@ func runPS5072(pass *analysis.Pass) (any, error) {
 					sites[i].fix = nil
 				}
 			} else if edit, ok := dropImportEdit(file, "encoding/binary"); ok {
+				grouped := analysis.SuggestedFix{
+					Message: "call hash/maphash.Hash.Sum64 directly at every site and remove the unused encoding/binary import",
+				}
+				firstFixable := -1
 				for i := range sites {
 					if sites[i].fix != nil {
-						sites[i].fix.TextEdits = append(sites[i].fix.TextEdits, edit)
-						break
+						if firstFixable < 0 {
+							firstFixable = i
+						}
+						grouped.TextEdits = append(grouped.TextEdits, sites[i].fix.TextEdits...)
+						sites[i].fix = nil
 					}
 				}
+				grouped.TextEdits = append(grouped.TextEdits, edit)
+				sites[firstFixable].fix = &grouped
 			} else {
 				for i := range sites {
 					sites[i].fix = nil
