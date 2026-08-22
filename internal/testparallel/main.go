@@ -53,14 +53,14 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	packages, err := listPackages(ctx, patterns)
+	packages, err := listPackages(ctx, patterns, *race)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	jobs := make([]testJob, 0, len(packages)*(*workers))
 	for _, pkg := range packages {
-		names, err := listTests(ctx, pkg)
+		names, err := listTests(ctx, pkg, *race)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -75,8 +75,13 @@ func main() {
 	}
 }
 
-func listPackages(ctx context.Context, patterns []string) ([]string, error) {
-	args := append([]string{"list", "-f", "{{.ImportPath}}"}, patterns...)
+func listPackages(ctx context.Context, patterns []string, race bool) ([]string, error) {
+	args := []string{"list"}
+	if race {
+		args = append(args, "-race")
+	}
+	args = append(args, "-f", "{{.ImportPath}}")
+	args = append(args, patterns...)
 	cmd := exec.CommandContext(ctx, "go", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -89,8 +94,13 @@ func listPackages(ctx context.Context, patterns []string) ([]string, error) {
 	return packages, nil
 }
 
-func listTests(ctx context.Context, pkg string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "go", "test", "-list", ".", pkg)
+func listTests(ctx context.Context, pkg string, race bool) ([]string, error) {
+	args := []string{"test"}
+	if race {
+		args = append(args, "-race")
+	}
+	args = append(args, "-list", ".", pkg)
+	cmd := exec.CommandContext(ctx, "go", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

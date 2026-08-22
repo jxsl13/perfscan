@@ -1,10 +1,43 @@
 package main
 
 import (
+	"context"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestListTestsUsesRequestedRaceBuild(t *testing.T) {
+	t.Parallel()
+	const fixture = "./testdata/racefixture"
+	ordinary, err := listTests(context.Background(), fixture, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(ordinary, "TestRaceBuildOnly") {
+		t.Fatalf("ordinary discovery unexpectedly included race-tagged test: %v", ordinary)
+	}
+	traced, err := listTests(context.Background(), fixture, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(traced, "TestRaceBuildOnly") {
+		t.Fatalf("race discovery omitted race-tagged test: %v", traced)
+	}
+}
+
+func TestListPackagesUsesRequestedRaceBuild(t *testing.T) {
+	t.Parallel()
+	packages, err := listPackages(context.Background(), []string{"./testdata/racepackage"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packages) != 1 || !strings.HasSuffix(packages[0], "/internal/testparallel/testdata/racepackage") {
+		t.Fatalf("race package discovery = %v, want the race-only fixture package", packages)
+	}
+}
 
 func TestParseTestNamesExcludesBenchmarksAndNoise(t *testing.T) {
 	t.Parallel()
