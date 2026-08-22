@@ -1362,6 +1362,57 @@ func returned(value string) string {
 	assertFixedCompiles(t, []byte(pass2))
 }
 
+func TestFixContainsGuardedSplitFamiliesReachFixedPointInOnePass(t *testing.T) {
+	const source = `package p
+
+import (
+	"bytes"
+	"strings"
+)
+
+func text(value, separator string) []string {
+	if strings.Contains(value, separator) {
+		return strings.Split(value, separator)
+	}
+	return []string{value}
+}
+
+func textN(value string) []string {
+	parts := []string{value}
+	if strings.Contains(value, ":") {
+		parts = strings.SplitAfterN(value, ":", -1)
+	}
+	return parts
+}
+
+func data(value, separator []byte) [][]byte {
+	if bytes.Contains(value, separator) {
+		return bytes.SplitAfter(value, separator)
+	}
+	return [][]byte{value}
+}
+`
+	pass1 := string(runFixMode(t, source))
+	for _, want := range []string{
+		`return strings.Split(value, separator)`,
+		`parts := strings.SplitAfterN(value, ":", -1)`,
+		`return bytes.SplitAfter(value, separator)`,
+	} {
+		if !strings.Contains(pass1, want) {
+			t.Errorf("expected guarded split fixed point %q in pass 1:\n%s", want, pass1)
+		}
+	}
+	if strings.Contains(pass1, ".Contains") || strings.Contains(pass1, "if ") ||
+		strings.Count(pass1, ".Split") != 3 {
+		t.Fatalf("Contains guards and singleton fallbacks must disappear in the first fix pass:\n%s", pass1)
+	}
+	pass2 := string(runFixMode(t, pass1))
+	if pass2 != pass1 {
+		t.Fatalf("guarded split family rewrite is not idempotent:\n--- pass1 ---\n%s\n--- pass2 ---\n%s", pass1, pass2)
+	}
+	assertFixedCompiles(t, []byte(pass2))
+}
+
 func TestFixContainsGuardedCountFamiliesReachFixedPointInOnePass(t *testing.T) {
 	const source = `package p
 

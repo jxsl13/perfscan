@@ -1,0 +1,24 @@
+package ps5128comment
+
+import "strings"
+
+func guardComment(value string) []string {
+	// want +1 `strings.Contains scans before strings.Split repeats the separator search`
+	if strings.Contains(value /* retain guard rationale */, ":") {
+		return strings.Split(value, ":")
+	}
+	return []string{value}
+}
+
+func fallbackComment(value string) []string {
+	// want +1 `strings.Contains scans before strings.Split repeats the separator search`
+	if strings.Contains(value, ":") {
+		return strings.Split(value, ":")
+	}
+	return []string{value} // retain singleton rationale
+}
+
+func keptComment(value string) []string {
+	// want +1 `strings.Contains scans before strings.Split repeats the separator search`
+	return strings.Split(value /* retain split rationale */, ":")
+}
