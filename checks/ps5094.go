@@ -71,6 +71,9 @@ An untyped nil String input is retained as string([]byte(nil)), avoiding the
 invalid string(nil) conversion while preserving the constructor's implicit
 []byte parameter conversion. Fixes that inject len, string, or byte are
 withheld when that predeclared identifier is shadowed.
+When a constant string length appears in a switch case or composite-literal
+key, the finding also stays advisory: replacing the runtime Buffer calls with
+a constant len expression could create an illegal duplicate case or key.
 Bare/go/defer call-only contexts receive no conversion fix because a type
 conversion is not a legal call statement. Comments keep the finding advisory.
 Shared import liveness removes every newly orphaned bytes/strings/slices import,
@@ -109,6 +112,7 @@ type ps5094Match struct {
 
 func runPS5094(pass *analysis.Pass) (any, error) {
 	for _, file := range pass.Files {
+		parents := ps6071Parents(file)
 		astutil.WithStack(file, func(node ast.Node, stack []ast.Node) bool {
 			outer, ok := node.(*ast.CallExpr)
 			if !ok {
@@ -127,7 +131,8 @@ func runPS5094(pass *analysis.Pass) (any, error) {
 				End:     match.root.End(),
 				Message: fmt.Sprintf("bytes.%s(...).%s constructs an ephemeral Buffer only to extract its initial value and carries %d throwaway Clone layer(s); use the equivalent builtin conversion or length directly", match.constructor, match.method, cloneLayers),
 			}
-			if match.fixable && ps5094ReplacementNamesAvailable(pass, &match) {
+			if match.fixable && ps5094ReplacementNamesAvailable(pass, &match) &&
+				!ps5094ReplacementIntroducesUniqueConstant(pass, &match, parents) {
 				if fix, ok := fixReplacedCallScaffoldingPaths(pass, file, match.paths, "replace ephemeral bytes.Buffer extraction chain",
 					analysis.TextEdit{Pos: match.root.Pos(), End: match.kept.Pos(), NewText: match.prefix},
 					analysis.TextEdit{Pos: match.kept.End(), End: match.root.End(), NewText: match.suffix},
@@ -140,6 +145,14 @@ func runPS5094(pass *analysis.Pass) (any, error) {
 		})
 	}
 	return nil, nil
+}
+
+func ps5094ReplacementIntroducesUniqueConstant(pass *analysis.Pass, match *ps5094Match, parents map[ast.Node]ast.Node) bool {
+	if match == nil || match.root == match.call.methodCall {
+		return false
+	}
+	typed, ok := pass.TypesInfo.Types[ps2110Unparen(match.kept)]
+	return ok && typed.Value != nil && replacementIntroducesConstantInUniqueContext(pass, match.root, parents)
 }
 
 func ps5094ExtractionMatch(pass *analysis.Pass, outer *ast.CallExpr, stack []ast.Node) (ps5094Match, bool) {

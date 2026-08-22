@@ -45,6 +45,25 @@ func textLength(text string) int {
 	return len((bytes.NewBufferString(strings.Clone(text)).Bytes())) // want "bytes.NewBufferString[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 1 throwaway Clone layer"
 }
 
+func constantTextLength() int {
+	return len(bytes.NewBufferString("constant").Bytes()) // want "bytes.NewBufferString[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 0 throwaway Clone layer"
+}
+
+func duplicateConstantCase(value int) string {
+	switch value {
+	case len(bytes.NewBufferString("x").Bytes()): // want "bytes.NewBufferString[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 0 throwaway Clone layer"
+		return "runtime"
+	case 1:
+		return "constant"
+	}
+	return ""
+}
+
+var duplicateConstantKey = map[int]string{
+	len(bytes.NewBufferString("x").Bytes()): "runtime", // want "bytes.NewBufferString[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 0 throwaway Clone layer"
+	1:                                       "constant",
+}
+
 func preserveSnapshot(data []byte) []byte {
 	return bytes.NewBuffer(slices.Clone(data)).Bytes() // want "bytes.NewBuffer[(]...[)].Bytes constructs an ephemeral Buffer only to extract its initial value and carries 0 throwaway Clone layer"
 }
