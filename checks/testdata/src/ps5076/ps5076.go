@@ -6,24 +6,24 @@ import (
 )
 
 func readAll(r io.Reader) ([]byte, error) {
-	return io.ReadAll(io.NopCloser(r)) // want `io\.ReadAll consumes only io\.Reader behavior`
+	return io.ReadAll(io.NopCloser(r)) // want `io\.ReadAll observes only Read behavior`
 }
 
 func copyTo(dst io.Writer, src io.Reader) (int64, error) {
-	return io.Copy(dst, io.NopCloser(src)) // want `io\.Copy consumes only io\.Reader behavior`
+	return io.Copy(dst, io.NopCloser(src)) // want `io\.Copy never calls Close`
 }
 
 func copyBuffer(dst io.Writer, src io.Reader, buf []byte) (int64, error) {
-	return io.CopyBuffer(dst, io.NopCloser(src), buf) // want `io\.CopyBuffer consumes only io\.Reader behavior`
+	return io.CopyBuffer(dst, io.NopCloser(src), buf) // want `io\.CopyBuffer never calls Close`
 }
 
 func triple(r io.Reader) ([]byte, error) {
-	return io.ReadAll(io.NopCloser(io.NopCloser(io.NopCloser(r)))) // want `io\.ReadAll consumes only io\.Reader behavior`
+	return io.ReadAll(io.NopCloser(io.NopCloser(io.NopCloser(r)))) // want `io\.ReadAll observes only Read behavior`
 }
 
 // A comment inside removed scaffolding keeps the report advisory.
 func commented(r io.Reader) ([]byte, error) {
-	return io.ReadAll(io.NopCloser( /* retain */ r)) // want `io\.ReadAll consumes only io\.Reader behavior`
+	return io.ReadAll(io.NopCloser( /* retain */ r)) // want `io\.ReadAll observes only Read behavior`
 }
 
 // --- negatives ---
@@ -36,7 +36,7 @@ func store(r io.Reader) io.ReadCloser {
 }
 
 func otherConsumer(r io.Reader) *bytes.Buffer {
-	return bytes.NewBuffer(func() []byte { b, _ := io.ReadAll(io.NopCloser(r)); return b }()) // want `io\.ReadAll consumes only io\.Reader behavior`
+	return bytes.NewBuffer(func() []byte { b, _ := io.ReadAll(io.NopCloser(r)); return b }()) // want `io\.ReadAll observes only Read behavior`
 }
 
 func NopCloser(r io.Reader) io.Reader { return r }

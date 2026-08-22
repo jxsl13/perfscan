@@ -19,9 +19,28 @@ func (r *ps5076ChunkReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-var ps5076N int64
+var (
+	ps5076N     int64
+	ps5076Bytes []byte
+)
 
-func BenchmarkPS5076_Before(b *testing.B) {
+func BenchmarkPS5076ReadAll_Before(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		r := &ps5076ChunkReader{remaining: 64 << 10}
+		ps5076Bytes, _ = io.ReadAll(io.NopCloser(r))
+	}
+}
+
+func BenchmarkPS5076ReadAll_After(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		r := &ps5076ChunkReader{remaining: 64 << 10}
+		ps5076Bytes, _ = io.ReadAll(r)
+	}
+}
+
+func BenchmarkPS5076Copy_Before(b *testing.B) {
 	b.ReportAllocs()
 	for range b.N {
 		r := &ps5076ChunkReader{remaining: 64 << 10}
@@ -29,7 +48,7 @@ func BenchmarkPS5076_Before(b *testing.B) {
 	}
 }
 
-func BenchmarkPS5076_After(b *testing.B) {
+func BenchmarkPS5076Copy_After(b *testing.B) {
 	b.ReportAllocs()
 	for range b.N {
 		r := &ps5076ChunkReader{remaining: 64 << 10}

@@ -258,7 +258,7 @@ checks' fixes.
 | [PS5073](PS5073.md) | alloc | L1 | yes | slog.Log, Logger.Log, or slog.Group receives only Attr values; the Attrs variant avoids ...any conversion |
 | [PS5074](PS5074.md) | alloc | L1 | yes | nested bytes/strings/slices/maps.Clone repeats an already-complete clone |
 | [PS5075](PS5075.md) | arith | L1 | yes | a standard-library normalizer is applied repeatedly even though one application is already stable |
-| [PS5076](PS5076.md) | indirect | L1 | yes | io.NopCloser is immediately passed to io.ReadAll/Copy/CopyBuffer, where Close is never observed |
+| [PS5076](PS5076.md) | indirect | L1 | yes | io.NopCloser is immediately passed to io.ReadAll/Copy/CopyBuffer, where Close is never called |
 | [PS5077](PS5077.md) | arith | L1 | yes | strings/bytes Trim is repeated with the same constant cutset |
 | [PS5078](PS5078.md) | arith | L1 | yes | TrimSpace is composed with a redundant constant whitespace-only Trim operation |
 | [PS5079](PS5079.md) | arith | L1 | yes | strings/bytes boundary operations use an empty prefix, suffix, or cutset |

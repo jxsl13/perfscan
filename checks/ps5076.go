@@ -9,7 +9,7 @@ import (
 )
 
 // PS5076 reports io.NopCloser wrapped around a reader that is immediately
-// consumed by an io operation which never observes Close.
+// consumed by an io operation which never calls Close.
 var PS5076 = register(&lint.Check{
 	ID:       "PS5076",
 	Category: "indirect",
@@ -17,28 +17,33 @@ var PS5076 = register(&lint.Check{
 	Level:    lint.LevelIdiomatic,
 	AutoFix:  true,
 	Doc: lint.Documentation{
-		Title: "io.NopCloser is immediately passed to io.ReadAll/Copy/CopyBuffer, where Close is never observed",
+		Title: "io.NopCloser is immediately passed to io.ReadAll/Copy/CopyBuffer, where Close is never called",
 		Text: `io.NopCloser adapts an io.Reader to io.ReadCloser by adding a
 no-op Close method. That adapter is useful only when the resulting value reaches
-an API that requires or stores a closer. io.ReadAll, io.Copy, and io.CopyBuffer
-accept a plain io.Reader and never call Close, so an immediately nested
-NopCloser adds only wrapper construction and another Read delegation:
+an API that requires or stores a closer. io.ReadAll accepts a plain io.Reader,
+does not expose the reader to another callback, and never calls Close, so an
+immediately nested NopCloser adds only wrapper construction and another Read
+delegation:
 
-  io.ReadAll(io.NopCloser(r))          -> io.ReadAll(r)
-  io.Copy(dst, io.NopCloser(r))        -> io.Copy(dst, r)
-  io.CopyBuffer(dst, io.NopCloser(r), b) -> io.CopyBuffer(dst, r, b)
+  io.ReadAll(io.NopCloser(r)) -> io.ReadAll(r)
 
-Multiple nested NopCloser layers are removed together. Standalone NopCloser
-values, returns, assignments, and calls to other consumers are deliberately
-left alone because wrapper identity or the Close method may then be observed.
+Multiple nested NopCloser layers inside ReadAll are removed together.
+Standalone NopCloser values, returns, assignments, and calls to other consumers
+are deliberately left alone because wrapper identity or the Close method may
+then be observed.
 
-The rewrite is BIT-IDENTICAL for these exact outer consumers. NopCloser.Read
-forwards each call to the underlying Reader unchanged. When the underlying
-reader implements io.WriterTo, NopCloser also forwards WriterTo, preserving
-io.Copy's optimized dispatch; otherwise Copy and CopyBuffer take the same Read
-path. The outer functions return the same bytes/count and error, the underlying
-reader sees the same operations, Close is never invoked in either form, and
-the reader expression is still evaluated once in the same argument position.
+The ReadAll rewrite is BIT-IDENTICAL. NopCloser.Read forwards each call to the
+underlying Reader unchanged, so ReadAll returns the same bytes and error, the
+underlying reader sees the same operations, Close is never invoked in either
+form, and the reader expression is still evaluated once in the same argument
+position.
+
+Copy and CopyBuffer are diagnostic-only. When the source lacks io.WriterTo and
+the destination implements io.ReaderFrom, those functions pass the source to
+dst.ReadFrom. The original call exposes the NopCloser wrapper while a direct
+call exposes the underlying reader; ReaderFrom can observe io.Closer, another
+dynamic type, or retain that object. Remove the wrapper manually only after
+proving that fast-path boundary cannot observe or retain the source.
 
 Both outer and inner functions are resolved through go/types, so aliases work
 while shadowed functions, methods, and same-named user helpers do not match.
@@ -48,11 +53,12 @@ deletes only NopCloser scaffolding. A comment in deleted scaffolding withholds
 the automatic fix.`,
 		Before: `data, err := io.ReadAll(io.NopCloser(src))`,
 		After:  `data, err := io.ReadAll(src)`,
-		MeasuredWin: `BenchmarkPS5076 copies 64 KiB from a 32-byte-chunk reader
-to io.Discard (Apple M2 Pro, go1.26; five runs): io.Copy through NopCloser
-median 24107 ns/op, 24 B/op, 2 allocs/op -> direct reader median 22898 ns/op,
-8 B/op, 1 alloc/op (~1.05x, -5.02%). The direct form removes the 16-byte
-escaping adapter and one delegated Read frame per 32-byte chunk.`,
+		MeasuredWin: `Apple M2 Pro, go1.26, ten 300 ms samples over a 64 KiB
+32-byte-chunk reader: the safe ReadAll rewrite was time-neutral at 32644 ->
+32630 ns/op median while removing the escaping adapter (138136 -> 138120 B/op,
+18 -> 17 allocs/op). The diagnostic-only Copy form measured 24911.5 -> 23836.5
+ns/op median and likewise removed 16 B/one allocation, but is not fixed because
+a destination ReaderFrom can observe or retain a different source object.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS5076",
@@ -65,10 +71,11 @@ type ps5076Variant struct {
 	name   string
 	arity  int
 	reader int
+	fix    bool
 }
 
 var ps5076Variants = []ps5076Variant{
-	{name: "ReadAll", arity: 1, reader: 0},
+	{name: "ReadAll", arity: 1, reader: 0, fix: true},
 	{name: "Copy", arity: 2, reader: 1},
 	{name: "CopyBuffer", arity: 3, reader: 1},
 }
@@ -84,12 +91,19 @@ func runPS5076(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
+			wrappers := ps5076WrapperText(layers)
+			message := "io." + variant.name + " never calls Close, but " + wrappers + " may still be observable"
+			if variant.fix {
+				message = "io.ReadAll observes only Read behavior; removing " + wrappers + " preserves behavior and avoids adapter/delegation work"
+			} else {
+				message += " through a destination ReaderFrom fast path; remove it only after proving that callback cannot inspect or retain the source"
+			}
 			diagnostic := analysis.Diagnostic{
 				Pos:     firstWrapper.Pos(),
 				End:     firstWrapper.End(),
-				Message: "io." + variant.name + " consumes only io.Reader behavior; " + ps5076LayerText(layers) + " immediately nested io.NopCloser wrapper adds no observable Close behavior and only repeats adapter/delegation work",
+				Message: message,
 			}
-			if !ps2111CommentIn(file, firstWrapper.Pos(), reader.Pos()) &&
+			if variant.fix && !ps2111CommentIn(file, firstWrapper.Pos(), reader.Pos()) &&
 				!ps2111CommentIn(file, reader.End(), firstWrapper.End()) {
 				diagnostic.SuggestedFixes = []analysis.SuggestedFix{{
 					Message: "pass the underlying reader directly",
@@ -140,9 +154,9 @@ func ps5076NopCloser(pass *analysis.Pass, call *ast.CallExpr) bool {
 	return ok && sig.Recv() == nil && fn.Pkg() != nil && fn.Pkg().Path() == "io" && fn.Name() == "NopCloser"
 }
 
-func ps5076LayerText(layers int) string {
+func ps5076WrapperText(layers int) string {
 	if layers == 1 {
-		return "the"
+		return "the immediately nested io.NopCloser wrapper"
 	}
-	return "all nested"
+	return "all immediately nested io.NopCloser wrappers"
 }
