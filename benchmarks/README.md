@@ -38,7 +38,7 @@ Rules without a pair, and why:
   that the win evaporates on any memory-touching path; its evidence table
   lives in the check text.
 - **PS6004**: a verification-gap advisory; there is nothing to time.
-- **PS6005–PS6059 and PS6062–PS6078** (accelerator and campaign verification advisories): their
+- **PS6005–PS6059 and PS6062–PS6079** (accelerator and campaign verification advisories): their
   remedies require real device traces, independent processes, exact workload
   identities, topology/parity evidence, or project-specific kernels. A toy Go
   micro-benchmark cannot reproduce those contracts and would manufacture a
