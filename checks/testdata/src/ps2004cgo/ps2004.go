@@ -69,6 +69,23 @@ func (r *recorder) ProfileUnrelatedContract(events []int) []string {
 	return labels
 }
 
+// Hoisting the loop-local label into the nested block would shadow the outer
+// integer in the loop condition and make the fixed source fail to compile.
+func (r *recorder) ProfileOuterShadow(events []int) []string {
+	labels := make([]string, 0, len(events))
+	label := len(events)
+	// perfscan:full-overwrite label by C.fill_label.
+	{
+		for event := 0; event < label; event++ { // want `label: make\(\) per iteration of a pointer-method loop`
+			label := make([]byte, 96)
+			C.fill_label(C.int(event), (*C.char)(unsafe.Pointer(&label[0])), C.size_t(len(label)))
+			end := bytes.IndexByte(label, 0)
+			labels = append(labels, string(label[:end]))
+		}
+	}
+	return labels
+}
+
 var retained []byte
 
 func retain(label []byte) { retained = label }

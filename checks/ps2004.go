@@ -161,7 +161,7 @@ func ps2004CgoReuseFix(pass *analysis.Pass, file *ast.File, fn *ast.FuncDecl, lo
 			break
 		}
 	}
-	collision := ps2004NameCollision(pass, fn, parent, id.Name)
+	collision := ps2004NameCollision(pass, loop.Pos(), object)
 	if index < 0 || index+1 >= len(body.List) || collision {
 		return analysis.SuggestedFix{}, "", "", false
 	}
@@ -237,11 +237,21 @@ func ps2004DirectStmt(block *ast.BlockStmt, node ast.Node) bool {
 	return false
 }
 
-func ps2004NameCollision(pass *analysis.Pass, fn *ast.FuncDecl, block *ast.BlockStmt, name string) bool {
-	if scope := pass.TypesInfo.Scopes[block]; scope != nil && scope.Lookup(name) != nil {
+func ps2004NameCollision(pass *analysis.Pass, insertion token.Pos, scratch types.Object) bool {
+	scope := pass.Pkg.Scope().Innermost(insertion)
+	if scope == nil || scratch == nil {
 		return true
 	}
-	return block == fn.Body && pass.TypesInfo.Scopes[fn.Type] != nil && pass.TypesInfo.Scopes[fn.Type].Lookup(name) != nil
+	// Lookup catches declarations later in this block too: hoisting before
+	// them would either redeclare the name or change their binding. LookupParent
+	// at the insertion position additionally catches a currently visible outer
+	// binding that the hoisted declaration would shadow in the loop header and
+	// every following statement in this block.
+	if scope.Lookup(scratch.Name()) != nil {
+		return true
+	}
+	_, visible := scope.LookupParent(scratch.Name(), insertion)
+	return visible != nil && visible != scratch
 }
 
 func ps2004DirectCgoProducer(pass *analysis.Pass, file *ast.File, stmt ast.Stmt, object types.Object) (*ast.CallExpr, string, bool) {
