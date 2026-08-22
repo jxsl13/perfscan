@@ -44,6 +44,31 @@ func (r *recorder) ProfileNoContract(events []int) []string {
 	return labels
 }
 
+func (r *recorder) ProfileShortContract(events []int) []string {
+	labels := make([]string, 0, len(events))
+	// perfscan:full-overwrite b by C.fill_label.
+	for _, event := range events { // want `b: fixed 96-byte cgo output buffer is allocated once per record despite an explicit full-overwrite contract for C\.fill_label; reuse one backing buffer across the loop \(autofix preserves the local method-call lifetime\)`
+		b := make([]byte, 96)
+		C.fill_label(C.int(event), (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)))
+		end := bytes.IndexByte(b, 0)
+		labels = append(labels, string(b[:end]))
+	}
+	return labels
+}
+
+// A complete overwrite contract for some other object must not authorize b.
+func (r *recorder) ProfileUnrelatedContract(events []int) []string {
+	labels := make([]string, 0, len(events))
+	// Another buffer is fully overwritten by a separate helper.
+	for _, event := range events { // want `b: make\(\) per iteration of a pointer-method loop`
+		b := make([]byte, 96)
+		C.fill_label(C.int(event), (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)))
+		end := bytes.IndexByte(b, 0)
+		labels = append(labels, string(b[:end]))
+	}
+	return labels
+}
+
 var retained []byte
 
 func retain(label []byte) { retained = label }

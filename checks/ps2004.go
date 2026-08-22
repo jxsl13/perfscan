@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"strings"
+	"unicode"
 
 	"golang.org/x/tools/go/analysis"
 
@@ -46,9 +47,9 @@ these facts are source-auditable:
     non-retaining bytes scan, or C.GoString/C.GoStringN;
   - the object is never returned, stored, appended, or passed to another Go
     call, and the hoisted name cannot collide; and
-  - a local comment explicitly names the buffer or producer and documents
-    perfscan:full-overwrite, a full/every-byte overwrite, or both zero-padding
-    and NUL termination.
+  - a local comment names the buffer or producer as a complete identifier token
+    and documents perfscan:full-overwrite, a full/every-byte overwrite, or both
+    zero-padding and NUL termination.
 
 The explicit contract is essential: cgo signatures do not reveal whether C
 writes the complete readable region. Add such a comment only after checking
@@ -298,17 +299,26 @@ func ps2004NodeUsesObject(pass *analysis.Pass, root ast.Node, object types.Objec
 }
 
 func ps2004FullOverwriteContract(file *ast.File, fn *ast.FuncDecl, loop ast.Node, buffer, producer string) bool {
-	buffer = ps2004ContractToken(buffer)
-	producer = ps2004ContractToken(producer)
+	buffer = strings.ToLower(buffer)
+	producer = strings.ToLower(producer)
 	for _, group := range file.Comments {
 		if group != fn.Doc && (group.Pos() < fn.Body.Pos() || group.End() > loop.Pos()) {
 			continue
 		}
-		text := ps2004ContractToken(group.Text())
-		target := strings.Contains(text, buffer) || strings.Contains(text, producer)
-		full := ps6007ContainsAny(text, "perfscanfulloverwrite", "fullyoverwrites", "fulloverwrite", "writeseverybyte", "definesentirebuffer", "definesallbytes")
-		terminated := ps6007ContainsAny(text, "nulterminated", "nullterminated", "nulterminates", "nullterminates")
-		padded := ps6007ContainsAny(text, "zeropadded", "zeropads", "zeropadding")
+		tokens := ps2004ContractTokens(group.Text())
+		target := ps2004HasContractToken(tokens, buffer) || ps2004HasContractToken(tokens, producer)
+		full := ps2004HasContractPhrase(tokens,
+			"perfscan full overwrite", "fully overwrites", "fully overwritten", "full overwrite",
+			"full every byte overwrite", "every byte overwrite",
+			"writes every byte", "defines entire buffer", "defines all bytes",
+		)
+		terminated := ps2004HasContractPhrase(tokens,
+			"nul terminated", "null terminated", "nul terminates", "null terminates",
+			"nulterminated", "nullterminated", "nulterminates", "nullterminates",
+		)
+		padded := ps2004HasContractPhrase(tokens,
+			"zero padded", "zero pads", "zero padding", "zeropadded", "zeropads", "zeropadding",
+		)
 		if target && (full || terminated && padded) {
 			return true
 		}
@@ -316,15 +326,54 @@ func ps2004FullOverwriteContract(file *ast.File, fn *ast.FuncDecl, loop ast.Node
 	return false
 }
 
-func ps2004ContractToken(text string) string {
-	var normalized strings.Builder
-	normalized.Grow(len(text))
+func ps2004ContractTokens(text string) []string {
+	var tokens []string
+	var token strings.Builder
+	token.Grow(len(text))
+	flush := func() {
+		if token.Len() == 0 {
+			return
+		}
+		tokens = append(tokens, token.String())
+		token.Reset()
+	}
 	for _, r := range strings.ToLower(text) {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
-			normalized.WriteRune(r)
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+			token.WriteRune(r)
+		} else {
+			flush()
 		}
 	}
-	return normalized.String()
+	flush()
+	return tokens
+}
+
+func ps2004HasContractToken(tokens []string, target string) bool {
+	for _, token := range tokens {
+		if token == target {
+			return true
+		}
+	}
+	return false
+}
+
+func ps2004HasContractPhrase(tokens []string, phrases ...string) bool {
+	for _, phrase := range phrases {
+		want := strings.Fields(phrase)
+		for start := 0; start+len(want) <= len(tokens); start++ {
+			match := true
+			for i := range want {
+				if tokens[start+i] != want[i] {
+					match = false
+					break
+				}
+			}
+			if match {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func ps2004ReusableUses(pass *analysis.Pass, body *ast.BlockStmt, as *ast.AssignStmt, producer *ast.CallExpr, object types.Object) bool {
