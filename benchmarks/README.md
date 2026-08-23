@@ -56,3 +56,8 @@ Rules without a pair, and why:
   owner campaign found fewer allocations but a statistically significant
   production-latency regression, so a toy goroutine benchmark would imply the
   exact generic speedup this check warns users not to infer.
+- **PS6087** (last-use in-place fusion advisory): the allocation win depends on
+  a project-owned tensor representation, backend capability, and fused kernel.
+  A toy tensor and fake in-place method would measure the fixture rather than
+  the configured contract. The check documentation pins the permanent GoAI
+  kernel benchmark and retained end-to-end campaign evidence.

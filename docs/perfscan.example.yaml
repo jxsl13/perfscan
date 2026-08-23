@@ -161,8 +161,36 @@ optimizedBackendPkgs:
 kernelRegisterFuncs:
   - registerKernel
 
+# Exact API contracts for PS6087 last-use in-place fusion candidates. Function
+# IDs are import/path.Type.Method. These booleans are semantic promises made by
+# the project, not facts perfscan guesses from names. Omit the whole field to
+# keep PS6087 silent. The guard must be a positive, zero-argument method on the
+# same operation provider. All three configured operations must return fresh
+# nonaliasing outputs. The capability must match the composition, overwrite
+# operand 0, preserve operand 1, and leave both unchanged when returning false.
+inPlaceFusionContracts:
+  - name: swiglu-eager
+    producer: example.com/project/tensor.Linear.Forward
+    activation: example.com/project/backend.Executor.SiLU
+    activationInputArg: 0
+    binary: example.com/project/backend.Executor.Mul
+    binaryActivationArg: 0
+    binaryOtherArg: 1
+    capabilityInterface: example.com/project/backend.SwiGLUInPlaceFuser
+    capabilityMethod: FuseSwiGLUInPlace
+    nonRecordingGuard: example.com/project/backend.Executor.IsEager
+    producerReturnsFreshOwned: true
+    activationReturnsFreshOwned: true
+    binaryReturnsFreshOwned: true
+    capabilityOverwritesFirstArg: true
+    capabilityPreservesSecondArg: true
+    capabilityRejectsUnsupported: true
+    capabilityFailureUnmodified: true
+    capabilityMatchesComposition: true
+    guardProvesNonRecording: true
+
 # ---------------------------------------------------------------------------
-# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 26
+# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 27
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the
 # names:
 #
@@ -192,4 +220,6 @@ kernelRegisterFuncs:
 #   referenceBackendPkg:    ref
 #   optimizedBackendPkgs:   [cpu]
 #   kernelRegisterFuncs:    [add]
+#   inPlaceFusionContracts:
+#     - {name: swiglu-eager, producer: example.com/tensor.Linear.Forward, activation: example.com/backend.Executor.SiLU, activationInputArg: 0, binary: example.com/backend.Executor.Mul, binaryActivationArg: 0, binaryOtherArg: 1, capabilityInterface: example.com/backend.SwiGLUInPlaceFuser, capabilityMethod: FuseSwiGLUInPlace, nonRecordingGuard: example.com/backend.Executor.IsEager, producerReturnsFreshOwned: true, activationReturnsFreshOwned: true, binaryReturnsFreshOwned: true, capabilityOverwritesFirstArg: true, capabilityPreservesSecondArg: true, capabilityRejectsUnsupported: true, capabilityFailureUnmodified: true, capabilityMatchesComposition: true, guardProvesNonRecording: true}
 # ---------------------------------------------------------------------------

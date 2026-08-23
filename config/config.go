@@ -171,6 +171,43 @@ type Config struct {
 	// KernelRegisterFuncs are repository functions that register an operation,
 	// dtype, backend, and implementation in a kernel table.
 	KernelRegisterFuncs []string `json:"kernelRegisterFuncs,omitempty" yaml:"kernelRegisterFuncs"`
+
+	// InPlaceFusionContracts are explicit, project-owned API contracts for
+	// PS6087. Every entry names exact typed producer/activation/binary methods,
+	// their operand positions, the provider's optional overwrite interface, and
+	// an eager guard. The boolean assertions are intentionally verbose: local Go
+	// syntax cannot prove fresh nonaliasing outputs, composed behavioral
+	// equivalence, success/failure mutation semantics, or that a guard excludes
+	// recorder/autograd visibility. PS6087 stays silent unless all assertions are
+	// true and the source matches the exact contract.
+	InPlaceFusionContracts []InPlaceFusionContract `json:"inPlaceFusionContracts,omitempty" yaml:"inPlaceFusionContracts"`
+}
+
+// InPlaceFusionContract binds one last-use fusion candidate to exact project
+// APIs. Function identifiers use "import/path.Type.Method" for methods and
+// "import/path.Function" for package functions. PS6087 currently accepts
+// method-based activation/binary providers only; this makes the optional
+// capability assertable on the exact stable receiver.
+type InPlaceFusionContract struct {
+	Name                         string `json:"name" yaml:"name"`
+	Producer                     string `json:"producer" yaml:"producer"`
+	Activation                   string `json:"activation" yaml:"activation"`
+	ActivationInputArg           int    `json:"activationInputArg" yaml:"activationInputArg"`
+	Binary                       string `json:"binary" yaml:"binary"`
+	BinaryActivationArg          int    `json:"binaryActivationArg" yaml:"binaryActivationArg"`
+	BinaryOtherArg               int    `json:"binaryOtherArg" yaml:"binaryOtherArg"`
+	CapabilityInterface          string `json:"capabilityInterface" yaml:"capabilityInterface"`
+	CapabilityMethod             string `json:"capabilityMethod" yaml:"capabilityMethod"`
+	NonRecordingGuard            string `json:"nonRecordingGuard" yaml:"nonRecordingGuard"`
+	ProducerReturnsFreshOwned    bool   `json:"producerReturnsFreshOwned" yaml:"producerReturnsFreshOwned"`
+	ActivationReturnsFreshOwned  bool   `json:"activationReturnsFreshOwned" yaml:"activationReturnsFreshOwned"`
+	BinaryReturnsFreshOwned      bool   `json:"binaryReturnsFreshOwned" yaml:"binaryReturnsFreshOwned"`
+	CapabilityOverwritesFirstArg bool   `json:"capabilityOverwritesFirstArg" yaml:"capabilityOverwritesFirstArg"`
+	CapabilityPreservesSecondArg bool   `json:"capabilityPreservesSecondArg" yaml:"capabilityPreservesSecondArg"`
+	CapabilityRejectsUnsupported bool   `json:"capabilityRejectsUnsupported" yaml:"capabilityRejectsUnsupported"`
+	CapabilityFailureUnmodified  bool   `json:"capabilityFailureUnmodified" yaml:"capabilityFailureUnmodified"`
+	CapabilityMatchesComposition bool   `json:"capabilityMatchesComposition" yaml:"capabilityMatchesComposition"`
+	GuardProvesNonRecording      bool   `json:"guardProvesNonRecording" yaml:"guardProvesNonRecording"`
 }
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
@@ -201,6 +238,7 @@ type Sets struct {
 	ReferenceBackendPkg      string
 	OptimizedBackendPkgs     map[string]bool
 	KernelRegisterFuncs      map[string]bool
+	InPlaceFusionContracts   []InPlaceFusionContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -243,6 +281,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		ReferenceBackendPkg:      c.ReferenceBackendPkg,
 		OptimizedBackendPkgs:     toSet(c.OptimizedBackendPkgs),
 		KernelRegisterFuncs:      toSet(c.KernelRegisterFuncs),
+		InPlaceFusionContracts:   slices.Clone(c.InPlaceFusionContracts),
 	}
 }
 

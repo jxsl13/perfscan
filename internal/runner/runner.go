@@ -345,6 +345,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"referenceBackendPkg":      len(cfg.ReferenceBackendPkg),
 		"optimizedBackendPkgs":     len(cfg.OptimizedBackendPkgs),
 		"kernelRegisterFuncs":      len(cfg.KernelRegisterFuncs),
+		"inPlaceFusionContracts":   len(cfg.InPlaceFusionContracts),
 	}
 	missing := make([]string, 0, len(c.Vocab))
 	for _, v := range c.Vocab {
