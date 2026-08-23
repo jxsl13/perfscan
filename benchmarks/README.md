@@ -51,3 +51,8 @@ Rules without a pair, and why:
   required NaN and signed-zero contracts. Their documentation records the
   owner campaigns' native arm64 measurements and raw-bit/tail validation;
   benchmark the registered native sibling on each supported architecture.
+- **PS6086** (caller-participation fan-out advisory): scheduler placement and
+  crossover behavior are workload-, topology-, and threshold-dependent. The
+  owner campaign found fewer allocations but a statistically significant
+  production-latency regression, so a toy goroutine benchmark would imply the
+  exact generic speedup this check warns users not to infer.
