@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**375 checks total** — **263 with a bit-identical auto-fix**, 112 advisory. By fix level: **246 L1** (idiomatic), **110 L2** (structured), **19 L3** (aggressive).
+**376 checks total** — **263 with a bit-identical auto-fix**, 113 advisory. By fix level: **246 L1** (idiomatic), **110 L2** (structured), **20 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -387,4 +387,5 @@ checks' fixes.
 | [PS6077](PS6077.md) | verify | L2 |  | same-signature architecture siblings select scalar transcendental and vector implementations |
 | [PS6078](PS6078.md) | verify | L2 |  | an architecture capability flag constant-folds optimized branches out of public operations |
 | [PS6079](PS6079.md) | verify | L2 |  | a benchmark fixture does not prove that its guarded optimized route is entered |
+| [PS6086](PS6086.md) | verify | L3 |  | all-goroutine fan-out leaves the caller waiting; caller participation needs a latency benchmark, not an allocation-only rewrite |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |
