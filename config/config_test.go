@@ -8,6 +8,7 @@ import (
 )
 
 func TestToSetAndCompile(t *testing.T) {
+	t.Parallel()
 	// An empty slice compiles to a nil set (not an empty map) so membership
 	// tests are a plain, allocation-free nil-map read.
 	if got := toSet(nil); got != nil {
@@ -26,7 +27,10 @@ func TestToSetAndCompile(t *testing.T) {
 		ElementAccessors:         []string{"AtF64", "SetF64"},
 		AllocatorFuncs:           []string{"Zeros"},
 		SelectorPromotionSymbols: []string{"selectKernel"},
-		ElementCountMethods:      nil, // stays nil after compile
+		InPlaceFusionContracts: []InPlaceFusionContract{{
+			Name: "swiglu",
+		}},
+		ElementCountMethods: nil, // stays nil after compile
 	}
 	sets := c.Compile()
 	if sets.CacheLineBytes != 128 {
@@ -40,6 +44,13 @@ func TestToSetAndCompile(t *testing.T) {
 	}
 	if !sets.SelectorPromotionSymbols["selectKernel"] {
 		t.Errorf("Compile lost selector promotion symbols: %v", sets.SelectorPromotionSymbols)
+	}
+	if len(sets.InPlaceFusionContracts) != 1 || sets.InPlaceFusionContracts[0].Name != "swiglu" {
+		t.Errorf("Compile lost in-place fusion contracts: %+v", sets.InPlaceFusionContracts)
+	}
+	c.InPlaceFusionContracts[0].Name = "mutated"
+	if sets.InPlaceFusionContracts[0].Name != "swiglu" {
+		t.Error("Compile must clone in-place fusion contracts")
 	}
 	if sets.ElementCountMethods != nil {
 		t.Errorf("empty field must compile to a nil set, got %v", sets.ElementCountMethods)
@@ -220,6 +231,7 @@ func TestGoAICurrentVocabularyCompatibility(t *testing.T) {
 // contain NO unknown keys (so it never drifts back to stale/renamed fields), and
 // populate every documented field so it stays a complete, working reference.
 func TestExampleConfigIsValidAndGeneric(t *testing.T) {
+	t.Parallel()
 	const path = "../docs/perfscan.example.yaml"
 	if unk := UnknownKeys(path); len(unk) != 0 {
 		t.Errorf("example config has unknown keys %v — every key must map to a Config field", unk)
@@ -241,7 +253,8 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"PointerTypeNames": len(c.PointerTypeNames), "VariadicDispatchWrappers": len(c.VariadicDispatchWrappers),
 		"TopKSelectorFuncs": len(c.TopKSelectorFuncs), "InputViewFuncs": len(c.InputViewFuncs),
 		"OutputViewFuncs": len(c.OutputViewFuncs), "OptimizedBackendPkgs": len(c.OptimizedBackendPkgs),
-		"KernelRegisterFuncs": len(c.KernelRegisterFuncs),
+		"KernelRegisterFuncs":    len(c.KernelRegisterFuncs),
+		"InPlaceFusionContracts": len(c.InPlaceFusionContracts),
 	}
 	for name, n := range fields {
 		if n == 0 {
