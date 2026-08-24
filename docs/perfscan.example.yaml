@@ -146,6 +146,26 @@ variadicDispatchWrappers:
 topKSelectorFuncs:
   - topKIndices
 
+# Exact typed Top-K APIs whose k=1 result-use shape PS6091 may inspect. API IDs
+# are import/path.Function or import/path.Type.Method strings. Set kind to
+# function or method whenever both dotted parses are valid; it may be omitted
+# only for an unambiguous legacy ID. Their import-
+# path prefix follows Go's import-path rules; whitespace, control/non-ASCII and
+# URL-ambiguous punctuation such as : @ % are invalid there, as are unqualified
+# or empty-segment IDs. Receiver and function/method symbols are separately
+# validated as Go identifiers and may therefore be Unicode. Hyphen, underscore
+# and version path elements remain valid in the package path.
+# Positions are one-based (so omissions are invalid) and exclude the receiver,
+# including for method-expression calls. If no entry is valid, perfscan reports
+# the vocabulary as missing. This only identifies the API layout: a scalar
+# replacement still needs explicit prefix/tie/NaN/error equivalence.
+topKOneContracts:
+  - name: resident-topk-one
+    function: example.com/project/backend.DeviceBuffer.TopKN
+    kind: method
+    kArgPosition: 2
+    indicesResultPosition: 1
+
 # Helpers exposing typed input views and caller-owned output views.
 inputViewFuncs:
   - f64Data
@@ -190,7 +210,7 @@ inPlaceFusionContracts:
     guardProvesNonRecording: true
 
 # ---------------------------------------------------------------------------
-# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 27
+# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 28
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the
 # names:
 #
@@ -215,6 +235,8 @@ inPlaceFusionContracts:
 #   pointerTypeNames:       [Shape, Strides, Tensor, Storage, Device, Context]
 #   variadicDispatchWrappers: [bitExec, exec, hcExec, rdropExec, visExecN]
 #   topKSelectorFuncs:      [topKIndices]
+#   topKOneContracts:
+#     - {name: resident-topk-one, function: example.com/goai/backend.DeviceBuffer.TopKN, kind: method, kArgPosition: 2, indicesResultPosition: 1}
 #   inputViewFuncs:         [f64Data, f32Data]
 #   outputViewFuncs:        [outF64, outF32]
 #   referenceBackendPkg:    ref

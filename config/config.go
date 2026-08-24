@@ -24,12 +24,15 @@ package config
 
 import (
 	"fmt"
+	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"unicode"
 
+	"golang.org/x/mod/module"
 	"gopkg.in/yaml.v3"
 )
 
@@ -158,6 +161,13 @@ type Config struct {
 	// ranked subset of a larger device result.
 	TopKSelectorFuncs []string `json:"topKSelectorFuncs,omitempty" yaml:"topKSelectorFuncs"`
 
+	// TopKOneContracts identify exact typed Top-K APIs for PS6091.
+	// Each contract gives the constant-k argument and ranked-index result
+	// positions. PS6091 remains advisory: these positions establish the source
+	// shape, not tie-breaking, NaN, prefix, or backend-error equivalence with a
+	// replacement scalar argmax API.
+	TopKOneContracts []TopKOneContract `json:"topKOneContracts,omitempty" yaml:"topKOneContracts"`
+
 	// InputViewFuncs and OutputViewFuncs expose repository-specific typed views
 	// over input and destination storage respectively.
 	InputViewFuncs  []string `json:"inputViewFuncs,omitempty" yaml:"inputViewFuncs"`
@@ -210,6 +220,106 @@ type InPlaceFusionContract struct {
 	GuardProvesNonRecording      bool   `json:"guardProvesNonRecording" yaml:"guardProvesNonRecording"`
 }
 
+// TopKOneContract describes the syntactic shape of one project Top-K
+// API. Function uses import/path.Function; methods use
+// import/path.Type.Method. Kind is "function" or "method" and is required when
+// dots in the ID make both parses valid; it may be omitted for an unambiguous
+// legacy ID. KArgPosition and IndicesResultPosition are one-based (so omitted
+// zero values are invalid) and exclude a method receiver.
+type TopKOneContract struct {
+	Name                  string              `json:"name" yaml:"name"`
+	Function              string              `json:"function" yaml:"function"`
+	Kind                  TopKOneContractKind `json:"kind,omitempty" yaml:"kind,omitempty"`
+	KArgPosition          int                 `json:"kArgPosition" yaml:"kArgPosition"`
+	IndicesResultPosition int                 `json:"indicesResultPosition" yaml:"indicesResultPosition"`
+}
+
+// TopKOneContractKind disambiguates package functions from methods when dots
+// in an import path make both documented ID parses syntactically valid.
+type TopKOneContractKind string
+
+const (
+	TopKOneContractFunction TopKOneContractKind = "function"
+	TopKOneContractMethod   TopKOneContractKind = "method"
+)
+
+// Valid reports whether the contract identifies an API and explicitly sets
+// both required one-based positions and uses the documented qualified function
+// or method ID shape. A function ID validates the prefix before its symbol as a
+// Go import path. A method ID instead validates the prefix before its receiver
+// as the import path and validates the receiver and method as Go identifiers.
+// The two parses are alternatives because dots are also legal inside import
+// paths. Kind is required when both parses are valid; an omitted kind remains
+// backward-compatible only for an unambiguous ID. It deliberately rejects
+// rather than trims invalid input so analyzers and runner vocabulary warnings
+// share one exact definition.
+func (c TopKOneContract) Valid() bool {
+	_, ok := c.ResolvedKind()
+	return ok
+}
+
+// ResolvedKind returns the contract's explicit or unambiguous API kind.
+func (c TopKOneContract) ResolvedKind() (TopKOneContractKind, bool) {
+	if c.KArgPosition <= 0 || c.IndicesResultPosition <= 0 ||
+		c.Function == "" || strings.TrimSpace(c.Function) != c.Function ||
+		strings.IndexFunc(c.Function, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+		return "", false
+	}
+	functionValid := psTopKFunctionIDValid(c.Function)
+	methodValid := psTopKMethodIDValid(c.Function)
+	switch c.Kind {
+	case TopKOneContractFunction:
+		return TopKOneContractFunction, functionValid
+	case TopKOneContractMethod:
+		return TopKOneContractMethod, methodValid
+	case "":
+		if functionValid == methodValid {
+			return "", false
+		}
+		if functionValid {
+			return TopKOneContractFunction, true
+		}
+		return TopKOneContractMethod, true
+	default:
+		return "", false
+	}
+}
+
+func psTopKFunctionIDValid(id string) bool {
+	separator := strings.LastIndexByte(id, '.')
+	return separator > 0 && psTopKIdentifierValid(id[separator+1:]) &&
+		psTopKImportPathValid(id[:separator])
+}
+
+func psTopKMethodIDValid(id string) bool {
+	methodSeparator := strings.LastIndexByte(id, '.')
+	if methodSeparator <= 0 || !psTopKIdentifierValid(id[methodSeparator+1:]) {
+		return false
+	}
+	receiverSeparator := strings.LastIndexByte(id[:methodSeparator], '.')
+	return receiverSeparator > 0 &&
+		psTopKIdentifierValid(id[receiverSeparator+1:methodSeparator]) &&
+		psTopKImportPathValid(id[:receiverSeparator])
+}
+
+func psTopKIdentifierValid(identifier string) bool {
+	return identifier != "_" && token.IsIdentifier(identifier)
+}
+
+func psTopKImportPathValid(importPath string) bool {
+	for pathPart := range strings.SplitSeq(importPath, "/") {
+		if pathPart == "" {
+			return false
+		}
+		for dotPart := range strings.SplitSeq(pathPart, ".") {
+			if dotPart == "" {
+				return false
+			}
+		}
+	}
+	return module.CheckImportPath(importPath) == nil
+}
+
 // Sets is the compiled, set-shaped view of Config used by analyzers.
 type Sets struct {
 	CacheLineBytes           int
@@ -233,6 +343,7 @@ type Sets struct {
 	PointerTypeNames         map[string]bool
 	VariadicDispatchWrappers map[string]bool
 	TopKSelectorFuncs        map[string]bool
+	TopKOneContracts         []TopKOneContract
 	InputViewFuncs           map[string]bool
 	OutputViewFuncs          map[string]bool
 	ReferenceBackendPkg      string
@@ -276,6 +387,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		PointerTypeNames:         toSet(c.PointerTypeNames),
 		VariadicDispatchWrappers: toSet(c.VariadicDispatchWrappers),
 		TopKSelectorFuncs:        toSet(c.TopKSelectorFuncs),
+		TopKOneContracts:         slices.Clone(c.TopKOneContracts),
 		InputViewFuncs:           toSet(c.InputViewFuncs),
 		OutputViewFuncs:          toSet(c.OutputViewFuncs),
 		ReferenceBackendPkg:      c.ReferenceBackendPkg,
