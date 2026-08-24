@@ -30,6 +30,9 @@ func TestToSetAndCompile(t *testing.T) {
 		InPlaceFusionContracts: []InPlaceFusionContract{{
 			Name: "swiglu",
 		}},
+		TopKOneContracts: []TopKOneContract{{
+			Name: "resident-topk-one",
+		}},
 		ElementCountMethods: nil, // stays nil after compile
 	}
 	sets := c.Compile()
@@ -47,6 +50,13 @@ func TestToSetAndCompile(t *testing.T) {
 	}
 	if len(sets.InPlaceFusionContracts) != 1 || sets.InPlaceFusionContracts[0].Name != "swiglu" {
 		t.Errorf("Compile lost in-place fusion contracts: %+v", sets.InPlaceFusionContracts)
+	}
+	if len(sets.TopKOneContracts) != 1 || sets.TopKOneContracts[0].Name != "resident-topk-one" {
+		t.Errorf("Compile lost Top-K(k=1) contracts: %+v", sets.TopKOneContracts)
+	}
+	c.TopKOneContracts[0].Name = "mutated"
+	if sets.TopKOneContracts[0].Name != "resident-topk-one" {
+		t.Error("Compile must clone Top-K(k=1) contracts")
 	}
 	c.InPlaceFusionContracts[0].Name = "mutated"
 	if sets.InPlaceFusionContracts[0].Name != "swiglu" {
@@ -183,6 +193,7 @@ func TestUnknownKeys(t *testing.T) {
 }
 
 func TestGoAICurrentVocabularyCompatibility(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "perfscan.json")
 	data := []byte(`{
@@ -193,6 +204,7 @@ func TestGoAICurrentVocabularyCompatibility(t *testing.T) {
   "pointerTypeNames": ["Tensor", "Storage"],
   "variadicDispatchWrappers": ["exec", "visExecN"],
   "topKSelectorFuncs": ["topKIndices"],
+  "topKOneContracts": [{"name":"resident", "function":"example.com/goai.DeviceBuffer.TopKN", "kind":"method", "kArgPosition":2, "indicesResultPosition":1}],
   "inputViewFuncs": ["f64Data", "f32Data"],
   "outputViewFuncs": ["outF64", "outF32"],
   "referenceBackendPkg": "ref",
@@ -212,7 +224,8 @@ func TestGoAICurrentVocabularyCompatibility(t *testing.T) {
 	if cfg.Comment == "" || cfg.CacheLineBytes != 128 || cfg.ReferenceBackendPkg != "ref" ||
 		len(cfg.PureComputeFuncs) != 1 || len(cfg.LayoutOpConstants) != 2 ||
 		len(cfg.PointerTypeNames) != 2 || len(cfg.VariadicDispatchWrappers) != 2 ||
-		len(cfg.TopKSelectorFuncs) != 1 || len(cfg.InputViewFuncs) != 2 ||
+		len(cfg.TopKSelectorFuncs) != 1 || len(cfg.TopKOneContracts) != 1 ||
+		cfg.TopKOneContracts[0].Kind != TopKOneContractMethod || len(cfg.InputViewFuncs) != 2 ||
 		len(cfg.OutputViewFuncs) != 2 || len(cfg.OptimizedBackendPkgs) != 1 ||
 		len(cfg.KernelRegisterFuncs) != 1 {
 		t.Fatalf("current GoAI vocabulary did not round-trip: %+v", cfg)
@@ -220,7 +233,7 @@ func TestGoAICurrentVocabularyCompatibility(t *testing.T) {
 	sets := cfg.Compile()
 	if sets.CacheLineBytes != 128 || !sets.PureComputeFuncs["forward"] || !sets.LayoutOpConstants["OpSlice"] ||
 		!sets.PointerTypeNames["Tensor"] || !sets.VariadicDispatchWrappers["exec"] ||
-		!sets.TopKSelectorFuncs["topKIndices"] || !sets.InputViewFuncs["f64Data"] ||
+		!sets.TopKSelectorFuncs["topKIndices"] || len(sets.TopKOneContracts) != 1 || !sets.InputViewFuncs["f64Data"] ||
 		!sets.OutputViewFuncs["outF64"] || sets.ReferenceBackendPkg != "ref" ||
 		!sets.OptimizedBackendPkgs["cpu"] || !sets.KernelRegisterFuncs["add"] {
 		t.Fatalf("Compile lost current GoAI vocabulary: %+v", sets)
@@ -252,7 +265,8 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"PureComputeFuncs": len(c.PureComputeFuncs), "LayoutOpConstants": len(c.LayoutOpConstants),
 		"PointerTypeNames": len(c.PointerTypeNames), "VariadicDispatchWrappers": len(c.VariadicDispatchWrappers),
 		"TopKSelectorFuncs": len(c.TopKSelectorFuncs), "InputViewFuncs": len(c.InputViewFuncs),
-		"OutputViewFuncs": len(c.OutputViewFuncs), "OptimizedBackendPkgs": len(c.OptimizedBackendPkgs),
+		"TopKOneContracts": len(c.TopKOneContracts),
+		"OutputViewFuncs":  len(c.OutputViewFuncs), "OptimizedBackendPkgs": len(c.OptimizedBackendPkgs),
 		"KernelRegisterFuncs":    len(c.KernelRegisterFuncs),
 		"InPlaceFusionContracts": len(c.InPlaceFusionContracts),
 	}

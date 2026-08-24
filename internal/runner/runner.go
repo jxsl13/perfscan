@@ -340,6 +340,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"pointerTypeNames":         len(cfg.PointerTypeNames),
 		"variadicDispatchWrappers": len(cfg.VariadicDispatchWrappers),
 		"topKSelectorFuncs":        len(cfg.TopKSelectorFuncs),
+		"topKOneContracts":         validTopKOneContracts(cfg.TopKOneContracts),
 		"inputViewFuncs":           len(cfg.InputViewFuncs),
 		"outputViewFuncs":          len(cfg.OutputViewFuncs),
 		"referenceBackendPkg":      len(cfg.ReferenceBackendPkg),
@@ -354,6 +355,16 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		}
 	}
 	return missing
+}
+
+func validTopKOneContracts(contracts []config.TopKOneContract) int {
+	valid := 0
+	for _, contract := range contracts {
+		if contract.Valid() {
+			valid++
+		}
+	}
+	return valid
 }
 
 // selectChecks resolves the -checks selector. The explicit set contains

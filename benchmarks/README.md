@@ -66,3 +66,9 @@ Rules without a pair, and why:
   The owner campaign's bounded-pool candidate preserved exact output but failed
   its end-to-end speedup gate, so an isolated goroutine benchmark would imply
   precisely the generic pool win this rule requires callers to prove instead.
+- **PS6091** (Top-K(k=1) scalarization advisory): the allocation and latency
+  delta belongs to a configured backend's generic Top-K implementation and its
+  proposed scalar argmax capability. A local toy selector would benchmark
+  fixture choices without proving prefix, tie, NaN, or error equivalence. The
+  check documentation records the owner campaign and requires project-level
+  equivalence plus end-to-end gates.

@@ -36,6 +36,7 @@ func TestLoadConfigWarnsUnknownKeys(t *testing.T) {
 }
 
 func TestLoadConfigAcceptsCurrentGoAIVocabulary(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "perfscan.json")
 	data := []byte(`{
@@ -49,6 +50,7 @@ func TestLoadConfigAcceptsCurrentGoAIVocabulary(t *testing.T) {
   "pureComputeFuncs": ["forward"],
   "referenceBackendPkg": "ref",
   "topKSelectorFuncs": ["topKIndices"],
+  "topKOneContracts": [{"name":"resident", "function":"example.com/goai.DeviceBuffer.TopKN", "kind":"method", "kArgPosition":2, "indicesResultPosition":1}],
   "variadicDispatchWrappers": ["exec"]
 }`)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
@@ -59,7 +61,7 @@ func TestLoadConfigAcceptsCurrentGoAIVocabulary(t *testing.T) {
 	if strings.Contains(errBuf.String(), "unrecognized key") {
 		t.Fatalf("current GoAI vocabulary must not produce compatibility warnings:\n%s", errBuf.String())
 	}
-	if cfg.ReferenceBackendPkg != "ref" || len(cfg.VariadicDispatchWrappers) != 1 {
+	if cfg.ReferenceBackendPkg != "ref" || len(cfg.VariadicDispatchWrappers) != 1 || len(cfg.TopKOneContracts) != 1 {
 		t.Fatalf("loadConfig lost current vocabulary: %+v", cfg)
 	}
 }
