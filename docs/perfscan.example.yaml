@@ -124,9 +124,13 @@ gpuReductionKernels:
   - matvec_q4k
 
 # Helpers known to perform computation without changing tensor layout or
-# ownership. Graph checks use these to distinguish compute from movement.
+# ownership. Graph checks use short names to distinguish compute from movement.
+# PS6090 additionally accepts exact typed IDs (import/path.Func or
+# import/path.Type.Method) and audits that benchmark loops keep their primary
+# non-error result observably live. Prefer exact IDs for that benchmark audit.
 pureComputeFuncs:
   - forward
+  - example.com/project/math.QMatMul
 
 # Operation constants that represent layout/view or movement boundaries.
 layoutOpConstants:

@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**383 checks total** — **263 with a bit-identical auto-fix**, 120 advisory. By fix level: **246 L1** (idiomatic), **115 L2** (structured), **22 L3** (aggressive).
+**384 checks total** — **263 with a bit-identical auto-fix**, 121 advisory. By fix level: **246 L1** (idiomatic), **116 L2** (structured), **22 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -392,6 +392,7 @@ checks' fixes.
 | [PS6087](PS6087.md) | alloc | L2 |  | a contract-proven private single-use tensor chain has a provider-bound in-place fusion capability |
 | [PS6088](PS6088.md) | verify | L3 |  | a repeated fresh fan-out barrier has no caller-attributed lifecycle A/B evidence |
 | [PS6089](PS6089.md) | verify | L2 |  | GPU fusion claims must cover production topologies and command lifecycle |
+| [PS6090](PS6090.md) | verify | L2 |  | a benchmark loop discards the primary result of a pure compute call |
 | [PS6091](PS6091.md) | alloc | L2 |  | a generic Top-K(k=1) result is allocated only to read its first index |
 | [PS6092](PS6092.md) | verify | L3 |  | a type-parameter receiver calls an interface-constraint method on a repeated hot-loop path |
 | [PS6093](PS6093.md) | access | L2 |  | a method-sized loop indexes a slice without a source-visible length proof |

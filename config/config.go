@@ -141,8 +141,11 @@ type Config struct {
 	GPUReductionKernels []string `json:"gpuReductionKernels,omitempty" yaml:"gpuReductionKernels"`
 
 	// PureComputeFuncs are project helpers known to perform computation without
-	// changing tensor layout or ownership. Graph/dispatch checks use the set to
-	// distinguish real compute stages from wrappers and movement operations.
+	// changing tensor layout or ownership. Graph/dispatch checks use short names
+	// from the set to distinguish real compute stages from wrappers and movement
+	// operations. PS6090 also accepts exact typed identities such as
+	// "example.com/math.QMatMul" and "example.com/backend.Engine.Execute" when
+	// auditing whether benchmark loops keep compute results observably live.
 	PureComputeFuncs []string `json:"pureComputeFuncs,omitempty" yaml:"pureComputeFuncs"`
 
 	// LayoutOpConstants are operation constants that denote layout/view or
