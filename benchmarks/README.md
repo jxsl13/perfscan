@@ -61,3 +61,8 @@ Rules without a pair, and why:
   A toy tensor and fake in-place method would measure the fixture rather than
   the configured contract. The check documentation pins the permanent GoAI
   kernel benchmark and retained end-to-end campaign evidence.
+- **PS6088** (repeated fan-out barrier evidence advisory): scheduler wait share
+  cannot distinguish goroutine lifecycle cost from ordinary worker idleness.
+  The owner campaign's bounded-pool candidate preserved exact output but failed
+  its end-to-end speedup gate, so an isolated goroutine benchmark would imply
+  precisely the generic pool win this rule requires callers to prove instead.

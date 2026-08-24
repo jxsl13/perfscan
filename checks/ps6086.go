@@ -546,7 +546,7 @@ func ps6086FreshWaitGroupExpression(pass *analysis.Pass, expression ast.Expr) bo
 }
 
 func ps6086WaitGroupValue(value types.Type) bool {
-	named, ok := value.(*types.Named)
+	named, ok := types.Unalias(value).(*types.Named)
 	return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "sync" && named.Obj().Name() == "WaitGroup"
 }
 
