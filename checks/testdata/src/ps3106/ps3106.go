@@ -134,3 +134,17 @@ func chanFuncParam(ch chan Big, f func(Big)) {
 func ifaceParam(v interface{ Sum() int64 }) {
 	sinkInt(v.Sum())
 }
+
+func fixedFunctionHeader[T any](value struct { // want `parameter value of type struct.* is 264 bytes; passing it by value copies 264 bytes on every call`
+	Pad [256]byte
+	F   func(T)
+}) {
+	_ = value.Pad[0]
+}
+
+func fixedInterfaceHeader[T any](value struct { // want `parameter value of type struct.* is 272 bytes; passing it by value copies 272 bytes on every call`
+	Pad [256]byte
+	I   interface{ M(T) }
+}) {
+	_ = value.Pad[0]
+}
