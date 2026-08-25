@@ -1,18 +1,47 @@
 package checks
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"testing"
 
+	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 
 func TestPS6079(t *testing.T) {
+	t.Parallel()
 	analysistest.Run(t, analysistest.TestData(), PS6079.Analyzer, "ps6079")
 }
 
+func TestPS6079PackageHasBenchmark(t *testing.T) {
+	t.Parallel()
+	testingPackage := types.NewPackage("testing", "testing")
+	benchmarkType := types.NewNamed(
+		types.NewTypeName(token.NoPos, testingPackage, "B", nil),
+		types.NewStruct(nil, nil),
+		nil,
+	)
+	parameter := types.NewVar(token.NoPos, nil, "b", types.NewPointer(benchmarkType))
+	signature := types.NewSignatureType(nil, nil, nil, types.NewTuple(parameter), nil, false)
+	name := ast.NewIdent("BenchmarkRoute")
+	function := &ast.FuncDecl{Name: name, Type: &ast.FuncType{}, Body: &ast.BlockStmt{}}
+	pass := &analysis.Pass{TypesInfo: &types.Info{Defs: map[*ast.Ident]types.Object{
+		name: types.NewFunc(token.NoPos, nil, name.Name, signature),
+	}}}
+	if !ps6079PackageHasBenchmark(pass, []*ast.FuncDecl{function}) {
+		t.Fatal("exact BenchmarkX(*testing.B) function was not recognized")
+	}
+	function.Name.Name = "Route"
+	if ps6079PackageHasBenchmark(pass, []*ast.FuncDecl{function}) {
+		t.Fatal("non-benchmark function was recognized as a benchmark")
+	}
+}
+
 func TestPS6079PredicateRelations(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name     string
 		relation ps6079Relation
@@ -32,6 +61,7 @@ func TestPS6079PredicateRelations(t *testing.T) {
 }
 
 func TestPS6079ComparisonOperators(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		expression string
 		operation  token.Token
@@ -54,6 +84,7 @@ func TestPS6079ComparisonOperators(t *testing.T) {
 }
 
 func TestPS6079RouteEvidenceRequiresOperation(t *testing.T) {
+	t.Parallel()
 	route := ps6079Route{gate: &ps6079Gate{
 		optimized: "ssmEncodeNEON",
 		fallback:  "ssmEncodeScalar",

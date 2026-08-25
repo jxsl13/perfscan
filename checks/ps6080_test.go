@@ -28,6 +28,17 @@ func (importer ps6080OverlayImporter) Import(path string) (*types.Package, error
 	return importer.fallback.Import(path)
 }
 
+func TestPS6080SkipsOwnAnalyzerPackage(t *testing.T) {
+	t.Parallel()
+	result, err := runPS6080(&analysis.Pass{Pkg: types.NewPackage(ps6080PackagePath, "checks")})
+	if err != nil {
+		t.Fatalf("runPS6080() error = %v", err)
+	}
+	if result != nil {
+		t.Fatalf("runPS6080() result = %v, want nil", result)
+	}
+}
+
 func TestPS6080StandardErrorSentinel(t *testing.T) {
 	t.Parallel()
 	errorType := types.Universe.Lookup("error").Type()

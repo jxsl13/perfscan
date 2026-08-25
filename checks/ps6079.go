@@ -301,6 +301,12 @@ type ps6079CounterObservation struct {
 
 func runPS6079(pass *analysis.Pass) (any, error) {
 	functions, sites, declarations := ps6079PackageFunctions(pass)
+	if !ps6079PackageHasBenchmark(pass, functions) {
+		// PS6079 only reports routed calls made by a benchmark in this
+		// package. Avoid the substantially more expensive gate, alias, and
+		// route analysis when no such reporting site can exist.
+		return nil, nil
+	}
 	var gates []ps6079Gate
 	for _, function := range functions {
 		gates = append(gates, ps6079FunctionGates(pass, function)...)
@@ -369,6 +375,12 @@ func runPS6079(pass *analysis.Pass) (any, error) {
 		}
 	}
 	return nil, nil
+}
+
+func ps6079PackageHasBenchmark(pass *analysis.Pass, functions []*ast.FuncDecl) bool {
+	return slices.ContainsFunc(functions, func(function *ast.FuncDecl) bool {
+		return ps6006Benchmark(pass, function)
+	})
 }
 
 func ps6079MeasuredBenchmarkCall(pass *analysis.Pass, benchmark *ast.FuncDecl, call *ast.CallExpr) bool {

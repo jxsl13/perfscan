@@ -9,6 +9,7 @@ import (
 	"maps"
 	"path"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -124,6 +125,10 @@ var (
 	ps6080GlobalAliasCaches    sync.Map
 	ps6080ReturnFailureCaches  sync.Map
 )
+
+type ps6080PackageSentinel struct{}
+
+var ps6080PackagePath = reflect.TypeOf(ps6080PackageSentinel{}).PkgPath()
 
 type ps6080Role uint8
 
@@ -267,6 +272,13 @@ type ps6080Finding struct {
 }
 
 func runPS6080(pass *analysis.Pass) (any, error) {
+	if pass.Pkg != nil && pass.Pkg.Path() == ps6080PackagePath {
+		// The analyzer package necessarily contains the storage/decode/matmul
+		// vocabulary in PS6080's own implementation. Those checker helpers are
+		// not a quantized compute surface, and following their package-wide call
+		// graph is both irrelevant and disproportionately expensive.
+		return nil, nil
+	}
 	pass = ps6080ProductionPass(pass)
 	cache := &sync.Map{}
 	ps6080InvokedLiteralCaches.Store(pass, cache)
