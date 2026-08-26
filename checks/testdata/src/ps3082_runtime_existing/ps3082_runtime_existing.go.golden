@@ -1,0 +1,33 @@
+package ps3082_runtime_existing
+
+import (
+	"math"
+	"runtime"
+)
+
+var _ = runtime.GOARCH
+
+func minimum(values []float64) float64 {
+	result := math.Inf(1)
+	for _, value := range values {
+		result = psFmin(result, value) // want `math\.Min in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware min-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
+	}
+	return result
+}
+
+// psFmin preserves math.Min bit for bit while keeping its common path inline
+// (see perfscan PS3082).
+func psFmin(a, b float64) float64 {
+	if runtime.GOARCH == "arm64" {
+		const negativeInfinityBits = uint64(0xfff0000000000000)
+		negativeInfinity := math.Float64frombits(negativeInfinityBits)
+		if a == negativeInfinity || b == negativeInfinity {
+			return negativeInfinity
+		}
+		return min(b, a)
+	}
+	if r := min(a, b); r == r {
+		return r
+	}
+	return math.Min(a, b)
+}

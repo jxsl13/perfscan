@@ -1,6 +1,11 @@
 package checks
 
 import (
+	"go/ast"
+	"go/importer"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,7 +195,54 @@ func TestPS3077(t *testing.T) {
 }
 
 func TestPS3082(t *testing.T) {
+	t.Parallel()
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3082.Analyzer, "ps3082", "pkgshadow")
+}
+
+func TestPS3082RuntimeImportGuards(t *testing.T) {
+	t.Parallel()
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3082.Analyzer,
+		"ps3082_runtime_alias",
+		"ps3082_runtime_existing",
+		"ps3082_existing_helper",
+		"ps3082_runtime_dot",
+		"ps3082_runtime_blank",
+		"ps3082_math_dot",
+		"ps3082_collisions",
+		"ps3082cgo",
+	)
+}
+
+// TestPS3082FixedTargetsTypeCheck closes analysistest's compile gap: golden
+// comparison proves the emitted text, while this proves that the complete
+// fixed default-import, aliased-import, existing-import, and idempotent-helper
+// files resolve and type-check.
+func TestPS3082FixedTargetsTypeCheck(t *testing.T) {
+	t.Parallel()
+	for _, packageName := range []string{
+		"ps3082",
+		"ps3082_runtime_alias",
+		"ps3082_runtime_existing",
+		"ps3082_existing_helper",
+	} {
+		t.Run(packageName, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(analysistest.TestData(), "src", packageName, packageName+".go.golden")
+			source, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			files := token.NewFileSet()
+			file, err := parser.ParseFile(files, path, source, parser.ParseComments)
+			if err != nil {
+				t.Fatal(err)
+			}
+			configuration := types.Config{Importer: importer.Default()}
+			if _, err := configuration.Check(packageName, files, []*ast.File{file}, nil); err != nil {
+				t.Fatalf("fixed target does not type-check: %v", err)
+			}
+		})
+	}
 }
 
 // TestPS3082Shadow pins the guard that a package-level max/min declaration
@@ -198,6 +250,7 @@ func TestPS3082(t *testing.T) {
 // builtin would instead dispatch to the user's function. The diagnostics
 // must still fire, but with no SuggestedFix (hence no .golden file).
 func TestPS3082Shadow(t *testing.T) {
+	t.Parallel()
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS3082.Analyzer, "ps3082_shadow")
 }
 

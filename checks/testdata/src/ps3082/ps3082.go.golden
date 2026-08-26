@@ -1,11 +1,12 @@
 package ps3082
 
+import "runtime"
 import "math"
 
 func runningMax(xs []float64) float64 {
 	hi := math.Inf(-1)
 	for _, v := range xs {
-		hi = psFmax(hi, v) // want `math\.Max in a loop pays a function call per iteration; the max builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		hi = psFmax(hi, v) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 	return hi
 }
@@ -13,7 +14,7 @@ func runningMax(xs []float64) float64 {
 func runningMin(xs []float64) float64 {
 	lo := math.Inf(1)
 	for _, v := range xs {
-		lo = psFmin(lo, v) // want `math\.Min in a loop pays a function call per iteration; the min builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		lo = psFmin(lo, v) // want `math\.Min in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware min-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 	return lo
 }
@@ -22,27 +23,43 @@ type acc struct{ hi float64 }
 
 func fieldMax(a *acc, xs []float64) {
 	for i := range xs {
-		a.hi = psFmax(a.hi, xs[i]) // want `math\.Max in a loop pays a function call per iteration; the max builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		a.hi = psFmax(a.hi, xs[i]) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 }
 
-// A call operand is not side-effect-free: reported, but never rewritten.
+// Selector-only replacement preserves call-operand evaluation once and in
+// left-to-right order, so this is fixable too.
 func callOperand(xs []float64, next func() float64) float64 {
 	hi := math.Inf(-1)
 	for range xs {
-		hi = math.Max(hi, next()) // want `math\.Max in a loop pays a function call per iteration; the max builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		hi = psFmax(hi, next()) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 	return hi
 }
 
-// A compound operand is not in the proven shape: reported, but never
-// rewritten.
+func orderedCallOperands(xs []float64, next func(string) float64) float64 {
+	result := math.Inf(-1)
+	for range xs {
+		result = psFmax(next("left"), next("right")) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
+	}
+	return result
+}
+
+// Compound and conversion operands are also preserved verbatim.
 func scaledOperand(xs []float64) float64 {
 	hi := math.Inf(-1)
 	for _, v := range xs {
-		hi = math.Max(hi, 2*v) // want `math\.Max in a loop pays a function call per iteration; the max builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		hi = psFmax(hi, 2*v) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 	return hi
+}
+
+func convertedF32Operand(xs []float32) float64 {
+	result := math.Inf(-1)
+	for _, value := range xs {
+		result = psFmax(result, float64(value)) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
+	}
+	return result
 }
 
 // A local name capturing the wrapper at the call site: reported, but never
@@ -50,7 +67,7 @@ func scaledOperand(xs []float64) float64 {
 func shadowedWrapper(xs []float64) float64 {
 	psFmax := math.Inf(-1)
 	for _, v := range xs {
-		psFmax = math.Max(psFmax, v) // want `math\.Max in a loop pays a function call per iteration; the max builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		psFmax = math.Max(psFmax, v) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 	return psFmax
 }
@@ -67,20 +84,74 @@ func outsideLoop(a, b float64) float64 {
 	return math.Max(a, b)
 }
 
-// psFmax is the max builtin with a fallback to math.Max whenever the
-// builtin returns NaN — the only inputs on which the two disagree (see
-// perfscan PS3082).
+// Statically short loops stay silent: the helper guards can lose when the
+// repeated work is this small.
+func knownShort(a, b float64) float64 {
+	for range 8 {
+		a = math.Max(a, b)
+	}
+	for range [8]struct{}{} {
+		a = math.Min(a, b)
+	}
+	return a
+}
+
+// A statically larger domain is repeated enough to qualify.
+func knownLarge(a, b float64) float64 {
+	for range 9 {
+		a = psFmax(a, b) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
+	}
+	return a
+}
+
+// A short inner loop is hot when a data-scaled outer loop repeats it.
+func nestedDataScaled(xs []float64) float64 {
+	var result float64
+	for _, value := range xs {
+		for range 2 {
+			result = psFmax(result, value) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
+		}
+	}
+	return result
+}
+
+// A positive constant step still proves a data-scaled counted domain.
+func steppedDataScaled(xs []float64) float64 {
+	var result float64
+	for i := 0; i < len(xs); i += 2 {
+		result = psFmax(result, xs[i]) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
+	}
+	return result
+}
+
+// psFmax preserves math.Max bit for bit while keeping its common path inline
+// (see perfscan PS3082).
 func psFmax(a, b float64) float64 {
+	if runtime.GOARCH == "arm64" {
+		const positiveInfinityBits = uint64(0x7ff0000000000000)
+		positiveInfinity := math.Float64frombits(positiveInfinityBits)
+		if a == positiveInfinity || b == positiveInfinity {
+			return positiveInfinity
+		}
+		return max(b, a)
+	}
 	if r := max(a, b); r == r {
 		return r
 	}
 	return math.Max(a, b)
 }
 
-// psFmin is the min builtin with a fallback to math.Min whenever the
-// builtin returns NaN — the only inputs on which the two disagree (see
-// perfscan PS3082).
+// psFmin preserves math.Min bit for bit while keeping its common path inline
+// (see perfscan PS3082).
 func psFmin(a, b float64) float64 {
+	if runtime.GOARCH == "arm64" {
+		const negativeInfinityBits = uint64(0xfff0000000000000)
+		negativeInfinity := math.Float64frombits(negativeInfinityBits)
+		if a == negativeInfinity || b == negativeInfinity {
+			return negativeInfinity
+		}
+		return min(b, a)
+	}
 	if r := min(a, b); r == r {
 		return r
 	}

@@ -1032,6 +1032,7 @@ var fixableStdlibImports = map[string]string{
 	"sort":    "sort",
 	"strings": "strings",
 	"errors":  "errors",
+	"runtime": "runtime",
 	"utf8":    "unicode/utf8",
 	"hex":     "encoding/hex", // PS2107 rewrites fmt.Sprintf("%x", b) -> hex.EncodeToString(b)
 }

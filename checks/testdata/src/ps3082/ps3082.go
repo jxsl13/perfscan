@@ -5,7 +5,7 @@ import "math"
 func runningMax(xs []float64) float64 {
 	hi := math.Inf(-1)
 	for _, v := range xs {
-		hi = math.Max(hi, v) // want `math\.Max in a loop pays a function call per iteration; the max builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		hi = math.Max(hi, v) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 	return hi
 }
@@ -13,7 +13,7 @@ func runningMax(xs []float64) float64 {
 func runningMin(xs []float64) float64 {
 	lo := math.Inf(1)
 	for _, v := range xs {
-		lo = math.Min(lo, v) // want `math\.Min in a loop pays a function call per iteration; the min builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		lo = math.Min(lo, v) // want `math\.Min in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware min-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 	return lo
 }
@@ -22,27 +22,43 @@ type acc struct{ hi float64 }
 
 func fieldMax(a *acc, xs []float64) {
 	for i := range xs {
-		a.hi = math.Max(a.hi, xs[i]) // want `math\.Max in a loop pays a function call per iteration; the max builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		a.hi = math.Max(a.hi, xs[i]) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 }
 
-// A call operand is not side-effect-free: reported, but never rewritten.
+// Selector-only replacement preserves call-operand evaluation once and in
+// left-to-right order, so this is fixable too.
 func callOperand(xs []float64, next func() float64) float64 {
 	hi := math.Inf(-1)
 	for range xs {
-		hi = math.Max(hi, next()) // want `math\.Max in a loop pays a function call per iteration; the max builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		hi = math.Max(hi, next()) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 	return hi
 }
 
-// A compound operand is not in the proven shape: reported, but never
-// rewritten.
+func orderedCallOperands(xs []float64, next func(string) float64) float64 {
+	result := math.Inf(-1)
+	for range xs {
+		result = math.Max(next("left"), next("right")) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
+	}
+	return result
+}
+
+// Compound and conversion operands are also preserved verbatim.
 func scaledOperand(xs []float64) float64 {
 	hi := math.Inf(-1)
 	for _, v := range xs {
-		hi = math.Max(hi, 2*v) // want `math\.Max in a loop pays a function call per iteration; the max builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		hi = math.Max(hi, 2*v) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 	return hi
+}
+
+func convertedF32Operand(xs []float32) float64 {
+	result := math.Inf(-1)
+	for _, value := range xs {
+		result = math.Max(result, float64(value)) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
+	}
+	return result
 }
 
 // A local name capturing the wrapper at the call site: reported, but never
@@ -50,7 +66,7 @@ func scaledOperand(xs []float64) float64 {
 func shadowedWrapper(xs []float64) float64 {
 	psFmax := math.Inf(-1)
 	for _, v := range xs {
-		psFmax = math.Max(psFmax, v) // want `math\.Max in a loop pays a function call per iteration; the max builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		psFmax = math.Max(psFmax, v) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 	return psFmax
 }
@@ -65,4 +81,44 @@ func clamp(xs []float64, lo, hi float64) {
 
 func outsideLoop(a, b float64) float64 {
 	return math.Max(a, b)
+}
+
+// Statically short loops stay silent: the helper guards can lose when the
+// repeated work is this small.
+func knownShort(a, b float64) float64 {
+	for range 8 {
+		a = math.Max(a, b)
+	}
+	for range [8]struct{}{} {
+		a = math.Min(a, b)
+	}
+	return a
+}
+
+// A statically larger domain is repeated enough to qualify.
+func knownLarge(a, b float64) float64 {
+	for range 9 {
+		a = math.Max(a, b) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
+	}
+	return a
+}
+
+// A short inner loop is hot when a data-scaled outer loop repeats it.
+func nestedDataScaled(xs []float64) float64 {
+	var result float64
+	for _, value := range xs {
+		for range 2 {
+			result = math.Max(result, value) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
+		}
+	}
+	return result
+}
+
+// A positive constant step still proves a data-scaled counted domain.
+func steppedDataScaled(xs []float64) float64 {
+	var result float64
+	for i := 0; i < len(xs); i += 2 {
+		result = math.Max(result, xs[i]) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
+	}
+	return result
 }
