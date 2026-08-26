@@ -391,6 +391,7 @@ checks' fixes.
 | [PS6086](PS6086.md) | verify | L3 |  | all-goroutine fan-out leaves the caller waiting; caller participation needs a latency benchmark, not an allocation-only rewrite |
 | [PS6087](PS6087.md) | alloc | L2 |  | a contract-proven private single-use tensor chain has a provider-bound in-place fusion capability |
 | [PS6088](PS6088.md) | verify | L3 |  | a repeated fresh fan-out barrier has no caller-attributed lifecycle A/B evidence |
+| [PS6089](PS6089.md) | verify | L2 |  | GPU fusion claims must cover production topologies and command lifecycle |
 | [PS6091](PS6091.md) | alloc | L2 |  | a generic Top-K(k=1) result is allocated only to read its first index |
 | [PS6093](PS6093.md) | access | L2 |  | a method-sized loop indexes a slice without a source-visible length proof |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |
