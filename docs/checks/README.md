@@ -164,7 +164,7 @@ checks' fixes.
 | [PS3066](PS3066.md) | indirect | L2 | yes | three or more sibling loops over the same bound, all touching one buffer |
 | [PS3071](PS3071.md) | indirect | L2 |  | a method-local fixed-size buffer sliced into an interface-taking call |
 | [PS3077](PS3077.md) | indirect | L3 | yes | math.Min wrapped around math.Max (a clamp) inside a loop |
-| [PS3082](PS3082.md) | indirect | L2 | yes | math.Min or math.Max called inside a loop |
+| [PS3082](PS3082.md) | indirect | L2 | yes | math.Min or math.Max called inside a data-scaled hot loop |
 | [PS3083](PS3083.md) | indirect | L3 |  | an integer-keyed map allocated per outer iteration and probed in a nested loop |
 | [PS3090](PS3090.md) | indirect | L2 |  | a capturing closure passed to a fan-out helper allocates per dispatch |
 | [PS3091](PS3091.md) | indirect | L2 |  | a one-entry compiled-graph/pipeline cache thrashes under alternating signatures; key a bounded cache by the full signature |

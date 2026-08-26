@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -353,15 +354,39 @@ func BenchmarkPS3077_After(b *testing.B) {
 	}
 }
 
-// PS3082 — math.Max call vs NaN-correct builtin wrapper.
+// PS3082 — math.Min/math.Max calls vs exact architecture-aware wrappers.
 func fmax(a, c float64) float64 {
+	if runtime.GOARCH == "arm64" {
+		const positiveInfinityBits = uint64(0x7ff0000000000000)
+		positiveInfinity := math.Float64frombits(positiveInfinityBits)
+		if a == positiveInfinity || c == positiveInfinity {
+			return positiveInfinity
+		}
+		return max(c, a)
+	}
 	if r := max(a, c); r == r {
 		return r
 	}
 	return math.Max(a, c)
 }
 
+func fmin(a, c float64) float64 {
+	if runtime.GOARCH == "arm64" {
+		const negativeInfinityBits = uint64(0xfff0000000000000)
+		negativeInfinity := math.Float64frombits(negativeInfinityBits)
+		if a == negativeInfinity || c == negativeInfinity {
+			return negativeInfinity
+		}
+		return min(c, a)
+	}
+	if r := min(a, c); r == r {
+		return r
+	}
+	return math.Min(a, c)
+}
+
 func BenchmarkPS3082_Before(b *testing.B) {
+	b.ReportAllocs()
 	for range b.N {
 		hi := math.Inf(-1)
 		for _, v := range floats {
@@ -372,12 +397,98 @@ func BenchmarkPS3082_Before(b *testing.B) {
 }
 
 func BenchmarkPS3082_After(b *testing.B) {
+	b.ReportAllocs()
 	for range b.N {
 		hi := math.Inf(-1)
 		for _, v := range floats {
 			hi = fmax(hi, v)
 		}
 		sinkF = hi
+	}
+}
+
+func BenchmarkPS3082_MinBefore(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		lo := math.Inf(1)
+		for _, v := range floats {
+			lo = math.Min(lo, v)
+		}
+		sinkF = lo
+	}
+}
+
+func BenchmarkPS3082_MinAfter(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		lo := math.Inf(1)
+		for _, v := range floats {
+			lo = fmin(lo, v)
+		}
+		sinkF = lo
+	}
+}
+
+// The size sweep keeps the detector's short-loop exclusion independently
+// measurable. Its paired subbenchmarks use identical complete reductions;
+// only the per-element operation differs.
+func BenchmarkPS3082_MaxSizesBefore(b *testing.B) {
+	for _, size := range []int{1, 2, 4, 8, 9, 16, 64, n} {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				hi := math.Inf(-1)
+				for _, value := range floats[:size] {
+					hi = math.Max(hi, value)
+				}
+				sinkF = hi
+			}
+		})
+	}
+}
+
+func BenchmarkPS3082_MaxSizesAfter(b *testing.B) {
+	for _, size := range []int{1, 2, 4, 8, 9, 16, 64, n} {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				hi := math.Inf(-1)
+				for _, value := range floats[:size] {
+					hi = fmax(hi, value)
+				}
+				sinkF = hi
+			}
+		})
+	}
+}
+
+func BenchmarkPS3082_MinSizesBefore(b *testing.B) {
+	for _, size := range []int{1, 2, 4, 8, 9, 16, 64, n} {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				lo := math.Inf(1)
+				for _, value := range floats[:size] {
+					lo = math.Min(lo, value)
+				}
+				sinkF = lo
+			}
+		})
+	}
+}
+
+func BenchmarkPS3082_MinSizesAfter(b *testing.B) {
+	for _, size := range []int{1, 2, 4, 8, 9, 16, 64, n} {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				lo := math.Inf(1)
+				for _, value := range floats[:size] {
+					lo = fmin(lo, value)
+				}
+				sinkF = lo
+			}
+		})
 	}
 }
 

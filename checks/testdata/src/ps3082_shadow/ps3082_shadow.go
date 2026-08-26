@@ -23,7 +23,7 @@ func min(a, b float64) float64 {
 func runningMax(xs []float64) float64 {
 	hi := math.Inf(-1)
 	for _, v := range xs {
-		hi = math.Max(hi, v) // want `math\.Max in a loop pays a function call per iteration; the max builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		hi = math.Max(hi, v) // want `math\.Max in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware max-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 	return hi
 }
@@ -31,7 +31,7 @@ func runningMax(xs []float64) float64 {
 func runningMin(xs []float64) float64 {
 	lo := math.Inf(1)
 	for _, v := range xs {
-		lo = math.Min(lo, v) // want `math\.Min in a loop pays a function call per iteration; the min builtin is one instruction but differs on NaN-vs-Inf pairs — use a NaN-correct wrapper and gate with planted edge values`
+		lo = math.Min(lo, v) // want `math\.Min in a data-scaled loop can stay an out-of-line architecture call per iteration; use the exact architecture-aware min-builtin helper, validate signed-zero/infinity/NaN raw bits on every target, and retain it only after a complete-operation benchmark`
 	}
 	return lo
 }

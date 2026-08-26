@@ -20,6 +20,7 @@ import (
 	"math"
 	"math/rand"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -1586,6 +1587,14 @@ func TestEquiv_PS3077ClampVariableBoundDivergence(t *testing.T) {
 // emits (ps3082FmaxText/ps3082FminText in ps3082.go); the pin below tracks
 // the real emitted code, so any edit to the helpers must be mirrored here.
 func psFmax3082(a, b float64) float64 {
+	if runtime.GOARCH == "arm64" {
+		const positiveInfinityBits = uint64(0x7ff0000000000000)
+		positiveInfinity := math.Float64frombits(positiveInfinityBits)
+		if a == positiveInfinity || b == positiveInfinity {
+			return positiveInfinity
+		}
+		return max(b, a)
+	}
 	if r := max(a, b); r == r {
 		return r
 	}
@@ -1593,6 +1602,14 @@ func psFmax3082(a, b float64) float64 {
 }
 
 func psFmin3082(a, b float64) float64 {
+	if runtime.GOARCH == "arm64" {
+		const negativeInfinityBits = uint64(0xfff0000000000000)
+		negativeInfinity := math.Float64frombits(negativeInfinityBits)
+		if a == negativeInfinity || b == negativeInfinity {
+			return negativeInfinity
+		}
+		return min(b, a)
+	}
 	if r := min(a, b); r == r {
 		return r
 	}
@@ -1600,13 +1617,14 @@ func psFmin3082(a, b float64) float64 {
 }
 
 // TestEquiv_PS3082MinMaxWrapper pins PS3082's bit-identity claim: the
-// builtin-with-NaN-fallback wrappers return exactly math.Max/math.Min's bits
-// for EVERY pair. The builtins and the math functions disagree only on
-// NaN-vs-Inf pairs (math.Max documents +Inf as beating NaN, math.Min -Inf),
-// which is exactly when the builtin returns NaN and the wrapper delegates —
-// so the full ±0/±Inf/NaN cross product plus a numeric sweep must agree
-// bit-for-bit, including the -0/+0 ordering both sides define.
+// architecture-aware wrappers return exactly math.Max/math.Min's bits for
+// EVERY pair on the tested Go 1.27 target. The arm64 arm pins its native NaN
+// payload/operand-order behavior, while other architectures use math as the
+// fallback whenever the builtin returns NaN. The full ±0/±Inf/NaN cross
+// product plus a numeric sweep must agree bit-for-bit, including the -0/+0
+// ordering both sides define.
 func TestEquiv_PS3082MinMaxWrapper(t *testing.T) {
+	t.Parallel()
 	check := func(a, b float64) {
 		if got, want := psFmax3082(a, b), math.Max(a, b); math.Float64bits(got) != math.Float64bits(want) {
 			t.Errorf("psFmax(%v, %v)=%#x != math.Max=%#x", a, b, math.Float64bits(got), math.Float64bits(want))
@@ -1615,8 +1633,21 @@ func TestEquiv_PS3082MinMaxWrapper(t *testing.T) {
 			t.Errorf("psFmin(%v, %v)=%#x != math.Min=%#x", a, b, math.Float64bits(got), math.Float64bits(want))
 		}
 	}
-	for _, a := range equivSpecialFloats {
-		for _, b := range equivSpecialFloats {
+	rawValues := append([]float64(nil), equivSpecialFloats...)
+	for _, bits := range []uint64{
+		0x7ff0000000000001, // + signaling NaN, smallest payload
+		0x7ff0000000000042, // + signaling NaN, nontrivial payload
+		0x7ff8000000000001, // + quiet NaN, smallest payload
+		0x7ff8000000000042, // + quiet NaN, nontrivial payload
+		0xfff0000000000001, // - signaling NaN
+		0xfff0000000000042, // - signaling NaN, nontrivial payload
+		0xfff8000000000001, // - quiet NaN
+		0xfff8000000000042, // - quiet NaN, nontrivial payload
+	} {
+		rawValues = append(rawValues, math.Float64frombits(bits))
+	}
+	for _, a := range rawValues {
+		for _, b := range rawValues {
 			check(a, b)
 		}
 	}
@@ -1632,6 +1663,40 @@ func TestEquiv_PS3082MinMaxWrapper(t *testing.T) {
 			check(s, x)
 		}
 	}
+}
+
+// TestEquiv_PS3082ArgumentEvaluation pins why selector-only replacement may
+// safely cover calls, conversions, and compound expressions: the wrapper call
+// evaluates both arguments exactly once, left to right, just like math.Max or
+// math.Min. This is an evaluation contract test, separate from the raw-bit
+// result Cartesian product above.
+func TestEquiv_PS3082ArgumentEvaluation(t *testing.T) {
+	t.Parallel()
+	test := func(name string, before, after func(float64, float64) float64) {
+		t.Helper()
+		var trace []string
+		counts := map[string]int{}
+		value := func(label string, result float64) float64 {
+			trace = append(trace, label)
+			counts[label]++
+			return result
+		}
+		want := before(value("left", -2), value("right", 3))
+		if strings.Join(trace, ",") != "left,right" || counts["left"] != 1 || counts["right"] != 1 {
+			t.Fatalf("%s before evaluation: trace=%v counts=%v", name, trace, counts)
+		}
+		trace = nil
+		counts = map[string]int{}
+		got := after(value("left", -2), value("right", 3))
+		if strings.Join(trace, ",") != "left,right" || counts["left"] != 1 || counts["right"] != 1 {
+			t.Fatalf("%s after evaluation: trace=%v counts=%v", name, trace, counts)
+		}
+		if math.Float64bits(got) != math.Float64bits(want) {
+			t.Fatalf("%s result bits=%#x, want %#x", name, math.Float64bits(got), math.Float64bits(want))
+		}
+	}
+	test("Max", math.Max, psFmax3082)
+	test("Min", math.Min, psFmin3082)
 }
 
 // TestEquiv_PS3005IndirectKeySort pins PS3005's float/NaN safety. PS3005 is the
