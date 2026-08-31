@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**381 checks total** — **263 with a bit-identical auto-fix**, 118 advisory. By fix level: **246 L1** (idiomatic), **114 L2** (structured), **21 L3** (aggressive).
+**381 checks total** — **263 with a bit-identical auto-fix**, 118 advisory. By fix level: **246 L1** (idiomatic), **114 L2** (structured), **22 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -393,5 +393,7 @@ checks' fixes.
 | [PS6088](PS6088.md) | verify | L3 |  | a repeated fresh fan-out barrier has no caller-attributed lifecycle A/B evidence |
 | [PS6089](PS6089.md) | verify | L2 |  | GPU fusion claims must cover production topologies and command lifecycle |
 | [PS6091](PS6091.md) | alloc | L2 |  | a generic Top-K(k=1) result is allocated only to read its first index |
+| [PS6092](PS6092.md) | verify | L3 |  | a type-parameter receiver calls an interface-constraint method on a repeated hot-loop path |
+| [PS6092](PS6092.md) | verify | L3 |  | a type-parameter receiver calls an interface-constraint method on a repeated hot-loop path |
 | [PS6093](PS6093.md) | access | L2 |  | a method-sized loop indexes a slice without a source-visible length proof |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |
