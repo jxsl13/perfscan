@@ -72,3 +72,9 @@ Rules without a pair, and why:
   fixture choices without proving prefix, tie, NaN, or error equivalence. The
   check documentation records the owner campaign and requires project-level
   equivalence plus end-to-end gates.
+- **PS6092** (generic constraint-call dispatch advisory): dictionary dispatch is
+  compiler-, version-, target-, and instantiation-shape-dependent, while the
+  possible operation-specific rewrites have different code-size and semantic
+  tradeoffs. A fixed toy pair would turn a machine-code verification obligation
+  into a misleading universal speedup claim; inspect the exact instantiated
+  symbol and benchmark the real operation mix instead.
