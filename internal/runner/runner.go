@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/ast/astutil"
@@ -155,6 +156,7 @@ func Run(checks []*lint.Check, opts Options) int {
 	if loadErrors {
 		return 2
 	}
+	metadata := scanEvidenceMetadata(pkgs)
 
 	findings := make([]Finding, 0, len(pkgs))
 	for _, c := range enabled {
@@ -199,7 +201,8 @@ func Run(checks []*lint.Check, opts Options) int {
 			io.WriteString(opts.Stderr, "perfscan: -write-baseline requires -baseline <file>"+"\n")
 			return 2
 		}
-		if err := writeBaseline(opts.Baseline, findings); err != nil {
+		emitEvidenceWarnings(metadata.Warnings, opts.Stderr)
+		if err := writeBaseline(opts.Baseline, findings, metadata); err != nil {
 			fmt.Fprintln(opts.Stderr, "perfscan: baseline:", err)
 			return 2
 		}
@@ -207,16 +210,18 @@ func Run(checks []*lint.Check, opts Options) int {
 		return 0
 	}
 	if opts.Baseline != "" {
-		filtered, suppressed, err := applyBaseline(opts.Baseline, findings)
+		filtered, suppressed, warnings, err := applyBaseline(opts.Baseline, findings, metadata)
 		if err != nil {
 			fmt.Fprintln(opts.Stderr, "perfscan: baseline:", err)
 			return 2
 		}
 		findings = filtered
+		metadata.Warnings = append(metadata.Warnings, warnings...)
 		if suppressed > 0 {
 			fmt.Fprintf(opts.Stderr, "perfscan: %d baselined finding(s) suppressed (%s)\n", suppressed, opts.Baseline)
 		}
 	}
+	emitEvidenceWarnings(metadata.Warnings, opts.Stderr)
 
 	if opts.Diff {
 		// Dry-run: the diff IS the output — findings text is suppressed
@@ -241,9 +246,9 @@ func Run(checks []*lint.Check, opts Options) int {
 
 	switch {
 	case opts.SARIF:
-		emitSARIF(opts.Stdout, findings)
+		emitSARIF(opts.Stdout, findings, metadata)
 	case opts.JSON:
-		emitJSON(opts.Stdout, findings)
+		emitJSON(opts.Stdout, findings, metadata)
 	default:
 		for i := range findings {
 			f := &findings[i]
@@ -264,6 +269,7 @@ func Run(checks []*lint.Check, opts Options) int {
 // e.g. in tests, but never during one); relPath falls back to fetching it
 // lazily when called outside Run.
 var (
+	wdCacheMu   sync.RWMutex
 	cachedWd    string
 	cachedWdErr error
 	wdCached    bool
@@ -271,18 +277,28 @@ var (
 
 // cacheWd captures the current working directory for relPath.
 func cacheWd() {
-	cachedWd, cachedWdErr = os.Getwd()
+	wd, err := os.Getwd()
+	wdCacheMu.Lock()
+	cachedWd, cachedWdErr = wd, err
 	wdCached = true
+	wdCacheMu.Unlock()
 }
 
 func relPath(p string) string {
-	if !wdCached {
+	wdCacheMu.RLock()
+	ready := wdCached
+	wd, err := cachedWd, cachedWdErr
+	wdCacheMu.RUnlock()
+	if !ready {
 		cacheWd()
+		wdCacheMu.RLock()
+		wd, err = cachedWd, cachedWdErr
+		wdCacheMu.RUnlock()
 	}
-	if cachedWdErr != nil {
+	if err != nil {
 		return p
 	}
-	if r, err := filepath.Rel(cachedWd, p); err == nil && !strings.HasPrefix(r, "..") {
+	if r, err := filepath.Rel(wd, p); err == nil && !strings.HasPrefix(r, "..") {
 		return r
 	}
 	return p
@@ -430,7 +446,7 @@ func load(opts *Options) ([]*packages.Package, error) {
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
 			packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo |
 			packages.NeedTypesSizes | packages.NeedImports | packages.NeedDeps |
-			packages.NeedEmbedFiles,
+			packages.NeedEmbedFiles | packages.NeedModule,
 		Tests: opts.Tests,
 	}
 	return packages.Load(cfg, opts.Patterns...)
@@ -1338,20 +1354,21 @@ type jsonFix struct {
 }
 
 type jsonFinding struct {
-	ID       string    `json:"id"`
-	Category string    `json:"category"`
-	Level    string    `json:"level"`
-	AutoFix  bool      `json:"autoFix"`
-	File     string    `json:"file"`
-	Line     int       `json:"line"`
-	Col      int       `json:"col"`
-	EndLine  int       `json:"endLine"`
-	EndCol   int       `json:"endCol"`
-	Message  string    `json:"message"`
-	Fixes    []jsonFix `json:"fixes,omitempty"`
+	ID       string           `json:"id"`
+	Category string           `json:"category"`
+	Level    string           `json:"level"`
+	AutoFix  bool             `json:"autoFix"`
+	File     string           `json:"file"`
+	Line     int              `json:"line"`
+	Col      int              `json:"col"`
+	EndLine  int              `json:"endLine"`
+	EndCol   int              `json:"endCol"`
+	Message  string           `json:"message"`
+	Fixes    []jsonFix        `json:"fixes,omitempty"`
+	Metadata evidenceMetadata `json:"metadata"`
 }
 
-func emitJSON(w io.Writer, findings []Finding) {
+func emitJSON(w io.Writer, findings []Finding, metadata evidenceMetadata) {
 	out := make([]jsonFinding, 0, len(findings))
 	for i := range findings {
 		f := &findings[i]
@@ -1366,6 +1383,7 @@ func emitJSON(w io.Writer, findings []Finding) {
 			EndLine:  f.End.Line,
 			EndCol:   f.End.Column,
 			Message:  f.Message,
+			Metadata: metadata,
 		}
 		for _, fix := range f.Fixes {
 			jx := jsonFix{Message: fix.Message}

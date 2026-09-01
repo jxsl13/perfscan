@@ -1,0 +1,14 @@
+name: dynamic
+jobs:
+  test:
+    strategy:
+      matrix:
+        go: [stable, oldstable]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+      - uses: example/setup-go-wrapper@v1
+        with:
+          go-version: "1.26"

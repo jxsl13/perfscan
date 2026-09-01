@@ -1,0 +1,48 @@
+name: version-files
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: ".go-version"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: ".tool-versions"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: "selected/go.mod"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: "selected/go.work"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "legacy/go.mod"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: "legacy/go.mod"
+      - uses: actions/setup-go@main
+        with:
+          go-version-file: "legacy/go.mod"
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.x"
+          go-version-file: ".go-version"
+      - uses: actions/setup-go@v7
+        with:
+          go-version:
+          go-version-file: ".go-version"
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          go-version-file: ".go-version"
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          go-version-file: ".go-version"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: ${{ matrix.file }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: "../outside/.go-version"

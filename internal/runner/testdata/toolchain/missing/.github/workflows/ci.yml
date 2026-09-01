@@ -1,0 +1,8 @@
+name: missing
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod

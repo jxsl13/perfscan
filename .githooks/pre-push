@@ -11,10 +11,66 @@ err(){ printf '\033[31m[pre-push] FAIL: %s\033[0m\n' "$*"; fail=1; }
 
 if ! command -v go >/dev/null 2>&1; then err "go not on PATH"; exit 1; fi
 
+current_go="$(go env GOVERSION)"
+staticcheck_install_go="local"
+if [[ "$current_go" =~ ^go([0-9]+)\.([0-9]+) ]] && [ "${BASH_REMATCH[2]}" -gt 0 ]; then
+  staticcheck_install_go="go${BASH_REMATCH[1]}.$((BASH_REMATCH[2] - 1)).0"
+fi
+
+install_staticcheck() {
+  say "installing staticcheck with $staticcheck_install_go"
+  GOTOOLCHAIN="$staticcheck_install_go" go install honnef.co/go/tools/cmd/staticcheck@latest
+}
+
+go_version_at_least() {
+  local have="${1#go}" need="${2#go}"
+  local have_major have_minor have_patch need_major need_minor need_patch
+  IFS=. read -r have_major have_minor have_patch <<<"$have"
+  IFS=. read -r need_major need_minor need_patch <<<"$need"
+  have_patch="${have_patch:-0}"; have_patch="${have_patch%%[^0-9]*}"
+  need_patch="${need_patch:-0}"; need_patch="${need_patch%%[^0-9]*}"
+  [[ "$have_major" =~ ^[0-9]+$ && "$have_minor" =~ ^[0-9]+$ && "$have_patch" =~ ^[0-9]+$ &&
+     "$need_major" =~ ^[0-9]+$ && "$need_minor" =~ ^[0-9]+$ && "$need_patch" =~ ^[0-9]+$ ]] || return 1
+  (( have_major > need_major ||
+     have_major == need_major && have_minor > need_minor ||
+     have_major == need_major && have_minor == need_minor && have_patch >= need_patch ))
+}
+
+module_go="$(go list -m -f '{{.GoVersion}}')" || {
+  err "cannot determine module Go version"
+  exit 1
+}
+if ! go_version_at_least "$staticcheck_install_go" "$module_go"; then
+  staticcheck_install_go="go${module_go#go}"
+fi
+
 SC="$(go env GOPATH)/bin/staticcheck"
 if [ ! -x "$SC" ]; then
-  say "installing staticcheck (one-time)"; go install honnef.co/go/tools/cmd/staticcheck@latest || err "staticcheck install"
+  install_staticcheck || { err "staticcheck install"; exit 1; }
 fi
+
+# Staticcheck must load the standard library with the Go version it was built
+# against. This matters while stable Go is newer than staticcheck's supported
+# export-data format: invoking an oldstable-built binary with stable's PATH or
+# GOROOT mixes compiler artifacts and produces spurious version errors.
+staticcheck_go="$(go version -m "$SC" | sed -n '1s/.*: //p')"
+if [ -z "$staticcheck_go" ]; then
+  err "cannot determine staticcheck build Go version"
+  exit 1
+fi
+if ! go_version_at_least "$staticcheck_go" "$module_go"; then
+  say "staticcheck build toolchain $staticcheck_go cannot load go $module_go; reinstalling"
+  install_staticcheck || { err "staticcheck install"; exit 1; }
+  staticcheck_go="$(go version -m "$SC" | sed -n '1s/.*: //p')"
+  if ! go_version_at_least "$staticcheck_go" "$module_go"; then
+    err "staticcheck build toolchain $staticcheck_go cannot load go $module_go"
+    exit 1
+  fi
+fi
+staticcheck_goroot="$(GOTOOLCHAIN="$staticcheck_go" go env GOROOT)" || {
+  err "cannot locate Go toolchain $staticcheck_go for staticcheck"
+  exit 1
+}
 
 say "quality + parallel race tests"
 (
@@ -23,7 +79,7 @@ say "quality + parallel race tests"
   go vet ./... || exit 1
   go build ./... || exit 1
   go run ./internal/testparallel -race -workers 2 ./... || exit 1
-  "$SC" ./... || exit 1
+  PATH="$staticcheck_goroot/bin:$PATH" GOROOT="$staticcheck_goroot" "$SC" ./... || exit 1
 ) || err "quality"
 
 say "extra gates"

@@ -1,4 +1,10 @@
 version: 1
+metadata:
+    toolchain:
+        goVersion: go1.27.0
+        goos: darwin
+        goarch: arm64
+        moduleGo: 1.25.0
 entries:
     - file: config/config.go
       id: PS3106
