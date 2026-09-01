@@ -144,14 +144,9 @@ func runJobs(ctx context.Context, jobs []testJob, workers, parallel int, timeout
 		go func() {
 			defer wg.Done()
 			for job := range queue {
-				args := testArgs(job, parallel, timeout, race)
-				cmd := exec.CommandContext(ctx, "go", args...)
-				var output bytes.Buffer
-				cmd.Stdout = &output
-				cmd.Stderr = &output
-				err := cmd.Run()
+				output, err := runTestJob(ctx, job, parallel, timeout, race, runtime.GOOS)
 				outputMu.Lock()
-				fmt.Printf("=== %s shard %d/%d ===\n%s", job.pkg, job.shard+1, job.shardCount, output.String())
+				fmt.Printf("=== %s shard %d/%d ===\n%s", job.pkg, job.shard+1, job.shardCount, output)
 				outputMu.Unlock()
 				if err != nil {
 					errs <- fmt.Errorf("%s shard %d/%d: %w", job.pkg, job.shard+1, job.shardCount, err)
@@ -183,6 +178,86 @@ func runJobs(ctx context.Context, jobs []testJob, workers, parallel int, timeout
 		return fmt.Errorf("testparallel: %d shard(s) failed:\n%s", len(failures), strings.Join(failures, "\n"))
 	}
 	return nil
+}
+
+func runTestJob(ctx context.Context, job testJob, parallel int, timeout time.Duration, race bool, goos string) (string, error) {
+	return runTestAttempts(ctx, goos, timeout, func(attemptCtx context.Context, remaining time.Duration) (string, error) {
+		args := testArgs(job, parallel, remaining, race)
+		cmd := exec.CommandContext(attemptCtx, "go", args...)
+		var output bytes.Buffer
+		cmd.Stdout = &output
+		cmd.Stderr = &output
+		err := cmd.Run()
+		return output.String(), err
+	})
+}
+
+func runTestAttempts(ctx context.Context, goos string, timeout time.Duration, run func(context.Context, time.Duration) (string, error)) (string, error) {
+	attemptCtx := ctx
+	cancel := func() {}
+	var budgetDeadline time.Time
+	if timeout > 0 {
+		grace := testTimeoutGrace(timeout)
+		budgetDeadline = time.Now().Add(timeout)
+		attemptCtx, cancel = context.WithTimeout(ctx, timeout+grace)
+		if parentDeadline, ok := ctx.Deadline(); ok {
+			parentBudgetDeadline := parentDeadline.Add(-grace)
+			if parentBudgetDeadline.Before(budgetDeadline) {
+				budgetDeadline = parentBudgetDeadline
+			}
+		}
+	}
+	defer cancel()
+
+	var combined strings.Builder
+	combined.Grow(256)
+	for attempt := 1; attempt <= 2; attempt++ {
+		remaining := timeout
+		if timeout > 0 {
+			remaining = time.Until(budgetDeadline)
+			if remaining <= 0 {
+				return combined.String(), context.DeadlineExceeded
+			}
+		}
+		output, err := run(attemptCtx, remaining)
+		combined.WriteString(output)
+		if !retryableWindowsAccessViolation(attemptCtx, goos, output, err) || attempt == 2 {
+			return combined.String(), err
+		}
+		if timeout > 0 && time.Until(budgetDeadline) <= 0 {
+			return combined.String(), context.DeadlineExceeded
+		}
+		combined.WriteString("testparallel: Windows test process exited with 0xc0000005; retrying this complete shard once\n")
+	}
+	panic("unreachable")
+}
+
+func testTimeoutGrace(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return 0
+	}
+	grace := timeout / 10
+	if grace < time.Millisecond {
+		return time.Millisecond
+	}
+	return min(grace, 5*time.Second)
+}
+
+func retryableWindowsAccessViolation(ctx context.Context, goos, output string, err error) bool {
+	if err == nil || ctx.Err() != nil || goos != "windows" {
+		return false
+	}
+	accessViolation := false
+	for line := range strings.SplitSeq(output, "\n") {
+		line = strings.TrimSpace(strings.ToLower(line))
+		if strings.HasPrefix(line, "--- fail:") {
+			return false
+		}
+		if line == "exit status 0xc0000005" {
+			accessViolation = true
+		}
+	}
+	return accessViolation
 }
 
 func testArgs(job testJob, parallel int, timeout time.Duration, race bool) []string {
