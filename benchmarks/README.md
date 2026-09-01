@@ -66,6 +66,12 @@ Rules without a pair, and why:
   The owner campaign's bounded-pool candidate preserved exact output but failed
   its end-to-end speedup gate, so an isolated goroutine benchmark would imply
   precisely the generic pool win this rule requires callers to prove instead.
+- **PS6090** (benchmark result-liveness advisory): the typed sink is deliberately
+  performance-neutral hardening around a project-owned compute API. A toy pure
+  function would either be optimized away (restating the vulnerability) or
+  measure fixture-specific work rather than the configured call. The check
+  documentation records the order-alternated sink/control campaign; retain the
+  real operation and validate that adding its race-free observation is neutral.
 - **PS6091** (Top-K(k=1) scalarization advisory): the allocation and latency
   delta belongs to a configured backend's generic Top-K implementation and its
   proposed scalar argmax capability. A local toy selector would benchmark
