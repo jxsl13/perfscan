@@ -5,10 +5,12 @@ import (
 	"go/ast"
 	"go/build/constraint"
 	"go/token"
+	"go/types"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"golang.org/x/tools/go/analysis"
 
@@ -50,13 +52,20 @@ least two and whose body touches multiple indexed lanes.
 
 The diagnostic prints the exact constraint label and file:line span of both
 siblings and attaches both as related locations. It ranks assembly over named
-SIMD calls over inferred vector-width loops. A scalar variant must itself be
-architecture-specific (at most two satisfiable GOARCH values); deliberately
-broad portable fallbacks therefore stay silent when a more-specific vector
-sibling exists. Different signatures, overlapping partitions, unsatisfiable
-constraints, scalar arithmetic without transcendental calls, unknown sibling
-implementations, dot-imported math lookalikes, nested closures, and
-//perfscan:architecture-symbol-gap-validated functions stay silent.
+SIMD calls over inferred vector-width loops. It also reports up to three direct
+package-function consumers in the scalar partition and up to three nearby
+vector leaves only when their slice/result shape and semantic name family match
+the scalar symbol.
+Those related locations are discovery evidence: they identify where a shared
+primitive may compound, but do not prove semantic interchangeability.
+
+A scalar variant must itself be architecture-specific (at most two
+satisfiable GOARCH values); deliberately broad portable fallbacks therefore
+stay silent when a more-specific vector sibling exists. Different signatures,
+overlapping partitions, unsatisfiable constraints, scalar arithmetic without
+transcendental calls, unknown sibling implementations, dot-imported math
+lookalikes, nested closures, locally shadowed calls, incompatible vector-leaf
+shapes, and //perfscan:architecture-symbol-gap-validated functions stay silent.
 
 There is NO automatic fix. A vector sibling proves an optimization family, not
 semantic interchangeability. Preserve the scalar function's NaN propagation,
@@ -73,7 +82,8 @@ func ExpSumF64(x []float64) float64 {
 
 // exp_amd64.go: //go:build amd64 && goexperiment.simd
 func ExpSumF64(x []float64) float64 { return expSumAVX2(x) }`,
-		After: `// Add a separately selectable arm64 vector candidate.
+		After: `// Inspect related same-partition leaves and direct consumers.
+// Add a separately selectable arm64 vector candidate or fused consumer.
 // Preserve exact special-value/reduction behavior and scalar tails.
 // Promote only after full routed same-binary shape campaigns pass.`,
 		MeasuredWin: `Owner issue #794 was validated by merged goai change #1127
@@ -82,8 +92,14 @@ matrices on archived head 6b69e5162dc7ced392bced1ddc647dee97cf3981.
 The cross-sibling gap was real: adding the separately gated two-lane arm64 NEON
 leaf reduced direct 32K Exp latency by 62.69-63.50% and the six-operation
 geomean by 51.50-52.61% across three alternating paired count=7 M2 Pro
-campaigns. Every cell reported p=0.001, 0 B/op, and 0 allocs/op. The check still
-does not transfer those measurements to an unvalidated symbol or architecture.`,
+campaigns. Every cell reported p=0.001, 0 B/op, and 0 allocs/op.
+
+Owner issue #917 then validated shared-transcendental reuse on Apple M2 Pro:
+the same two-lane logistic leaf improved production F64 sigmoid by 3.029x and
+its SiLU-backward consumer by 2.087x, while a three-pass soft-cap composition
+failed the production gate despite a 3.124x direct-leaf win. A fused one-pass
+consumer subsequently won. Related leaves and consumers are therefore hints
+for separately gated candidates, never transferred performance evidence.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS6077",
@@ -95,6 +111,7 @@ does not transfer those measurements to an unvalidated symbol or architecture.`,
 type ps6077Source struct {
 	file           *ast.File
 	filename       string
+	active         bool
 	constraint     constraint.Expr
 	constraintText string
 	implicitArch   string
@@ -103,19 +120,25 @@ type ps6077Source struct {
 }
 
 type ps6077Variant struct {
-	source       *ps6077Source
-	function     *ast.FuncDecl
-	key          string
-	signature    string
-	scalarCalls  []string
-	vectorKind   string
-	vectorScore  int
-	specificArch int
+	source           *ps6077Source
+	function         *ast.FuncDecl
+	key              string
+	signature        string
+	scalarCalls      []string
+	vectorKind       string
+	vectorScore      int
+	specificArch     int
+	sliceResultShape string
+	nameFamilies     map[string]bool
+	allFamilies      map[string]bool
+	packageCalls     map[string]bool
 }
 
 type ps6077Finding struct {
-	scalar *ps6077Variant
-	vector *ps6077Variant
+	scalar    *ps6077Variant
+	vector    *ps6077Variant
+	leaves    []*ps6077Variant
+	consumers []*ps6077Variant
 }
 
 var ps6077Transcendentals = map[string]bool{
@@ -133,6 +156,7 @@ var ps6077Transcendentals = map[string]bool{
 func runPS6077(pass *analysis.Pass) (any, error) {
 	sources := ps6077PackageSources(pass)
 	groups := make(map[string][]*ps6077Variant)
+	var allVariants []*ps6077Variant
 	for sourceIndex := range sources {
 		source := &sources[sourceIndex]
 		imports := ps6077Imports(source.file)
@@ -145,10 +169,15 @@ func runPS6077(pass *analysis.Pass) (any, error) {
 				source: source, function: function,
 				key: ps6074SymbolKey(function), signature: ps6077Signature(function),
 			}
-			variant.scalarCalls = ps6077ScalarCalls(function, imports)
+			variant.scalarCalls = ps6077ScalarCalls(pass, source, function, imports)
 			variant.vectorKind, variant.vectorScore = ps6077VectorEvidence(function)
 			variant.specificArch = len(ps6077SatisfiableArchitectures(*source))
+			variant.sliceResultShape = ps6077SliceResultShape(function)
+			variant.nameFamilies = ps6077SemanticFamilies(function, false)
+			variant.allFamilies = ps6077SemanticFamilies(function, true)
+			variant.packageCalls = ps6077PackageCalls(pass, variant)
 			groups[variant.key+"|"+variant.signature] = append(groups[variant.key+"|"+variant.signature], variant)
+			allVariants = append(allVariants, variant)
 		}
 	}
 
@@ -170,7 +199,10 @@ func runPS6077(pass *analysis.Pass) (any, error) {
 				}
 			}
 			if best != nil {
-				findings = append(findings, ps6077Finding{scalar: scalar, vector: best})
+				leaves, consumers := ps6077RelatedEvidence(scalar, allVariants)
+				findings = append(findings, ps6077Finding{
+					scalar: scalar, vector: best, leaves: leaves, consumers: consumers,
+				})
 			}
 		}
 	}
@@ -187,13 +219,31 @@ func runPS6077(pass *analysis.Pass) (any, error) {
 		finding := &findings[findingIndex]
 		scalarPosition := pass.Fset.Position(finding.scalar.function.Name.Pos())
 		vectorPosition := pass.Fset.Position(finding.vector.function.Name.Pos())
+		messageParts := make([]string, 0, 3)
+		messageParts = append(messageParts, finding.scalar.key+" has an architecture-specific scalar transcendental implementation ("+strings.Join(finding.scalar.scalarCalls, ", ")+") under ["+finding.scalar.source.label+"] at "+filepath.Base(scalarPosition.Filename)+":"+strconv.Itoa(scalarPosition.Line)+", while the same-signature sibling is "+finding.vector.vectorKind+" under ["+finding.vector.source.label+"] at "+filepath.Base(vectorPosition.Filename)+":"+strconv.Itoa(vectorPosition.Line)+". This is a cross-partition scalar/vector implementation gap")
+		if related := ps6077RelatedMessage(pass, finding); related != "" {
+			messageParts = append(messageParts, "; "+related+". Treat related leaves and consumers as discovery evidence only: validate shared-primitive reuse or a fused consumer at the complete routed boundary")
+		}
+		messageParts = append(messageParts, "; add a separately selectable candidate and preserve special values, approximation/reduction order, tails, alignment, aliasing, and feature gates before routed same-binary promotion (advisory, no automatic fix)")
+		related := []analysis.RelatedInformation{
+			{Pos: finding.scalar.function.Name.Pos(), End: finding.scalar.function.Name.End(), Message: "scalar transcendental sibling under " + finding.scalar.source.label},
+			{Pos: finding.vector.function.Name.Pos(), End: finding.vector.function.Name.End(), Message: finding.vector.vectorKind + " sibling under " + finding.vector.source.label},
+		}
+		for _, leaf := range finding.leaves {
+			related = append(related, analysis.RelatedInformation{
+				Pos: leaf.function.Name.Pos(), End: leaf.function.Name.End(),
+				Message: "shape-compatible same-partition vector-leaf candidate " + leaf.key + " under " + leaf.source.label + " (semantics unproven)",
+			})
+		}
+		for _, consumer := range finding.consumers {
+			related = append(related, analysis.RelatedInformation{
+				Pos: consumer.function.Name.Pos(), End: consumer.function.Name.End(),
+				Message: "direct same-partition consumer " + consumer.key + " under " + consumer.source.label,
+			})
+		}
 		pass.Report(analysis.Diagnostic{
 			Pos: finding.scalar.function.Name.Pos(), End: finding.scalar.function.Name.End(),
-			Message: finding.scalar.key + " has an architecture-specific scalar transcendental implementation (" + strings.Join(finding.scalar.scalarCalls, ", ") + ") under [" + finding.scalar.source.label + "] at " + filepath.Base(scalarPosition.Filename) + ":" + strconv.Itoa(scalarPosition.Line) + ", while the same-signature sibling is " + finding.vector.vectorKind + " under [" + finding.vector.source.label + "] at " + filepath.Base(vectorPosition.Filename) + ":" + strconv.Itoa(vectorPosition.Line) + ". This is a cross-partition scalar/vector implementation gap; add a separately selectable candidate and preserve special values, approximation/reduction order, tails, alignment, aliasing, and feature gates before routed same-binary promotion (advisory, no automatic fix)",
-			Related: []analysis.RelatedInformation{
-				{Pos: finding.scalar.function.Name.Pos(), End: finding.scalar.function.Name.End(), Message: "scalar transcendental sibling under " + finding.scalar.source.label},
-				{Pos: finding.vector.function.Name.Pos(), End: finding.vector.function.Name.End(), Message: finding.vector.vectorKind + " sibling under " + finding.vector.source.label},
-			},
+			Message: strings.Join(messageParts, ""), Related: related,
 		})
 	}
 	return nil, nil
@@ -207,6 +257,7 @@ func ps6077PackageSources(pass *analysis.Pass) []ps6077Source {
 		arch, operatingSystem := ps6077FilenamePartition(source.filename)
 		result = append(result, ps6077Source{
 			file: source.file, filename: source.filename,
+			active:     source.active,
 			constraint: expression, constraintText: text,
 			implicitArch: arch, implicitOS: operatingSystem,
 			label: ps6077ConstraintLabel(arch, operatingSystem, text),
@@ -301,9 +352,13 @@ func ps6077Imports(file *ast.File) map[string]string {
 	return result
 }
 
-func ps6077ScalarCalls(function *ast.FuncDecl, imports map[string]string) []string {
+func ps6077ScalarCalls(pass *analysis.Pass, source *ps6077Source, function *ast.FuncDecl, imports map[string]string) []string {
 	if function.Body == nil {
 		return nil
+	}
+	var parents map[ast.Node]ast.Node
+	if !source.active {
+		parents = ps6077ParentMap(function.Body)
 	}
 	seen := make(map[string]bool)
 	var names []string
@@ -320,7 +375,7 @@ func ps6077ScalarCalls(function *ast.FuncDecl, imports map[string]string) []stri
 			return true
 		}
 		qualifier, ok := ps2110Unparen(selector.X).(*ast.Ident)
-		if !ok || imports[qualifier.Name] != "math" {
+		if !ok || imports[qualifier.Name] != "math" || !ps6077MathSelector(pass, source, function, selector, qualifier, parents) {
 			return true
 		}
 		name := "math." + selector.Sel.Name
@@ -332,6 +387,21 @@ func ps6077ScalarCalls(function *ast.FuncDecl, imports map[string]string) []stri
 	})
 	slices.Sort(names)
 	return names
+}
+
+func ps6077MathSelector(
+	pass *analysis.Pass,
+	source *ps6077Source,
+	function *ast.FuncDecl,
+	selector *ast.SelectorExpr,
+	qualifier *ast.Ident,
+	parents map[ast.Node]ast.Node,
+) bool {
+	if source.active {
+		called, ok := pass.TypesInfo.Uses[selector.Sel].(*types.Func)
+		return ok && called.Pkg() != nil && called.Pkg().Path() == "math" && called.Name() == selector.Sel.Name
+	}
+	return !ps6077HasLocalBindingAt(function, qualifier.Name, qualifier.Pos(), parents)
 }
 
 func ps6077VectorEvidence(function *ast.FuncDecl) (string, int) {
@@ -364,6 +434,355 @@ func ps6077VectorEvidence(function *ast.FuncDecl) (string, int) {
 		return "a multi-lane vector-width loop", 1
 	}
 	return "", 0
+}
+
+func ps6077RelatedEvidence(scalar *ps6077Variant, variants []*ps6077Variant) ([]*ps6077Variant, []*ps6077Variant) {
+	shape := scalar.sliceResultShape
+	families := scalar.nameFamilies
+	seenLeaves := make(map[string]bool)
+	seenConsumers := make(map[string]bool)
+	var leaves, consumers []*ps6077Variant
+	for _, candidate := range variants {
+		if candidate.function == scalar.function || candidate.key == scalar.key {
+			continue
+		}
+		leafCandidate := candidate.vectorScore > 0 && shape != "" &&
+			shape == candidate.sliceResultShape &&
+			ps6077FamiliesOverlap(families, candidate.allFamilies)
+		consumerCandidate := candidate.packageCalls[scalar.function.Name.Name]
+		if !leafCandidate && !consumerCandidate || !ps6077PartitionsOverlap(*scalar.source, *candidate.source) {
+			continue
+		}
+		if leafCandidate {
+			identity := candidate.key + "|" + candidate.signature + "|" + candidate.source.label
+			if !seenLeaves[identity] {
+				seenLeaves[identity] = true
+				leaves = append(leaves, candidate)
+			}
+		}
+		if consumerCandidate {
+			identity := candidate.key + "|" + candidate.signature + "|" + candidate.source.label
+			if !seenConsumers[identity] {
+				seenConsumers[identity] = true
+				consumers = append(consumers, candidate)
+			}
+		}
+	}
+	slices.SortFunc(leaves, func(left, right *ps6077Variant) int {
+		if byScore := cmp.Compare(right.vectorScore, left.vectorScore); byScore != 0 {
+			return byScore
+		}
+		return cmp.Compare(left.function.Pos(), right.function.Pos())
+	})
+	slices.SortFunc(consumers, func(left, right *ps6077Variant) int {
+		return cmp.Compare(left.function.Pos(), right.function.Pos())
+	})
+	return ps6077LimitRelated(leaves), ps6077LimitRelated(consumers)
+}
+
+func ps6077LimitRelated(variants []*ps6077Variant) []*ps6077Variant {
+	const maximum = 3
+	if len(variants) > maximum {
+		return variants[:maximum]
+	}
+	return variants
+}
+
+// ps6077SliceResultShape ignores scalar mode/configuration parameters so a
+// mode-selected SIMD primitive can match its public composite. Requiring the
+// ordered slice parameters and complete result signature keeps unrelated
+// numeric helpers out of the discovery evidence.
+func ps6077SliceResultShape(function *ast.FuncDecl) string {
+	var parameters []string
+	for _, field := range function.Type.Params.List {
+		array, ok := ps2110Unparen(field.Type).(*ast.ArrayType)
+		if !ok || array.Len != nil {
+			continue
+		}
+		count := len(field.Names)
+		if count == 0 {
+			count = 1
+		}
+		for range count {
+			parameters = append(parameters, exprTextRendered(field.Type))
+		}
+	}
+	if len(parameters) == 0 {
+		return ""
+	}
+	return "type=" + ps6077FieldTypes(function.Type.TypeParams) + "|slices=(" + strings.Join(parameters, ",") + ")|results=" + ps6077FieldTypes(function.Type.Results)
+}
+
+var ps6077SemanticAliases = map[string]string{
+	"acos": "acos", "acosh": "acosh", "asin": "asin", "asinh": "asinh",
+	"atan": "atan", "atan2": "atan", "atanh": "atanh", "cbrt": "cbrt", "cos": "cos",
+	"cosh": "cosh", "erf": "erf", "erfc": "erfc", "exp": "exp",
+	"exp2": "exp", "expm1": "exp", "gamma": "gamma", "gelu": "gelu", "hypot": "hypot",
+	"j0": "bessel", "j1": "bessel", "jn": "bessel", "lgamma": "gamma",
+	"log": "log", "log10": "log", "log1p": "log", "log2": "log", "logistic": "sigmoid", "pow": "pow",
+	"sigmoid": "sigmoid", "silu": "sigmoid", "sin": "sin", "sincos": "sincos",
+	"sinh": "sinh", "softplus": "softplus", "swish": "sigmoid", "tan": "tan",
+	"tanh": "tanh", "y0": "bessel", "y1": "bessel", "yn": "bessel",
+}
+
+func ps6077SemanticFamilies(function *ast.FuncDecl, includeCalls bool) map[string]bool {
+	result := make(map[string]bool)
+	ps6077AddSemanticName(result, function.Name.Name)
+	if !includeCalls || function.Body == nil {
+		return result
+	}
+	ast.Inspect(function.Body, func(node ast.Node) bool {
+		if _, nested := node.(*ast.FuncLit); nested {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if ok {
+			ps6077AddSemanticName(result, ps6074CalledName(call.Fun))
+		}
+		return true
+	})
+	return result
+}
+
+func ps6077AddSemanticName(families map[string]bool, name string) {
+	// Go initialisms such as SiLUF64 or sharedSiLUNEON are deliberately kept
+	// together by some naming styles and split as "Si"/"LU" by others. SiLU
+	// and sigmoid share the same transcendental leaf, so retain that sibling
+	// relationship independently of camel-case tokenization.
+	if strings.Contains(strings.ToLower(name), "silu") {
+		families["sigmoid"] = true
+	}
+	for _, word := range ps6077NameWords(name) {
+		if family := ps6077SemanticAliases[word]; family != "" {
+			families[family] = true
+		}
+	}
+}
+
+func ps6077NameWords(name string) []string {
+	var words []string
+	start := 0
+	runes := []rune(name)
+	flush := func(end int) {
+		if end > start {
+			words = append(words, strings.ToLower(string(runes[start:end])))
+		}
+		start = end
+	}
+	for index, current := range runes {
+		if !unicode.IsLetter(current) && !unicode.IsDigit(current) {
+			flush(index)
+			start = index + 1
+			continue
+		}
+		if index > start && unicode.IsUpper(current) &&
+			(unicode.IsLower(runes[index-1]) || index+1 < len(runes) && unicode.IsLower(runes[index+1])) {
+			flush(index)
+		}
+	}
+	flush(len(runes))
+	return words
+}
+
+func ps6077FamiliesOverlap(left, right map[string]bool) bool {
+	for family := range left {
+		if right[family] {
+			return true
+		}
+	}
+	return false
+}
+
+func ps6077PackageCalls(pass *analysis.Pass, consumer *ps6077Variant) map[string]bool {
+	if consumer.function.Recv != nil || consumer.function.Body == nil {
+		// A same-named selector on an ignored architecture file cannot be
+		// resolved safely to a receiver type. Keep the cross-file fallback
+		// precise by reporting package functions only.
+		return nil
+	}
+	var parents map[ast.Node]ast.Node
+	if !consumer.source.active {
+		parents = ps6077ParentMap(consumer.function.Body)
+	}
+	result := make(map[string]bool)
+	ast.Inspect(consumer.function.Body, func(node ast.Node) bool {
+		if _, nested := node.(*ast.FuncLit); nested {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		identifier, ok := ps6077CalledIdentifier(call.Fun)
+		if !ok {
+			return true
+		}
+		if consumer.source.active {
+			object := pass.TypesInfo.Uses[identifier]
+			function, ok := object.(*types.Func)
+			if ok && function.Pkg() == pass.Pkg && function.Parent() == pass.Pkg.Scope() {
+				result[function.Name()] = true
+			}
+			return true
+		}
+		if ps6077HasLocalBindingAt(consumer.function, identifier.Name, identifier.Pos(), parents) {
+			return true
+		}
+		result[identifier.Name] = true
+		return true
+	})
+	return result
+}
+
+func ps6077CalledIdentifier(expression ast.Expr) (*ast.Ident, bool) {
+	switch value := ps2110Unparen(expression).(type) {
+	case *ast.Ident:
+		return value, true
+	case *ast.IndexExpr:
+		return ps6077CalledIdentifier(value.X)
+	case *ast.IndexListExpr:
+		return ps6077CalledIdentifier(value.X)
+	default:
+		return nil, false
+	}
+}
+
+func ps6077ParentMap(root ast.Node) map[ast.Node]ast.Node {
+	parents := make(map[ast.Node]ast.Node)
+	var stack []ast.Node
+	ast.Inspect(root, func(node ast.Node) bool {
+		if node == nil {
+			stack = stack[:len(stack)-1]
+			return false
+		}
+		if len(stack) != 0 {
+			parents[node] = stack[len(stack)-1]
+		}
+		stack = append(stack, node)
+		return true
+	})
+	return parents
+}
+
+func ps6077HasLocalBindingAt(function *ast.FuncDecl, name string, position token.Pos, parents map[ast.Node]ast.Node) bool {
+	fieldLists := []*ast.FieldList{function.Recv, function.Type.TypeParams, function.Type.Params, function.Type.Results}
+	for _, fields := range fieldLists {
+		if fields == nil {
+			continue
+		}
+		for _, field := range fields.List {
+			for _, identifier := range field.Names {
+				if identifier.Name == name {
+					return true
+				}
+			}
+		}
+	}
+	shadowed := false
+	ast.Inspect(function.Body, func(node ast.Node) bool {
+		if shadowed {
+			return false
+		}
+		switch value := node.(type) {
+		case *ast.AssignStmt:
+			if value.Tok == token.DEFINE && value.End() <= position && ps6077ScopeContains(ps6077BindingScope(parents, value), position) {
+				for _, expression := range value.Lhs {
+					if identifier, ok := ps2110Unparen(expression).(*ast.Ident); ok && identifier.Name == name {
+						shadowed = true
+						return false
+					}
+				}
+			}
+		case *ast.RangeStmt:
+			if value.Tok == token.DEFINE && value.Pos() < position && ps6077ScopeContains(value.Body, position) {
+				for _, expression := range []ast.Expr{value.Key, value.Value} {
+					if identifier, ok := ps2110Unparen(expression).(*ast.Ident); ok && identifier.Name == name {
+						shadowed = true
+						return false
+					}
+				}
+			}
+		case *ast.ValueSpec:
+			if value.End() <= position && ps6077ScopeContains(ps6077BindingScope(parents, value), position) {
+				for _, identifier := range value.Names {
+					if identifier.Name == name {
+						shadowed = true
+						return false
+					}
+				}
+			}
+		case *ast.TypeSpec:
+			if value.End() <= position && value.Name.Name == name && ps6077ScopeContains(ps6077BindingScope(parents, value), position) {
+				shadowed = true
+				return false
+			}
+		}
+		return true
+	})
+	return shadowed
+}
+
+func ps6077BindingScope(parents map[ast.Node]ast.Node, declaration ast.Node) ast.Node {
+	if assignment, ok := declaration.(*ast.AssignStmt); ok {
+		switch parent := parents[assignment].(type) {
+		case *ast.IfStmt:
+			if parent.Init == assignment {
+				return parent
+			}
+		case *ast.ForStmt:
+			if parent.Init == assignment {
+				return parent
+			}
+		case *ast.SwitchStmt:
+			if parent.Init == assignment {
+				return parent
+			}
+		case *ast.TypeSwitchStmt:
+			if parent.Init == assignment || parent.Assign == assignment {
+				return parent
+			}
+		}
+	}
+	for node := declaration; node != nil; node = parents[node] {
+		switch scope := parents[node].(type) {
+		case *ast.CaseClause:
+			return scope
+		case *ast.CommClause:
+			return scope
+		case *ast.BlockStmt:
+			return scope
+		}
+	}
+	return nil
+}
+
+func ps6077ScopeContains(scope ast.Node, position token.Pos) bool {
+	return scope != nil && scope.Pos() <= position && position < scope.End()
+}
+
+func ps6077RelatedMessage(pass *analysis.Pass, finding *ps6077Finding) string {
+	evidence := make([]string, 0, len(finding.leaves)+len(finding.consumers))
+	for _, leaf := range finding.leaves {
+		position := pass.Fset.Position(leaf.function.Name.Pos())
+		evidence = append(evidence, "shape-compatible "+strings.Join(ps6077SortedFamilies(ps6077SemanticFamilies(leaf.function, true)), "/")+"-family vector leaf "+leaf.key+" under ["+leaf.source.label+"] at "+filepath.Base(position.Filename)+":"+strconv.Itoa(position.Line))
+	}
+	for _, consumer := range finding.consumers {
+		position := pass.Fset.Position(consumer.function.Name.Pos())
+		evidence = append(evidence, "direct consumer "+consumer.key+" under ["+consumer.source.label+"] at "+filepath.Base(position.Filename)+":"+strconv.Itoa(position.Line))
+	}
+	if len(evidence) == 0 {
+		return ""
+	}
+	return "same-partition discovery evidence: " + strings.Join(evidence, "; ")
+}
+
+func ps6077SortedFamilies(families map[string]bool) []string {
+	result := make([]string, 0, len(families))
+	for family := range families {
+		result = append(result, family)
+	}
+	slices.Sort(result)
+	return result
 }
 
 func ps6077VectorWidthLoop(body *ast.BlockStmt) bool {
