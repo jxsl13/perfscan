@@ -116,20 +116,20 @@ func TestRetryableWindowsAccessViolation(t *testing.T) {
 	}
 }
 
-func TestRunTestAttemptsRetriesAccessViolationOnce(t *testing.T) {
+func TestRunTestAttemptsRetriesTwoConsecutiveAccessViolations(t *testing.T) {
 	t.Parallel()
 	attempts := 0
 	output, err := runTestAttempts(context.Background(), "windows", time.Minute, func(context.Context, time.Duration) (string, error) {
 		attempts++
-		if attempts == 1 {
+		if attempts <= 2 {
 			return "exit status 0xc0000005\nFAIL\n", context.DeadlineExceeded
 		}
 		return "ok\n", nil
 	})
-	if err != nil || attempts != 2 {
-		t.Fatalf("err = %v, attempts = %d; want nil, 2", err, attempts)
+	if err != nil || attempts != 3 {
+		t.Fatalf("err = %v, attempts = %d; want nil, 3", err, attempts)
 	}
-	if !strings.Contains(output, "retrying this complete shard once") || !strings.HasSuffix(output, "ok\n") {
+	if strings.Count(output, "retrying this complete shard") != 2 || !strings.Contains(output, "attempt 3/3") || !strings.HasSuffix(output, "ok\n") {
 		t.Fatalf("combined output did not preserve retry evidence and success: %q", output)
 	}
 }
@@ -141,8 +141,8 @@ func TestRunTestAttemptsKeepsPersistentCrashFailed(t *testing.T) {
 		attempts++
 		return "exit status 0xc0000005\nFAIL\n", context.DeadlineExceeded
 	})
-	if err == nil || attempts != 2 {
-		t.Fatalf("err = %v, attempts = %d; want failure after 2 attempts", err, attempts)
+	if err == nil || attempts != windowsAccessViolationAttempts {
+		t.Fatalf("err = %v, attempts = %d; want failure after %d attempts", err, attempts, windowsAccessViolationAttempts)
 	}
 }
 
@@ -180,7 +180,7 @@ func TestRunTestAttemptsSharesTimeoutAcrossRetries(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
 		t.Fatalf("shared timeout took %s; retry appears to have received a fresh budget", elapsed)
 	}
-	if !strings.Contains(output, "retrying this complete shard once") {
+	if !strings.Contains(output, "retrying this complete shard") {
 		t.Fatalf("combined output omitted retry evidence: %q", output)
 	}
 }

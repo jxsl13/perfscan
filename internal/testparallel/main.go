@@ -192,6 +192,8 @@ func runTestJob(ctx context.Context, job testJob, parallel int, timeout time.Dur
 	})
 }
 
+const windowsAccessViolationAttempts = 3
+
 func runTestAttempts(ctx context.Context, goos string, timeout time.Duration, run func(context.Context, time.Duration) (string, error)) (string, error) {
 	attemptCtx := ctx
 	cancel := func() {}
@@ -211,7 +213,7 @@ func runTestAttempts(ctx context.Context, goos string, timeout time.Duration, ru
 
 	var combined strings.Builder
 	combined.Grow(256)
-	for attempt := 1; attempt <= 2; attempt++ {
+	for attempt := 1; attempt <= windowsAccessViolationAttempts; attempt++ {
 		remaining := timeout
 		if timeout > 0 {
 			remaining = time.Until(budgetDeadline)
@@ -221,13 +223,13 @@ func runTestAttempts(ctx context.Context, goos string, timeout time.Duration, ru
 		}
 		output, err := run(attemptCtx, remaining)
 		combined.WriteString(output)
-		if !retryableWindowsAccessViolation(attemptCtx, goos, output, err) || attempt == 2 {
+		if !retryableWindowsAccessViolation(attemptCtx, goos, output, err) || attempt == windowsAccessViolationAttempts {
 			return combined.String(), err
 		}
 		if timeout > 0 && time.Until(budgetDeadline) <= 0 {
 			return combined.String(), context.DeadlineExceeded
 		}
-		combined.WriteString("testparallel: Windows test process exited with 0xc0000005; retrying this complete shard once\n")
+		fmt.Fprintf(&combined, "testparallel: Windows test process exited with 0xc0000005; retrying this complete shard (attempt %d/%d)\n", attempt+1, windowsAccessViolationAttempts)
 	}
 	panic("unreachable")
 }
