@@ -12,7 +12,7 @@ type optimizer struct {
 func (o *optimizer) apply(p param, g []float64) {}
 
 func (o *optimizer) Step(params []param) {
-	for _, p := range params { // want `grad: make\\(\\) per iteration of a pointer-method loop, bound to a non-escaping local — per-call scratch reallocated every call; hoist to a reused receiver field \\(grow-on-demand, zero only if read before written\\)`
+	for _, p := range params { // want `grad: make\\(\\) per iteration of a pointer-method loop, bound to a non-escaping local — hoist scratch to method-local storage outside the per-item loop first; receiver/sync\\.Pool lifetime extension requires interleaved wall-time evidence \\(zero allocs alone do not prove speedup; measured receiver variants regressed 25–34%\\)`
 		grad := make([]float64, p.N())
 		o.apply(p, grad)
 	}
