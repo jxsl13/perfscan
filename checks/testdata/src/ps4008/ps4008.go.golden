@@ -3,12 +3,47 @@ package ps4008
 func matmul(a, b, c [][]float64) {
 	for i := range a {
 		for j := range b[0] {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				sum += a[i][k] * b[k][j]
+			}
+			c[i][j] = sum
+		}
+	}
+}
+
+// Fixed rectangular arrays prove non-aliasing and every source/output bound,
+// so moving the stores cannot change panic timing or shared-row behavior.
+func matmulFixedArrays(a [2][3]float64, b [3][4]float64) [2][4]float64 {
+	var c [2][4]float64
+	for i := range a {
+		for j := range b[0] {
 			c[i][j] = 0
 		}
 		for k := range b {
 			for j := range b[0] {
 				c[i][j] += a[i][k] * b[k][j]
 			}
+		}
+	}
+	return c
+}
+
+// An unrelated invariant comparison is not an output-lane tail guard. On its
+// false path only s0 is live, so the serial reduction must remain diagnosed.
+func unrelatedInvariantGuardStillSerial(a, b [][]float64, c []float64, cols, retries, limit int) {
+	for i := range a {
+		for j := 0; j+3 < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				s0 += a[i][k] * b[k][j]
+				if retries+1 < limit {
+					s1 += a[i][k] * b[k][j+1]
+					s2 += a[i][k] * b[k][j+2]
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
 		}
 	}
 }
@@ -62,4 +97,1294 @@ func dot(a, b []float64) float64 {
 		}
 	}
 	return s
+}
+
+// A single accumulator still reports when both operands use an index derived
+// from the serial loop variable.
+func derivedSingle(a, b [][]float64, c []float64) {
+	for i := range a {
+		for j := range b[0] {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				base := k * 2
+				sum += a[i][base] * b[base][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+// Three direct/guarded accumulators are not enough to prove latency hiding.
+func threeWayTileStillSerial(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j += 3 {
+			var s0, s1, s2 float64
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				s0 += a[i][k] * b[k][j]
+				if j+1 < cols {
+					s1 += a[i][k] * b[k][j+1]
+				}
+				if j+2 < cols {
+					s2 += a[i][k] * b[k][j+2]
+				}
+			}
+			c[j] = s0 + s1 + s2
+		}
+	}
+}
+
+// Four direct accumulators already expose independent output work.
+func fourWayDirectTile(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b {
+				s0 += a[i][k] * b[k][j]
+				s1 += a[i][k] * b[k][j+1]
+				s2 += a[i][k] * b[k][j+2]
+				s3 += a[i][k] * b[k][j+3]
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+// Addition and subtraction each form one serial recurrence per accumulator;
+// four independent lanes hide the same FMA latency even when the signs mix.
+func fourWayMixedAddSubTile(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b {
+				s0 += a[i][k] * b[k][j]
+				s1 -= a[i][k] * b[k][j+1]
+				s2 += a[i][k] * b[k][j+2]
+				s3 -= a[i][k] * b[k][j+3]
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+// Tail guards are accepted only because they are invariant in the tap loop.
+func fourWayGuardedTailTile(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b {
+				s0 += a[i][k] * b[k][j]
+				if j+1 < cols {
+					s1 += a[i][k] * b[k][j+1]
+				}
+				if j+2 < cols {
+					s2 += a[i][k] * b[k][j+2]
+				}
+				if j+3 < cols {
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+// A tap-varying guard does not prove a full independent accumulator.
+func tapVaryingGuardStillSerial(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				s0 += a[i][k] * b[k][j]
+				if k > 0 {
+					s1 += a[i][k] * b[k][j+1]
+					s2 += a[i][k] * b[k][j+2]
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+// The shadowed k is not the serial loop object, so this is only a 3-way tile.
+func shadowedIndexStillSerial(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				s0 += a[i][k] * b[k][j]
+				s1 += a[i][k] * b[k][j+1]
+				s2 += a[i][k] * b[k][j+2]
+				if j+3 < cols {
+					k := j
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+// Reassigning a derived index before the multiply breaks the serial-index proof.
+func derivedReassignedBeforeUseSilent(a, b [][]float64, c []float64) {
+	for i := range a {
+		for j := range b[0] {
+			sum := 0.0
+			for k := range b {
+				base := k * 2
+				base = 0
+				sum += a[i][base] * b[base][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+// Reassigning after the multiply does not invalidate the already-seen use.
+func derivedReassignedAfterUseReports(a, b [][]float64, c []float64) {
+	for i := range a {
+		for j := range b[0] {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				base := k * 2
+				sum += a[i][base] * b[base][j]
+				base = 0
+			}
+			c[j] = sum
+		}
+	}
+}
+
+// Derived locals inside invariant guards are still valid for that guarded path.
+func derivedInsideInvariantGuardReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				if j < cols {
+					base := k * 2
+					sum += a[i][base] * b[base][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+// Tap-varying guards do not count for tile suppression, but the guarded serial
+// accumulator is still a serial dot when it executes.
+func onlyTapVaryingGuardStillReports(a, b [][]float64, c []float64) {
+	for i := range a {
+		for j := range b[0] {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				if k > 0 {
+					sum += a[i][k] * b[k][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+// Two then-branch accumulators plus two else-branch accumulators are not four
+// independent accumulators on a single executable path.
+func exclusiveBranchesStillSerial(a, b [][]float64, c []float64, cols int, flag bool) {
+	for i := range a {
+		for j := 0; j < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				if flag {
+					s0 += a[i][k] * b[k][j]
+					s1 += a[i][k] * b[k][j+1]
+				} else {
+					s2 += a[i][k] * b[k][j+2]
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+// Four accumulators in one branch do not hide the serial chain in the one-way
+// branch.
+func fourThenOneElseStillSerial(a, b [][]float64, c []float64, cols int, flag bool) {
+	for i := range a {
+		for j := 0; j < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				if flag {
+					s0 += a[i][k] * b[k][j]
+					s1 += a[i][k] * b[k][j+1]
+					s2 += a[i][k] * b[k][j+2]
+					s3 += a[i][k] * b[k][j+3]
+				} else {
+					s0 += a[i][k] * b[k][j]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+// Every accumulating branch has four independent accumulators.
+func fourAccumulatorsEveryBranchSilent(a, b [][]float64, c []float64, cols int, flag bool) {
+	for i := range a {
+		for j := 0; j < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b {
+				if flag {
+					s0 += a[i][k] * b[k][j]
+					s1 += a[i][k] * b[k][j+1]
+					s2 += a[i][k] * b[k][j+2]
+					s3 += a[i][k] * b[k][j+3]
+				} else {
+					s0 += a[i][k] * b[k][j]
+					s1 += a[i][k] * b[k][j+1]
+					s2 += a[i][k] * b[k][j+2]
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+func serialDotInsideStandaloneBlockReports(a, b [][]float64, c []float64) {
+	for i := range a {
+		for j := range b[0] {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				{
+					sum += a[i][k] * b[k][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func serialDotInsideLabeledBlockReports(a, b [][]float64, c []float64) {
+	for i := range a {
+		for j := range b[0] {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				if false {
+					goto label
+				}
+			label:
+				{
+					sum += a[i][k] * b[k][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func serialDotInsideElseIfReports(a, b [][]float64, c []float64, flag bool) {
+	for i := range a {
+		for j := range b[0] {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				if flag {
+				} else if !flag {
+					sum += a[i][k] * b[k][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func serialDotInsideSwitchReports(a, b [][]float64, c []float64, mode int) {
+	for i := range a {
+		for j := range b[0] {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				switch mode {
+				case 1:
+					sum += a[i][k] * b[k][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func serialDotInsideSelectReports(a, b [][]float64, c []float64, ready <-chan struct{}) {
+	for i := range a {
+		for j := range b[0] {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				select {
+				case <-ready:
+					sum += a[i][k] * b[k][j]
+				default:
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func ifInitializerDerivedIndexReports(a, b [][]float64, c []float64, flag bool) {
+	for i := range a {
+		for j := range b[0] {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				if idx := k; flag {
+					sum += a[i][idx] * b[idx][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func elseIfInitializerDerivedIndexReports(a, b [][]float64, c []float64, flag bool) {
+	for i := range a {
+		for j := range b[0] {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				if flag {
+				} else if idx := k; !flag {
+					sum += a[i][idx] * b[idx][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func consumePS4008Index(int) {}
+
+func mutatePS4008Index(p *int) { *p = 0 }
+
+func resetPS4008AndTrue(p *int) bool {
+	*p = 0
+	return true
+}
+
+func resetPS4008AndInt(p *int) int {
+	*p = 0
+	return 0
+}
+
+func resetPS4008Any(p *int) any {
+	*p = 0
+	return 0
+}
+
+type ps4008PointerBox struct{ p *int }
+
+func resetPS4008InterfacePointer(value any) {
+	if p, ok := value.(*int); ok {
+		*p = 0
+	}
+}
+
+func resetPS4008PointerBox(box ps4008PointerBox) { *box.p = 0 }
+
+func (box *ps4008PointerBox) reset() { *box.p = 0 }
+
+func simultaneousDerivedAssignmentReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := k
+				prev := idx
+				prev, idx = 0, prev
+				sum += a[i][idx] * b[idx][j]
+				_ = prev
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func simultaneousDerivedAssignmentOverwriteSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				prev := 0
+				idx, prev = prev, idx
+				sum += a[i][idx] * b[idx][j]
+				_ = prev
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func byValueCallKeepsDerivedIndexReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := k
+				consumePS4008Index(idx)
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func addressTakenWithoutMutationKeepsDerivedIndexReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := k
+				_ = &idx
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func pointerAliasMutationClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				p := &idx
+				*p = 0
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func pointerArgumentMutationClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				mutatePS4008Index(&idx)
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func pointerArgumentMutationKeepsUnrelatedDerivedIndexReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx1 := k
+				idx2 := k
+				mutatePS4008Index(&idx1)
+				sum += a[i][idx2] * b[idx2][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func transitivePointerAliasMutationKeepsUnrelatedDerivedIndexReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx1 := k
+				idx2 := k
+				p := &idx1
+				q := p
+				*q = 0
+				sum += a[i][idx2] * b[idx2][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func futurePointerAliasAssignmentDoesNotKillUnrelatedDerivedIndexReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx1 := k
+				idx2 := k
+				p := &idx1
+				*p = 0
+				p = &idx2
+				_ = p
+				sum += a[i][idx2] * b[idx2][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func overwrittenPointerAliasMutationKeepsPreviousTargetReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx1 := k
+				idx2 := k
+				p := &idx1
+				p = &idx2
+				*p = 0
+				sum += a[i][idx1] * b[idx1][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func branchPointerAliasMutationKeepsUnreachedTargetReports(a, b [][]float64, c []float64, cols int, flag bool) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx1 := k
+				idx2 := k
+				p := &idx1
+				if flag {
+					p = &idx2
+				}
+				*p = 0
+				sum += a[i][idx2] * b[idx2][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func branchLocalPointerAliasMutationKeepsUnrelatedTargetReports(a, b [][]float64, c []float64, cols int, flag bool) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx1 := k
+				idx2 := k
+				if flag {
+					p := &idx1
+					*p = 0
+					sum += a[i][idx2] * b[idx2][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func nestedBranchPointerAliasMutationKeepsUnrelatedTargetReports(a, b [][]float64, c []float64, cols int, outer, inner bool) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx1 := k
+				idx2 := k
+				if outer {
+					p := &idx1
+					if inner {
+						*p = 0
+						sum += a[i][idx2] * b[idx2][j]
+					}
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func manyInvariantBranchesBeforeAccumulatorStayLinear(a, b [][]float64, c []float64, cols int, flag bool) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := k
+				if flag {
+				}
+				if flag {
+				}
+				if flag {
+				}
+				if flag {
+				}
+				if flag {
+				}
+				if flag {
+				}
+				if flag {
+				}
+				if flag {
+				}
+				if flag {
+				}
+				if flag {
+				}
+				if flag {
+				}
+				if flag {
+				}
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func closureAliasMutationClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				mutate := func() { idx = 0 }
+				mutate()
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func closureAliasMutationKeepsUnrelatedDerivedIndexReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx1 := k
+				idx2 := k
+				mutate := func() { idx1 = 0 }
+				mutate()
+				_ = idx1
+				sum += a[i][idx2] * b[idx2][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func overwrittenClosureAliasMutationKeepsPreviousTargetReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx1 := k
+				idx2 := k
+				mutate := func() { idx1 = 0 }
+				mutate = func() { idx2 = 0 }
+				mutate()
+				_ = idx2
+				sum += a[i][idx1] * b[idx1][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func aggregateAliasWriteDoesNotCreateDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idxs := []int{k}
+				idxs[0] = 0
+				sum += a[i][idxs[0]] * b[idxs[0]][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func aggregatePointerAliasMutationClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				box := struct{ p *int }{p: &idx}
+				*box.p = 0
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func transitiveAggregatePointerAliasMutationClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				p := &idx
+				box := struct{ p *int }{p: p}
+				*box.p = 0
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func aggregatePointerAliasMutationKeepsUnrelatedDerivedIndexReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx1 := k
+				idx2 := k
+				box := struct{ p *int }{p: &idx1}
+				*box.p = 0
+				sum += a[i][idx2] * b[idx2][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func interfacePointerAliasCallClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				var alias any = &idx
+				resetPS4008InterfacePointer(alias)
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func aggregatePointerAliasCallClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				box := ps4008PointerBox{p: &idx}
+				resetPS4008PointerBox(box)
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func aggregatePointerReceiverClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				box := ps4008PointerBox{p: &idx}
+				box.reset()
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func ifConditionMutationClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				if resetPS4008AndTrue(&idx) {
+					sum += a[i][idx] * b[idx][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func switchTagMutationClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				switch resetPS4008AndInt(&idx) {
+				case 0:
+					sum += a[i][idx] * b[idx][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func typeSwitchAssignMutationClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				switch resetPS4008Any(&idx).(type) {
+				default:
+					sum += a[i][idx] * b[idx][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func switchCaseMutationClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				switch {
+				case resetPS4008AndTrue(&idx):
+					sum += a[i][idx] * b[idx][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func selectReceiveClearsDerivedIndexSilent(a, b [][]float64, c []float64, cols int, ch <-chan int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				idx := k
+				select {
+				case idx = <-ch:
+					sum += a[i][idx] * b[idx][j]
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func unconditionalContinueBeforeAccumulatorSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				continue
+				sum += a[i][k] * b[k][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func unconditionalReturnBeforeAccumulatorSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				return
+				sum += a[i][k] * b[k][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func forwardGotoSkipsAccumulatorSilent(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b {
+				goto done
+				sum += a[i][k] * b[k][j]
+			done:
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func branchJoinDerivedIndexReports(a, b [][]float64, c []float64, cols int, flag bool) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := 0
+				if flag {
+					idx = k
+				} else {
+					idx = k
+				}
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func branchJoinMixedDerivedIndexReports(a, b [][]float64, c []float64, cols int, flag bool) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := 0
+				if flag {
+					idx = k
+				} else {
+					idx = 0
+				}
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func switchBreakKeepsDerivedIndexReports(a, b [][]float64, c []float64, cols int, mode int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := k
+				switch mode {
+				case 0:
+					break
+				default:
+					break
+				}
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func switchFallthroughKeepsDerivedIndexReports(a, b [][]float64, c []float64, cols int, mode int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := 0
+				switch mode {
+				case 0:
+					idx = k
+					fallthrough
+				default:
+				}
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func switchNestedBreakKeepsDerivedIndexReports(a, b [][]float64, c []float64, cols int, mode int, flag bool) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := k
+				switch mode {
+				case 0:
+					if flag {
+						break
+					}
+					idx = 0
+				default:
+					idx = 0
+				}
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func forwardGotoKeepsDerivedIndexAtLabelReports(a, b [][]float64, c []float64, cols int, flag bool) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := k
+				if flag {
+					goto use
+				}
+				idx = 0
+			use:
+				sum += a[i][idx] * b[idx][j]
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func backwardGotoKeepsDerivedIndexAtLabelReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := 0
+			use:
+				sum += a[i][idx] * b[idx][j]
+				idx = k
+				goto use
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func backwardGotoToEmptyLabelKeepsDerivedIndexReports(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := 0
+			use:
+				;
+				sum += a[i][idx] * b[idx][j]
+				idx = k
+				goto use
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func nestedBackwardGotoKeepsDerivedIndexAtOuterLabelReports(a, b [][]float64, c []float64, cols int, flag bool) {
+	for i := range a {
+		for j := 0; j < cols; j++ {
+			sum := 0.0
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				idx := 0
+			use:
+				;
+				sum += a[i][idx] * b[idx][j]
+				idx = k
+				if flag {
+					goto use
+				}
+			}
+			c[j] = sum
+		}
+	}
+}
+
+func closureOuterLoopsDoNotCountTowardDepth(a, b []float64, rows, cols int) {
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			dot := func() float64 {
+				sum := 0.0
+				for k := range b {
+					sum += a[k] * b[k]
+				}
+				return sum
+			}
+			_ = dot
+			_ = i
+			_ = j
+		}
+	}
+}
+
+func closureOwnDepthStillReports(a, b [][]float64, cols int) func() float64 {
+	return func() float64 {
+		total := 0.0
+		for i := range a {
+			for j := 0; j < cols; j++ {
+				sum := 0.0
+				for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+					sum += a[i][k] * b[k][j]
+				}
+				total += sum
+			}
+		}
+		return total
+	}
+}
+
+func nestedOptionalTailGuardExclusiveBranchesStillSerial(a, b [][]float64, c []float64, cols int, flag bool) {
+	for i := range a {
+		for j := 0; j+3 < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				s0 += a[i][k] * b[k][j]
+				if j+1 < cols {
+					if flag {
+						s1 += a[i][k] * b[k][j+1]
+					} else {
+						s2 += a[i][k] * b[k][j+2]
+					}
+				}
+				if j+2 < cols {
+					s2 += a[i][k] * b[k][j+2]
+				}
+				if j+3 < cols {
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+func nestedOptionalTailGuardDifferentAccumulatorsEachPathSilent(a, b [][]float64, c []float64, cols int, flag bool) {
+	for i := range a {
+		for j := 0; j+3 < cols; j += 4 {
+			var s0, s1, s2, s3, alt float64
+			for k := range b {
+				s0 += a[i][k] * b[k][j]
+				if j+1 < cols {
+					if flag {
+						s1 += a[i][k] * b[k][j+1]
+					} else {
+						alt += a[i][k] * b[k][j+1]
+					}
+				}
+				if j+2 < cols {
+					s2 += a[i][k] * b[k][j+2]
+				}
+				if j+3 < cols {
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3 + alt
+		}
+	}
+}
+
+// Optional output lanes do not prove a four-way accumulator tile when their
+// shared bound is assigned during the serial loop.
+func assignedOptionalTailBoundStillSerial(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j+3 < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				s0 += a[i][k] * b[k][j]
+				cols--
+				if j+1 < cols {
+					s1 += a[i][k] * b[k][j+1]
+				}
+				if j+2 < cols {
+					s2 += a[i][k] * b[k][j+2]
+				}
+				if j+3 < cols {
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+// Taking the bound's address exposes it to mutation and invalidates the same
+// optional-tail proof.
+func escapedOptionalTailBoundStillSerial(a, b [][]float64, c []float64, cols int) {
+	for i := range a {
+		for j := 0; j+3 < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				s0 += a[i][k] * b[k][j]
+				mutatePS4008Index(&cols)
+				if j+1 < cols {
+					s1 += a[i][k] * b[k][j+1]
+				}
+				if j+2 < cols {
+					s2 += a[i][k] * b[k][j+2]
+				}
+				if j+3 < cols {
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+// The bound can escape before either loop starts. An indirect write through
+// that old alias still invalidates optional-lane coverage inside the dot loop.
+func priorEscapedOptionalTailBoundStillSerial(a, b [][]float64, c []float64, cols int) {
+	p := &cols
+	for i := range a {
+		for j := 0; j+3 < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				s0 += a[i][k] * b[k][j]
+				mutatePS4008Index(p)
+				if j+1 < cols {
+					s1 += a[i][k] * b[k][j+1]
+				}
+				if j+2 < cols {
+					s2 += a[i][k] * b[k][j+2]
+				}
+				if j+3 < cols {
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+// A closure defined before the output loop can mutate the optional-lane bound
+// even though its call does not directly name cols.
+func priorClosureOptionalTailBoundStillSerial(a, b [][]float64, c []float64, cols int) {
+	mutate := func() { cols = 1 }
+	for i := range a {
+		for j := 0; j+3 < cols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				s0 += a[i][k] * b[k][j]
+				mutate()
+				if j+1 < cols {
+					s1 += a[i][k] * b[k][j+1]
+				}
+				if j+2 < cols {
+					s2 += a[i][k] * b[k][j+2]
+				}
+				if j+3 < cols {
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
+}
+
+var ps4008PackageCols = 8
+
+func mutatePS4008PackageCols() { ps4008PackageCols++ }
+
+// An impure call in the serial loop may change a package-scope optional-lane
+// bound even when it has no explicit argument naming that bound.
+func packageBoundCallEffectStillSerial(a, b [][]float64, c []float64) {
+	for i := range a {
+		for j := 0; j+3 < ps4008PackageCols; j += 4 {
+			var s0, s1, s2, s3 float64
+			for k := range b { // want `innermost loop of this nest is a serial scalar dot accumulator running at FMA latency, not throughput; an ikj/axpy order or an accumulator block breaks the chain \(reassociation is not bit-identical — gate with a tolerance oracle\)`
+				s0 += a[i][k] * b[k][j]
+				mutatePS4008PackageCols()
+				if j+1 < ps4008PackageCols {
+					s1 += a[i][k] * b[k][j+1]
+				}
+				if j+2 < ps4008PackageCols {
+					s2 += a[i][k] * b[k][j+2]
+				}
+				if j+3 < ps4008PackageCols {
+					s3 += a[i][k] * b[k][j+3]
+				}
+			}
+			c[j] = s0 + s1 + s2 + s3
+		}
+	}
 }

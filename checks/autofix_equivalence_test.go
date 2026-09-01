@@ -1963,7 +1963,8 @@ func TestEquiv_PS5002SymmetricMirror(t *testing.T) {
 	}
 }
 
-// TestEquiv_PS4008Matmul pins PS4008's bit-identity claim: the ikj/axpy rewrite
+// TestEquiv_PS4008Matmul pins the arithmetic premise behind PS4008's guarded
+// fixed-array edit: the ikj/axpy rewrite
 // (zero c[i][j], then for k { for j { c[i][j] += a[i][k]*b[k][j] } }) sums each
 // output cell over k in ASCENDING order — exactly the order the serial ijk dot
 // accumulator uses — so the two are bitwise identical (Go float64 arithmetic is
@@ -1972,8 +1973,10 @@ func TestEquiv_PS5002SymmetricMirror(t *testing.T) {
 // that reordered the accumulation (e.g. cache blocking, or swapping to sum over
 // j) would NOT be bit-identical; this asserts the shipped ikj order is. Random
 // matrices whose entries mix large/small magnitudes and specials (±0, extremes)
-// stress rounding; any single-ULP divergence fails CI.
+// stress rounding; any single-ULP divergence fails CI. Runtime-shaped slice
+// alias and panic counterexamples are pinned separately and receive no edit.
 func TestEquiv_PS4008Matmul(t *testing.T) {
+	t.Parallel()
 	ijk := func(a, b [][]float64) [][]float64 {
 		c := make([][]float64, len(a))
 		for i := range a {
@@ -2101,8 +2104,8 @@ func TestEquiv_PS2008Slab(t *testing.T) {
 	}
 }
 
-// TestEquiv_PS1006ColReduce pins PS1006's bit-identity claim AND its panic
-// parity. The interchange (scratch sums walked row-major) accumulates each
+// TestEquiv_PS1006ColReduce pins the arithmetic premise behind PS1006's guarded
+// fixed-array edit. The interchange (scratch sums walked row-major) accumulates each
 // output column over r in ASCENDING order — exactly the order the original
 // strided reduction uses — so the values are bitwise identical. The
 // write-back must be an INDEXED loop (out[c] = sums[c]), not
@@ -2111,8 +2114,10 @@ func TestEquiv_PS2008Slab(t *testing.T) {
 // cap(out) — for len(out) < cols <= cap(out) the copy form silently writes
 // into spare capacity and ELIMINATES the panic. This test pins both: bitwise
 // value identity on valid inputs, and orig-panics == indexed-panics !=
-// copy-panics on a short-but-roomy out.
+// copy-panics on a short-but-roomy out. Slice source-panic/store-order and
+// overlap counterexamples are pinned separately and receive no edit.
 func TestEquiv_PS1006ColReduce(t *testing.T) {
+	t.Parallel()
 	orig := func(a []float64, rows, cols int, out []float64) {
 		for c := 0; c < cols; c++ {
 			s := 0.0

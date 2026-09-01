@@ -55,6 +55,7 @@ func TestPS6004(t *testing.T) {
 var goodFastPaths = config.Config{FastPathHelpers: []string{"flatF64", "flatF32"}}
 
 func TestPS4008(t *testing.T) {
+	t.Parallel()
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS4008.Analyzer, "ps4008")
 }
 
@@ -343,6 +344,7 @@ func TestPS1004(t *testing.T) {
 }
 
 func TestPS1006(t *testing.T) {
+	t.Parallel()
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS1006.Analyzer, "ps1006")
 }
 
