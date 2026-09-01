@@ -99,7 +99,43 @@ func TestPS5008(t *testing.T) {
 }
 
 func TestPS6010(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS6010.Analyzer, "ps6010")
+	t.Parallel()
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS6010.Analyzer, "ps6010", "ps6010_len_shadow")
+}
+
+// TestPS6010FixedTargetTypeCheck closes analysistest's compile gap for the
+// multi-statement rewrite, including block, switch-case, select-case, local
+// float64 shadowing, len-builtin shadow suppression, multiple same-line edits,
+// and duplicate adjusted //line positions. Golden comparison proves the text;
+// this proves the complete combined target compiles.
+func TestPS6010FixedTargetTypeCheck(t *testing.T) {
+	t.Parallel()
+	files := token.NewFileSet()
+	var parsed []*ast.File
+	for _, name := range []string{
+		"package_state.go",
+		"ps6010.go.golden",
+		"fix_safety.go.golden",
+		"same_line.go.golden",
+		"line_directive.go.golden",
+		"name_capture.go.golden",
+		"round14_len.go.golden",
+	} {
+		path := filepath.Join(analysistest.TestData(), "src", "ps6010", name)
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := parser.ParseFile(files, path, source, parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed = append(parsed, file)
+	}
+	configuration := types.Config{Importer: importer.Default()}
+	if _, err := configuration.Check("ps6010", files, parsed, nil); err != nil {
+		t.Fatalf("PS6010 fixed target does not type-check: %v", err)
+	}
 }
 
 func TestPS5002(t *testing.T) {

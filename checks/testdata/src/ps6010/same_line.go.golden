@@ -1,0 +1,64 @@
+package ps6010
+
+func twoFixesOnOneLine(a [4]float64, w [16]float64, out, n int) ([4]float64, [4]float64) {
+	var first, second [4]float64
+	psO138 := 0
+	if out <= 0 || (out <= len(first) && (n <= 0 || (n <= len(a) && n <= len(w)/out))) {
+		for ; psO138 < out && out-psO138 >= 4; psO138 += 4 {
+			a0, a1, a2, a3 := 0.0, 0.0, 0.0, 0.0
+			for i := 0; i < n; i++ {
+				ai := a[i]
+				a0 += ai * w[i*out+psO138]
+				a1 += ai * w[i*out+psO138+1]
+				a2 += ai * w[i*out+psO138+2]
+				a3 += ai * w[i*out+psO138+3]
+			}
+			first[psO138], first[psO138+1], first[psO138+2], first[psO138+3] = a0, a1, a2, a3
+		}
+		for ; psO138 < out; psO138++ {
+			sum := 0.0
+			for i := 0; i < n; i++ {
+				sum += a[i] * w[i*out+psO138]
+			}
+			first[psO138] = sum
+		}
+	} else {
+		for ; psO138 < out; psO138++ {
+			sum := 0.0
+			for i := 0; i < n; i++ {
+				sum += a[i] * w[i*out+psO138]
+			}
+			first[psO138] = sum
+		}
+	}
+	psO220 := 0
+	if out <= 0 || (out <= len(second) && (n <= 0 || (n <= len(a) && n <= len(w)/out))) {
+		for ; psO220 < out && out-psO220 >= 4; psO220 += 4 {
+			a0, a1, a2, a3 := 0.0, 0.0, 0.0, 0.0
+			for i := 0; i < n; i++ {
+				ai := a[i]
+				a0 += ai * w[i*out+psO220]
+				a1 += ai * w[i*out+psO220+1]
+				a2 += ai * w[i*out+psO220+2]
+				a3 += ai * w[i*out+psO220+3]
+			}
+			second[psO220], second[psO220+1], second[psO220+2], second[psO220+3] = a0, a1, a2, a3
+		}
+		for ; psO220 < out; psO220++ {
+			sum := 0.0
+			for i := 0; i < n; i++ {
+				sum += a[i] * w[i*out+psO220]
+			}
+			second[psO220] = sum
+		}
+	} else {
+		for ; psO220 < out; psO220++ {
+			sum := 0.0
+			for i := 0; i < n; i++ {
+				sum += a[i] * w[i*out+psO220]
+			}
+			second[psO220] = sum
+		}
+	} // want `this operand does not vary with the output index o but is re-streamed once per output element; unroll the output loop by 4 with independent accumulators to amortize the load \(bit-identical per output\)` `this operand does not vary with the output index p but is re-streamed once per output element; unroll the output loop by 4 with independent accumulators to amortize the load \(bit-identical per output\)`
+	return first, second
+}
