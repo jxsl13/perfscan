@@ -26,10 +26,10 @@ var PS2004 = register(&lint.Check{
 		Title: "per-call scratch make() bound to a non-escaping local in a pointer-method loop",
 		Text: `A slice make() inside a per-item loop of a pointer-receiver
 method, bound to a local that does not escape (not returned, not stored into
-a field or slot), is scratch reallocated on every call. On a reusable
-stateful object — an optimizer stepping over its parameters — that is pure
-GC churn. Hoist it to a reused receiver field (grow-on-demand; zero it only
-if it is read before written).
+a field or slot), is scratch reallocated for every item. Prefer method-local
+reuse by hoisting the storage outside the per-item loop (grow on demand and
+zero only when the consumer can read before fully overwriting it). This keeps
+the scratch lifetime within one call and preserves concurrency between calls.
 
 Ring slots and returned buffers escape and are deliberately excluded — they
 need a different fix. Pointer-element slices (make([]*T, …)) are skipped:
@@ -55,7 +55,11 @@ The explicit contract is essential: cgo signatures do not reveal whether C
 writes the complete readable region. Add such a comment only after checking
 the foreign implementation. Without every proof, PS2004 remains advisory.
 The local hoist preserves concurrency between method calls, unlike moving the
-buffer to a receiver field.`,
+buffer to a receiver field. Extending lifetime onto a receiver or sync.Pool is
+a separate optimization: require interleaved wall-time evidence (including
+contention and reuse controls) before adopting it. Zero allocations alone do
+not imply a speedup; receiver-owned variants have measured 25–34% regressions
+consistent with altered aliasing and loss of fresh-allocation no-alias facts.`,
 		Before: `func (o *Optimizer) Step(params []Param) {
 	for _, p := range params {
 		grad := make([]float64, p.N())
@@ -63,9 +67,15 @@ buffer to a receiver field.`,
 	}
 }`,
 		After: `func (o *Optimizer) Step(params []Param) {
+	var scratch []float64
 	for _, p := range params {
-		o.scratch = growF64(o.scratch, p.N()) // reused receiver field
-		o.apply(p, o.scratch)
+		n := p.N()
+		if cap(scratch) < n {
+			scratch = make([]float64, n)
+		}
+		grad := scratch[:n:n] // retain the fresh slice's len/cap contract
+		clear(grad) // omit only with a proven full-overwrite contract
+		o.apply(p, grad)
 	}
 }`,
 		MeasuredWin: `On Apple M2 Pro with a fixed 96-byte foreign output buffer
@@ -73,7 +83,9 @@ and 128 returned records, reuse measured 4.80 us, 17,648 B/op, 214 allocs/op
 before versus 2.72 us, 5,456 B/op, 87 allocs/op after: 127 fewer allocations,
 12,192 fewer bytes, and about 1.76x lower latency. The equivalence corpus covers
 adjacent shrinking/growing labels, empty and embedded-NUL labels, and the exact
-95-byte truncation boundary.`,
+95-byte truncation boundary. Conversely, issue #898 measured two receiver-owned
+scratch variants at 1.2465x and 1.3379x slower despite reaching 0 B/op and 0
+allocs/op, consistent with losing fresh-allocation no-alias optimization.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS2004",
@@ -122,7 +134,7 @@ func runPS2004(pass *analysis.Pass) (any, error) {
 					diag := analysis.Diagnostic{
 						Pos:     loop.Pos(),
 						End:     as.End(),
-						Message: id.Name + ": make() per iteration of a pointer-method loop, bound to a non-escaping local — per-call scratch reallocated every call; hoist to a reused receiver field (grow-on-demand, zero only if read before written)",
+						Message: id.Name + ": make() per iteration of a pointer-method loop, bound to a non-escaping local — hoist scratch to method-local storage outside the per-item loop first; receiver/sync.Pool lifetime extension requires interleaved wall-time evidence (zero allocs alone do not prove speedup; measured receiver variants regressed 25–34%)",
 					}
 					if !fixedLoops[loop] {
 						if fix, size, producer, ok := ps2004CgoReuseFix(pass, f, fn, loop, as, call, id, stack); ok {
