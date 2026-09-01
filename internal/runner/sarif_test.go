@@ -17,6 +17,8 @@ import (
 // (uri + 1-based startLine). It also pins the fix-level → severity mapping
 // (L1/L2 warning, L3 note).
 func TestSARIFStructure(t *testing.T) {
+	t.Parallel()
+
 	c1 := &lint.Check{ID: "PS9001", Category: "alloc", Level: lint.LevelIdiomatic, Doc: lint.Documentation{Title: "t1"}}
 	c3 := &lint.Check{ID: "PS9003", Category: "misc", Level: lint.LevelAggressive, Doc: lint.Documentation{Title: "t3"}}
 	findings := []Finding{
@@ -26,7 +28,8 @@ func TestSARIFStructure(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	emitSARIF(&buf, findings)
+	metadata := fakeEvidenceMetadata("go1.25.3", "1.25.0")
+	emitSARIF(&buf, findings, metadata)
 
 	var log struct {
 		Version string `json:"version"`
@@ -60,6 +63,7 @@ func TestSARIFStructure(t *testing.T) {
 					} `json:"physicalLocation"`
 				} `json:"locations"`
 			} `json:"results"`
+			Properties evidenceMetadata `json:"properties"`
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal(buf.Bytes(), &log); err != nil {
@@ -75,6 +79,9 @@ func TestSARIFStructure(t *testing.T) {
 		t.Fatalf("runs = %d, want 1", len(log.Runs))
 	}
 	run := log.Runs[0]
+	if run.Properties.Toolchain != metadata.Toolchain {
+		t.Errorf("run.properties.toolchain = %+v, want %+v", run.Properties.Toolchain, metadata.Toolchain)
+	}
 	if run.Tool.Driver.Name != "perfscan" {
 		t.Errorf("tool.driver.name = %q, want perfscan", run.Tool.Driver.Name)
 	}
@@ -132,5 +139,37 @@ func TestSARIFStructure(t *testing.T) {
 		if loc.Region.StartLine < 1 {
 			t.Errorf("result[%d] (%s) startLine = %d, want >= 1", i, res.RuleID, loc.Region.StartLine)
 		}
+	}
+}
+
+func TestSARIFEmptyRunMetadataIsAdditiveForLegacyDecoders(t *testing.T) {
+	t.Parallel()
+
+	metadata := fakeEvidenceMetadata("go1.25.3", "1.25.0")
+	var buffer bytes.Buffer
+	emitSARIF(&buffer, nil, metadata)
+
+	// This models a consumer compiled against the old run shape. SARIF property
+	// bags are additive; the decoder must retain the standard run/results shape
+	// while ignoring the newly populated run.properties value.
+	var legacy struct {
+		Runs []struct {
+			Tool    sarifTool     `json:"tool"`
+			Results []sarifResult `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(buffer.Bytes(), &legacy); err != nil {
+		t.Fatalf("legacy SARIF decoder rejected additive run properties: %v", err)
+	}
+	if len(legacy.Runs) != 1 || legacy.Runs[0].Tool.Driver.Name != "perfscan" || legacy.Runs[0].Results == nil {
+		t.Fatalf("legacy SARIF run shape changed: %+v", legacy.Runs)
+	}
+
+	var current sarifLog
+	if err := json.Unmarshal(buffer.Bytes(), &current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Runs[0].Properties.Toolchain != metadata.Toolchain {
+		t.Fatalf("empty SARIF run toolchain = %+v, want %+v", current.Runs[0].Properties.Toolchain, metadata.Toolchain)
 	}
 }

@@ -25,7 +25,11 @@ jobs:
       - name: Build
         run: go build ./...
       - name: Test in parallel
-        run: go run ./internal/testparallel -race -workers 4 ./...
+        # Analyzer tests spawn nested Go builds. Four race-enabled processes
+        # oversubscribe the smaller macOS arm64 runner and make every checks
+        # shard hit its timeout; two still run tests concurrently without the
+        # pathological contention. Linux and Windows retain four workers.
+        run: go run ./internal/testparallel -race -workers ${{ runner.os == 'macOS' && 2 || 4 }} ./...
 
   quality:
     runs-on: ubuntu-latest

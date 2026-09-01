@@ -60,7 +60,42 @@ perfscan -baseline perfscan-baseline.yaml ./...                  # exit 1 only o
 Baseline identity is line-independent (`{file, check, message}` with
 counts), so unrelated edits that shift line numbers do not resurrect
 accepted findings. Re-run `-write-baseline` after fixing a batch to ratchet
-the accepted set down.
+the accepted set down. Baselines also record the Go toolchain and target that
+created them. If the compiler generation changes, regenerate performance
+baselines, or explicitly carry them forward only after validating the new
+compiler; perfscan warns when it detects such a change. A GOOS/GOARCH change
+warns as well, so cross-target results cannot be mistaken for same-target runs.
+
+## Toolchain evidence
+
+JSON findings, every SARIF run, and every written baseline carry a toolchain
+fingerprint: the effective go command's `GOVERSION` (including `GOTOOLCHAIN`
+and `toolchain` selection), its package-loading GOOS/GOARCH, and the main
+module's `go` directive. SARIF stores it once in
+`runs[].properties`, and baselines store it once under `metadata`; both retain
+it when a scan has no findings. For backward
+compatibility, `perfscan -json` remains a top-level findings array and adds the
+same precomputed `metadata` object to each finding. Consequently an empty JSON
+array has no container in which to carry run metadata; no sentinel finding or
+breaking wrapper is introduced.
+
+For GitHub Actions, perfscan inspects literal `go-version` values and literal
+`go-version-file` paths on `actions/setup-go` steps in the repository-root
+`.github/workflows/*.yml` and `*.yaml`. Version files are read conservatively
+when they name `go.mod`, `go.work`, `.go-version`, or `.tool-versions`; an
+explicit `go-version` takes precedence as setup-go specifies. Perfscan warns
+when the selected major/minor generation conflicts with the main `go.mod`.
+For version files containing both directives, setup-go v6+ selects `toolchain`
+while older literal action versions select `go`; unknown action refs stay
+conservative when those directives differ.
+Dynamic expressions (`${{ ... }}`), aliases such as `stable`, missing or
+outside-repository version files, malformed workflows, and ambiguous
+multi-module workspaces are left alone rather than guessed.
+
+A fingerprint identifies the compiler/target but does not prove every tagged
+path builds there. Toolchain upgrades should also run architecture-tagged
+full-tree compile probes (and any focused experimental API compiles) for the
+targets represented by retained benchmark evidence.
 
 ## Fix levels: graded optimization
 
@@ -158,8 +193,9 @@ The text output matches a standard problem-matcher; for VS Code:
 }
 ```
 
-`perfscan -json` emits every finding with its fix's text edits (line/col
-ranges, byte offsets, replacement text) for quick-fix integrations.
+`perfscan -json` keeps its top-level findings array. Every finding includes
+additive toolchain metadata and its fix's text edits (line/col ranges, byte
+offsets, replacement text) for quick-fix integrations.
 
 Because every check is a plain `analysis.Analyzer`, you can also embed them
 in your own multichecker or `go vet -vettool` binary.

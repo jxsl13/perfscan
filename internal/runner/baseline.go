@@ -24,6 +24,10 @@ import (
 type baselineFile struct {
 	// Version guards the format for future changes.
 	Version int `json:"version" yaml:"version"`
+	// Metadata fingerprints the toolchain that produced this evidence. It is
+	// optional so version-1 baselines written by older perfscan releases remain
+	// readable and can produce an actionable warning instead of failing.
+	Metadata evidenceMetadata `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 	// Entries maps "file\x00id\x00message" → accepted count. Serialized
 	// as a sorted list for stable diffs.
 	Entries []baselineEntry `json:"entries" yaml:"entries"`
@@ -73,7 +77,7 @@ func baselineKey(f *Finding, anchorDir string) string {
 }
 
 // writeBaseline writes the current findings as the accepted baseline.
-func writeBaseline(path string, findings []Finding) error {
+func writeBaseline(path string, findings []Finding, metadata evidenceMetadata) error {
 	anchor := baselineAnchor(path)
 	counts := make(map[string]*baselineEntry, len(findings))
 	for i := range findings {
@@ -103,7 +107,7 @@ func writeBaseline(path string, findings []Finding) error {
 		}
 		return strings.Compare(a.Message, b.Message)
 	})
-	b, err := yaml.Marshal(baselineFile{Version: 1, Entries: entries})
+	b, err := yaml.Marshal(baselineFile{Version: 1, Metadata: metadata, Entries: entries})
 	if err != nil {
 		return err
 	}
@@ -117,17 +121,17 @@ func writeBaseline(path string, findings []Finding) error {
 
 // applyBaseline drops findings covered by the baseline, consuming counts.
 // It returns the surviving findings and the number suppressed.
-func applyBaseline(path string, findings []Finding) ([]Finding, int, error) {
+func applyBaseline(path string, findings []Finding, metadata evidenceMetadata) ([]Finding, int, []evidenceWarning, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return findings, 0, err
+		return findings, 0, nil, err
 	}
 	var bf baselineFile
 	if err := yaml.Unmarshal(raw, &bf); err != nil {
-		return findings, 0, fmt.Errorf("%s: %w", path, err)
+		return findings, 0, nil, fmt.Errorf("%s: %w", path, err)
 	}
 	if bf.Version != 1 {
-		return findings, 0, fmt.Errorf("%s: unsupported baseline version %d", path, bf.Version)
+		return findings, 0, nil, fmt.Errorf("%s: unsupported baseline version %d", path, bf.Version)
 	}
 	anchor := baselineAnchor(path)
 	budget := make(map[string]int, len(bf.Entries))
@@ -146,5 +150,5 @@ func applyBaseline(path string, findings []Finding) ([]Finding, int, error) {
 		}
 		out = append(out, *f)
 	}
-	return out, suppressed, nil
+	return out, suppressed, baselineMetadataWarnings(bf.Metadata, metadata), nil
 }

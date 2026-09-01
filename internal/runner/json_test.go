@@ -61,7 +61,8 @@ func TestFixJSONAppliesAndEmitsJSON(t *testing.T) {
 
 	// (b) stdout is valid findings JSON listing PS2107 — -fix must not suppress it.
 	var findings []struct {
-		ID string `json:"id"`
+		ID       string           `json:"id"`
+		Metadata evidenceMetadata `json:"metadata"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &findings); err != nil {
 		t.Fatalf("-fix -json stdout is not valid JSON: %v\n%s", err, out.String())
@@ -69,13 +70,19 @@ func TestFixJSONAppliesAndEmitsJSON(t *testing.T) {
 	if len(findings) != 1 || findings[0].ID != "PS2107" {
 		t.Errorf("-fix -json must emit the PS2107 finding as JSON, got:\n%s", out.String())
 	}
+	if findings[0].Metadata.Toolchain.GoVersion == "" || findings[0].Metadata.Toolchain.ModuleGo != "1.23" {
+		t.Errorf("-fix -json has incomplete scan metadata: %+v", findings[0].Metadata)
+	}
 }
 
 // TestJSONOutputStructure covers emitJSON (the -json output consumed by tooling
-// and editors): parse the array and assert each finding's fields — id, category,
-// level, autoFix, file, 1-based line/col, message — plus the nested fix/edit shape
-// (message + edits with a resolved file:line, byte start<end, and the new text).
+// and editors): preserve the legacy top-level array while asserting each
+// finding's additive metadata and fields — id, category, level, autoFix, file,
+// 1-based line/col, message — plus the nested fix/edit shape (message + edits
+// with a resolved file:line, byte start<end, and the new text).
 func TestJSONOutputStructure(t *testing.T) {
+	t.Parallel()
+
 	c1 := &lint.Check{ID: "PS9001", Category: "indirect", Level: lint.LevelIdiomatic, AutoFix: true, Doc: lint.Documentation{Title: "t1"}}
 	c2 := &lint.Check{ID: "PS9002", Category: "alloc", Level: lint.LevelStructured, Doc: lint.Documentation{Title: "t2"}}
 
@@ -101,7 +108,8 @@ func TestJSONOutputStructure(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	emitJSON(&buf, findings)
+	metadata := fakeEvidenceMetadata("go1.25.3", "1.25.0")
+	emitJSON(&buf, findings, metadata)
 
 	var got []struct {
 		ID       string `json:"id"`
@@ -122,6 +130,7 @@ func TestJSONOutputStructure(t *testing.T) {
 				End     int    `json:"end"`
 			} `json:"edits"`
 		} `json:"fixes"`
+		Metadata evidenceMetadata `json:"metadata"`
 	}
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("-json is not valid JSON: %v\n%s", err, buf.String())
@@ -131,6 +140,9 @@ func TestJSONOutputStructure(t *testing.T) {
 	}
 
 	f0 := got[0]
+	if f0.Metadata.Toolchain != metadata.Toolchain {
+		t.Errorf("finding[0] metadata toolchain = %+v, want %+v", f0.Metadata.Toolchain, metadata.Toolchain)
+	}
 	if f0.ID != "PS9001" || f0.Category != "indirect" || f0.Level != "L1" || !f0.AutoFix {
 		t.Errorf("finding[0] core fields = %+v, want PS9001/indirect/L1/autoFix", f0)
 	}
@@ -159,10 +171,50 @@ func TestJSONOutputStructure(t *testing.T) {
 	}
 
 	f1 := got[1]
+	if f1.Metadata.Toolchain != metadata.Toolchain {
+		t.Errorf("finding[1] metadata toolchain = %+v, want %+v", f1.Metadata.Toolchain, metadata.Toolchain)
+	}
 	if f1.ID != "PS9002" || f1.Level != "L2" || f1.AutoFix {
 		t.Errorf("finding[1] = %+v, want PS9002/L2/no-autoFix", f1)
 	}
 	if len(f1.Fixes) != 0 {
 		t.Errorf("finding[1] should have no fixes, got %d", len(f1.Fixes))
+	}
+}
+
+func TestJSONEmptyScanPreservesLegacyEmptyArray(t *testing.T) {
+	t.Parallel()
+
+	metadata := fakeEvidenceMetadata("go1.25.3", "1.25.0")
+	var buffer bytes.Buffer
+	emitJSON(&buffer, nil, metadata)
+	var findings []jsonFinding
+	if err := json.Unmarshal(buffer.Bytes(), &findings); err != nil {
+		t.Fatal(err)
+	}
+	if findings == nil || len(findings) != 0 {
+		t.Fatalf("empty-scan JSON = %#v, want the backward-compatible non-nil empty array", findings)
+	}
+}
+
+func TestJSONAdditiveMetadataPreservesLegacyDecoder(t *testing.T) {
+	t.Parallel()
+
+	check := &lint.Check{ID: "PS9001", Category: "alloc", Level: lint.LevelIdiomatic}
+	metadata := fakeEvidenceMetadata("go1.25.3", "1.25.0")
+	var buffer bytes.Buffer
+	emitJSON(&buffer, []Finding{{Check: check, Pos: token.Position{Filename: "x.go", Line: 1}, Message: "m"}}, metadata)
+
+	// This is the pre-metadata consumer shape. encoding/json must ignore the
+	// additive field and preserve the top-level array and finding identity.
+	var legacy []struct {
+		ID      string `json:"id"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(buffer.Bytes(), &legacy); err != nil {
+		t.Fatalf("legacy JSON decoder rejected additive metadata: %v", err)
+	}
+	if len(legacy) != 1 || legacy[0].ID != "PS9001" || legacy[0].Message != "m" {
+		t.Fatalf("legacy decoded findings = %+v", legacy)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jxsl13/perfscan/checks"
 	"github.com/jxsl13/perfscan/lint"
+	"gopkg.in/yaml.v3"
 )
 
 // TestBaselineRunFlowSeedFilterAndWriteGuard drives the baseline flow through
@@ -59,6 +60,13 @@ func TestBaselineRunFlowSeedFilterAndWriteGuard(t *testing.T) {
 	if len(seeded) == 0 {
 		t.Fatal("seeded baseline is empty; the corpus should produce findings")
 	}
+	var baseline baselineFile
+	if err := yaml.Unmarshal(seeded, &baseline); err != nil {
+		t.Fatalf("seeded baseline is invalid YAML: %v", err)
+	}
+	if baseline.Metadata.Toolchain.GoVersion == "" || baseline.Metadata.Toolchain.ModuleGo != "1.23" {
+		t.Fatalf("seeded baseline has incomplete toolchain evidence: %+v", baseline.Metadata)
+	}
 
 	// Filter: -baseline (no -write) suppresses everything (identical corpus),
 	// exits 0, and must NOT modify the baseline file.
@@ -89,16 +97,36 @@ func fakeFinding(file, id, msg string, line int) Finding {
 	}
 }
 
+func fakeEvidenceMetadata(goVersion, moduleGo string) evidenceMetadata {
+	return evidenceMetadata{Toolchain: toolchainFingerprint{
+		GoVersion: goVersion,
+		GOOS:      "linux",
+		GOARCH:    "amd64",
+		ModuleGo:  moduleGo,
+	}}
+}
+
+func resetWdCacheForTest() {
+	wdCacheMu.Lock()
+	cachedWd = ""
+	cachedWdErr = nil
+	wdCached = false
+	wdCacheMu.Unlock()
+}
+
 func TestBaselineRoundTrip(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "baseline.json")
+	metadata := fakeEvidenceMetadata("go1.25.3", "1.25.0")
 
 	old := []Finding{
 		fakeFinding("a.go", "PS2101", "out is appended", 10),
 		fakeFinding("a.go", "PS2101", "out is appended", 42), // same key, count 2
 		fakeFinding("b.go", "PS3003", "map probed", 7),
 	}
-	if err := writeBaseline(path, old); err != nil {
+	if err := writeBaseline(path, old, metadata); err != nil {
 		t.Fatal(err)
 	}
 
@@ -108,12 +136,15 @@ func TestBaselineRoundTrip(t *testing.T) {
 		fakeFinding("a.go", "PS2101", "out is appended", 44),
 		fakeFinding("b.go", "PS3003", "map probed", 9),
 	}
-	surviving, suppressed, err := applyBaseline(path, shifted)
+	surviving, suppressed, warnings, err := applyBaseline(path, shifted, metadata)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if suppressed != 3 || len(surviving) != 0 {
 		t.Fatalf("want 3 suppressed, 0 surviving; got %d, %d", suppressed, len(surviving))
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unchanged baseline toolchain warnings = %v, want none", warnings)
 	}
 
 	// A regression (third occurrence of a key baselined at count 2, plus a
@@ -122,7 +153,7 @@ func TestBaselineRoundTrip(t *testing.T) {
 		fakeFinding("a.go", "PS2101", "out is appended", 99),
 		fakeFinding("c.go", "PS2005", "regexp in loop", 5),
 	)
-	surviving, suppressed, err = applyBaseline(path, regressed)
+	surviving, suppressed, warnings, err = applyBaseline(path, regressed, metadata)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,6 +162,9 @@ func TestBaselineRoundTrip(t *testing.T) {
 	}
 	if surviving[0].Pos.Line != 99 || surviving[1].Check.ID != "PS2005" {
 		t.Fatalf("unexpected survivors: %+v", surviving)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unchanged baseline toolchain warnings = %v, want none", warnings)
 	}
 }
 
@@ -142,20 +176,26 @@ func TestBaselineRoundTrip(t *testing.T) {
 // sign, or a leading dash was untested. A one-byte change across the round-trip
 // would resurface the baselined finding as a false regression.
 func TestBaselineRoundTripsSpecialCharMessage(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "baseline.json")
 	msg := `- 'variable' "x": copied, per #note: costs 100% more`
-	if err := writeBaseline(path, []Finding{fakeFinding("a.go", "PS2101", msg, 10)}); err != nil {
+	metadata := fakeEvidenceMetadata("go1.25.3", "1.25.0")
+	if err := writeBaseline(path, []Finding{fakeFinding("a.go", "PS2101", msg, 10)}, metadata); err != nil {
 		t.Fatal(err)
 	}
 	// The same finding at a shifted line: line-independent, so it must be
 	// suppressed — but only if the special-char message round-tripped exactly.
-	surviving, suppressed, err := applyBaseline(path, []Finding{fakeFinding("a.go", "PS2101", msg, 99)})
+	surviving, suppressed, warnings, err := applyBaseline(path, []Finding{fakeFinding("a.go", "PS2101", msg, 99)}, metadata)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if suppressed != 1 || len(surviving) != 0 {
 		t.Errorf("a baselined finding with a special-char message must stay suppressed (message must round-trip exactly); surviving=%v suppressed=%d", surviving, suppressed)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unchanged baseline toolchain warnings = %v, want none", warnings)
 	}
 }
 
@@ -194,15 +234,16 @@ func TestBaselineKeyIsInvocationCWDIndependent(t *testing.T) {
 	// Restore cwd AND the relPath wd cache so later tests are unaffected.
 	defer func() {
 		_ = os.Chdir(wd)
-		wdCached = false
+		resetWdCacheForTest()
 	}()
 
 	// Invocation 1 (seed) from the module ROOT: fresh process => fresh wd cache.
 	if err := os.Chdir(root); err != nil {
 		t.Fatal(err)
 	}
-	wdCached = false
-	if err := writeBaseline(blPath, []Finding{fakeFinding(absSrc, "PS2101", "out is appended", 10)}); err != nil {
+	resetWdCacheForTest()
+	metadata := fakeEvidenceMetadata("go1.25.3", "1.25.0")
+	if err := writeBaseline(blPath, []Finding{fakeFinding(absSrc, "PS2101", "out is appended", 10)}, metadata); err != nil {
 		t.Fatal(err)
 	}
 
@@ -212,19 +253,94 @@ func TestBaselineKeyIsInvocationCWDIndependent(t *testing.T) {
 	if err := os.Chdir(filepath.Join(root, "build")); err != nil {
 		t.Fatal(err)
 	}
-	wdCached = false
-	surviving, suppressed, err := applyBaseline(blPath, []Finding{fakeFinding(absSrc, "PS2101", "out is appended", 55)})
+	resetWdCacheForTest()
+	surviving, suppressed, warnings, err := applyBaseline(blPath, []Finding{fakeFinding(absSrc, "PS2101", "out is appended", 55)}, metadata)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if suppressed != 1 || len(surviving) != 0 {
 		t.Errorf("baseline seeded from root did not suppress the same finding from build/: suppressed=%d surviving=%d (want 1, 0) — baseline key is CWD-dependent", suppressed, len(surviving))
 	}
+	if len(warnings) != 0 {
+		t.Fatalf("unchanged baseline toolchain warnings = %v, want none", warnings)
+	}
 }
 
 func TestBaselineMissingFile(t *testing.T) {
-	_, _, err := applyBaseline(filepath.Join(t.TempDir(), "nope.json"), nil)
+	t.Parallel()
+
+	_, _, _, err := applyBaseline(filepath.Join(t.TempDir(), "nope.json"), nil, fakeEvidenceMetadata("go1.25.3", "1.25.0"))
 	if err == nil {
 		t.Fatal("want error for missing baseline file")
+	}
+}
+
+func TestBaselineToolchainChangesWarnWithoutDisablingSuppression(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "baseline.yaml")
+	finding := fakeFinding("a.go", "PS2101", "out is appended", 10)
+	if err := writeBaseline(path, []Finding{finding}, fakeEvidenceMetadata("go1.25.3", "1.25.0")); err != nil {
+		t.Fatal(err)
+	}
+
+	surviving, suppressed, warnings, err := applyBaseline(
+		path,
+		[]Finding{finding},
+		fakeEvidenceMetadata("go1.26.1", "1.26.0"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suppressed != 1 || len(surviving) != 0 {
+		t.Fatalf("toolchain warning must not silently discard the ratchet: suppressed=%d surviving=%v", suppressed, surviving)
+	}
+	if len(warnings) != 1 || warnings[0].Code != baselineToolchainWarning ||
+		!strings.Contains(warnings[0].Message, "compiler 1.25 -> 1.26") ||
+		!strings.Contains(warnings[0].Message, "go.mod 1.25 -> 1.26") {
+		t.Fatalf("toolchain change warnings = %+v", warnings)
+	}
+}
+
+func TestBaselineTargetChangeWarnsWithoutDisablingSuppression(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "baseline.yaml")
+	finding := fakeFinding("a.go", "PS2101", "out is appended", 10)
+	stored := fakeEvidenceMetadata("go1.25.3", "1.25.0")
+	if err := writeBaseline(path, []Finding{finding}, stored); err != nil {
+		t.Fatal(err)
+	}
+	current := stored
+	current.Toolchain.GOOS = "darwin"
+	current.Toolchain.GOARCH = "arm64"
+
+	surviving, suppressed, warnings, err := applyBaseline(path, []Finding{finding}, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suppressed != 1 || len(surviving) != 0 {
+		t.Fatalf("target warning must preserve the ratchet: suppressed=%d surviving=%v", suppressed, surviving)
+	}
+	if len(warnings) != 1 || warnings[0].Code != baselineToolchainWarning ||
+		!strings.Contains(warnings[0].Message, "target linux/amd64 -> darwin/arm64") {
+		t.Fatalf("target-change warnings = %+v", warnings)
+	}
+}
+
+func TestLegacyBaselineWithoutMetadataRemainsReadableAndWarns(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "baseline.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\nentries: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, warnings, err := applyBaseline(path, nil, fakeEvidenceMetadata("go1.25.3", "1.25.0"))
+	if err != nil {
+		t.Fatalf("legacy baseline must remain readable: %v", err)
+	}
+	if len(warnings) != 1 || warnings[0].Code != baselineToolchainWarning ||
+		!strings.Contains(warnings[0].Message, "no toolchain fingerprint") {
+		t.Fatalf("legacy baseline warnings = %+v", warnings)
 	}
 }

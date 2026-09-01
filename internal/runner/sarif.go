@@ -16,8 +16,9 @@ type sarifLog struct {
 }
 
 type sarifRun struct {
-	Tool    sarifTool     `json:"tool"`
-	Results []sarifResult `json:"results"`
+	Tool       sarifTool        `json:"tool"`
+	Results    []sarifResult    `json:"results"`
+	Properties evidenceMetadata `json:"properties"`
 }
 
 type sarifTool struct {
@@ -85,7 +86,7 @@ type sarifRegion struct {
 // Version is stamped by the CLI so SARIF logs carry the release.
 var Version = "dev"
 
-func emitSARIF(w io.Writer, findings []Finding) {
+func emitSARIF(w io.Writer, findings []Finding, metadata evidenceMetadata) {
 	ruleIndex := make(map[string]int, len(findings))
 	rules := make([]sarifRule, 0, len(findings))
 	results := make([]sarifResult, 0, len(findings))
@@ -132,7 +133,8 @@ func emitSARIF(w io.Writer, findings []Finding) {
 				InformationURI: "https://github.com/jxsl13/perfscan",
 				Rules:          rules,
 			}},
-			Results: results,
+			Results:    results,
+			Properties: metadata,
 		}},
 	}
 	enc := json.NewEncoder(w)
