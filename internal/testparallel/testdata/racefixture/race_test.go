@@ -4,4 +4,6 @@ package racefixture
 
 import "testing"
 
-func TestRaceBuildOnly(t *testing.T) {}
+func TestRaceBuildOnly(t *testing.T) {
+	t.Parallel()
+}
