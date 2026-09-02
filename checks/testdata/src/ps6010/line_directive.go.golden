@@ -1,0 +1,66 @@
+package ps6010
+
+func duplicateLineDirectiveFixes(a [4]float64, w [16]float64, out, n int) ([4]float64, [4]float64) {
+	var first, second [4]float64
+//line generated.go:10:2
+	psO173 := 0
+	if out <= 0 || (out <= len(first) && (n <= 0 || (n <= len(a) && n <= len(w)/out))) {
+		for ; psO173 < out && out-psO173 >= 4; psO173 += 4 {
+			a0, a1, a2, a3 := 0.0, 0.0, 0.0, 0.0
+			for i := 0; i < n; i++ {
+				ai := a[i]
+				a0 += ai * w[i*out+psO173]
+				a1 += ai * w[i*out+psO173+1]
+				a2 += ai * w[i*out+psO173+2]
+				a3 += ai * w[i*out+psO173+3]
+			}
+			first[psO173], first[psO173+1], first[psO173+2], first[psO173+3] = a0, a1, a2, a3
+		}
+		for ; psO173 < out; psO173++ {
+			sum := 0.0
+			for i := 0; i < n; i++ {
+				sum += a[i] * w[i*out+psO173]
+			}
+			first[psO173] = sum
+		}
+	} else {
+		for ; psO173 < out; psO173++ {
+			sum := 0.0
+			for i := 0; i < n; i++ {
+				sum += a[i] * w[i*out+psO173]
+			}
+			first[psO173] = sum
+		}
+	}
+//line generated.go:10:2
+	psO736 := 0
+	if out <= 0 || (out <= len(second) && (n <= 0 || (n <= len(a) && n <= len(w)/out))) {
+		for ; psO736 < out && out-psO736 >= 4; psO736 += 4 {
+			a0, a1, a2, a3 := 0.0, 0.0, 0.0, 0.0
+			for i := 0; i < n; i++ {
+				ai := a[i]
+				a0 += ai * w[i*out+psO736]
+				a1 += ai * w[i*out+psO736+1]
+				a2 += ai * w[i*out+psO736+2]
+				a3 += ai * w[i*out+psO736+3]
+			}
+			second[psO736], second[psO736+1], second[psO736+2], second[psO736+3] = a0, a1, a2, a3
+		}
+		for ; psO736 < out; psO736++ {
+			sum := 0.0
+			for i := 0; i < n; i++ {
+				sum += a[i] * w[i*out+psO736]
+			}
+			second[psO736] = sum
+		}
+	} else {
+		for ; psO736 < out; psO736++ {
+			sum := 0.0
+			for i := 0; i < n; i++ {
+				sum += a[i] * w[i*out+psO736]
+			}
+			second[psO736] = sum
+		}
+	}
+	return first, second
+}
