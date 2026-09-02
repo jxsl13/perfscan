@@ -56,6 +56,9 @@ float64 sequence signatures. The destination must itself be that exact float
 sequence precision and be assignable, or representation-preservingly
 convertible, to a leaf slice formal for zero-copy in-place reuse. Names,
 signatures, and lane access patterns must agree on the operation and precision;
+an operation-free leaf name must either delegate through the sequence to one
+reachable compatible vector call or write one operation's results to at least
+two distinct lanes of that sequence;
 an interface method declaration alone is not a concrete SIMD implementation,
 and repeated access to one lane is not multi-lane evidence. Leaf and scalar
 calls must be control-flow reachable after returns, branches, builtin panic,
@@ -510,12 +513,12 @@ func ps6099Leaves(pass *analysis.Pass) map[string][]ps6099Leaf {
 				continue
 			}
 			precision, ok := ps6099BatchPrecision(pass, function, typesByName)
-			operation := ps6099FunctionOperation(function)
-			if operation == "" || !ok {
+			if !ok {
 				continue
 			}
-			kind, score := ps6099VectorEvidence(pass, source.file, function, operation, precision, typesByName, functionsByName)
-			if score == 0 {
+			operation := ps6099OperationInName(function.Name.Name)
+			operation, kind, score := ps6099VectorEvidence(pass, source.file, function, operation, precision, typesByName, functionsByName)
+			if operation == "" || score == 0 {
 				continue
 			}
 			result[operation] = append(result[operation], ps6099Leaf{
@@ -538,12 +541,15 @@ func ps6099Leaves(pass *analysis.Pass) map[string][]ps6099Leaf {
 	return result
 }
 
-func ps6099VectorEvidence(pass *analysis.Pass, file *ast.File, function *ast.FuncDecl, operation, precision string, typesByName map[string]ast.Expr, functionsByName map[string][]*ast.FuncDecl) (string, int) {
+func ps6099VectorEvidence(pass *analysis.Pass, file *ast.File, function *ast.FuncDecl, operation, precision string, typesByName map[string]ast.Expr, functionsByName map[string][]*ast.FuncDecl) (string, string, int) {
 	if file == nil || function == nil {
-		return "", 0
+		return "", "", 0
 	}
 	if function.Body == nil {
-		return "an external assembly implementation", 3
+		if operation == "" {
+			return "", "", 0
+		}
+		return operation, "an external assembly implementation", 3
 	}
 	imports := ps6077Imports(file)
 	sequenceParameters := ps6099SequenceParameters{
@@ -563,11 +569,13 @@ func ps6099VectorEvidence(pass *analysis.Pass, file *ast.File, function *ast.Fun
 			}
 		}
 	}
+	resolvedOperation := operation
 	var called string
+	ambiguous := false
 	parents := ps6087Parents(function.Body)
 	reachableCalls := ps6099ReachableCalls(pass, function, parents)
 	ast.Inspect(function.Body, func(node ast.Node) bool {
-		if called != "" {
+		if called != "" && operation != "" {
 			return false
 		}
 		if _, nested := node.(*ast.FuncLit); nested {
@@ -581,7 +589,8 @@ func ps6099VectorEvidence(pass *analysis.Pass, file *ast.File, function *ast.Fun
 			return true
 		}
 		name := ps6074CalledName(call.Fun)
-		if ps6099OperationInName(name) != operation ||
+		callOperation := ps6099OperationInName(name)
+		if callOperation == "" || operation != "" && callOperation != operation ||
 			!ps6099CalledLeafCompatible(pass, call, name, precision, imports, typesByName, functionsByName, sequenceParameters, function, parents) {
 			return true
 		}
@@ -600,16 +609,28 @@ func ps6099VectorEvidence(pass *analysis.Pass, file *ast.File, function *ast.Fun
 		if !vector {
 			return true
 		}
-		called = displayName
-		return false
+		if resolvedOperation != "" && resolvedOperation != callOperation {
+			ambiguous = true
+			return true
+		}
+		resolvedOperation = callOperation
+		if called == "" {
+			called = displayName
+		}
+		return operation == ""
 	})
-	if called != "" {
-		return "SIMD/vector-backed via " + called, 2
+	if called != "" && !ambiguous {
+		return resolvedOperation, "SIMD/vector-backed via " + called, 2
 	}
-	if ps6099DistinctLaneLoop(pass, function.Body, sequenceParameters) {
-		return "a multi-lane vector-width loop", 1
+	if operation != "" && ps6099DistinctLaneLoop(pass, function.Body, sequenceParameters) {
+		return operation, "a multi-lane vector-width loop", 1
 	}
-	return "", 0
+	if operation == "" && !ambiguous {
+		if inferred := ps6099DistinctLaneOperation(pass, function.Body, sequenceParameters, parents, reachableCalls); inferred != "" {
+			return inferred, "a multi-lane vector-width loop", 1
+		}
+	}
+	return "", "", 0
 }
 
 func ps6099CalledLeafCompatible(pass *analysis.Pass, call *ast.CallExpr, name, precision string, imports map[string]string, typesByName map[string]ast.Expr, functionsByName map[string][]*ast.FuncDecl, parameters ps6099SequenceParameters, enclosing *ast.FuncDecl, parents map[ast.Node]ast.Node) bool {
@@ -1243,6 +1264,80 @@ func ps6099DistinctLaneLoop(pass *analysis.Pass, body *ast.BlockStmt, parameters
 	return found
 }
 
+func ps6099DistinctLaneOperation(pass *analysis.Pass, body *ast.BlockStmt, parameters ps6099SequenceParameters, parents map[ast.Node]ast.Node, reachableCalls map[*ast.CallExpr]bool) string {
+	operations := make(map[string]bool)
+	linkedOperations := make(map[string]bool)
+	ast.Inspect(body, func(node ast.Node) bool {
+		if _, nested := node.(*ast.FuncLit); nested {
+			return false
+		}
+		loop, ok := node.(*ast.ForStmt)
+		if !ok {
+			return true
+		}
+		step := ps6077LiteralStep(loop.Post)
+		indexName := ps6077LoopIndexName(loop)
+		if step < 2 || indexName == "" {
+			return true
+		}
+		aliases := ps6099SequenceAliases(pass, body, loop.Pos(), parents, parameters)
+		offsets := make(map[string]map[string]map[int64]bool)
+		astutil.WithStack(loop.Body, func(candidate ast.Node, stack []ast.Node) bool {
+			if _, nested := candidate.(*ast.FuncLit); nested {
+				return false
+			}
+			call, ok := candidate.(*ast.CallExpr)
+			if !ok || !ps6099CallReachable(pass, call, parents, reachableCalls[call]) || ps6099Precision(pass.TypesInfo.TypeOf(call)) == "" {
+				return true
+			}
+			operation, direct := ps6099DirectMathIdentity(pass, call)
+			if !direct {
+				operation = ps6099OperationInName(ps6074CalledName(call.Fun))
+			}
+			if operation == "" {
+				return true
+			}
+			_, output := ps6099CallAssignment(call, stack)
+			if output == nil {
+				return true
+			}
+			sequence := ps6099SequenceBaseKey(pass, output.X, aliases)
+			offset, valid := ps6099LaneOffset(output.Index, indexName)
+			if sequence == "" || !valid || offset < 0 || offset >= step {
+				return true
+			}
+			linkedOperations[operation] = true
+			operationOffsets := offsets[operation]
+			if operationOffsets == nil {
+				operationOffsets = make(map[string]map[int64]bool)
+				offsets[operation] = operationOffsets
+			}
+			lanes := operationOffsets[sequence]
+			if lanes == nil {
+				lanes = make(map[int64]bool, step)
+				operationOffsets[sequence] = lanes
+			}
+			lanes[offset] = true
+			return true
+		})
+		for operation, sequences := range offsets {
+			for _, lanes := range sequences {
+				if len(lanes) >= 2 {
+					operations[operation] = true
+				}
+			}
+		}
+		return true
+	})
+	if len(operations) != 1 || len(linkedOperations) != 1 {
+		return ""
+	}
+	for operation := range operations {
+		return operation
+	}
+	return ""
+}
+
 func ps6099SequenceAliases(pass *analysis.Pass, body *ast.BlockStmt, before token.Pos, parents map[ast.Node]ast.Node, parameters ps6099SequenceParameters) map[string]string {
 	aliases := make(map[string]string, len(parameters.objects)+len(parameters.names))
 	for object := range parameters.objects {
@@ -1520,33 +1615,6 @@ func ps6099SyntaxScalarPrecision(expression ast.Expr, typesByName map[string]ast
 	return ""
 }
 
-func ps6099FunctionOperation(function *ast.FuncDecl) string {
-	if function == nil {
-		return ""
-	}
-	if operation := ps6099OperationInName(function.Name.Name); operation != "" {
-		return operation
-	}
-	if function.Body == nil {
-		return ""
-	}
-	var operation string
-	ast.Inspect(function.Body, func(node ast.Node) bool {
-		if operation != "" {
-			return false
-		}
-		if _, nested := node.(*ast.FuncLit); nested {
-			return false
-		}
-		call, ok := node.(*ast.CallExpr)
-		if ok {
-			operation = ps6099OperationInName(ps6074CalledName(call.Fun))
-		}
-		return operation == ""
-	})
-	return operation
-}
-
 func ps6099OperationInName(name string) string {
 	for _, operation := range ps6099OperationOrder {
 		for offset := 0; ; {
@@ -1626,6 +1694,8 @@ func ps6099NamePrecision(name string) string {
 
 func ps6099Function(pass *analysis.Pass, function *ast.FuncDecl, helpers map[*types.Func]ps6099Helper, leaves map[string][]ps6099Leaf) {
 	reported := make(map[ast.Node]bool)
+	var parents map[ast.Node]ast.Node
+	var reachableCalls map[*ast.CallExpr]bool
 	astutil.WithStack(function.Body, func(node ast.Node, stack []ast.Node) bool {
 		if _, nested := node.(*ast.FuncLit); nested {
 			return false
@@ -1636,6 +1706,13 @@ func ps6099Function(pass *analysis.Pass, function *ast.FuncDecl, helpers map[*ty
 		}
 		operation, ok := ps6099CallOperation(pass, call, helpers)
 		if !ok {
+			return true
+		}
+		if parents == nil {
+			parents = ps6087Parents(function.Body)
+			reachableCalls = ps6099ReachableCalls(pass, function, parents)
+		}
+		if !ps6099CallReachable(pass, call, parents, reachableCalls[call]) {
 			return true
 		}
 		assignment, left := ps6099CallAssignment(call, stack)

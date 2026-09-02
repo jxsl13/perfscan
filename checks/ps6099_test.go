@@ -16,7 +16,8 @@ func TestPS6099(t *testing.T) {
 		"ps6099calleeprecision", "ps6099ignoredalias", "ps6099genericleaf",
 		"ps6099calledsignature", "ps6099repeatedlane", "ps6099genericcalled",
 		"ps6099ignoredunknown", "ps6099tuplealias", "ps6099lanebasebad",
-		"ps6099lanebasealias", "ps6099deadleaf", "ps6099ignoredshadow")
+		"ps6099lanebasealias", "ps6099deadleaf", "ps6099ignoredshadow",
+		"ps6099operationreach", "ps6099deadscalar")
 	analysistest.Run(t, analysistest.TestData(), PS6099.Analyzer, "ps6099adversarial")
 }
 
