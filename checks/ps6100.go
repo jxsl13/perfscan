@@ -47,7 +47,9 @@ assignments retain Go's right-hand-side snapshot semantics, slice-view writes
 retain their element offsets, and reachable stored closures invalidate aliases
 whose captured headers they may rebind. Bounded local callback graphs and
 stored function or method values contribute their captured receiver, argument,
-and mutation effects; opaque, recursive, and overflowed targets remain hazards.
+and mutation effects. Per-iteration alias rebindings flow into captured
+variables, and stored-call targets are resolved from the assignments that can
+reach each call site; opaque, recursive, and overflowed targets remain hazards.
 A deferred body is applied at the return of its actual frame, so an outer-frame
 defer stays delayed while a defer inside an invoked helper or closure is visible
 before control returns to the scans.
@@ -178,7 +180,13 @@ type ps6100CallableBinding struct {
 	unknown bool
 }
 
-type ps6100CallableBindings map[types.Object]ps6100CallableBinding
+type ps6100CallableState map[types.Object]ps6100CallableBinding
+
+type ps6100CallableBindings struct {
+	all     ps6100CallableState
+	parents map[ast.Node]ast.Node
+	before  map[ast.Node]ps6100CallableState
+}
 
 type ps6100CallableResolution struct {
 	targets []ps6100CallableTarget
@@ -218,7 +226,9 @@ func ps6100LocalFunctions(pass *analysis.Pass) ps6100Helpers {
 }
 
 func ps6100LocalCallableBindings(pass *analysis.Pass) ps6100CallableBindings {
-	result := make(ps6100CallableBindings)
+	result := ps6100CallableBindings{
+		all: make(ps6100CallableState), parents: make(map[ast.Node]ast.Node), before: make(map[ast.Node]ps6100CallableState),
+	}
 	var inspectFrame func(*ast.BlockStmt)
 	inspectFrame = func(body *ast.BlockStmt) {
 		if body == nil {
@@ -254,9 +264,12 @@ func ps6100LocalCallableBindings(pass *analysis.Pass) ps6100CallableBindings {
 		if !hasCallableBinding {
 			return
 		}
-		flow := ps6100HelperAliasFlow(pass, body, nil)
+		for child, parent := range ps6087Parents(body) {
+			result.parents[child] = parent
+		}
+		aliasFlow := ps6100HelperAliasFlow(pass, body, nil)
 		reachability := ps6100ReachableNodes(pass, body)
-		record := func(identifier *ast.Ident, assignment token.Token, source ast.Expr) {
+		recordAll := func(identifier *ast.Ident, assignment token.Token, source ast.Expr) {
 			if identifier == nil || identifier.Name == "_" {
 				return
 			}
@@ -264,13 +277,13 @@ func ps6100LocalCallableBindings(pass *analysis.Pass) ps6100CallableBindings {
 			if object == nil || !ps6100FunctionValueType(object.Type()) {
 				return
 			}
-			binding := result[object]
+			binding := result.all[object]
 			if source == nil {
 				binding.unknown = true
-				result[object] = binding
+				result.all[object] = binding
 				return
 			}
-			callable := ps6100CallableSourceAt(pass, source, flow)
+			callable := ps6100CallableSourceAt(pass, source, aliasFlow)
 			if callable.unknown {
 				binding.unknown = true
 			}
@@ -279,7 +292,7 @@ func ps6100LocalCallableBindings(pass *analysis.Pass) ps6100CallableBindings {
 			} else {
 				binding.sources = append(binding.sources, callable)
 			}
-			result[object] = binding
+			result.all[object] = binding
 		}
 		ast.Inspect(body, func(node ast.Node) bool {
 			if node == nil {
@@ -302,7 +315,7 @@ func ps6100LocalCallableBindings(pass *analysis.Pass) ps6100CallableBindings {
 					if len(value.Lhs) == len(value.Rhs) {
 						source = value.Rhs[index]
 					}
-					record(identifier, value.Tok, source)
+					recordAll(identifier, value.Tok, source)
 				}
 			case *ast.ValueSpec:
 				for index, name := range value.Names {
@@ -310,16 +323,206 @@ func ps6100LocalCallableBindings(pass *analysis.Pass) ps6100CallableBindings {
 					if len(value.Names) == len(value.Values) {
 						source = value.Values[index]
 					}
-					record(name, token.DEFINE, source)
+					recordAll(name, token.DEFINE, source)
 				}
 			}
 			return true
 		})
+
+		flow := ps6100CallableFlowForBody(pass, body, nil, aliasFlow)
+		for node, state := range flow.before {
+			result.before[node] = state
+		}
 	}
 	for _, file := range pass.Files {
 		for _, declaration := range file.Decls {
 			if function, ok := declaration.(*ast.FuncDecl); ok {
 				inspectFrame(function.Body)
+			}
+		}
+	}
+	return result
+}
+
+func ps6100TransferCallableNode(pass *analysis.Pass, node ast.Node, state ps6100CallableState, aliases *ps6100AliasFlow) {
+	var transfers []struct {
+		object  types.Object
+		binding ps6100CallableBinding
+	}
+	record := func(object types.Object, source ast.Expr) {
+		if object == nil || !ps6100FunctionValueType(object.Type()) {
+			return
+		}
+		transfers = append(transfers, struct {
+			object  types.Object
+			binding ps6100CallableBinding
+		}{object: object, binding: ps6100CallableBindingFromSource(pass, source, state, aliases)})
+	}
+	switch value := node.(type) {
+	case *ast.AssignStmt:
+		for index, left := range value.Lhs {
+			identifier, ok := ps2110Unparen(left).(*ast.Ident)
+			if !ok || identifier.Name == "_" {
+				continue
+			}
+			var source ast.Expr
+			if len(value.Lhs) == len(value.Rhs) {
+				source = value.Rhs[index]
+			}
+			record(ps6100AssignedObject(pass, identifier, value.Tok), source)
+		}
+	case *ast.ValueSpec:
+		for index, name := range value.Names {
+			var source ast.Expr
+			if len(value.Names) == len(value.Values) {
+				source = value.Values[index]
+			}
+			record(pass.TypesInfo.Defs[name], source)
+		}
+	}
+	// All right-hand sides are evaluated against the incoming state before any
+	// left-hand side is assigned, preserving tuple-snapshot semantics.
+	for _, transfer := range transfers {
+		state[transfer.object] = transfer.binding
+	}
+}
+
+func ps6100CallableBindingFromSource(pass *analysis.Pass, source ast.Expr, state ps6100CallableState, aliases *ps6100AliasFlow) ps6100CallableBinding {
+	if source == nil {
+		return ps6100CallableBinding{unknown: true}
+	}
+	callable := ps6100CallableSourceAt(pass, source, aliases)
+	if callable.unknown {
+		return ps6100CallableBinding{unknown: true}
+	}
+	if callable.target != nil {
+		return ps6100CallableBinding{sources: []ps6100CallableSource{callable}}
+	}
+	if identifier, ok := ps2110Unparen(callable.expression).(*ast.Ident); ok {
+		if binding, found := state[pass.TypesInfo.ObjectOf(identifier)]; found {
+			return ps6100CloneCallableBinding(binding)
+		}
+	}
+	return ps6100CallableBinding{sources: []ps6100CallableSource{callable}}
+}
+
+func ps6100CloneCallableBinding(binding ps6100CallableBinding) ps6100CallableBinding {
+	return ps6100CallableBinding{sources: slices.Clone(binding.sources), unknown: binding.unknown}
+}
+
+func ps6100CloneCallableState(state ps6100CallableState) ps6100CallableState {
+	result := make(ps6100CallableState, len(state))
+	for object, binding := range state {
+		result[object] = ps6100CloneCallableBinding(binding)
+	}
+	return result
+}
+
+func ps6100MergeCallableStates(current, incoming ps6100CallableState) (ps6100CallableState, bool) {
+	if current == nil {
+		return ps6100CloneCallableState(incoming), true
+	}
+	changed := false
+	for object, binding := range incoming {
+		merged, bindingChanged := ps6100MergeCallableBindings(current[object], binding)
+		if bindingChanged {
+			current[object] = merged
+			changed = true
+		}
+	}
+	return current, changed
+}
+
+func ps6100MergeCallableBindings(current, incoming ps6100CallableBinding) (ps6100CallableBinding, bool) {
+	changed := false
+	if incoming.unknown && !current.unknown {
+		current.unknown = true
+		changed = true
+	}
+	seen := make(map[string]bool, len(current.sources))
+	for _, source := range current.sources {
+		seen[ps6100CallableSourceKey(source)] = true
+	}
+	for _, source := range incoming.sources {
+		key := ps6100CallableSourceKey(source)
+		if seen[key] {
+			continue
+		}
+		if len(current.sources) >= ps6100MaxAliasValues {
+			if !current.unknown {
+				current.unknown = true
+				changed = true
+			}
+			continue
+		}
+		seen[key] = true
+		current.sources = append(current.sources, source)
+		changed = true
+	}
+	return current, changed
+}
+
+func ps6100CallableSourceKey(source ps6100CallableSource) string {
+	if source.target != nil {
+		return ps6100CallableTargetKey(*source.target)
+	}
+	if source.expression != nil {
+		return "expression:" + strconv.Itoa(int(source.expression.Pos())) + ":" + exprTextRendered(source.expression)
+	}
+	if source.unknown {
+		return "unknown"
+	}
+	return "empty"
+}
+
+func (bindings ps6100CallableBindings) stateAt(node ast.Node) ps6100CallableState {
+	for current := node; current != nil; current = bindings.parents[current] {
+		if state, found := bindings.before[current]; found {
+			return state
+		}
+	}
+	return nil
+}
+
+func (bindings ps6100CallableBindings) bindingAt(object types.Object, node ast.Node) (ps6100CallableBinding, bool) {
+	if binding, found := bindings.stateAt(node)[object]; found {
+		return binding, true
+	}
+	binding, found := bindings.all[object]
+	return binding, found
+}
+
+func ps6100CallableFlowForBody(pass *analysis.Pass, body *ast.BlockStmt, seed ps6100CallableState, aliases *ps6100AliasFlow) ps6100CallableBindings {
+	result := ps6100CallableBindings{parents: ps6087Parents(body), before: make(map[ast.Node]ps6100CallableState)}
+	if body == nil {
+		return result
+	}
+	graph := cfg.New(body, func(call *ast.CallExpr) bool { return ps6100CallMayReturn(pass, call) })
+	if len(graph.Blocks) == 0 {
+		return result
+	}
+	reachability := ps6100ReachableNodes(pass, body)
+	inputs := map[*cfg.Block]ps6100CallableState{graph.Blocks[0]: ps6100CloneCallableState(seed)}
+	queue := []*cfg.Block{graph.Blocks[0]}
+	queued := map[*cfg.Block]bool{graph.Blocks[0]: true}
+	for len(queue) > 0 {
+		block := queue[0]
+		queue = queue[1:]
+		queued[block] = false
+		state := ps6100CloneCallableState(inputs[block])
+		for _, node := range block.Nodes {
+			if !reachability.mayExecute(node) {
+				continue
+			}
+			result.before[node], _ = ps6100MergeCallableStates(result.before[node], state)
+			ps6100TransferCallableNode(pass, node, state, aliases)
+		}
+		for _, successor := range ps6100CFGSuccessors(pass, result.parents, block) {
+			merged, changed := ps6100MergeCallableStates(inputs[successor], state)
+			inputs[successor] = merged
+			if changed && !queued[successor] {
+				queue = append(queue, successor)
+				queued[successor] = true
 			}
 		}
 	}
@@ -392,7 +595,8 @@ func ps6100CapturedCallableReceiver(pass *analysis.Pass, receiver ast.Expr, flow
 	return receiver, true
 }
 
-func ps6100ResolveCallables(pass *analysis.Pass, expression ast.Expr, environment map[types.Object]ast.Expr, bindings ps6100CallableBindings) ps6100CallableResolution {
+func ps6100ResolveCallables(pass *analysis.Pass, expression ast.Expr, environment map[types.Object]ast.Expr, bindings ps6100CallableBindings, state ps6100CallableState) ps6100CallableResolution {
+	site := expression
 	work := ps6100MaxCallableWork
 	result := ps6100CallableResolution{}
 	seenTargets := make(map[string]bool)
@@ -452,7 +656,10 @@ func ps6100ResolveCallables(pass *analysis.Pass, expression ast.Expr, environmen
 			result.unknown = true
 			return
 		}
-		binding, found := bindings[object]
+		binding, found := state[object]
+		if !found {
+			binding, found = bindings.bindingAt(object, site)
+		}
 		if !found {
 			result.unknown = true
 			return
@@ -600,6 +807,7 @@ func ps6100Function(pass *analysis.Pass, function *ast.FuncDecl, helpers ps6100H
 	if len(byOuter) == 0 {
 		return
 	}
+	aliasFlow := ps6100HelperAliasFlow(pass, function.Body, nil)
 	liveOuter := ps6100LiveLoopBodies(pass, function.Body)
 	for outerNode, scans := range byOuter {
 		if len(scans) < 2 {
@@ -612,7 +820,7 @@ func ps6100Function(pass *analysis.Pass, function *ast.FuncDecl, helpers ps6100H
 		if outerBody == nil {
 			continue
 		}
-		ps6100Outer(pass, outerNode, outerBody, scans, helpers, callables, addresses, aliases)
+		ps6100Outer(pass, outerNode, outerBody, scans, helpers, callables, addresses, aliases, aliasFlow.stateWithin(outerBody))
 	}
 }
 
@@ -1367,7 +1575,11 @@ func ps6100Mentions(pass *analysis.Pass, expression ast.Expr, target types.Objec
 }
 
 func ps6100StorageOf(pass *analysis.Pass, expression ast.Expr, environment map[types.Object]ast.Expr) (ps6100Storage, bool) {
-	expression = ps6100ResolveExpression(pass, expression, environment, make(map[types.Object]bool))
+	return ps6100StorageOfSeen(pass, expression, environment, make(map[types.Object]bool))
+}
+
+func ps6100StorageOfSeen(pass *analysis.Pass, expression ast.Expr, environment map[types.Object]ast.Expr, seen map[types.Object]bool) (ps6100Storage, bool) {
+	expression = ps6100ResolveExpression(pass, expression, environment, seen)
 	expression = ps2110Unparen(expression)
 	switch value := expression.(type) {
 	case *ast.Ident:
@@ -1375,9 +1587,14 @@ func ps6100StorageOf(pass *analysis.Pass, expression ast.Expr, environment map[t
 		if object == nil {
 			return ps6100Storage{}, false
 		}
+		if seen[object] && environment[object] != nil {
+			// Invocation environments may contain recursive slice-view or tuple
+			// substitutions. A cycle is not a concrete storage identity.
+			return ps6100Storage{}, false
+		}
 		return ps6100Storage{key: ps6100ObjectKey(object), name: value.Name, typ: object.Type(), object: object}, true
 	case *ast.SelectorExpr:
-		base, ok := ps6100StorageOf(pass, value.X, environment)
+		base, ok := ps6100StorageOfSeen(pass, value.X, environment, seen)
 		if !ok {
 			return ps6100Storage{}, false
 		}
@@ -1390,14 +1607,14 @@ func ps6100StorageOf(pass *analysis.Pass, expression ast.Expr, environment map[t
 			typ: pass.TypesInfo.TypeOf(value), object: base.object,
 		}, true
 	case *ast.IndexExpr:
-		return ps6100StorageOf(pass, value.X, environment)
+		return ps6100StorageOfSeen(pass, value.X, environment, seen)
 	case *ast.SliceExpr:
-		return ps6100StorageOf(pass, value.X, environment)
+		return ps6100StorageOfSeen(pass, value.X, environment, seen)
 	case *ast.StarExpr:
-		return ps6100StorageOf(pass, value.X, environment)
+		return ps6100StorageOfSeen(pass, value.X, environment, seen)
 	case *ast.UnaryExpr:
 		if value.Op == token.AND {
-			return ps6100StorageOf(pass, value.X, environment)
+			return ps6100StorageOfSeen(pass, value.X, environment, seen)
 		}
 	}
 	return ps6100Storage{}, false
@@ -1528,7 +1745,7 @@ func ps6100BlocksReach(from, to []*cfg.Block) bool {
 	return false
 }
 
-func ps6100Outer(pass *analysis.Pass, outer ast.Node, body *ast.BlockStmt, scans []ps6100Scan, helpers ps6100Helpers, callables ps6100CallableBindings, addresses []ps6100AddressExposure, aliases map[types.Object]ast.Expr) {
+func ps6100Outer(pass *analysis.Pass, outer ast.Node, body *ast.BlockStmt, scans []ps6100Scan, helpers ps6100Helpers, callables ps6100CallableBindings, addresses []ps6100AddressExposure, aliases map[types.Object]ast.Expr, aliasState ps6100AliasState) {
 	if !ps6100LoopMayExecute(pass, outer) {
 		return
 	}
@@ -1567,7 +1784,7 @@ func ps6100Outer(pass *analysis.Pass, outer ast.Node, body *ast.BlockStmt, scans
 			skip[scan.loop.node] = true
 		}
 		callableWork := ps6100MaxCallableWork
-		facts := ps6100CollectMutationFacts(pass, body, helpers, callables, allInputs, nil, aliases, make(map[string]bool), &callableWork, 0, false)
+		facts := ps6100CollectMutationFacts(pass, body, helpers, callables, allInputs, nil, aliases, aliasState, nil, make(map[string]bool), &callableWork, 0, false)
 		facts.hazards = append(facts.hazards, ps6100AddressHazards(addresses, allInputs)...)
 		mutated := make(map[string]bool, len(facts.mutations))
 		for _, mutation := range facts.mutations {
@@ -1851,15 +2068,19 @@ type ps6100AliasFlow struct {
 }
 
 func ps6100HelperAliasFlow(pass *analysis.Pass, body *ast.BlockStmt, environment map[types.Object]ast.Expr) *ps6100AliasFlow {
+	return ps6100AliasFlowWithState(pass, body, environment, nil)
+}
+
+func ps6100AliasFlowWithState(pass *analysis.Pass, body *ast.BlockStmt, environment map[types.Object]ast.Expr, seed ps6100AliasState) *ps6100AliasFlow {
 	result := &ps6100AliasFlow{
 		base: environment, parents: ps6087Parents(body), before: make(map[ast.Node]ps6100AliasState),
 	}
 	if body == nil {
 		return result
 	}
-	initial := make(ps6100AliasState)
+	initial := ps6100CloneAliasState(seed)
 	for object, expression := range environment {
-		if ps6100ReferenceAliasType(object.Type()) {
+		if _, found := initial[object]; !found && ps6100ReferenceAliasType(object.Type()) {
 			initial[object] = ps6100AliasExpressionValues(pass, expression, nil, environment, make(map[types.Object]bool))
 		}
 	}
@@ -2094,6 +2315,27 @@ func (flow *ps6100AliasFlow) stateAt(node ast.Node) ps6100AliasState {
 	return nil
 }
 
+func (flow *ps6100AliasFlow) stateWithin(root ast.Node) ps6100AliasState {
+	if flow == nil || root == nil {
+		return nil
+	}
+	if state := flow.stateAt(root); state != nil {
+		return state
+	}
+	var result ps6100AliasState
+	ast.Inspect(root, func(node ast.Node) bool {
+		if node == nil || result != nil {
+			return false
+		}
+		if state, found := flow.before[node]; found {
+			result = state
+			return false
+		}
+		return true
+	})
+	return result
+}
+
 func (flow *ps6100AliasFlow) environmentAt(node ast.Node) map[types.Object]ast.Expr {
 	if flow == nil {
 		return nil
@@ -2162,6 +2404,8 @@ func ps6100CollectMutationFacts(
 	relevant map[string]ps6100Storage,
 	skip map[ast.Node]bool,
 	environment map[types.Object]ast.Expr,
+	aliasState ps6100AliasState,
+	callableState ps6100CallableState,
 	active map[string]bool,
 	callableWork *int,
 	depth int,
@@ -2178,8 +2422,12 @@ func ps6100CollectMutationFacts(
 	parents := ps6087Parents(root)
 	block, _ := root.(*ast.BlockStmt)
 	var aliasFlow *ps6100AliasFlow
+	if block != nil {
+		aliasFlow = ps6100AliasFlowWithState(pass, block, environment, aliasState)
+	}
+	var callableFlow ps6100CallableBindings
 	if depth > 0 && block != nil {
-		aliasFlow = ps6100HelperAliasFlow(pass, block, environment)
+		callableFlow = ps6100CallableFlowForBody(pass, block, callableState, aliasFlow)
 	}
 	reachability := ps6100ReachableNodes(pass, block)
 	ast.Inspect(root, func(node ast.Node) bool {
@@ -2193,8 +2441,18 @@ func ps6100CollectMutationFacts(
 			return false
 		}
 		nodeEnvironment := environment
+		nodeAliasState := aliasState
 		if aliasFlow != nil {
 			nodeEnvironment = aliasFlow.environmentAt(node)
+			nodeAliasState = aliasFlow.stateAt(node)
+		}
+		nodeCallableState := callableState
+		if depth == 0 {
+			if state := callables.stateAt(node); state != nil {
+				nodeCallableState = state
+			}
+		} else if state := callableFlow.stateAt(node); state != nil {
+			nodeCallableState = state
 		}
 		if literal, nested := node.(*ast.FuncLit); nested {
 			if depth == 0 && ps6100DeferredLiteral(literal, parents) {
@@ -2241,7 +2499,7 @@ func ps6100CollectMutationFacts(
 			if ps6100SafeCall(pass, value) {
 				return true
 			}
-			resolution := ps6100ResolveCallables(pass, value.Fun, nodeEnvironment, callables)
+			resolution := ps6100ResolveCallables(pass, value.Fun, nodeEnvironment, callables, nodeCallableState)
 			complete := !resolution.unknown && len(resolution.targets) != 0
 			localOpaque := resolution.unknown
 			for _, target := range resolution.targets {
@@ -2267,7 +2525,7 @@ func ps6100CollectMutationFacts(
 				*callableWork = *callableWork - 1
 				active[key] = true
 				inner := ps6100CollectMutationFacts(
-					pass, body, helpers, callables, relevant, nil, next, active, callableWork, depth+1,
+					pass, body, helpers, callables, relevant, nil, next, nodeAliasState, nodeCallableState, active, callableWork, depth+1,
 					insideLoop || ps6100NestedLoopMutation(root, value, parents),
 				)
 				delete(active, key)
@@ -2612,8 +2870,8 @@ func ps6100StableAliases(pass *analysis.Pass, body *ast.BlockStmt, helpers ps610
 	unknownCallableInvocation := false
 	active := make(map[string]bool)
 	work := ps6100MaxCallableWork
-	var inspect func(ast.Node, map[types.Object]ast.Expr, int, bool)
-	inspect = func(root ast.Node, environment map[types.Object]ast.Expr, depth int, outerFrame bool) {
+	var inspect func(ast.Node, map[types.Object]ast.Expr, ps6100CallableState, int, bool)
+	inspect = func(root ast.Node, environment map[types.Object]ast.Expr, callableState ps6100CallableState, depth int, outerFrame bool) {
 		if root == nil || depth >= ps6100MaxHelperDepth || work == 0 {
 			unknownCallableInvocation = true
 			return
@@ -2621,20 +2879,38 @@ func ps6100StableAliases(pass *analysis.Pass, body *ast.BlockStmt, helpers ps610
 		parents := ps6087Parents(root)
 		block, _ := root.(*ast.BlockStmt)
 		live := ps6100ReachableNodes(pass, block)
+		var aliasFlow *ps6100AliasFlow
+		var callableFlow ps6100CallableBindings
+		if !outerFrame && block != nil {
+			aliasFlow = ps6100HelperAliasFlow(pass, block, environment)
+			callableFlow = ps6100CallableFlowForBody(pass, block, callableState, aliasFlow)
+		}
 		ast.Inspect(root, func(node ast.Node) bool {
 			if node != root && !live.mayExecute(node) {
 				return false
 			}
 			if call, ok := node.(*ast.CallExpr); ok {
+				nodeEnvironment := environment
+				if aliasFlow != nil {
+					nodeEnvironment = aliasFlow.environmentAt(node)
+				}
+				nodeCallableState := callableState
+				if outerFrame {
+					if state := callables.stateAt(node); state != nil {
+						nodeCallableState = state
+					}
+				} else if state := callableFlow.stateAt(node); state != nil {
+					nodeCallableState = state
+				}
 				if outerFrame && ps6100DeferredCall(call, parents) {
 					return true
 				}
-				resolution := ps6100ResolveCallables(pass, call.Fun, environment, callables)
+				resolution := ps6100ResolveCallables(pass, call.Fun, nodeEnvironment, callables, nodeCallableState)
 				if resolution.unknown && ps6100IndirectCallable(pass, call.Fun) {
 					unknownCallableInvocation = true
 				}
 				for _, target := range resolution.targets {
-					calleeBody, next, callable := ps6100CallableInvocation(pass, target, call, helpers, environment)
+					calleeBody, next, callable := ps6100CallableInvocation(pass, target, call, helpers, nodeEnvironment)
 					if !callable {
 						if target.literal != nil || (target.function != nil && helpers[target.function.Origin()] != nil) {
 							unknownCallableInvocation = true
@@ -2648,7 +2924,7 @@ func ps6100StableAliases(pass *analysis.Pass, body *ast.BlockStmt, helpers ps610
 					}
 					work--
 					active[key] = true
-					inspect(calleeBody, next, depth+1, false)
+					inspect(calleeBody, next, nodeCallableState, depth+1, false)
 					delete(active, key)
 				}
 				for _, argument := range call.Args {
@@ -2693,7 +2969,7 @@ func ps6100StableAliases(pass *analysis.Pass, body *ast.BlockStmt, helpers ps610
 			return true
 		})
 	}
-	inspect(body, nil, 0, true)
+	inspect(body, nil, nil, 0, true)
 	if unknownCallableInvocation {
 		// An unresolved function-valued local may select a closure from a
 		// source set larger than our bound. Do not promote a reference alias
