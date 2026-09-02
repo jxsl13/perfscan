@@ -17,6 +17,7 @@ func TestPS6099(t *testing.T) {
 		"ps6099calledsignature", "ps6099repeatedlane", "ps6099genericcalled",
 		"ps6099ignoredunknown", "ps6099tuplealias", "ps6099lanebasebad",
 		"ps6099lanebasealias", "ps6099deadleaf", "ps6099ignoredshadow")
+	analysistest.Run(t, analysistest.TestData(), PS6099.Analyzer, "ps6099adversarial")
 }
 
 func TestPS6099BooleanSwitchReachability(t *testing.T) {

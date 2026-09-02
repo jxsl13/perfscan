@@ -47,13 +47,19 @@ every reachable iteration state. The destination and any aliases
 formed before the loop have no other read, rebind, escape, capture, or opaque
 use on the candidate path.
 Package-local generic and nongeneric single-return wrappers are followed
-through multiple layers. A package function or ignored architecture sibling
+through multiple layers, but every live nested call is counted: a wrapper that
+evaluates another scalar transcendental or an opaque runtime call is not a
+one-transcendental path. A package function or ignored architecture sibling
 must independently provide matching vector/batch/assembly evidence; a leaf
 and any vector leaf it calls must have result-free, consistently float32 or
-float64 sequence signatures. Names, signatures, and lane access patterns must
-agree on the operation and precision; repeated access to one lane is not
-multi-lane evidence. Leaf calls must be control-flow reachable after returns,
-branches, builtin panic, constant conditions, gotos, and fallthrough. Syntax-only
+float64 sequence signatures. The destination must itself be that exact float
+sequence precision and be assignable, or representation-preservingly
+convertible, to a leaf slice formal for zero-copy in-place reuse. Names,
+signatures, and lane access patterns must agree on the operation and precision;
+an interface method declaration alone is not a concrete SIMD implementation,
+and repeated access to one lane is not multi-lane evidence. Leaf and scalar
+calls must be control-flow reachable after returns, branches, builtin panic,
+constant and short-circuit conditions, gotos, and fallthrough. Syntax-only
 ignored siblings honor lexical bindings instead of treating shadowed callback
 or qualifier spellings as package or import evidence.
 
@@ -127,12 +133,20 @@ type ps6099Helper struct {
 }
 
 type ps6099Leaf struct {
-	operation string
-	name      string
-	precision string
-	kind      string
-	score     int
-	node      ast.Node
+	operation     string
+	name          string
+	precision     string
+	kind          string
+	score         int
+	node          ast.Node
+	sequences     []ps6099LeafSequence
+	syntaxTypes   map[string]ast.Expr
+	syntaxAliases map[string]bool
+}
+
+type ps6099LeafSequence struct {
+	typ    types.Type
+	syntax ast.Expr
 }
 
 type ps6099Loop struct {
@@ -173,20 +187,16 @@ func runPS6099(pass *analysis.Pass) (any, error) {
 }
 
 func ps6099Helpers(pass *analysis.Pass) map[*types.Func]ps6099Helper {
-	functions := make(map[*types.Func]*ast.FuncDecl)
-	for _, file := range pass.Files {
-		for _, declaration := range file.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Body == nil || function.Recv != nil || len(function.Body.List) != 1 {
-				continue
-			}
-			object, ok := pass.TypesInfo.Defs[function.Name].(*types.Func)
-			if ok {
-				functions[object.Origin()] = function
-			}
+	declarations := ps6099LocalFunctionDeclarations(pass)
+	functions := make(map[*types.Func]*ast.FuncDecl, len(declarations))
+	for object, function := range declarations {
+		if function.Body == nil || function.Recv != nil || len(function.Body.List) != 1 {
+			continue
 		}
+		functions[object] = function
 	}
 	result := make(map[*types.Func]ps6099Helper)
+	scalarMemo := make(map[*types.Func]ps6099ScalarFunctionState)
 	for changed := true; changed; {
 		changed = false
 		for object, function := range functions {
@@ -217,8 +227,28 @@ func ps6099Helpers(pass *analysis.Pass) map[*types.Func]ps6099Helper {
 			} else {
 				parameterInputs = ps6099ForwardedParameters(pass, function, call, ps6099ArgumentPositions(call.Args))
 			}
+			scalar := ps6099ExpressionScalarSummary(pass, call, result, declarations, scalarMemo)
+			if !scalar.valid || scalar.count != 1 || scalar.operation != operation {
+				continue
+			}
 			result[object] = ps6099Helper{operation: operation, parameterInputs: parameterInputs, call: call}
 			changed = true
+		}
+	}
+	return result
+}
+
+func ps6099LocalFunctionDeclarations(pass *analysis.Pass) map[*types.Func]*ast.FuncDecl {
+	result := make(map[*types.Func]*ast.FuncDecl)
+	for _, file := range pass.Files {
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Body == nil {
+				continue
+			}
+			if object, ok := pass.TypesInfo.Defs[function.Name].(*types.Func); ok {
+				result[object.Origin()] = function
+			}
 		}
 	}
 	return result
@@ -280,7 +310,157 @@ func ps6099MentionsObject(pass *analysis.Pass, expression ast.Expr, target types
 	return found
 }
 
+type ps6099ScalarExpressionSummary struct {
+	operation string
+	count     int
+	valid     bool
+}
+
+func ps6099ExpressionScalarSummary(pass *analysis.Pass, expression ast.Expr, helpers map[*types.Func]ps6099Helper, functions map[*types.Func]*ast.FuncDecl, memo map[*types.Func]ps6099ScalarFunctionState) ps6099ScalarExpressionSummary {
+	result := ps6099ScalarExpressionSummary{valid: true}
+	var inspect func(ast.Expr)
+	inspect = func(candidate ast.Expr) {
+		if candidate == nil || !result.valid {
+			return
+		}
+		ast.Inspect(candidate, func(node ast.Node) bool {
+			if !result.valid {
+				return false
+			}
+			switch value := node.(type) {
+			case *ast.FuncLit:
+				// Merely creating a closure does not execute its body. An immediate
+				// invocation is rejected as an opaque call by the CallExpr case.
+				return false
+			case *ast.BinaryExpr:
+				if value.Op != token.LAND && value.Op != token.LOR {
+					return true
+				}
+				inspect(value.X)
+				left, known := ps6099BooleanCondition(pass, value.X)
+				if known && (value.Op == token.LAND && !left || value.Op == token.LOR && left) {
+					return false
+				}
+				inspect(value.Y)
+				return false
+			case *ast.CallExpr:
+				operation, scalar := ps6099DirectMathIdentity(pass, value)
+				var callee *types.Func
+				if !scalar {
+					if resolved, _, ok := typedCallee(pass, value.Fun); ok {
+						callee = resolved.Origin()
+						operation = helpers[callee.Origin()].operation
+						scalar = operation != ""
+					}
+				}
+				if scalar {
+					if result.count == 0 {
+						result.operation = operation
+					}
+					result.count = min(2, result.count+1)
+				} else if !ps6099CompileTimeCall(pass, value) {
+					switch ps6099LocalScalarState(pass, callee, functions, memo, make(map[*types.Func]bool)) {
+					case ps6099ScalarFunctionZero:
+					case ps6099ScalarFunctionPresent:
+						result.count = min(2, result.count+1)
+					default:
+						result.valid = false
+						return false
+					}
+				}
+			}
+			return true
+		})
+	}
+	inspect(expression)
+	return result
+}
+
+type ps6099ScalarFunctionState uint8
+
+const (
+	ps6099ScalarFunctionUnknown ps6099ScalarFunctionState = iota
+	ps6099ScalarFunctionZero
+	ps6099ScalarFunctionPresent
+)
+
+func ps6099LocalScalarState(pass *analysis.Pass, function *types.Func, functions map[*types.Func]*ast.FuncDecl, memo map[*types.Func]ps6099ScalarFunctionState, active map[*types.Func]bool) ps6099ScalarFunctionState {
+	if function == nil {
+		return ps6099ScalarFunctionUnknown
+	}
+	function = function.Origin()
+	if state, known := memo[function]; known {
+		return state
+	}
+	declaration := functions[function]
+	if declaration == nil || declaration.Body == nil || active[function] {
+		return ps6099ScalarFunctionUnknown
+	}
+	active[function] = true
+	defer delete(active, function)
+	parents := ps6087Parents(declaration.Body)
+	reachable := ps6099ReachableCallsInBlock(pass, declaration.Body, parents)
+	state := ps6099ScalarFunctionZero
+	ast.Inspect(declaration.Body, func(node ast.Node) bool {
+		if state == ps6099ScalarFunctionPresent {
+			return false
+		}
+		if _, nested := node.(*ast.FuncLit); nested {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if !ok || !ps6099CallReachable(pass, call, parents, reachable[call]) {
+			return true
+		}
+		if _, scalar := ps6099DirectMathIdentity(pass, call); scalar {
+			state = ps6099ScalarFunctionPresent
+			return false
+		}
+		if ps6099CompileTimeCall(pass, call) {
+			return true
+		}
+		callee, _, resolved := typedCallee(pass, call.Fun)
+		nestedState := ps6099ScalarFunctionUnknown
+		if resolved {
+			nestedState = ps6099LocalScalarState(pass, callee, functions, memo, active)
+		}
+		switch nestedState {
+		case ps6099ScalarFunctionPresent:
+			state = ps6099ScalarFunctionPresent
+			return false
+		case ps6099ScalarFunctionUnknown:
+			state = ps6099ScalarFunctionUnknown
+		}
+		return true
+	})
+	memo[function] = state
+	return state
+}
+
+func ps6099CompileTimeCall(pass *analysis.Pass, call *ast.CallExpr) bool {
+	if call == nil {
+		return false
+	}
+	if pass.TypesInfo.Types[call.Fun].IsType() {
+		return true
+	}
+	identifier, ok := ps2110Unparen(call.Fun).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	_, ok = pass.TypesInfo.ObjectOf(identifier).(*types.Builtin)
+	return ok
+}
+
 func ps6099DirectMathCall(pass *analysis.Pass, call *ast.CallExpr) (string, bool) {
+	operation, ok := ps6099DirectMathIdentity(pass, call)
+	if !ok || operation == "Pow" && ps6099CheapPow(pass, call) {
+		return "", false
+	}
+	return operation, true
+}
+
+func ps6099DirectMathIdentity(pass *analysis.Pass, call *ast.CallExpr) (string, bool) {
 	if call == nil || call.Ellipsis.IsValid() {
 		return "", false
 	}
@@ -289,11 +469,7 @@ func ps6099DirectMathCall(pass *analysis.Pass, call *ast.CallExpr) (string, bool
 		signature.Variadic() || len(call.Args) != signature.Params().Len() || !ps6099Operations[function.Name()] {
 		return "", false
 	}
-	operation := function.Name()
-	if operation == "Pow" && ps6099CheapPow(pass, call) {
-		return "", false
-	}
-	return operation, true
+	return function.Name(), true
 }
 
 func ps6099CheapPow(pass *analysis.Pass, call *ast.CallExpr) bool {
@@ -325,6 +501,7 @@ func ps6099Leaves(pass *analysis.Pass) map[string][]ps6099Leaf {
 	result := make(map[string][]ps6099Leaf)
 	sources := ps6077PackageSources(pass)
 	typesByName := ps6099SyntaxTypes(sources)
+	typeAliases := ps6099SyntaxTypeAliases(sources)
 	functionsByName := ps6099SyntaxFunctions(sources)
 	for _, source := range sources {
 		for _, declaration := range source.file.Decls {
@@ -343,8 +520,9 @@ func ps6099Leaves(pass *analysis.Pass) map[string][]ps6099Leaf {
 			}
 			result[operation] = append(result[operation], ps6099Leaf{
 				operation: operation, name: function.Name.Name,
-				precision: precision,
-				kind:      kind, score: score, node: function.Name,
+				precision: precision, sequences: ps6099LeafSequences(pass, function, typesByName),
+				kind: kind, score: score, node: function.Name,
+				syntaxTypes: typesByName, syntaxAliases: typeAliases,
 			})
 		}
 	}
@@ -438,8 +616,8 @@ func ps6099CalledLeafCompatible(pass *analysis.Pass, call *ast.CallExpr, name, p
 	if calledPrecision := ps6099NamePrecision(name); calledPrecision != "" && calledPrecision != precision {
 		return false
 	}
-	if _, signature, ok := typedCallee(pass, call.Fun); ok {
-		if call.Ellipsis.IsValid() || len(call.Args) != signature.Params().Len() {
+	if function, signature, ok := typedCallee(pass, call.Fun); ok {
+		if !ps6099ConcreteLeafCallee(pass, call, function, signature) {
 			return false
 		}
 		calledPrecision, valid := ps6099SignaturePrecision(signature)
@@ -457,7 +635,7 @@ func ps6099CalledLeafCompatible(pass *analysis.Pass, call *ast.CallExpr, name, p
 				if !ok {
 					return false
 				}
-				if call.Ellipsis.IsValid() || len(call.Args) != signature.Params().Len() {
+				if _, valid := ps6099CallSignatureOffset(pass, call, signature); !valid {
 					return false
 				}
 				calledPrecision, valid := ps6099SignaturePrecision(signature)
@@ -610,11 +788,18 @@ func ps6099SyntaxExpressionBinds(expression ast.Expr, name string) bool {
 }
 
 func ps6099ReachableCalls(pass *analysis.Pass, function *ast.FuncDecl, parents map[ast.Node]ast.Node) map[*ast.CallExpr]bool {
-	result := make(map[*ast.CallExpr]bool)
 	if function == nil || function.Body == nil {
+		return make(map[*ast.CallExpr]bool)
+	}
+	return ps6099ReachableCallsInBlock(pass, function.Body, parents)
+}
+
+func ps6099ReachableCallsInBlock(pass *analysis.Pass, body *ast.BlockStmt, parents map[ast.Node]ast.Node) map[*ast.CallExpr]bool {
+	result := make(map[*ast.CallExpr]bool)
+	if body == nil {
 		return result
 	}
-	graph := cfg.New(function.Body, func(call *ast.CallExpr) bool {
+	graph := cfg.New(body, func(call *ast.CallExpr) bool {
 		return !typedBuiltinName(pass, call.Fun, "panic")
 	})
 	if len(graph.Blocks) == 0 {
@@ -795,13 +980,102 @@ func ps6099NodeWithin(node, container ast.Node) bool {
 }
 
 func ps6099CallHasSequenceFormal(pass *analysis.Pass, call *ast.CallExpr, signature *types.Signature, parameters ps6099SequenceParameters, precision string) bool {
-	for index := 0; index < signature.Params().Len() && index < len(call.Args); index++ {
+	offset, ok := ps6099CallSignatureOffset(pass, call, signature)
+	if !ok {
+		return false
+	}
+	if receiver := signature.Recv(); receiver != nil {
+		candidate, sequence := ps6099TypeSequencePrecision(receiver.Type())
+		if sequence && candidate == precision {
+			if expression := ps6099CallReceiverExpression(pass, call); expression != nil &&
+				ps6099ArgumentMentionsSequenceParameter(pass, expression, parameters, precision) {
+				return true
+			}
+		}
+	}
+	for index := 0; index < signature.Params().Len() && index+offset < len(call.Args); index++ {
 		candidate, sequence := ps6099TypeSequencePrecision(signature.Params().At(index).Type())
-		if sequence && candidate == precision && ps6099ArgumentMentionsSequenceParameter(pass, call.Args[index], parameters, precision) {
+		if sequence && candidate == precision && ps6099ArgumentMentionsSequenceParameter(pass, call.Args[index+offset], parameters, precision) {
 			return true
 		}
 	}
 	return false
+}
+
+func ps6099ConcreteLeafCallee(pass *analysis.Pass, call *ast.CallExpr, function *types.Func, signature *types.Signature) bool {
+	if function == nil || signature == nil {
+		return false
+	}
+	if signature.Recv() == nil {
+		_, valid := ps6099CallSignatureOffset(pass, call, signature)
+		return valid
+	}
+	selector := ps6099CallSelector(call.Fun)
+	selection := pass.TypesInfo.Selections[selector]
+	if selection == nil {
+		return false
+	}
+	receiver := types.Unalias(selection.Recv())
+	if pointer, ok := receiver.(*types.Pointer); ok {
+		receiver = types.Unalias(pointer.Elem())
+	}
+	if _, ok := receiver.(*types.TypeParam); ok {
+		return false
+	}
+	if _, dynamic := receiver.Underlying().(*types.Interface); dynamic {
+		return false
+	}
+	_, valid := ps6099CallSignatureOffset(pass, call, signature)
+	return valid
+}
+
+func ps6099CallSignatureOffset(pass *analysis.Pass, call *ast.CallExpr, signature *types.Signature) (int, bool) {
+	if call == nil || signature == nil || call.Ellipsis.IsValid() {
+		return 0, false
+	}
+	offset := 0
+	if signature.Recv() != nil {
+		selector := ps6099CallSelector(call.Fun)
+		selection := pass.TypesInfo.Selections[selector]
+		if selection == nil {
+			return 0, false
+		}
+		if selection.Kind() == types.MethodExpr {
+			offset = 1
+		}
+	}
+	return offset, len(call.Args) == signature.Params().Len()+offset
+}
+
+func ps6099CallReceiverExpression(pass *analysis.Pass, call *ast.CallExpr) ast.Expr {
+	if call == nil {
+		return nil
+	}
+	selector := ps6099CallSelector(call.Fun)
+	selection := pass.TypesInfo.Selections[selector]
+	if selection == nil {
+		return nil
+	}
+	if selection.Kind() == types.MethodExpr {
+		if len(call.Args) == 0 {
+			return nil
+		}
+		return call.Args[0]
+	}
+	return selector.X
+}
+
+func ps6099CallSelector(expression ast.Expr) *ast.SelectorExpr {
+	expression = ps2110Unparen(expression)
+	switch value := expression.(type) {
+	case *ast.IndexExpr:
+		return ps6099CallSelector(value.X)
+	case *ast.IndexListExpr:
+		return ps6099CallSelector(value.X)
+	case *ast.SelectorExpr:
+		return value
+	}
+	return nil
 }
 
 func ps6099SyntaxCallHasSequenceFormal(pass *analysis.Pass, call *ast.CallExpr, function *ast.FuncDecl, parameters ps6099SequenceParameters, precision string, typesByName map[string]ast.Expr) bool {
@@ -1128,6 +1402,37 @@ func ps6099SyntaxTypes(sources []ps6077Source) map[string]ast.Expr {
 	return result
 }
 
+func ps6099SyntaxTypeAliases(sources []ps6077Source) map[string]bool {
+	result := make(map[string]bool)
+	for _, source := range sources {
+		for _, declaration := range source.file.Decls {
+			generic, ok := declaration.(*ast.GenDecl)
+			if !ok || generic.Tok != token.TYPE {
+				continue
+			}
+			for _, specification := range generic.Specs {
+				if named, ok := specification.(*ast.TypeSpec); ok {
+					result[named.Name.Name] = named.Assign.IsValid()
+				}
+			}
+		}
+	}
+	return result
+}
+
+func ps6099LeafSequences(pass *analysis.Pass, function *ast.FuncDecl, typesByName map[string]ast.Expr) []ps6099LeafSequence {
+	if function == nil || function.Type == nil || function.Type.Params == nil {
+		return nil
+	}
+	var result []ps6099LeafSequence
+	for _, field := range function.Type.Params.List {
+		if precision, sequence := ps6099SequenceKindPrecision(pass.TypesInfo.TypeOf(field.Type), field.Type, typesByName, make(map[string]bool)); sequence && precision != "" {
+			result = append(result, ps6099LeafSequence{typ: pass.TypesInfo.TypeOf(field.Type), syntax: field.Type})
+		}
+	}
+	return result
+}
+
 // ps6099BatchPrecision accepts only a result-free batch signature whose every
 // sequence is a float sequence of one consistent precision. Requiring known
 // precision is intentional: an untyped ignored sibling or []int must never be
@@ -1352,7 +1657,7 @@ func ps6099Function(pass *analysis.Pass, function *ast.FuncDecl, helpers map[*ty
 			return true
 		}
 		precision := ps6099Precision(pass.TypesInfo.TypeOf(call))
-		leaf, ok := ps6099BestLeaf(leaves[operation], precision)
+		leaf, ok := ps6099BestLeaf(leaves[operation], precision, destination.typ)
 		if !ok {
 			return true
 		}
@@ -1753,6 +2058,7 @@ func ps6099DestinationSafe(pass *analysis.Pass, scope *ast.BlockStmt, loop *ps60
 		return false
 	}
 	parents := ps6087Parents(loop.body)
+	reachableCalls := ps6099ReachableCallsInBlock(pass, loop.body, parents)
 	allowedRoot := make(map[ast.Node]bool)
 	ast.Inspect(left.X, func(node ast.Node) bool {
 		if node != nil {
@@ -1767,7 +2073,7 @@ func ps6099DestinationSafe(pass *analysis.Pass, scope *ast.BlockStmt, loop *ps60
 		}
 		switch value := node.(type) {
 		case *ast.CallExpr:
-			if value != scalarCall {
+			if value != scalarCall && ps6099CallReachable(pass, value, parents, reachableCalls[value]) {
 				safe = false
 				return false
 			}
@@ -2305,12 +2611,14 @@ func ps6099RebindsStorage(pass *analysis.Pass, expression ast.Expr, destination 
 
 func ps6099ScalarCallCount(pass *analysis.Pass, body *ast.BlockStmt, helpers map[*types.Func]ps6099Helper) int {
 	count := 0
+	parents := ps6087Parents(body)
+	reachable := ps6099ReachableCallsInBlock(pass, body, parents)
 	ast.Inspect(body, func(node ast.Node) bool {
 		if _, nested := node.(*ast.FuncLit); nested {
 			return false
 		}
 		call, ok := node.(*ast.CallExpr)
-		if ok {
+		if ok && ps6099CallReachable(pass, call, parents, reachable[call]) {
 			if _, scalar := ps6099CallOperation(pass, call, helpers); scalar {
 				count++
 			}
@@ -3038,14 +3346,124 @@ func ps6099TypeParameterPrecision(parameter *types.TypeParam) string {
 	return precision
 }
 
-func ps6099BestLeaf(leaves []ps6099Leaf, precision string) (ps6099Leaf, bool) {
-	if precision == "" {
+func ps6099BestLeaf(leaves []ps6099Leaf, precision string, destination types.Type) (ps6099Leaf, bool) {
+	if precision == "" || ps6099SequencePrecision(destination, nil, nil) != precision {
 		return ps6099Leaf{}, false
 	}
 	for _, leaf := range leaves {
-		if leaf.precision == precision {
+		if leaf.precision == precision && ps6099LeafAcceptsDestination(leaf, destination) {
 			return leaf, true
 		}
 	}
 	return ps6099Leaf{}, false
+}
+
+func ps6099LeafAcceptsDestination(leaf ps6099Leaf, destination types.Type) bool {
+	actual := ps6099DestinationSliceType(destination)
+	if actual == nil {
+		return false
+	}
+	for _, sequence := range leaf.sequences {
+		if sequence.typ != nil {
+			if ps6099TypedSequenceAccepts(actual, sequence.typ) {
+				return true
+			}
+			continue
+		}
+		if ps6099SyntaxSequenceAccepts(actual, sequence.syntax, leaf.syntaxTypes, leaf.syntaxAliases, make(map[string]bool)) {
+			return true
+		}
+	}
+	return false
+}
+
+// ps6099DestinationSliceType returns the exact slice value that can be handed
+// to a batch leaf without copying. An array destination can be sliced in place;
+// a by-value array formal is deliberately never accepted as an in-place leaf.
+func ps6099DestinationSliceType(destination types.Type) types.Type {
+	if destination == nil {
+		return nil
+	}
+	underlying := types.Unalias(destination).Underlying()
+	switch value := underlying.(type) {
+	case *types.Slice:
+		return destination
+	case *types.Array:
+		return types.NewSlice(value.Elem())
+	}
+	return nil
+}
+
+func ps6099TypedSequenceAccepts(actual, formal types.Type) bool {
+	if actual == nil || formal == nil {
+		return false
+	}
+	if _, ok := types.Unalias(formal).Underlying().(*types.Slice); !ok {
+		return false
+	}
+	if types.AssignableTo(actual, formal) || types.ConvertibleTo(actual, formal) {
+		return true
+	}
+	actualSlice, actualOK := types.Unalias(actual).Underlying().(*types.Slice)
+	formalSlice, formalOK := types.Unalias(formal).Underlying().(*types.Slice)
+	if !actualOK || !formalOK {
+		return false
+	}
+	return ps6099GenericElementAccepts(actualSlice.Elem(), formalSlice.Elem())
+}
+
+func ps6099GenericElementAccepts(actual, formal types.Type) bool {
+	formal = types.Unalias(formal)
+	if parameter, ok := formal.(*types.TypeParam); ok {
+		constraint, ok := parameter.Constraint().Underlying().(*types.Interface)
+		return ok && types.Satisfies(actual, constraint)
+	}
+	return types.Identical(actual, formal)
+}
+
+func ps6099SyntaxSequenceAccepts(actual types.Type, syntax ast.Expr, typesByName map[string]ast.Expr, aliases map[string]bool, active map[string]bool) bool {
+	actualSlice, ok := types.Unalias(actual).Underlying().(*types.Slice)
+	if !ok {
+		return false
+	}
+	syntax = ps2110Unparen(syntax)
+	switch value := syntax.(type) {
+	case *ast.Ident:
+		if active[value.Name] || typesByName[value.Name] == nil {
+			return false
+		}
+		active[value.Name] = true
+		accepted := ps6099SyntaxSequenceAccepts(actual, typesByName[value.Name], typesByName, aliases, active)
+		delete(active, value.Name)
+		return accepted
+	case *ast.ArrayType:
+		if value.Len != nil {
+			return false
+		}
+		return ps6099SyntaxElementMatches(actualSlice.Elem(), value.Elt, typesByName, aliases, make(map[string]bool))
+	}
+	return false
+}
+
+func ps6099SyntaxElementMatches(actual types.Type, syntax ast.Expr, typesByName map[string]ast.Expr, aliases map[string]bool, active map[string]bool) bool {
+	identifier, ok := ps2110Unparen(syntax).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	if identifier.Name == "float32" || identifier.Name == "float64" {
+		basic, ok := types.Unalias(actual).(*types.Basic)
+		return ok && basic.Name() == identifier.Name
+	}
+	definition := typesByName[identifier.Name]
+	if definition == nil || active[identifier.Name] {
+		return false
+	}
+	if !aliases[identifier.Name] {
+		named, ok := types.Unalias(actual).(*types.Named)
+		return ok && named.Obj() != nil && named.Obj().Name() == identifier.Name
+	}
+	active[identifier.Name] = true
+	accepted := ps6099SyntaxElementMatches(actual, definition, typesByName, aliases, active)
+	delete(active, identifier.Name)
+	return accepted
 }
