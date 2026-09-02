@@ -752,6 +752,10 @@ func ps4008ForwardGotoLabelIndex(block *ast.BlockStmt, statementIndex int, label
 }
 
 func ps4008StatementPreservesFollowingOnLivePaths(statement ast.Stmt) bool {
+	return ps4008StatementPreservesFollowingOnLivePathsWithRoot(statement, statement)
+}
+
+func ps4008StatementPreservesFollowingOnLivePathsWithRoot(statement ast.Stmt, branchRoot ast.Node) bool {
 	switch value := statement.(type) {
 	case *ast.AssignStmt, *ast.DeclStmt, *ast.IncDecStmt, *ast.ExprStmt,
 		*ast.EmptyStmt, *ast.DeferStmt, *ast.GoStmt, *ast.SendStmt,
@@ -760,15 +764,15 @@ func ps4008StatementPreservesFollowingOnLivePaths(statement ast.Stmt) bool {
 	case *ast.BlockStmt:
 		return ps4008BlockPreservesFollowingOnLivePaths(value)
 	case *ast.IfStmt:
-		return !ps4008ContainsEscapingBranch(value)
+		return !ps4008ContainsEscapingBranch(branchRoot)
 	case *ast.SwitchStmt:
-		return !ps4008ContainsEscapingBranch(value)
+		return !ps4008ContainsEscapingBranch(branchRoot)
 	case *ast.TypeSwitchStmt:
-		return !ps4008ContainsEscapingBranch(value)
+		return !ps4008ContainsEscapingBranch(branchRoot)
 	case *ast.SelectStmt:
-		return ps4008SelectHasDefault(value) && !ps4008ContainsEscapingBranch(value)
+		return ps4008SelectHasDefault(value) && !ps4008ContainsEscapingBranch(branchRoot)
 	case *ast.LabeledStmt:
-		return ps4008StatementPreservesFollowingOnLivePaths(value.Stmt)
+		return ps4008StatementPreservesFollowingOnLivePathsWithRoot(value.Stmt, branchRoot)
 	default:
 		return false
 	}
@@ -813,8 +817,16 @@ func ps4008ContainsEscapingBranch(node ast.Node) bool {
 			return true
 		}
 		if branch.Label != nil {
-			escapes = true
-			return false
+			switch branch.Tok {
+			case token.BREAK, token.CONTINUE:
+				escapes = !ps4008StackContainsLabeledBranchTarget(stack, branch.Label.Name, branch.Tok)
+			default:
+				// Gotos and any other labeled transfer stay conservative. A
+				// goto target need not be an ancestor and therefore cannot be
+				// resolved from this subtree stack alone.
+				escapes = true
+			}
+			return !escapes
 		}
 		switch branch.Tok {
 		case token.BREAK:
@@ -832,6 +844,32 @@ func ps4008ContainsEscapingBranch(node ast.Node) bool {
 		return !escapes
 	})
 	return escapes
+}
+
+func ps4008StackContainsLabeledBranchTarget(stack []ast.Node, label string, branch token.Token) bool {
+	if label == "" {
+		return false
+	}
+	for stackIndex := len(stack) - 1; stackIndex >= 0; stackIndex-- {
+		labeled, ok := stack[stackIndex].(*ast.LabeledStmt)
+		if !ok || labeled.Label == nil || labeled.Label.Name != label {
+			continue
+		}
+		switch branch {
+		case token.BREAK:
+			switch labeled.Stmt.(type) {
+			case *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+				return true
+			}
+		case token.CONTINUE:
+			switch labeled.Stmt.(type) {
+			case *ast.ForStmt, *ast.RangeStmt:
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 func ps4008StackContainsBreakTarget(stack []ast.Node) bool {
