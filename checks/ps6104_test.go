@@ -121,6 +121,80 @@ kernel void row_changes_later(uint row [[thread_position_in_grid]], uint outputR
 }`,
 		},
 		{
+			name: "indexed row mutation",
+			source: `#include <metal_stdlib>
+kernel void indexed_row_change(uint outputRows [[buffer(0)]]) {
+  uint row[2] = {0, 0};
+  for (uint block = 0; block < blocks; ++block) {
+    row[block & 1] = block;
+    if (row[0] < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "indexed row read remains invariant",
+			source: `#include <metal_stdlib>
+kernel void indexed_row_read(uint outputRows [[buffer(0)]]) {
+  uint row[2] = {0, 1};
+  for (uint block = 0; block < blocks; ++block) {
+    if (row[0] < outputRows) consume(block);
+  }
+}`,
+			want: 1,
+		},
+		{
+			name: "indexed postfix row mutation",
+			source: `#include <metal_stdlib>
+kernel void indexed_postfix_change(uint outputRows [[buffer(0)]]) {
+  uint row[2] = {0, 1};
+  for (uint block = 0; block < blocks; ++block) {
+    row[0]++;
+    if (row[0] < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "aggregate field mutation",
+			source: `#include <metal_stdlib>
+kernel void field_row_change(uint outputRows [[buffer(0)]]) {
+  RowState state;
+  for (uint block = 0; block < blocks; ++block) {
+    state.row = block;
+    if (state.row < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "pointer field mutation",
+			source: `#include <metal_stdlib>
+kernel void pointer_field_change(device RowState* state, uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    state->row = block;
+    if (state->row < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "dereferenced row mutation",
+			source: `#include <metal_stdlib>
+kernel void dereferenced_row_change(device uint* row, uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    *row = block;
+    if (*row < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "parenthesized dereferenced field mutation",
+			source: `#include <metal_stdlib>
+kernel void parenthesized_pointer_change(device RowState* state, uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    (*state).row = block;
+    if ((*state).row < outputRows) consume(block);
+  }
+}`,
+		},
+		{
 			name: "prefix row mutation",
 			source: `#include <metal_stdlib>
 kernel void prefix_row_change(uint row [[thread_position_in_grid]], uint outputRows [[buffer(0)]]) {

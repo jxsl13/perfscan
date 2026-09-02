@@ -75,15 +75,19 @@ the bit-identical candidate was reverted.`,
 })
 
 var (
-	ps6104If             = regexp.MustCompile(`\bif\s*\(`)
-	ps6104Identifier     = regexp.MustCompile(`\b[A-Za-z_]\w*\b`)
-	ps6104Comparison     = regexp.MustCompile(`(?:<=|>=|<|>)`)
-	ps6104FunctionConst  = regexp.MustCompile(`(?s)\bconstant\s+[A-Za-z_]\w*\s+([A-Za-z_]\w*)\s*\[\[\s*function_constant\s*\(`)
-	ps6104Call           = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*\(`)
-	ps6104AssignmentDecl = regexp.MustCompile(`(?m)\b([A-Za-z_]\w*)\s*=\s*([^;\n]+)`)
-	ps6104Mutation       = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*(?:\+\+|--|\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=)`)
-	ps6104PrefixMutation = regexp.MustCompile(`(?:\+\+|--)\s*\b([A-Za-z_]\w*)\b`)
-	ps6104ForHeader      = regexp.MustCompile(`\bfor\s*\(\s*(?:(?:const\s+)?(?:uint|int|uint32_t|int32_t|size_t|ushort|long)\s+)?([A-Za-z_]\w*)\s*=\s*0(?:[uUlL]*)\s*;\s*([A-Za-z_]\w*)\s*<\s*([^;]+?)\s*;\s*([^)]+)\)`)
+	ps6104If                      = regexp.MustCompile(`\bif\s*\(`)
+	ps6104Identifier              = regexp.MustCompile(`\b[A-Za-z_]\w*\b`)
+	ps6104Comparison              = regexp.MustCompile(`(?:<=|>=|<|>)`)
+	ps6104FunctionConst           = regexp.MustCompile(`(?s)\bconstant\s+[A-Za-z_]\w*\s+([A-Za-z_]\w*)\s*\[\[\s*function_constant\s*\(`)
+	ps6104Call                    = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*\(`)
+	ps6104AssignmentDecl          = regexp.MustCompile(`(?m)\b([A-Za-z_]\w*)\s*=\s*([^;\n]+)`)
+	ps6104Mutation                = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*(?:\+\+|--|\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=)`)
+	ps6104PrefixMutation          = regexp.MustCompile(`(?:\+\+|--)\s*\b([A-Za-z_]\w*)\b`)
+	ps6104AggregateMutation       = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*(?:(?:\[[^\]\n;]*\])|(?:(?:\.|->)\s*[A-Za-z_]\w*))+\s*(?:\+\+|--|<<=|>>=|[+\-*/%&|^]=|=(?:[ \t]*[^=]|$))`)
+	ps6104PrefixAggregateMutation = regexp.MustCompile(`(?:\+\+|--)\s*\b([A-Za-z_]\w*)\s*(?:(?:\[[^\]\n;]*\])|(?:(?:\.|->)\s*[A-Za-z_]\w*))+`)
+	ps6104IndirectMutation        = regexp.MustCompile(`\*+\s*\b([A-Za-z_]\w*)\b\s*(?:(?:\[[^\]\n;]*\])|(?:(?:\.|->)\s*[A-Za-z_]\w*))*\s*(?:\+\+|--|<<=|>>=|[+\-*/%&|^]=|=(?:[ \t]*[^=]|$))`)
+	ps6104ParenIndirectMutation   = regexp.MustCompile(`\(\s*\*+\s*\b([A-Za-z_]\w*)\s*\)\s*(?:(?:\[[^\]\n;]*\])|(?:(?:\.|->)\s*[A-Za-z_]\w*))*\s*(?:\+\+|--|<<=|>>=|[+\-*/%&|^]=|=(?:[ \t]*[^=]|$))`)
+	ps6104ForHeader               = regexp.MustCompile(`\bfor\s*\(\s*(?:(?:const\s+)?(?:uint|int|uint32_t|int32_t|size_t|ushort|long)\s+)?([A-Za-z_]\w*)\s*=\s*0(?:[uUlL]*)\s*;\s*([A-Za-z_]\w*)\s*<\s*([^;]+?)\s*;\s*([^)]+)\)`)
 )
 
 type ps6104Finding struct {
@@ -288,13 +292,25 @@ func ps6104InsideNestedLoop(body string, offset int) bool {
 func ps6104Mutations(body string) map[string]bool {
 	postfix := ps6104Mutation.FindAllStringSubmatch(body, -1)
 	prefix := ps6104PrefixMutation.FindAllStringSubmatch(body, -1)
+	aggregate := ps6104AggregateMutation.FindAllStringSubmatch(body, -1)
+	prefixAggregate := ps6104PrefixAggregateMutation.FindAllStringSubmatch(body, -1)
+	indirect := ps6104IndirectMutation.FindAllStringSubmatch(body, -1)
+	parenIndirect := ps6104ParenIndirectMutation.FindAllStringSubmatch(body, -1)
 	assignments := ps6104AssignmentDecl.FindAllStringSubmatch(body, -1)
-	result := make(map[string]bool, len(postfix)+len(prefix)+len(assignments))
+	result := make(map[string]bool, len(postfix)+len(prefix)+len(aggregate)+len(prefixAggregate)+len(indirect)+len(parenIndirect)+len(assignments))
 	for _, match := range postfix {
 		result[match[1]] = true
 	}
 	for _, match := range prefix {
 		result[match[1]] = true
+	}
+	for _, matches := range [][][]string{aggregate, prefixAggregate, indirect, parenIndirect} {
+		for _, match := range matches {
+			// Mutating an indexed element or field can change a predicate that
+			// reads through the same aggregate root. Treat the whole root as
+			// loop-variant instead of pretending only direct identifiers write.
+			result[match[1]] = true
+		}
 	}
 	for _, match := range assignments {
 		result[match[1]] = true
