@@ -75,19 +75,13 @@ the bit-identical candidate was reverted.`,
 })
 
 var (
-	ps6104If                      = regexp.MustCompile(`\bif\s*\(`)
-	ps6104Identifier              = regexp.MustCompile(`\b[A-Za-z_]\w*\b`)
-	ps6104Comparison              = regexp.MustCompile(`(?:<=|>=|<|>)`)
-	ps6104FunctionConst           = regexp.MustCompile(`(?s)\bconstant\s+[A-Za-z_]\w*\s+([A-Za-z_]\w*)\s*\[\[\s*function_constant\s*\(`)
-	ps6104Call                    = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*\(`)
-	ps6104AssignmentDecl          = regexp.MustCompile(`(?m)\b([A-Za-z_]\w*)\s*=\s*([^;\n]+)`)
-	ps6104Mutation                = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*(?:\+\+|--|\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=)`)
-	ps6104PrefixMutation          = regexp.MustCompile(`(?:\+\+|--)\s*\b([A-Za-z_]\w*)\b`)
-	ps6104AggregateMutation       = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*(?:(?:\[[^\]\n;]*\])|(?:(?:\.|->)\s*[A-Za-z_]\w*))+\s*(?:\+\+|--|<<=|>>=|[+\-*/%&|^]=|=(?:[ \t]*[^=]|$))`)
-	ps6104PrefixAggregateMutation = regexp.MustCompile(`(?:\+\+|--)\s*\b([A-Za-z_]\w*)\s*(?:(?:\[[^\]\n;]*\])|(?:(?:\.|->)\s*[A-Za-z_]\w*))+`)
-	ps6104IndirectMutation        = regexp.MustCompile(`\*+\s*\b([A-Za-z_]\w*)\b\s*(?:(?:\[[^\]\n;]*\])|(?:(?:\.|->)\s*[A-Za-z_]\w*))*\s*(?:\+\+|--|<<=|>>=|[+\-*/%&|^]=|=(?:[ \t]*[^=]|$))`)
-	ps6104ParenIndirectMutation   = regexp.MustCompile(`\(\s*\*+\s*\b([A-Za-z_]\w*)\s*\)\s*(?:(?:\[[^\]\n;]*\])|(?:(?:\.|->)\s*[A-Za-z_]\w*))*\s*(?:\+\+|--|<<=|>>=|[+\-*/%&|^]=|=(?:[ \t]*[^=]|$))`)
-	ps6104ForHeader               = regexp.MustCompile(`\bfor\s*\(\s*(?:(?:const\s+)?(?:uint|int|uint32_t|int32_t|size_t|ushort|long)\s+)?([A-Za-z_]\w*)\s*=\s*0(?:[uUlL]*)\s*;\s*([A-Za-z_]\w*)\s*<\s*([^;]+?)\s*;\s*([^)]+)\)`)
+	ps6104If             = regexp.MustCompile(`\bif\s*\(`)
+	ps6104Identifier     = regexp.MustCompile(`\b[A-Za-z_]\w*\b`)
+	ps6104Comparison     = regexp.MustCompile(`(?:<=|>=|<|>)`)
+	ps6104FunctionConst  = regexp.MustCompile(`(?s)\bconstant\s+[A-Za-z_]\w*\s+([A-Za-z_]\w*)\s*\[\[\s*function_constant\s*\(`)
+	ps6104Call           = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*\(`)
+	ps6104AssignmentDecl = regexp.MustCompile(`(?m)\b([A-Za-z_]\w*)\s*=\s*([^;\n]+)`)
+	ps6104ForHeader      = regexp.MustCompile(`\bfor\s*\(\s*(?:(?:const\s+)?(?:uint|int|uint32_t|int32_t|size_t|ushort|long)\s+)?([A-Za-z_]\w*)\s*=\s*0(?:[uUlL]*)\s*;\s*([A-Za-z_]\w*)\s*<\s*([^;]+?)\s*;\s*([^)]+)\)`)
 )
 
 type ps6104Finding struct {
@@ -290,32 +284,204 @@ func ps6104InsideNestedLoop(body string, offset int) bool {
 }
 
 func ps6104Mutations(body string) map[string]bool {
-	postfix := ps6104Mutation.FindAllStringSubmatch(body, -1)
-	prefix := ps6104PrefixMutation.FindAllStringSubmatch(body, -1)
-	aggregate := ps6104AggregateMutation.FindAllStringSubmatch(body, -1)
-	prefixAggregate := ps6104PrefixAggregateMutation.FindAllStringSubmatch(body, -1)
-	indirect := ps6104IndirectMutation.FindAllStringSubmatch(body, -1)
-	parenIndirect := ps6104ParenIndirectMutation.FindAllStringSubmatch(body, -1)
-	assignments := ps6104AssignmentDecl.FindAllStringSubmatch(body, -1)
-	result := make(map[string]bool, len(postfix)+len(prefix)+len(aggregate)+len(prefixAggregate)+len(indirect)+len(parenIndirect)+len(assignments))
-	for _, match := range postfix {
-		result[match[1]] = true
-	}
-	for _, match := range prefix {
-		result[match[1]] = true
-	}
-	for _, matches := range [][][]string{aggregate, prefixAggregate, indirect, parenIndirect} {
-		for _, match := range matches {
-			// Mutating an indexed element or field can change a predicate that
-			// reads through the same aggregate root. Treat the whole root as
-			// loop-variant instead of pretending only direct identifiers write.
-			result[match[1]] = true
-		}
-	}
-	for _, match := range assignments {
-		result[match[1]] = true
+	roots := ps6104NativeMutationRoots(body)
+	result := make(map[string]bool, len(roots))
+	for _, root := range roots {
+		// Mutating an indexed element, field, or dereference can change a
+		// predicate that reads through the same aggregate root. Treat the
+		// whole root as loop-variant instead of pretending only direct
+		// identifiers write.
+		result[root] = true
 	}
 	return result
+}
+
+func ps6104NativeMutationRoots(source string) []string {
+	tokens := ps6104NativeTokens(source)
+	seen := make(map[string]bool)
+	var roots []string
+	add := func(root string) {
+		if root != "" && !seen[root] {
+			seen[root] = true
+			roots = append(roots, root)
+		}
+	}
+	for index, token := range tokens {
+		switch token {
+		case "++", "--":
+			if root, ok := ps6104NativeLValueBefore(tokens, index); ok {
+				add(root)
+			}
+			if _, root, ok := ps6104ParseNativeLValue(tokens, index+1); ok {
+				add(root)
+			}
+		case "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=":
+			if root, ok := ps6104NativeLValueBefore(tokens, index); ok {
+				add(root)
+			}
+		}
+	}
+	return roots
+}
+
+func ps6104NativeLValueBefore(tokens []string, end int) (string, bool) {
+	start := 0
+	parentheses := 0
+	brackets := 0
+
+scan:
+	for index := end - 1; index >= 0; index-- {
+		switch tokens[index] {
+		case ")":
+			parentheses++
+			continue
+		case "(":
+			if parentheses > 0 {
+				parentheses--
+				continue
+			}
+		case "]":
+			brackets++
+			continue
+		case "[":
+			if brackets > 0 {
+				brackets--
+				continue
+			}
+		}
+		if parentheses != 0 || brackets != 0 {
+			continue
+		}
+		switch tokens[index] {
+		case ";", "{", "}", ",", "?", ":", "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=":
+			start = index + 1
+			break scan
+		}
+	}
+	for index := start; index < end; index++ {
+		next, root, ok := ps6104ParseNativeLValue(tokens, index)
+		if ok && next == end {
+			return root, true
+		}
+	}
+	return "", false
+}
+
+func ps6104ParseNativeLValue(tokens []string, start int) (int, string, bool) {
+	index := start
+	indirect := false
+	for index < len(tokens) && tokens[index] == "*" {
+		indirect = true
+		index++
+	}
+	if index >= len(tokens) {
+		return start, "", false
+	}
+	var root string
+	switch {
+	case ps6104NativeIdentifier(tokens[index]):
+		root = tokens[index]
+		index++
+	case tokens[index] == "(":
+		next, innerRoot, ok := ps6104ParseNativeLValue(tokens, index+1)
+		if !ok || next >= len(tokens) || tokens[next] != ")" {
+			return start, "", false
+		}
+		root = innerRoot
+		index = next + 1
+	default:
+		return start, "", false
+	}
+	for index < len(tokens) {
+		switch tokens[index] {
+		case "[":
+			close := ps6104MatchingNativeToken(tokens, index, "[", "]")
+			if close < 0 {
+				return start, "", false
+			}
+			indirect = true
+			index = close + 1
+		case ".", "->":
+			if index+1 >= len(tokens) || !ps6104NativeIdentifier(tokens[index+1]) {
+				return start, "", false
+			}
+			indirect = true
+			index += 2
+		default:
+			return index, root, root != "" && (indirect || index > start)
+		}
+	}
+	return index, root, root != "" && (indirect || index > start)
+}
+
+func ps6104MatchingNativeToken(tokens []string, start int, open, close string) int {
+	depth := 0
+	for index := start; index < len(tokens); index++ {
+		switch tokens[index] {
+		case open:
+			depth++
+		case close:
+			depth--
+			if depth == 0 {
+				return index
+			}
+		}
+	}
+	return -1
+}
+
+func ps6104NativeTokens(source string) []string {
+	var tokens []string
+	for index := 0; index < len(source); {
+		if strings.ContainsRune(" \t\r\n", rune(source[index])) {
+			index++
+			continue
+		}
+		if ps6104NativeIdentifierStart(source[index]) {
+			end := index + 1
+			for end < len(source) && ps6104NativeIdentifierContinue(source[end]) {
+				end++
+			}
+			tokens = append(tokens, source[index:end])
+			index = end
+			continue
+		}
+		matched := false
+		for _, operator := range []string{"<<=", ">>=", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "->", "==", "!=", "<=", ">=", "&&", "||"} {
+			if strings.HasPrefix(source[index:], operator) {
+				tokens = append(tokens, operator)
+				index += len(operator)
+				matched = true
+				break
+			}
+		}
+		if matched {
+			continue
+		}
+		tokens = append(tokens, source[index:index+1])
+		index++
+	}
+	return tokens
+}
+
+func ps6104NativeIdentifier(token string) bool {
+	if token == "" || !ps6104NativeIdentifierStart(token[0]) {
+		return false
+	}
+	for index := 1; index < len(token); index++ {
+		if !ps6104NativeIdentifierContinue(token[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func ps6104NativeIdentifierStart(value byte) bool {
+	return value == '_' || value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
+}
+
+func ps6104NativeIdentifierContinue(value byte) bool {
+	return ps6104NativeIdentifierStart(value) || value >= '0' && value <= '9'
 }
 
 func ps6104Assignments(body string, base int) map[string][]ps6104Assignment {

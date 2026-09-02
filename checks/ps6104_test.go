@@ -154,6 +154,77 @@ kernel void indexed_postfix_change(uint outputRows [[buffer(0)]]) {
 }`,
 		},
 		{
+			name: "nested indexed row mutation",
+			source: `#include <metal_stdlib>
+kernel void nested_index_change(uint outputRows [[buffer(0)]]) {
+  uint row[2] = {0, 1};
+  uint index[2] = {0, 1};
+  for (uint block = 0; block < blocks; ++block) {
+    row[index[block & 1]] = block;
+    if (row[0] < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "nested indexed row mutation with internal delimiters",
+			source: `#include <metal_stdlib>
+kernel void delimited_nested_index_change(uint outputRows [[buffer(0)]]) {
+  uint row[2] = {0, 1};
+  for (uint block = 0; block < blocks; ++block) {
+    row[select(block & 1, 0, block > 0)] = block;
+    if (row[0] < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "multiline indexed row mutation",
+			source: `#include <metal_stdlib>
+kernel void multiline_index_change(uint outputRows [[buffer(0)]]) {
+  uint row[2] = {0, 1};
+  for (uint block = 0; block < blocks; ++block) {
+    row[
+      block & 1
+    ] = block;
+    if (row[0] < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "parenthesized indexed row mutation",
+			source: `#include <metal_stdlib>
+kernel void parenthesized_index_change(uint outputRows [[buffer(0)]]) {
+  uint row[2] = {0, 1};
+  for (uint block = 0; block < blocks; ++block) {
+    (row[block & 1]) = block;
+    if (row[0] < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "unrelated aggregate mutation preserves finding",
+			source: `#include <metal_stdlib>
+kernel void unrelated_index_change(uint outputRows [[buffer(0)]]) {
+  uint row[2] = {0, 1};
+  uint scratch[2] = {0, 0};
+  for (uint block = 0; block < blocks; ++block) {
+    scratch[block & 1] = block;
+    if (row[0] < outputRows) consume(block);
+  }
+}`,
+			want: 1,
+		},
+		{
+			name: "comparisons do not masquerade as mutations",
+			source: `#include <metal_stdlib>
+kernel void comparisons_are_reads(uint row [[thread_position_in_grid]], uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    bool exact = row == outputRows;
+    if (row < outputRows) consume(exact, block);
+  }
+}`,
+			want: 1,
+		},
+		{
 			name: "aggregate field mutation",
 			source: `#include <metal_stdlib>
 kernel void field_row_change(uint outputRows [[buffer(0)]]) {
@@ -185,11 +256,51 @@ kernel void dereferenced_row_change(device uint* row, uint outputRows [[buffer(0
 }`,
 		},
 		{
+			name: "prefix dereferenced row mutation",
+			source: `#include <metal_stdlib>
+kernel void prefix_dereferenced_row_change(device uint* row, uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    ++*row;
+    if (*row < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "prefix parenthesized dereferenced row mutation",
+			source: `#include <metal_stdlib>
+kernel void prefix_parenthesized_row_change(device uint* row, uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    ++(*row);
+    if (*row < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "dereference of parenthesized pointer mutation",
+			source: `#include <metal_stdlib>
+kernel void parenthesized_pointer_row_change(device uint* row, uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    *(row) = block;
+    if (*row < outputRows) consume(block);
+  }
+}`,
+		},
+		{
 			name: "parenthesized dereferenced field mutation",
 			source: `#include <metal_stdlib>
 kernel void parenthesized_pointer_change(device RowState* state, uint outputRows [[buffer(0)]]) {
   for (uint block = 0; block < blocks; ++block) {
     (*state).row = block;
+    if ((*state).row < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "multiply parenthesized dereferenced field mutation",
+			source: `#include <metal_stdlib>
+kernel void multiply_parenthesized_pointer_change(device RowState* state, uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    (((*state).row)) = block;
     if ((*state).row < outputRows) consume(block);
   }
 }`,
