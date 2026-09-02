@@ -5452,9 +5452,10 @@ func ps1006ExprText(pass *analysis.Pass, expression ast.Expr) string {
 //	}
 //
 // with A and OUT plain identifiers, fixed array types, and compile-time
-// non-negative COLS/ROWS that prove every index in bounds. The replacement
-// accumulates into scratch while walking A contiguously; per output element
-// the accumulation order is unchanged, so the result is bit-identical:
+// positive COLS and non-negative ROWS that prove every index in bounds. The
+// replacement accumulates into scratch while walking A contiguously; per
+// output element the accumulation order is unchanged, so the result is
+// bit-identical:
 //
 //	psSumsN := make([]T, COLS)
 //	for R := 0; R < ROWS; R++ {
@@ -5540,14 +5541,21 @@ func ps1006InterchangeFix(pass *analysis.Pass, file *ast.File, outerNode, innerN
 	}
 	// Reordering changes both the time at which source/output bounds panics
 	// happen and the behavior of overlapping slices. Only fixed arrays with
-	// compile-time non-negative bounds let us prove that every indexed access
-	// succeeds and that distinct variables cannot share element storage.
+	// compile-time positive-column and non-negative-row bounds let us prove
+	// that every indexed access succeeds and that distinct variables cannot
+	// share element storage.
 	colsValue, colsOK := ps1006NonNegativeIntConstant(pass, colsExpr)
 	rowsValue, rowsOK := ps1006NonNegativeIntConstant(pass, rowsExpr)
 	sourceLength, sourceOK := ps1006ArrayLength(pass.TypesInfo.TypeOf(arrID))
 	outputLength, outputOK := ps1006ArrayLength(pass.TypesInfo.TypeOf(outID))
-	if !colsOK || !rowsOK || !sourceOK || !outputOK || colsValue > outputLength ||
-		colsValue != 0 && rowsValue > sourceLength/colsValue || rowsValue*colsValue > sourceLength {
+	// With zero columns the original outer loop is a no-op, while the
+	// interchanged form would still execute the row loop. Keep that degenerate
+	// shape advisory so an arbitrarily large row bound cannot turn O(1) work
+	// into O(rows).
+	if !colsOK || !rowsOK || colsValue == 0 || !sourceOK || !outputOK || colsValue > outputLength {
+		return nil
+	}
+	if rowsValue > sourceLength/colsValue || rowsValue*colsValue > sourceLength {
 		return nil
 	}
 	// All five participating names must be pairwise distinct, and the bound

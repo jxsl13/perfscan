@@ -1,6 +1,17 @@
 package checks
 
-import "testing"
+import (
+	"testing"
+
+	"golang.org/x/tools/go/analysis/analysistest"
+)
+
+func TestPS1006ZeroColumnInterchangeStaysAdvisory(t *testing.T) {
+	t.Parallel()
+	// The identical golden file proves the finding remains reportable while
+	// carrying no rewrite that would execute the otherwise unreachable row loop.
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS1006.Analyzer, "ps1006_zero_column")
+}
 
 func TestPS1006SliceInterchangeCounterexamples(t *testing.T) {
 	t.Parallel()
