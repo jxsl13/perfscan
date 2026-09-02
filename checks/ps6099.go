@@ -2765,6 +2765,14 @@ func ps6099FlowStmt(pass *analysis.Pass, statement ast.Stmt, before token.Pos, l
 		if value.Init != nil {
 			ps6099FlowStmt(pass, value.Init, token.NoPos, loop, state)
 		}
+		if truth, known := ps6099BooleanCondition(pass, value.Cond); known {
+			if truth {
+				ps6099FlowBlock(pass, value.Body, before, loop, state)
+			} else if value.Else != nil {
+				ps6099FlowStmt(pass, value.Else, before, loop, state)
+			}
+			return
+		}
 		thenState := ps6099CloneDependence(state)
 		ps6099FlowBlock(pass, value.Body, before, loop, thenState)
 		elseState := ps6099CloneDependence(state)
@@ -2811,6 +2819,10 @@ func ps6099FlowStmt(pass *analysis.Pass, statement ast.Stmt, before token.Pos, l
 		if value.Init != nil {
 			ps6099FlowStmt(pass, value.Init, token.NoPos, loop, state)
 		}
+		if clause, known := ps6099SelectedSwitchClause(pass, value); known {
+			ps6099FlowSelectedSwitchClauses(pass, value.Body.List, clause, before, loop, state)
+			return
+		}
 		ps6099FlowClauses(pass, value.Body.List, before, loop, state)
 	case *ast.TypeSwitchStmt:
 		if value.Init != nil {
@@ -2823,6 +2835,60 @@ func ps6099FlowStmt(pass *analysis.Pass, statement ast.Stmt, before token.Pos, l
 	case *ast.SelectStmt:
 		ps6099FlowCommClauses(pass, value.Body.List, before, loop, state)
 	}
+}
+
+// ps6099SelectedSwitchClause returns the statically selected case, or -1 for
+// a switch that has no matching case and no default. Unknown comparisons retain
+// the conservative all-clauses flow join.
+func ps6099SelectedSwitchClause(pass *analysis.Pass, statement *ast.SwitchStmt) (int, bool) {
+	if statement == nil || statement.Body == nil {
+		return -1, false
+	}
+	defaultClause := -1
+	for index, item := range statement.Body.List {
+		clause, ok := item.(*ast.CaseClause)
+		if !ok {
+			continue
+		}
+		if len(clause.List) == 0 {
+			defaultClause = index
+			continue
+		}
+		for _, expression := range clause.List {
+			matches, known := ps6099SwitchCaseCondition(pass, statement, expression)
+			if !known {
+				return -1, false
+			}
+			if matches {
+				return index, true
+			}
+		}
+	}
+	return defaultClause, true
+}
+
+// ps6099FlowSelectedSwitchClauses follows a source-proved switch selection.
+// It only proceeds into a later clause when the selected clause's direct last
+// statement is fallthrough; normal case completion exits the switch.
+func ps6099FlowSelectedSwitchClauses(pass *analysis.Pass, clauses []ast.Stmt, selected int, before token.Pos, loop *ps6099Loop, state map[types.Object]bool) {
+	for index := selected; index >= 0 && index < len(clauses); index++ {
+		clause, ok := clauses[index].(*ast.CaseClause)
+		if !ok {
+			return
+		}
+		ps6099FlowBlock(pass, &ast.BlockStmt{List: clause.Body}, before, loop, state)
+		if before.IsValid() && before <= clause.End() || !ps6099CaseFallsThrough(clause) {
+			return
+		}
+	}
+}
+
+func ps6099CaseFallsThrough(clause *ast.CaseClause) bool {
+	if clause == nil || len(clause.Body) == 0 {
+		return false
+	}
+	branch, ok := clause.Body[len(clause.Body)-1].(*ast.BranchStmt)
+	return ok && branch.Tok == token.FALLTHROUGH
 }
 
 func ps6099FlowAssignment(pass *analysis.Pass, assignment *ast.AssignStmt, loop *ps6099Loop, state map[types.Object]bool) {
