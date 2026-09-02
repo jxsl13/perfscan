@@ -55,12 +55,15 @@ math/rand/v2, but
 rejects overwritten, shadowed, unsigned/nonnegative, untimed, or
 control-flow-ambiguous values. Timer modeling accounts for conditional
 ResetTimer/StartTimer/StopTimer calls (a gate is timed when any live path is
-running), B.Loop setup and cleanup, PB.Next worker loops, and the fact that a
+running), B.Loop setup and false-returning cleanup without stopping explicit
+break, return, or goto exits, PB.Next worker loops, and the fact that a
 parent benchmark using B.Run is not measured. RunParallel workers inherit the
 parent timer state instead of starting a new timed sub-benchmark. Small
 exact-length loops are simulated precisely; a shared bounded transfer budget
 summarizes larger or nested for/range products with conservative chronological
-segments at constant induction comparisons.
+segments at constant induction comparisons. Bounded for tails recheck their
+real condition between segments and abandon fixed chronology when a body write
+changes the stored bound or induction value.
 Map allocation hints are never treated as lengths, and
 mutations that can change map iteration invalidate fixed-trip assumptions. Unknown or capped loops preserve
 inputs they cannot write and conservatively invalidate possible future writes.
@@ -86,8 +89,9 @@ quadratically; reaching the cap still evaluates operands in Go order and then
 conservatively discards captured provenance.
 Append modeling distinguishes reuse from allocation and accounts for slice
 offsets. Conditions and tagged-switch tags are evaluated once even when proof
-classification also inspects them, and unknown short-circuit paths merge skipped
-and executed operand effects. Negated conjunctions and
+classification also inspects them. Switch case matching keeps true and false
+short-circuit outcomes separate, so only an executed conjunction RHS can reach
+its selected body while the skipped state continues through no-match. Negated conjunctions and
 disjunctions follow De Morgan control semantics. Tagged switches model typed
 constant cases, Boolean polarity, default complements, reachability, and
 fallthrough. A product is treated as a square only when both operands carry the
@@ -1659,6 +1663,7 @@ func (engine *ps6101Engine) evaluateSwitchCases(
 	reachable := make([]bool, len(clauses))
 	candidates := make([][]ps6101ExitState, len(clauses))
 	defaultIndex := -1
+	unmatchedEntry := engine.currentExitState()
 	unmatched := true
 	for index, clause := range clauses {
 		if len(clause.List) == 0 {
@@ -1669,29 +1674,50 @@ func (engine *ps6101Engine) evaluateSwitchCases(
 			continue
 		}
 		for _, expression := range clause.List {
-			candidate := ps6101Value{}
+			engine.loadExitState(unmatchedEntry)
+			var matching []ps6101ExitState
+			var nonmatching []ps6101ExitState
 			if expressionless || ps6101BooleanExpression(engine.pass, expression) {
-				switch engine.boolConstant(expression) {
-				case 1:
-					candidate = ps6101ConstantValue(constant.MakeBool(true))
-				case -1:
-					candidate = ps6101ConstantValue(constant.MakeBool(false))
+				truths, falses := engine.evaluateBooleanOutcomes(expression)
+				for _, outcome := range []struct {
+					value  bool
+					states []ps6101ExitState
+				}{
+					{value: true, states: truths},
+					{value: false, states: falses},
+				} {
+					match := ps6101SwitchValueMatch(tag, ps6101ConstantValue(constant.MakeBool(outcome.value)))
+					if match >= 0 {
+						matching = append(matching, outcome.states...)
+					}
+					if match <= 0 {
+						nonmatching = append(nonmatching, outcome.states...)
+					}
 				}
 			} else {
-				candidate = engine.eval(expression)
+				candidate := engine.eval(expression)
+				state := engine.currentExitState()
+				match := ps6101SwitchValueMatch(tag, candidate)
+				if match >= 0 {
+					matching = append(matching, state)
+				}
+				if match <= 0 {
+					nonmatching = append(nonmatching, state)
+				}
 			}
-			match := ps6101SwitchValueMatch(tag, candidate)
-			if match >= 0 {
-				candidates[index] = append(candidates[index], engine.currentExitState())
+			if matched, ok := engine.mergeBooleanOutcomeStates(matching); ok {
+				candidates[index] = append(candidates[index], matched)
 				reachable[index] = true
 			}
-			if match > 0 {
+			var ok bool
+			unmatchedEntry, ok = engine.mergeBooleanOutcomeStates(nonmatching)
+			if !ok {
 				unmatched = false
 				break
 			}
 		}
 	}
-	noMatchEntry := engine.currentExitState()
+	noMatchEntry := unmatchedEntry
 	noMatchPossible := unmatched
 	if defaultIndex >= 0 && unmatched {
 		candidates[defaultIndex] = append(candidates[defaultIndex], noMatchEntry)
@@ -1699,7 +1725,15 @@ func (engine *ps6101Engine) evaluateSwitchCases(
 		noMatchPossible = false
 	}
 
-	evaluationEnd := engine.currentExitState()
+	evaluationEnd := unmatchedEntry
+	if !unmatched {
+		for index := len(candidates) - 1; index >= 0; index-- {
+			if len(candidates[index]) > 0 {
+				evaluationEnd = candidates[index][len(candidates[index])-1]
+				break
+			}
+		}
+	}
 	for index, states := range candidates {
 		if len(states) == 0 {
 			continue
@@ -1709,6 +1743,89 @@ func (engine *ps6101Engine) evaluateSwitchCases(
 	}
 	engine.loadExitState(evaluationEnd)
 	return entries, reachable, noMatchEntry, noMatchPossible
+}
+
+// evaluateBooleanOutcomes evaluates a logical expression once per runtime
+// path and keeps the states in which it is true separate from those in which
+// it is false. In particular, a true A && B state necessarily includes B's
+// effects, while an A-false short-circuit state can only flow to no-match.
+func (engine *ps6101Engine) evaluateBooleanOutcomes(expression ast.Expr) ([]ps6101ExitState, []ps6101ExitState) {
+	expression = ps6101Unparen(expression)
+	if unary, ok := expression.(*ast.UnaryExpr); ok && unary.Op == token.NOT {
+		truths, falses := engine.evaluateBooleanOutcomes(unary.X)
+		return falses, truths
+	}
+	if binary, ok := expression.(*ast.BinaryExpr); ok && (binary.Op == token.LAND || binary.Op == token.LOR) {
+		leftTruths, leftFalses := engine.evaluateBooleanOutcomes(binary.X)
+		if binary.Op == token.LAND {
+			falses := slices.Clone(leftFalses)
+			if leftTrue, ok := engine.mergeBooleanOutcomeStates(leftTruths); ok {
+				engine.loadExitState(leftTrue)
+				rightTruths, rightFalses := engine.evaluateBooleanOutcomes(binary.Y)
+				falses = append(falses, rightFalses...)
+				return engine.mergeBooleanOutcomes(rightTruths, falses)
+			}
+			return engine.mergeBooleanOutcomes(nil, falses)
+		}
+
+		truths := slices.Clone(leftTruths)
+		if leftFalse, ok := engine.mergeBooleanOutcomeStates(leftFalses); ok {
+			engine.loadExitState(leftFalse)
+			rightTruths, rightFalses := engine.evaluateBooleanOutcomes(binary.Y)
+			truths = append(truths, rightTruths...)
+			return engine.mergeBooleanOutcomes(truths, rightFalses)
+		}
+		return engine.mergeBooleanOutcomes(truths, nil)
+	}
+
+	// boolConstant classifies comparisons and local calls, while eval ensures
+	// that selector bases and other boolean atoms whose value stays unknown are
+	// still evaluated. A shared cache makes this one runtime evaluation.
+	restoreEvaluation := engine.beginSingleEvaluation()
+	result := engine.boolConstant(expression)
+	evaluated := engine.eval(expression)
+	restoreEvaluation()
+	if result == 0 && evaluated.constant != nil && evaluated.constant.Kind() == constant.Bool {
+		if constant.BoolVal(evaluated.constant) {
+			result = 1
+		} else {
+			result = -1
+		}
+	}
+	state := engine.currentExitState()
+	var truths, falses []ps6101ExitState
+	if result >= 0 {
+		truths = append(truths, state)
+	}
+	if result <= 0 {
+		falses = append(falses, state)
+	}
+	return truths, falses
+}
+
+func (engine *ps6101Engine) mergeBooleanOutcomeStates(states []ps6101ExitState) (ps6101ExitState, bool) {
+	if len(states) == 0 {
+		return ps6101ExitState{}, false
+	}
+	engine.mergeMayExitStates(states)
+	return engine.currentExitState(), true
+}
+
+// mergeBooleanOutcomes keeps recursive logical evaluation linear in the
+// expression size. Once paths have the same truth value, later short-circuit
+// decisions cannot distinguish them, so a single conservative joined state is
+// sufficient for each polarity.
+func (engine *ps6101Engine) mergeBooleanOutcomes(
+	truths, falses []ps6101ExitState,
+) ([]ps6101ExitState, []ps6101ExitState) {
+	var mergedTruths, mergedFalses []ps6101ExitState
+	if truth, ok := engine.mergeBooleanOutcomeStates(truths); ok {
+		mergedTruths = append(mergedTruths, truth)
+	}
+	if falsity, ok := engine.mergeBooleanOutcomeStates(falses); ok {
+		mergedFalses = append(mergedFalses, falsity)
+	}
+	return mergedTruths, mergedFalses
 }
 
 func ps6101BooleanExpression(pass *analysis.Pass, expression ast.Expr) bool {
@@ -2176,8 +2293,8 @@ func (engine *ps6101Engine) analyzeForLabeled(statement *ast.ForStmt, label type
 			return flow
 		}
 	}
-	bLoop := engine.isBLoopCondition(statement.Cond)
-	parallelLoop := engine.isParallelLoopCondition(statement.Cond)
+	bLoop := false
+	parallelLoop := false
 	var exitStates []map[ps6101Location]ps6101Value
 	var exitAliases []map[types.Object]ps6101Location
 	var exitGates [][]ps6101Gate
@@ -2195,10 +2312,27 @@ func (engine *ps6101Engine) analyzeForLabeled(statement *ast.ForStmt, label type
 		exitCounterRevs = append(exitCounterRevs, exit.counterRevs)
 	}
 	appendExit := func() { appendState(engine.currentExitState()) }
+	appendConditionExit := func() {
+		exit := engine.currentExitState()
+		if bLoop {
+			// Loop stops the timer only when the call itself returns false.
+			// Explicit break paths never execute that call and retain the timer
+			// state captured by appendExit above.
+			exit.timer = ps6101TimerStopped
+		}
+		appendState(exit)
+	}
 	flow := ps6101Flow(0)
 	condition := 1
 	for iteration := 0; ; iteration++ {
 		if iteration == 0 {
+			// Resolving a returned function or method value is part of evaluating
+			// the condition's function operand. Share one evaluation cache with
+			// the call below so helpers, receivers, and method-expression
+			// arguments run once in Go order.
+			restoreEvaluation := engine.beginSingleEvaluation()
+			bLoop = engine.isBLoopCondition(statement.Cond)
+			parallelLoop = engine.isParallelLoopCondition(statement.Cond)
 			if bLoop {
 				// Receiver and method-expression arguments are evaluated before
 				// B.Loop performs its first-call timer reset.
@@ -2207,17 +2341,18 @@ func (engine *ps6101Engine) analyzeForLabeled(statement *ast.ForStmt, label type
 				engine.timer = ps6101TimerRunning
 			} else {
 				condition = engine.boolConstant(statement.Cond)
-				if condition < 0 {
-					appendExit()
-					break
-				}
-				if condition == 0 {
-					appendExit()
-				}
+			}
+			restoreEvaluation()
+			if condition < 0 {
+				appendConditionExit()
+				break
+			}
+			if condition == 0 {
+				appendConditionExit()
 			}
 		}
 		if !engine.takeExactLoopTransfer() {
-			abstractFlow, abstractExits := engine.analyzeForRemainder(statement, label, condition)
+			abstractFlow, abstractExits := engine.analyzeForRemainder(statement, label, condition, bLoop, parallelLoop)
 			flow |= abstractFlow
 			for _, exit := range abstractExits {
 				appendState(exit)
@@ -2274,7 +2409,7 @@ func (engine *ps6101Engine) analyzeForLabeled(statement *ast.ForStmt, label type
 			}
 		}
 		if (bLoop || parallelLoop) && iteration > 0 && ps6101EquivalentStates(beforeState, engine.state) {
-			appendExit()
+			appendConditionExit()
 			break
 		}
 		if condition == 0 {
@@ -2282,12 +2417,6 @@ func (engine *ps6101Engine) analyzeForLabeled(statement *ast.ForStmt, label type
 			break
 		}
 		condition = nextCondition
-	}
-	if bLoop {
-		engine.timer = ps6101TimerStopped
-		if len(exitStates) == 0 {
-			appendExit()
-		}
 	}
 	if len(exitStates) > 0 {
 		engine.mergeFallthrough(exitStates, exitAliases)
@@ -2300,9 +2429,6 @@ func (engine *ps6101Engine) analyzeForLabeled(statement *ast.ForStmt, label type
 			engine.timer |= exitTimers[index]
 			engine.recoverable = max(engine.recoverable, exitRecoverables[index])
 		}
-		if bLoop {
-			engine.timer = ps6101TimerStopped
-		}
 		flow |= ps6101FallsThrough
 	}
 	return flow
@@ -2312,7 +2438,13 @@ func (engine *ps6101Engine) analyzeForLabeled(statement *ast.ForStmt, label type
 // exhaustion, then visits the remaining tail once with a bounded induction
 // value. The shared transfer budget bounds a product of nested for and range
 // trip counts rather than bounding each loop independently.
-func (engine *ps6101Engine) analyzeForRemainder(statement *ast.ForStmt, label types.Object, condition int) (ps6101Flow, []ps6101ExitState) {
+func (engine *ps6101Engine) analyzeForRemainder(
+	statement *ast.ForStmt,
+	label types.Object,
+	condition int,
+	bLoop bool,
+	parallelLoop bool,
+) (ps6101Flow, []ps6101ExitState) {
 	flow, exits, continuations, _ := engine.analyzeForTransfer(statement, label, condition)
 	if len(continuations) == 0 {
 		return flow, exits
@@ -2322,7 +2454,7 @@ func (engine *ps6101Engine) analyzeForRemainder(statement *ast.ForStmt, label ty
 		engine.analyzeStatement(statement.Post)
 	}
 	nextCondition := 1
-	if engine.isBLoopCondition(statement.Cond) {
+	if bLoop {
 		engine.boolConstant(statement.Cond)
 	} else {
 		nextCondition = engine.boolConstant(statement.Cond)
@@ -2344,7 +2476,7 @@ func (engine *ps6101Engine) analyzeForRemainder(statement *ast.ForStmt, label ty
 	diagnostics := engine.snapshotDiagnostics()
 	tailFlow, tailExits, tailContinuations, control := engine.analyzeForTransfer(statement, label, nextCondition)
 	flow |= tailFlow
-	allowTailDiagnostics := bounded || engine.isBLoopCondition(statement.Cond) || engine.isParallelLoopCondition(statement.Cond) || ps6101StaticBool(engine.pass, statement.Cond) == 1
+	allowTailDiagnostics := bounded || bLoop || parallelLoop || ps6101StaticBool(engine.pass, statement.Cond) == 1
 	if control || !allowTailDiagnostics {
 		// An exit at an unknown chronological index may prevent every later
 		// iteration. Preserve the state summary but not speculative gates or
@@ -2363,12 +2495,16 @@ func (engine *ps6101Engine) analyzeForRemainder(statement *ast.ForStmt, label ty
 	if statement.Post != nil {
 		engine.analyzeStatement(statement.Post)
 	}
-	if engine.isBLoopCondition(statement.Cond) {
+	if bLoop {
 		engine.boolConstant(statement.Cond)
 	}
 	engine.invalidateFutureLoopEffects(statement)
-	if engine.isBLoopCondition(statement.Cond) || engine.isParallelLoopCondition(statement.Cond) || statement.Cond != nil && ps6101StaticBool(engine.pass, statement.Cond) != 1 {
-		exits = append(exits, engine.currentExitState())
+	if bLoop || parallelLoop || statement.Cond != nil && ps6101StaticBool(engine.pass, statement.Cond) != 1 {
+		exit := engine.currentExitState()
+		if bLoop {
+			exit.timer = ps6101TimerStopped
+		}
+		exits = append(exits, exit)
 	}
 	return flow, exits
 }
@@ -2432,6 +2568,8 @@ func (engine *ps6101Engine) analyzeBoundedForTail(
 		}
 		exact := segment.lower == segment.upper
 		engine.state[induction] = ps6101LoopIndexValue(segment.lower, segment.upper)
+		segmentInduction := ps6101CloneValue(engine.state[induction])
+		bodyPreservesInduction := exact || engine.loopSegmentPreservesLocation(statement.Body, induction)
 		diagnostics := engine.snapshotDiagnostics()
 		segmentFlow, segmentExits, continuations, control := engine.analyzeForTransfer(statement, label, 1)
 		flow |= segmentFlow
@@ -2449,15 +2587,65 @@ func (engine *ps6101Engine) analyzeBoundedForTail(
 		}
 		engine.mergeJumpStates(continuations)
 		if !exact {
+			bodyPreservesInduction = bodyPreservesInduction && ps6101SameValue(segmentInduction, engine.state[induction])
 			// Classify body reachability while the induction interval still
 			// denotes this segment; the post statement may overwrite it.
 			engine.invalidateSegmentLoopEffects(statement)
 		}
-		if statement.Post != nil {
+		if !exact && bodyPreservesInduction {
+			var next int64
+			if direction >= 0 {
+				if segment.upper == math.MaxInt64 {
+					engine.invalidateFutureLoopEffects(statement)
+					return flow, append(exits, engine.currentExitState())
+				}
+				next = segment.upper + 1
+			} else {
+				if segment.lower == math.MinInt64 {
+					engine.invalidateFutureLoopEffects(statement)
+					return flow, append(exits, engine.currentExitState())
+				}
+				next = segment.lower - 1
+			}
+			// The recognized post is a unit update of induction. An interval
+			// summarizes all of its iterations, so its successor is the boundary
+			// immediately after the interval, not one update of an arbitrary
+			// representative value.
+			engine.state[induction] = ps6101ConstantValue(constant.MakeInt64(next))
+		} else if statement.Post != nil {
 			engine.analyzeStatement(statement.Post)
 		}
+
+		// The fixed segment schedule remains valid only while the real loop
+		// condition is definitely true at the next chronological transfer.
+		// A body write to a stored bound or to induction is therefore observed
+		// before another milestone is forced. Unknown chronology is summarized
+		// conservatively without admitting diagnostics from later segments.
+		nextCondition := engine.boolConstant(statement.Cond)
+		if nextCondition < 0 {
+			return flow, append(exits, engine.currentExitState())
+		}
+		if nextCondition == 0 {
+			engine.invalidateFutureLoopEffects(statement)
+			return flow, append(exits, engine.currentExitState())
+		}
 	}
+	// A true condition beyond the derived interval means that a stored bound
+	// grew. Do not invent indexes beyond the interval; summarize their effects.
+	engine.invalidateFutureLoopEffects(statement)
 	return flow, append(exits, engine.currentExitState())
+}
+
+func (engine *ps6101Engine) loopSegmentPreservesLocation(body *ast.BlockStmt, location ps6101Location) bool {
+	before := engine.currentExitState()
+	value, present := before.state[location]
+	if !present {
+		return false
+	}
+	engine.invalidateLoopEffects(&ast.ForStmt{Body: body}, engine.abstractLoopBool)
+	after, stillPresent := engine.state[location]
+	engine.loadExitState(before)
+	return stillPresent && ps6101SameValue(value, after)
 }
 
 func (engine *ps6101Engine) analyzeBoundedForFallback(
@@ -2467,11 +2655,17 @@ func (engine *ps6101Engine) analyzeBoundedForFallback(
 	bounds ps6101Value,
 ) (ps6101Flow, []ps6101ExitState) {
 	engine.state[induction] = bounds
+	chronologyStable := engine.loopBodyPreservesCondition(statement.Body, statement.Cond)
 	diagnostics := engine.snapshotDiagnostics()
 	flow, exits, continuations, control := engine.analyzeForTransfer(statement, label, 1)
-	if control {
+	if control || !chronologyStable {
 		engine.restoreDiagnostics(diagnostics)
 		ps6101RestoreExitDiagnostics(continuations, diagnostics)
+		if !chronologyStable {
+			// Once the abstract tail can change its own condition, no gate in
+			// this undivided interval has a proven chronological predecessor.
+			ps6101RestoreExitDiagnostics(exits, diagnostics)
+		}
 	}
 	if len(continuations) == 0 {
 		return flow, exits
@@ -2482,6 +2676,17 @@ func (engine *ps6101Engine) analyzeBoundedForFallback(
 		engine.analyzeStatement(statement.Post)
 	}
 	return flow, append(exits, engine.currentExitState())
+}
+
+func (engine *ps6101Engine) loopBodyPreservesCondition(body *ast.BlockStmt, condition ast.Expr) bool {
+	before := engine.currentExitState()
+	if engine.abstractLoopBool(condition) != 1 {
+		return false
+	}
+	engine.invalidateLoopEffects(&ast.ForStmt{Body: body}, engine.abstractLoopBool)
+	preserved := engine.abstractLoopBool(condition) == 1
+	engine.loadExitState(before)
+	return preserved
 }
 
 func ps6101RemainingLoopBounds(bounds ps6101Value, segment ps6101LoopSegment, direction int) ps6101Value {
@@ -2719,12 +2924,27 @@ func (engine *ps6101Engine) forRemainderInduction(statement *ast.ForStmt) (ps610
 
 func (engine *ps6101Engine) isBLoopCondition(expression ast.Expr) bool {
 	call, ok := ps6101Unparen(expression).(*ast.CallExpr)
-	return ok && engine.testingMethod(call) == "Loop"
+	return ok && engine.loopConditionTestingMethod(call) == "Loop"
 }
 
 func (engine *ps6101Engine) isParallelLoopCondition(expression ast.Expr) bool {
 	call, ok := ps6101Unparen(expression).(*ast.CallExpr)
-	return ok && engine.testingMethod(call) == "Next"
+	return ok && engine.loopConditionTestingMethod(call) == "Next"
+}
+
+func (engine *ps6101Engine) loopConditionTestingMethod(call *ast.CallExpr) string {
+	if call == nil {
+		return ""
+	}
+	// A call's function operand can itself be a local helper call returning a
+	// testing method value. Evaluating just that operand both resolves the
+	// callable and preserves the required function-before-arguments order.
+	// analyzeForLabeled keeps this value in its single-evaluation cache until
+	// the complete condition call has consumed its arguments.
+	if target := engine.eval(call.Fun); target.callable != nil && target.callable.testingMethod != "" {
+		return target.callable.testingMethod
+	}
+	return engine.testingMethod(call)
 }
 
 func ps6101EquivalentStates(left, right map[ps6101Location]ps6101Value) bool {
@@ -5163,6 +5383,13 @@ func (engine *ps6101Engine) dynamicMethodDeclaration(receiver ps6101Value, metho
 func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 	if call == nil {
 		return nil
+	}
+	// evalAssignmentRHS and return analysis dispatch calls directly here. Keep
+	// compile-time conversion results exact just as evalUncached does; treating
+	// int64(300) as an unknown runtime call would prematurely abandon a bounded
+	// loop before its chronological tail can be analyzed.
+	if value := engine.pass.TypesInfo.Types[call].Value; value != nil {
+		return []ps6101Value{ps6101ConstantValue(value)}
 	}
 	// A call evaluates its function value before its arguments. Keeping this
 	// result also prevents method receivers and returned function values from
