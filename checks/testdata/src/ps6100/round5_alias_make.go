@@ -361,7 +361,7 @@ func invokedLiteralParameterRebind(alpha []float64, left int) {
 	}
 }
 
-func invokedLiteralCapturedMutationHazard(alpha []float64, left int) {
+func invokedLiteralCapturedMutationHazard(alpha []float64, left int, mutate func([]float64, int)) {
 	for step := 0; step < 4; step++ { // want `closure may mutate or retain alpha@[0-9]+`
 		for index := range alpha {
 			if alpha[index] > 0 {
@@ -374,11 +374,11 @@ func invokedLiteralCapturedMutationHazard(alpha []float64, left int) {
 			}
 		}
 		alpha[left]++
-		func() { round5AliasMany(alpha, left) }()
+		func() { mutate(alpha, left) }()
 	}
 }
 
-func invokedLiteralArgumentHazard(alpha []float64, left int) {
+func invokedLiteralArgumentHazard(alpha []float64, left int, mutate func([]float64, int)) {
 	for step := 0; step < 4; step++ { // want `opaque call may bulk-mutate or retain alpha@[0-9]+`
 		for index := range alpha {
 			if alpha[index] > 0 {
@@ -391,7 +391,7 @@ func invokedLiteralArgumentHazard(alpha []float64, left int) {
 			}
 		}
 		alpha[left]++
-		func(local []float64) { round5AliasMany(local, left) }(alpha)
+		func(local []float64) { mutate(local, left) }(alpha)
 	}
 }
 
