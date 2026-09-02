@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**385 checks total** — **263 with a bit-identical auto-fix**, 122 advisory. By fix level: **246 L1** (idiomatic), **116 L2** (structured), **23 L3** (aggressive).
+**386 checks total** — **263 with a bit-identical auto-fix**, 123 advisory. By fix level: **246 L1** (idiomatic), **117 L2** (structured), **23 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -397,4 +397,5 @@ checks' fixes.
 | [PS6092](PS6092.md) | verify | L3 |  | a type-parameter receiver calls an interface-constraint method on a repeated hot-loop path |
 | [PS6093](PS6093.md) | access | L2 |  | a method-sized loop indexes a slice without a source-visible length proof |
 | [PS6099](PS6099.md) | vector | L3 |  | a scalar transcendental per independent output can stage into that output for a known batched leaf |
+| [PS6100](PS6100.md) | cpu | L2 |  | iterative full scans repeatedly derive finite per-element membership |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |
