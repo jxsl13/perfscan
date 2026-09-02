@@ -622,8 +622,8 @@ func ps4008ExhaustiveBranchDefinitions(pass *analysis.Pass, index *ps1006Analysi
 		if !paired || len(peerPositions) == 0 || owner == nil || index.branchOwners[peer] != owner {
 			continue
 		}
-		if ps4008BranchDefinitionMustExecute(owner, branch, positions) &&
-			ps4008BranchDefinitionMustExecute(owner, peer, peerPositions) &&
+		if ps4008BranchDefinitionMustExecute(pass, owner, branch, positions) &&
+			ps4008BranchDefinitionMustExecute(pass, owner, peer, peerPositions) &&
 			ps4008BranchPairReachesUse(pass, index, owner, before) {
 			return true
 		}
@@ -631,7 +631,7 @@ func ps4008ExhaustiveBranchDefinitions(pass *analysis.Pass, index *ps1006Analysi
 	return false
 }
 
-func ps4008BranchDefinitionMustExecute(owner *ast.IfStmt, branch ps1006BranchRange, definitions []token.Pos) bool {
+func ps4008BranchDefinitionMustExecute(pass *analysis.Pass, owner *ast.IfStmt, branch ps1006BranchRange, definitions []token.Pos) bool {
 	if owner == nil || len(definitions) == 0 {
 		return false
 	}
@@ -643,7 +643,7 @@ func ps4008BranchDefinitionMustExecute(owner *ast.IfStmt, branch ps1006BranchRan
 		block, _ = owner.Else.(*ast.BlockStmt)
 	}
 	for _, definition := range definitions {
-		if ps4008DefinitionInUnconditionalPrefix(block, definition) {
+		if ps4008DefinitionInUnconditionalPrefix(pass, block, definition) {
 			return true
 		}
 	}
@@ -664,7 +664,7 @@ func ps4008BranchPairReachesUse(pass *analysis.Pass, index *ps1006AnalysisIndex,
 	}
 	target := owner.Pos()
 	for loop := index.loopsAt[owner.Pos()]; loop != nil; loop = loop.parent {
-		if !ps4008NodeInUnconditionalPrefix(astutil.LoopBody(loop.node), target) {
+		if !ps4008NodeInUnconditionalPrefix(pass, astutil.LoopBody(loop.node), target) {
 			return false
 		}
 		if !ps4008LoopRangeContains(loop, before) && !ps4008LoopEntryGuaranteed(pass, loop.node) {
@@ -672,7 +672,7 @@ func ps4008BranchPairReachesUse(pass *analysis.Pass, index *ps1006AnalysisIndex,
 		}
 		target = loop.node.Pos()
 	}
-	return ps4008NodeInUnconditionalPrefix(ps4008FunctionBody(ownerFacts.root), target)
+	return ps4008NodeInUnconditionalPrefix(pass, ps4008FunctionBody(ownerFacts.root), target)
 }
 
 func ps4008FunctionBody(root ast.Node) *ast.BlockStmt {
@@ -686,7 +686,7 @@ func ps4008FunctionBody(root ast.Node) *ast.BlockStmt {
 	}
 }
 
-func ps4008NodeInUnconditionalPrefix(block *ast.BlockStmt, target token.Pos) bool {
+func ps4008NodeInUnconditionalPrefix(pass *analysis.Pass, block *ast.BlockStmt, target token.Pos) bool {
 	if block == nil || !target.IsValid() {
 		return false
 	}
@@ -698,9 +698,9 @@ func ps4008NodeInUnconditionalPrefix(block *ast.BlockStmt, target token.Pos) boo
 			}
 			switch value := statement.(type) {
 			case *ast.BlockStmt:
-				return ps4008NodeInUnconditionalPrefix(value, target)
+				return ps4008NodeInUnconditionalPrefix(pass, value, target)
 			case *ast.LabeledStmt:
-				return ps4008StatementContainsTarget(value.Stmt, target)
+				return ps4008StatementContainsTarget(pass, value.Stmt, target)
 			default:
 				return false
 			}
@@ -713,14 +713,14 @@ func ps4008NodeInUnconditionalPrefix(block *ast.BlockStmt, target token.Pos) boo
 			statementIndex = labelIndex - 1
 			continue
 		}
-		if !ps4008StatementPreservesFollowingOnLivePaths(statement) {
+		if !ps4008StatementPreservesFollowingOnLivePaths(pass, statement) {
 			return false
 		}
 	}
 	return false
 }
 
-func ps4008StatementContainsTarget(statement ast.Stmt, target token.Pos) bool {
+func ps4008StatementContainsTarget(pass *analysis.Pass, statement ast.Stmt, target token.Pos) bool {
 	if statement == nil || !target.IsValid() || target < statement.Pos() || target > statement.End() {
 		return false
 	}
@@ -729,9 +729,9 @@ func ps4008StatementContainsTarget(statement ast.Stmt, target token.Pos) bool {
 	}
 	switch value := statement.(type) {
 	case *ast.BlockStmt:
-		return ps4008NodeInUnconditionalPrefix(value, target)
+		return ps4008NodeInUnconditionalPrefix(pass, value, target)
 	case *ast.LabeledStmt:
-		return ps4008StatementContainsTarget(value.Stmt, target)
+		return ps4008StatementContainsTarget(pass, value.Stmt, target)
 	default:
 		return false
 	}
@@ -751,39 +751,53 @@ func ps4008ForwardGotoLabelIndex(block *ast.BlockStmt, statementIndex int, label
 	return 0, false
 }
 
-func ps4008StatementPreservesFollowingOnLivePaths(statement ast.Stmt) bool {
-	return ps4008StatementPreservesFollowingOnLivePathsWithRoot(statement, statement)
+func ps4008StatementPreservesFollowingOnLivePaths(pass *analysis.Pass, statement ast.Stmt) bool {
+	return ps4008StatementPreservesFollowingOnLivePathsWithRoot(pass, statement, statement)
 }
 
-func ps4008StatementPreservesFollowingOnLivePathsWithRoot(statement ast.Stmt, branchRoot ast.Node) bool {
+func ps4008StatementPreservesFollowingOnLivePathsWithRoot(pass *analysis.Pass, statement ast.Stmt, branchRoot ast.Node) bool {
 	switch value := statement.(type) {
 	case *ast.AssignStmt, *ast.DeclStmt, *ast.IncDecStmt, *ast.ExprStmt,
 		*ast.EmptyStmt, *ast.DeferStmt, *ast.GoStmt, *ast.SendStmt,
 		*ast.ReturnStmt:
 		return true
 	case *ast.BlockStmt:
-		return ps4008BlockPreservesFollowingOnLivePaths(value)
+		return ps4008BlockPreservesFollowingOnLivePaths(pass, value)
 	case *ast.IfStmt:
-		return !ps4008ContainsEscapingBranch(branchRoot)
+		return !ps4008ContainsEscapingBranch(pass, branchRoot)
+	case *ast.ForStmt:
+		return ps4008LoopPreservesFollowingOnLivePaths(pass, value, branchRoot)
+	case *ast.RangeStmt:
+		return ps4008LoopPreservesFollowingOnLivePaths(pass, value, branchRoot)
 	case *ast.SwitchStmt:
-		return !ps4008ContainsEscapingBranch(branchRoot)
+		return !ps4008ContainsEscapingBranch(pass, branchRoot)
 	case *ast.TypeSwitchStmt:
-		return !ps4008ContainsEscapingBranch(branchRoot)
+		return !ps4008ContainsEscapingBranch(pass, branchRoot)
 	case *ast.SelectStmt:
-		return ps4008SelectHasDefault(value) && !ps4008ContainsEscapingBranch(branchRoot)
+		return ps4008SelectHasDefault(value) && !ps4008ContainsEscapingBranch(pass, branchRoot)
 	case *ast.LabeledStmt:
-		return ps4008StatementPreservesFollowingOnLivePathsWithRoot(value.Stmt, branchRoot)
+		return ps4008StatementPreservesFollowingOnLivePathsWithRoot(pass, value.Stmt, branchRoot)
 	default:
 		return false
 	}
 }
 
-func ps4008BlockPreservesFollowingOnLivePaths(block *ast.BlockStmt) bool {
+func ps4008LoopPreservesFollowingOnLivePaths(pass *analysis.Pass, loop ast.Node, branchRoot ast.Node) bool {
+	// An impossible loop cannot execute a transfer in its body. Guaranteed and
+	// maybe-trip loops both need the same target-aware scan: only a branch that
+	// leaves the loop root can bypass the following statement on a live path.
+	if ps4008LoopEntryImpossible(pass, loop) {
+		return true
+	}
+	return !ps4008ContainsEscapingBranch(pass, branchRoot)
+}
+
+func ps4008BlockPreservesFollowingOnLivePaths(pass *analysis.Pass, block *ast.BlockStmt) bool {
 	if block == nil {
 		return false
 	}
 	for _, statement := range block.List {
-		if !ps4008StatementPreservesFollowingOnLivePaths(statement) {
+		if !ps4008StatementPreservesFollowingOnLivePaths(pass, statement) {
 			return false
 		}
 	}
@@ -803,13 +817,16 @@ func ps4008SelectHasDefault(statement *ast.SelectStmt) bool {
 	return false
 }
 
-func ps4008ContainsEscapingBranch(node ast.Node) bool {
+func ps4008ContainsEscapingBranch(pass *analysis.Pass, node ast.Node) bool {
 	escapes := false
 	astutil.WithStack(node, func(current ast.Node, stack []ast.Node) bool {
 		if escapes {
 			return false
 		}
 		if _, nestedCallable := current.(*ast.FuncLit); nestedCallable && current != node {
+			return false
+		}
+		if current != node && astutil.IsLoop(current) && ps4008LoopEntryImpossible(pass, current) {
 			return false
 		}
 		branch, ok := current.(*ast.BranchStmt)
@@ -945,7 +962,7 @@ func ps4008AliasDefinitionMayBeSkippedByExitedLoop(pass *analysis.Pass, index *p
 		if ps4008LoopRangeContains(loop, before) {
 			continue
 		}
-		if !ps4008LoopEntryGuaranteed(pass, loop.node) || !ps4008LoopDefinitionMustExecute(loop.node, definition) {
+		if !ps4008LoopEntryGuaranteed(pass, loop.node) || !ps4008LoopDefinitionMustExecute(pass, loop.node, definition) {
 			return true
 		}
 	}
@@ -1055,7 +1072,7 @@ func ps4008LoopEntryKnown(pass *analysis.Pass, node ast.Node) (bool, bool) {
 	return false, false
 }
 
-func ps4008LoopDefinitionMustExecute(node ast.Node, definition token.Pos) bool {
+func ps4008LoopDefinitionMustExecute(pass *analysis.Pass, node ast.Node, definition token.Pos) bool {
 	if node == nil || !definition.IsValid() {
 		return false
 	}
@@ -1069,7 +1086,7 @@ func ps4008LoopDefinitionMustExecute(node ast.Node, definition token.Pos) bool {
 		loop.Post.Pos() <= definition && definition <= loop.Post.End() {
 		return ps4008BlockFallsThrough(loop.Body)
 	}
-	return ps4008DefinitionInUnconditionalPrefix(astutil.LoopBody(node), definition)
+	return ps4008DefinitionInUnconditionalPrefix(pass, astutil.LoopBody(node), definition)
 }
 
 func ps4008BlockFallsThrough(block *ast.BlockStmt) bool {
@@ -1091,7 +1108,7 @@ func ps4008BlockFallsThrough(block *ast.BlockStmt) bool {
 	return true
 }
 
-func ps4008DefinitionInUnconditionalPrefix(block *ast.BlockStmt, definition token.Pos) bool {
+func ps4008DefinitionInUnconditionalPrefix(pass *analysis.Pass, block *ast.BlockStmt, definition token.Pos) bool {
 	if block == nil {
 		return false
 	}
@@ -1101,12 +1118,12 @@ func ps4008DefinitionInUnconditionalPrefix(block *ast.BlockStmt, definition toke
 			case *ast.AssignStmt, *ast.DeclStmt, *ast.IncDecStmt:
 				return true
 			case *ast.BlockStmt:
-				return ps4008DefinitionInUnconditionalPrefix(value, definition)
+				return ps4008DefinitionInUnconditionalPrefix(pass, value, definition)
 			default:
 				return false
 			}
 		}
-		if !ps4008StatementPreservesFollowingOnLivePaths(statement) {
+		if !ps4008StatementPreservesFollowingOnLivePaths(pass, statement) {
 			return false
 		}
 	}
