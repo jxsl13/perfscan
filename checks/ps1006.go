@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/cfg"
 
 	"github.com/jxsl13/perfscan/internal/astutil"
 	"github.com/jxsl13/perfscan/lint"
@@ -3430,7 +3431,7 @@ func ps1006ResolvedRegisterTile(index *ps1006AnalysisIndex, pass *analysis.Pass,
 		if tailOuter == nil || tailInner == nil || !ps1006ObjectStableInNode(index, pass, tail.Body, tailBound) || !ps1006ObjectStableInNode(index, pass, tailBody, tailOuter) {
 			return false
 		}
-		tile, ok := parent.List[statementIndex-1].(*ast.ForStmt)
+		tile, ok := unwrapLabeled(parent.List[statementIndex-1]).(*ast.ForStmt)
 		if !ok {
 			return false
 		}
@@ -3438,7 +3439,7 @@ func ps1006ResolvedRegisterTile(index *ps1006AnalysisIndex, pass *analysis.Pass,
 		if !ok || tileBound != tailBound {
 			return false
 		}
-		tileKeys := ps1006OuterRegisterTileKeys(index, pass, tile)
+		tileKeys := ps1006OuterRegisterTileKeys(index, pass, tile, tail)
 		if len(tileKeys) == 0 {
 			return false
 		}
@@ -3495,7 +3496,7 @@ func ps1006OuterRegisterTileForInner(index *ps1006AnalysisIndex, pass *analysis.
 	return ps1006InnerRegisterTile(index, pass, astutil.LoopBody(innerNode), innerObject, outerObject, tileBound, ps1006LoopStep(pass, outer))
 }
 
-func ps1006OuterRegisterTileKeys(index *ps1006AnalysisIndex, pass *analysis.Pass, outerNode ast.Node) map[ps1006TileKey]bool {
+func ps1006OuterRegisterTileKeys(index *ps1006AnalysisIndex, pass *analysis.Pass, outerNode ast.Node, tail *ast.ForStmt) map[ps1006TileKey]bool {
 	outer, ok := outerNode.(*ast.ForStmt)
 	if !ok {
 		return nil
@@ -3523,11 +3524,106 @@ func ps1006OuterRegisterTileKeys(index *ps1006AnalysisIndex, pass *analysis.Pass
 		if !ps1006ObjectStableInNode(index, pass, astutil.LoopBody(statement), outerObject) {
 			continue
 		}
-		for key := range ps1006InnerRegisterTileKeys(index, pass, astutil.LoopBody(statement), innerObject, outerObject, tileBound, ps1006LoopStep(pass, outer)) {
+		innerKeys := ps1006InnerRegisterTileKeys(index, pass, astutil.LoopBody(statement), innerObject, outerObject, tileBound, ps1006LoopStep(pass, outer))
+		if len(innerKeys) == 0 || !ps1006OuterIterationCompletesInnerTile(index, pass, outer, statement, tail) {
+			continue
+		}
+		for key := range innerKeys {
 			keys[key] = true
 		}
 	}
 	return keys
+}
+
+// ps1006OuterIterationCompletesInnerTile proves that each entered outer
+// iteration which can still reach the scalar tail completes the selected
+// register-tile loop first. A continue after the tile is equivalent to the
+// ordinary backedge and is safe; a continue before it is not. Any break (or
+// goto) that leaves the outer loop for the tail is unsafe because it can skip
+// later four-lane iterations. Return and no-return paths cannot reach the tail
+// and therefore do not invalidate the proof. Feasible CFG edges fold constant
+// if and switch conditions, avoiding dead-branch false negatives.
+func ps1006OuterIterationCompletesInnerTile(index *ps1006AnalysisIndex, pass *analysis.Pass, outer *ast.ForStmt, inner ast.Node, tail *ast.ForStmt) bool {
+	if index == nil || pass == nil || outer == nil || outer.Body == nil || inner == nil || tail == nil {
+		return false
+	}
+	completionKey := ps1006TileCompletionKey{outer: outer, inner: inner, tail: tail}
+	if result, ok := index.tileCompletions[completionKey]; ok {
+		return result
+	}
+	result := false
+	defer func() { index.tileCompletions[completionKey] = result }()
+	facts := index.functionByNode[outer]
+	if facts == nil || facts != index.functionByNode[inner] || facts != index.functionByNode[tail] {
+		return false
+	}
+	body := ps4008FunctionBody(facts.root)
+	if body == nil {
+		return false
+	}
+	control := index.controlFlows[body]
+	if control == nil {
+		control = &ps1006ControlFlow{
+			graph:   cfg.New(body, ps6080CallMayReturn(pass)),
+			parents: ps6071Parents(body),
+			blocks:  make(map[ps1006ControlFlowBlockKey]*cfg.Block),
+		}
+		for _, block := range control.graph.Blocks {
+			if block.Stmt != nil {
+				control.blocks[ps1006ControlFlowBlockKey{node: block.Stmt, kind: block.Kind}] = block
+			}
+		}
+		index.controlFlows[body] = control
+		index.controlFlowBuilds++
+	}
+	outerBody := control.blocks[ps1006ControlFlowBlockKey{node: outer, kind: cfg.KindForBody}]
+	outerLoop := control.blocks[ps1006ControlFlowBlockKey{node: outer, kind: cfg.KindForLoop}]
+	outerPost := control.blocks[ps1006ControlFlowBlockKey{node: outer, kind: cfg.KindForPost}]
+	outerDone := control.blocks[ps1006ControlFlowBlockKey{node: outer, kind: cfg.KindForDone}]
+	innerDone := control.blocks[ps1006ControlFlowBlockKey{node: inner, kind: cfg.KindForDone}]
+	if innerDone == nil {
+		innerDone = control.blocks[ps1006ControlFlowBlockKey{node: inner, kind: cfg.KindRangeDone}]
+	}
+	if outerBody == nil || outerLoop == nil || outerPost == nil || outerDone == nil || innerDone == nil {
+		return false
+	}
+	type flowState struct {
+		block     *cfg.Block
+		completed bool
+	}
+	queue := []flowState{{block: outerBody}}
+	seen := make(map[flowState]bool)
+	for len(queue) > 0 {
+		state := queue[0]
+		queue = queue[1:]
+		if state.block == nil || seen[state] {
+			continue
+		}
+		seen[state] = true
+		index.controlFlowVisits++
+		if state.block == innerDone {
+			state.completed = true
+		}
+		if state.block == outerPost || state.block == outerLoop {
+			if !state.completed {
+				return false
+			}
+			continue
+		}
+		if state.block == outerDone || state.block.Stmt == tail {
+			return false
+		}
+		if state.block.Return() != nil {
+			continue
+		}
+		for _, successor := range ps6080FeasibleSuccessors(pass, control.parents, state.block) {
+			if successor != nil && successor.Live {
+				queue = append(queue, flowState{block: successor, completed: state.completed})
+			}
+		}
+	}
+	result = true
+	return result
 }
 
 func ps1006TileLoopBound(pass *analysis.Pass, loop *ast.ForStmt) (types.Object, bool) {
@@ -3814,11 +3910,32 @@ type ps1006AnalysisIndex struct {
 	branchPeers            map[ps1006BranchRange]ps1006BranchRange
 	branchOwners           map[ps1006BranchRange]*ast.IfStmt
 	loopsAt                map[token.Pos]*ps1006LoopRange
+	controlFlows           map[*ast.BlockStmt]*ps1006ControlFlow
+	tileCompletions        map[ps1006TileCompletionKey]bool
 	buildVisits            int
 	analysisVisits         int
 	stabilityQueries       int
 	purityVisits           int
 	callableVisits         int
+	controlFlowBuilds      int
+	controlFlowVisits      int
+}
+
+type ps1006ControlFlow struct {
+	graph   *cfg.CFG
+	parents map[ast.Node]ast.Node
+	blocks  map[ps1006ControlFlowBlockKey]*cfg.Block
+}
+
+type ps1006ControlFlowBlockKey struct {
+	node ast.Node
+	kind cfg.BlockKind
+}
+
+type ps1006TileCompletionKey struct {
+	outer ast.Node
+	inner ast.Node
+	tail  ast.Node
 }
 
 type ps1006AliasDef struct {
@@ -3893,6 +4010,8 @@ func ps1006BuildAnalysisIndex(pass *analysis.Pass) *ps1006AnalysisIndex {
 		branchPeers:            make(map[ps1006BranchRange]ps1006BranchRange),
 		branchOwners:           make(map[ps1006BranchRange]*ast.IfStmt),
 		loopsAt:                make(map[token.Pos]*ps1006LoopRange),
+		controlFlows:           make(map[*ast.BlockStmt]*ps1006ControlFlow),
+		tileCompletions:        make(map[ps1006TileCompletionKey]bool),
 	}
 	loopByNode := make(map[ast.Node]*ps1006LoopRange)
 	roots := make(map[ast.Node]*ps1006FunctionFacts)

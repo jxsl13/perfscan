@@ -72,6 +72,32 @@ func TestPS1006NestedPureCallScaling(t *testing.T) {
 	}
 }
 
+// TestPS1006RegisterTileTailControlScaling keeps many tile/tail pairs in one
+// function. The control-flow graph must be indexed once and each local proof
+// must stay proportional to its own path rather than rescanning the complete
+// function for every scalar remainder.
+func TestPS1006RegisterTileTailControlScaling(t *testing.T) {
+	t.Parallel()
+	previousVisits := 0
+	for _, pairs := range []int{25, 50, 100, 200} {
+		pass, reports := ps1006TailControlScalingPass(t, pairs)
+		index, err := ps1006RunIndexed(pass)
+		if err != nil {
+			t.Fatalf("%d pairs: analyzer failed: %v", pairs, err)
+		}
+		if *reports != 0 {
+			t.Fatalf("%d complete tile/tail pairs: got %d diagnostics, want none", pairs, *reports)
+		}
+		if index.controlFlowBuilds != 1 || index.controlFlowVisits < pairs {
+			t.Fatalf("%d pairs: incomplete/repeated CFG instrumentation: builds=%d visits=%d", pairs, index.controlFlowBuilds, index.controlFlowVisits)
+		}
+		if previousVisits != 0 {
+			ps1006AssertNearLinearCount(t, pairs, "tile-tail control-flow visits", previousVisits, index.controlFlowVisits)
+		}
+		previousVisits = index.controlFlowVisits
+	}
+}
+
 func ps1006AssertNearLinearCount(t *testing.T, inputSize int, name string, previous, current int) {
 	t.Helper()
 	// The input exactly doubles. A small fixed allowance covers the package
@@ -116,6 +142,75 @@ func tile%d(a, w, out []float64, taps, channels int) {
 	pkg, err := (&types.Config{}).Check("scale", fset, []*ast.File{file}, info)
 	if err != nil {
 		t.Fatalf("type-check %d tiles: %v", tiles, err)
+	}
+	reports := 0
+	return &analysis.Pass{
+		Analyzer:  PS1006.Analyzer,
+		Fset:      fset,
+		Files:     []*ast.File{file},
+		Pkg:       pkg,
+		TypesInfo: info,
+		Report: func(analysis.Diagnostic) {
+			reports++
+		},
+	}, &reports
+}
+
+func ps1006TailControlScalingPass(t *testing.T, pairs int) (*analysis.Pass, *int) {
+	t.Helper()
+	var source strings.Builder
+	source.WriteString("package scale\nfunc tails(a, w, out []float64, taps, channels int, skip bool) {\n")
+	for index := 0; index < pairs; index++ {
+		fmt.Fprintf(&source, `
+	for c%d := 0; c%d+3 < channels; c%d += 4 {
+		var s0, s1, s2, s3 float64
+		for tap%d := 0; tap%d < taps; tap%d++ {
+			base%d := tap%d * channels
+			s0 += a[base%d+c%d] * w[tap%d]
+			s1 += a[base%d+c%d+1] * w[tap%d]
+			s2 += a[base%d+c%d+2] * w[tap%d]
+			s3 += a[base%d+c%d+3] * w[tap%d]
+		}
+		out[c%d], out[c%d+1], out[c%d+2], out[c%d+3] = s0, s1, s2, s3
+		if skip { continue }
+	}
+	for c%d := channels - channels%%4; c%d < channels; c%d++ {
+		s := 0.0
+		for tap%d := 0; tap%d < taps; tap%d++ {
+			base%d := tap%d * channels
+			s += a[base%d+c%d] * w[tap%d]
+		}
+		out[c%d] = s
+	}
+`, index, index, index,
+			index, index, index,
+			index, index,
+			index, index, index,
+			index, index, index,
+			index, index, index,
+			index, index, index,
+			index, index, index, index,
+			index, index, index,
+			index, index, index,
+			index, index,
+			index, index, index,
+			index)
+	}
+	source.WriteString("}\n")
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "tail_scale.go", source.String(), parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse %d tile/tail pairs: %v", pairs, err)
+	}
+	info := &types.Info{
+		Types:      make(map[ast.Expr]types.TypeAndValue),
+		Defs:       make(map[*ast.Ident]types.Object),
+		Uses:       make(map[*ast.Ident]types.Object),
+		Selections: make(map[*ast.SelectorExpr]*types.Selection),
+	}
+	pkg, err := (&types.Config{}).Check("scale", fset, []*ast.File{file}, info)
+	if err != nil {
+		t.Fatalf("type-check %d tile/tail pairs: %v", pairs, err)
 	}
 	reports := 0
 	return &analysis.Pass{
