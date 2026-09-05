@@ -23,7 +23,7 @@ var ps6101BenchmarkInputKeywords = [...]string{
 	"gate", "logit", "routing", "score", "mixture", "expert",
 }
 
-var ps6101AggregateKeywords = [...]string{"weight", "denom", "sum", "total", "norm", "scale", "mass", "score"}
+var ps6101AggregateKeywords = [...]string{"denom", "sum", "total", "norm", "scale", "mass", "score"}
 
 // PS6101 starts the perfscan-original verification block. Benchmark validity is
 // a verification concern even when the benchmark itself is statistically stable.
@@ -39,11 +39,13 @@ sign/nonzero/threshold gate may time a cheap fallback rather than the named
 kernel. This is a benchmark-validity issue: a statistically stable timing can
 still measure the wrong branch mixture.
 
-The detector follows object-specific input and aggregate values, including
-directly gated weights, through direct local helper and method calls, direct or
-stored numeric generic instantiations,
+The detector follows object-specific input and aggregate values through direct
+local helper and method calls, direct or stored numeric generic instantiations,
 positional variadic calls, interface boxing, single/comma-ok assertions and type
 switches, testing.B.Run sub-benchmarks, and testing.B.RunParallel workers.
+Direct recognized input bindings, local helper results, and facts live across
+testing-compatible calls preserve input provenance without treating an unrelated
+aggregate name as an input.
 Direct, method-expression, and stored testing.B method calls share the same
 timer/callback semantics.
 Pointer and named-pointer bindings preserve binding-local input facts through
@@ -63,8 +65,9 @@ storage while they remain transitively reachable through returned aggregates,
 closures, aliases, or deferred effects.
 runtime.Goexit, os.Exit, and testing Fatal, Fatalf, or FailNow make caller
 continuation unreachable; testing terminals reached through a locally proven
-testing-compatible interface retain that behavior, while Error, Errorf, and Fail remain
-nonterminal and unknown interface implementations stay opaque.
+testing-compatible interface retain that behavior, while Error, Errorf, and Fail
+remain nonterminal through direct calls, closures, and method values. Unknown
+interface implementations stay opaque and are not assumed terminal.
 It recognizes NormFloat64 or centered uniform input from math/rand and
 math/rand/v2, but
 rejects overwritten, shadowed, unsigned/nonnegative, untimed, or
@@ -81,12 +84,13 @@ real condition between segments and abandon fixed chronology when a body write
 changes the stored bound or induction value.
 Map allocation hints are never treated as lengths, and
 mutations that can change map iteration invalidate fixed-trip assumptions.
-Exact one-entry maps preserve nested key and value provenance through range,
-including constant keys boxed as interface values, without assuming an order
-for larger maps. Delete and clear invalidate values through every tracked alias
-of the affected backing map while preserving the alias topology for later
-writes. Unknown or capped loops preserve
-inputs they cannot write and conservatively invalidate possible future writes.
+Exact one-entry maps preserve arbitrarily nested key and value provenance through
+range, including constant keys with arbitrary text and keys boxed as interface
+values, without assuming an order for larger maps. Delete and clear invalidate
+values through transitive aliases of the affected backing map while preserving
+the alias topology and exact cardinality for later writes. Unknown or capped
+loops preserve inputs they cannot write and conservatively invalidate possible
+future writes.
 Forward gotos and labeled loop controls merge
 only paths that can reach their target, while backward-goto regions are treated
 as control-ambiguous. Index-specific writes, nested keyed inputs, named returns,
@@ -147,6 +151,7 @@ type ps6101Value struct {
 	nonempty   bool
 	threshold  bool
 	testing    bool
+	mapAbsent  bool
 	revision   uint64
 	identity   uint64
 	analysis   *ps6101ValueAnalysis
@@ -514,6 +519,9 @@ func (engine *ps6101Engine) analyzeFunction(function *ast.FuncDecl, call *ast.Ca
 		}
 	}
 	results := engine.mergeReturns(engine.returns)
+	if call != nil {
+		ps6101PromoteReturnedInputs(results)
+	}
 	localReturnOpaque := engine.returnOpaque
 	engine.mergeExits()
 	callExits := slices.Clone(engine.exits)
@@ -529,6 +537,7 @@ func (engine *ps6101Engine) analyzeFunction(function *ast.FuncDecl, call *ast.Ca
 		callEscaped = &state
 	}
 	if call != nil {
+		engine.promoteReturnedReferences(results)
 		engine.retainFreshReferencedRoots(callerRoots, results)
 		engine.retainCallerVisibility(callerRoots, callerAliases)
 	}
@@ -1718,7 +1727,7 @@ func (engine *ps6101Engine) collectReferenceFields(
 		}
 		for index := int64(0); index < current.Len() && *remaining > 0; index++ {
 			*remaining--
-			child := ps6101AppendLocation(location, "["+strconv.FormatInt(index, 10)+"]")
+			child := ps6101AppendLocation(location, ps6101IntegerIndexSegment(index))
 			remember(child)
 			engine.collectReferenceFields(root, child, current.Elem(), fields, seen, remaining)
 		}
@@ -4544,7 +4553,7 @@ func (engine *ps6101Engine) bindRangeIteration(statement *ast.RangeStmt, ranged 
 			}
 		} else if location, ok := engine.location(statement.X, true); ok && exact {
 			element := location
-			element.path += "[" + strconv.FormatInt(iteration, 10) + "]"
+			element.path += ps6101IntegerIndexSegment(iteration)
 			if stored, present := engine.state[element]; present {
 				value = stored
 			}
@@ -4565,6 +4574,9 @@ func ps6101SingleMapEntry(value ps6101Value) (constant.Value, ps6101Value, bool)
 	for path, candidate := range value.fieldValues() {
 		parsed, head, remainder, ok := ps6101MapPathHead(path)
 		if !ok {
+			continue
+		}
+		if candidate.mapAbsent {
 			continue
 		}
 		if found && head != prefix {
@@ -4593,34 +4605,29 @@ func ps6101SingleMapEntry(value ps6101Value) (constant.Value, ps6101Value, bool)
 }
 
 // ps6101MapPathHead splits one flattened exact map-entry path into its first
-// constant key and the path below that entry. Trying each closing bracket is
-// deliberate: a quoted string key may itself contain a closing bracket.
+// constant key and the path below that entry. Index segments are length
+// prefixed, so arbitrary key text and arbitrary nesting are unambiguous.
 func ps6101MapPathHead(path string) (constant.Value, string, string, bool) {
-	if len(path) < 3 || path[0] != '[' {
+	literal, head, remainder, ok := ps6101SplitIndexPath(path)
+	if !ok {
 		return nil, "", "", false
 	}
-	for end := 1; end < len(path); end++ {
-		if path[end] != ']' {
-			continue
-		}
-		head := path[:end+1]
-		key := ps6101MapPathConstant(head)
-		if key == nil {
-			continue
-		}
-		remainder := path[end+1:]
-		if remainder == "" || remainder[0] == '.' || remainder[0] == '[' {
-			return key, head, remainder, true
-		}
+	key := ps6101ConstantFromPathLiteral(literal)
+	if key == nil {
+		return nil, "", "", false
 	}
-	return nil, "", "", false
+	return key, head, remainder, true
 }
 
 func ps6101MapPathConstant(path string) constant.Value {
-	if len(path) < 3 || path[0] != '[' || path[len(path)-1] != ']' {
+	literal, _, remainder, ok := ps6101SplitIndexPath(path)
+	if !ok || remainder != "" {
 		return nil
 	}
-	literal := path[1 : len(path)-1]
+	return ps6101ConstantFromPathLiteral(literal)
+}
+
+func ps6101ConstantFromPathLiteral(literal string) constant.Value {
 	if literal == "true" {
 		return constant.MakeBool(true)
 	}
@@ -4633,6 +4640,46 @@ func ps6101MapPathConstant(path string) constant.Value {
 		}
 	}
 	return nil
+}
+
+func ps6101SplitIndexPath(path string) (string, string, string, bool) {
+	if len(path) < 4 || path[0] != '[' {
+		return "", "", "", false
+	}
+	colon := strings.IndexByte(path, ':')
+	if colon <= 1 {
+		return "", "", "", false
+	}
+	length, err := strconv.Atoi(path[1:colon])
+	if err != nil || length < 0 {
+		return "", "", "", false
+	}
+	start := colon + 1
+	if length > len(path)-start-1 {
+		return "", "", "", false
+	}
+	end := start + length
+	if end >= len(path) || path[end] != ']' {
+		return "", "", "", false
+	}
+	head := path[:end+1]
+	remainder := path[end+1:]
+	if remainder != "" && remainder[0] != '.' && remainder[0] != '[' {
+		return "", "", "", false
+	}
+	return path[start:end], head, remainder, true
+}
+
+func ps6101IndexSegment(value constant.Value) string {
+	if value == nil {
+		return ""
+	}
+	literal := value.ExactString()
+	return "[" + strconv.Itoa(len(literal)) + ":" + literal + "]"
+}
+
+func ps6101IntegerIndexSegment(index int64) string {
+	return ps6101IndexSegment(constant.MakeInt64(index))
 }
 
 func (engine *ps6101Engine) mergeFallthrough(states []map[ps6101Location]ps6101Value, aliases []map[types.Object]ps6101Location) {
@@ -4906,6 +4953,22 @@ func (engine *ps6101Engine) retainFreshReferencedRoots(roots map[types.Object]bo
 	}
 }
 
+func (engine *ps6101Engine) promoteFreshReferencedInputs(roots map[types.Object]bool) {
+	for location, value := range engine.state {
+		if !roots[location.root] || !engine.fresh[location.root] || value.kind != ps6101Symmetric || len(value.sources) == 0 {
+			continue
+		}
+		value.eligible = true
+		engine.state[location] = value
+	}
+}
+
+func (engine *ps6101Engine) promoteReturnedReferences(values []ps6101Value) {
+	roots := make(map[types.Object]bool)
+	engine.retainFreshReferencedRoots(roots, values)
+	engine.promoteFreshReferencedInputs(roots)
+}
+
 func (engine *ps6101Engine) retainCallerVisibility(roots, aliases map[types.Object]bool) {
 	visible := func(object types.Object) bool {
 		return roots[object] || ps6101PackageObject(object)
@@ -5031,12 +5094,7 @@ func (engine *ps6101Engine) finalizeCompositeFields(destination ps6101Location, 
 		}
 		value.eligible = value.eligible || parent.eligible
 		value.aggregate = value.aggregate || parent.aggregate
-		if ps6101BenchmarkInputName(name) && len(value.sources) > 0 {
-			value.eligible = true
-		}
-		if ps6101ThresholdName(name) {
-			value.threshold = true
-		}
+		ps6101ApplyNamedValueSemantics(name, &value)
 		engine.state[location] = ps6101CloneValue(value)
 		if nested := ps6101CompositeLiteral(expression); nested != nil {
 			engine.finalizeCompositeFields(location, nested)
@@ -5088,7 +5146,11 @@ func (engine *ps6101Engine) compositeSegment(composite *ast.CompositeLit, elemen
 		if typ := engine.pass.TypesInfo.TypeOf(composite); typ != nil {
 			if _, isMap := types.Unalias(typ).Underlying().(*types.Map); isMap {
 				if value := engine.indexConstant(keyed.Key); value != nil {
-					return "[" + value.ExactString() + "]", ""
+					name := ""
+					if value.Kind() == constant.String {
+						name = constant.StringVal(value)
+					}
+					return ps6101IndexSegment(value), name
 				}
 				return "", ""
 			}
@@ -5117,7 +5179,7 @@ func (engine *ps6101Engine) compositeSegment(composite *ast.CompositeLit, elemen
 		}
 		return "." + name, field.Name()
 	}
-	return "[" + strconv.Itoa(index) + "]", ""
+	return ps6101IntegerIndexSegment(int64(index)), ""
 }
 
 func (engine *ps6101Engine) compositeElementType(composite *ast.CompositeLit, element ast.Expr, index int) types.Type {
@@ -5352,14 +5414,25 @@ func (engine *ps6101Engine) storeTarget(expression ast.Expr, target ps6101StoreT
 	mapElementPresent := false
 	mapLength, mapLengthOK := int64(0), false
 	if target.isIndexed {
-		value.nonempty = value.nonempty || engine.state[target.indexedParent].nonempty
+		parentValue := engine.state[target.indexedParent]
+		value.nonempty = value.nonempty || parentValue.nonempty
+		value.eligible = value.eligible || parentValue.eligible
+		value.aggregate = value.aggregate || parentValue.aggregate
 		if target.mapIndex {
-			_, mapElementPresent = engine.state[location]
+			stored, present := engine.state[location]
+			mapElementPresent = present && !stored.mapAbsent
 			parent := engine.state[target.indexedParent]
 			mapLength, mapLengthOK = parent.length, parent.lengthOK
 		}
 	}
 	ps6101ApplyNamedValueSemantics(ps6101ExpressionName(expression), &value)
+	if target.mapIndex {
+		if indexed, ok := ps6101Unparen(expression).(*ast.IndexExpr); ok {
+			if key := engine.indexConstant(indexed.Index); key != nil && key.Kind() == constant.String {
+				ps6101ApplyNamedValueSemantics(constant.StringVal(key), &value)
+			}
+		}
+	}
 	elements := value.elements
 	fields := value.takeFields()
 	value.elements = nil
@@ -5376,7 +5449,7 @@ func (engine *ps6101Engine) storeTarget(expression ast.Expr, target ps6101StoreT
 	engine.state[location] = ps6101CloneValue(value)
 	for index, element := range elements {
 		child := location
-		child.path += "[" + strconv.FormatInt(index, 10) + "]"
+		child.path += ps6101IntegerIndexSegment(index)
 		element.elements = nil
 		element.eligible = element.eligible || value.eligible
 		element.aggregate = element.aggregate || value.aggregate
@@ -5426,8 +5499,8 @@ func ps6101ApplyNamedValueSemantics(name string, value *ps6101Value) {
 	}
 	if ps6101BenchmarkInputName(name) && len(value.sources) > 0 {
 		value.eligible = true
-	}
-	if ps6101AggregateName(name) && value.eligible && len(value.sources) > 0 {
+		value.aggregate = true
+	} else if ps6101AggregateName(name) && value.eligible && len(value.sources) > 0 {
 		value.aggregate = true
 	}
 	if ps6101ThresholdName(name) {
@@ -5583,9 +5656,11 @@ func (engine *ps6101Engine) recomputeIndexedValue(parent ps6101Location) {
 		if location.root != parent.root || !strings.HasPrefix(location.path, prefix) {
 			continue
 		}
-		remainder := strings.TrimPrefix(location.path, prefix)
-		closing := strings.IndexByte(remainder, ']')
-		if closing < 0 || closing != len(remainder)-1 {
+		remainder := strings.TrimPrefix(location.path, parent.path)
+		if _, _, tail, ok := ps6101SplitIndexPath(remainder); !ok || tail != "" {
+			continue
+		}
+		if value.mapAbsent {
 			continue
 		}
 		combined = ps6101CollectionMerge(combined, value)
@@ -5976,6 +6051,19 @@ func (engine *ps6101Engine) evalUncached(expression ast.Expr) ps6101Value {
 			analysis.lower, analysis.upper = constant.MakeInt64(1), constant.MakeInt64(1<<63-1)
 			return result
 		}
+		// Map assignment copies a descriptor for shared backing storage. Local
+		// roots retain useful snapshots for path-sensitive joins, but live map
+		// reads must prefer the canonical alias target so delete, clear, and a
+		// later insertion are observed across arbitrarily long binding chains.
+		if typ := engine.pass.TypesInfo.TypeOf(value); typ != nil {
+			if _, isMap := types.Unalias(typ).Underlying().(*types.Map); isMap {
+				if location, ok := engine.location(value, true); ok {
+					if stored, present := engine.state[location]; present {
+						return engine.valueWithStoredFields(location, ps6101CloneValue(stored), typ)
+					}
+				}
+			}
+		}
 		if location, ok := engine.location(value, false); ok {
 			if stored, present := engine.state[location]; present {
 				typ := engine.pass.TypesInfo.TypeOf(value)
@@ -6129,12 +6217,7 @@ func (engine *ps6101Engine) evalUncached(expression ast.Expr) ps6101Value {
 			}
 			elementType := engine.compositeElementType(value, element, index)
 			evaluated := engine.assignmentValue(elementType, engine.pass.TypesInfo.TypeOf(expression), engine.eval(expression))
-			if ps6101BenchmarkInputName(name) && len(evaluated.sources) > 0 {
-				evaluated.eligible = true
-			}
-			if ps6101ThresholdName(name) {
-				evaluated.threshold = true
-			}
+			ps6101ApplyNamedValueSemantics(name, &evaluated)
 			result = ps6101CollectionMerge(result, evaluated)
 			if !captureFields || !captureAllFields && !ps6101ContainsReference(engine.pass.TypesInfo.TypeOf(expression)) && !ps6101InterfaceType(elementType) {
 				continue
@@ -6250,7 +6333,7 @@ func (engine *ps6101Engine) selectIndexValue(base ps6101Value, expression *ast.I
 			selected, found = base.elements[exact]
 		}
 	}
-	prefix := "[" + index.ExactString() + "]"
+	prefix := ps6101IndexSegment(index)
 	children := make(map[string]ps6101Value)
 	for path, child := range base.fieldValues() {
 		if path == prefix {
@@ -6536,6 +6619,7 @@ func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 	}
 	function, receiver := engine.resolveCall(call)
 	if function == nil {
+		testingCompatible := ps6101TestingCompatibleInterfaceCall(engine.pass, call)
 		if engine.indirectCallable(call.Fun) {
 			engine.invalidateCapturedState()
 		}
@@ -6545,6 +6629,12 @@ func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 		for _, argument := range call.Args {
 			engine.eval(argument)
 			engine.invalidateSharedArgument(argument)
+		}
+		if testingCompatible {
+			// An opaque testing-compatible interface call may return even when
+			// its method is named Fatal or FailNow. Preserve caller continuation
+			// without losing the live random facts that crossed the call.
+			engine.promoteLiveTestingInputs()
 		}
 		return nil
 	}
@@ -6616,6 +6706,16 @@ func (engine *ps6101Engine) invokeTestingMethod(call *ast.CallExpr, callable *ps
 			engine.invalidateSharedArgument(argument)
 		}
 		return []ps6101Value{{}}, true
+	case "Error", "Errorf", "Fail":
+		for _, argument := range adjusted.Args {
+			engine.eval(argument)
+			engine.invalidateSharedArgument(argument)
+		}
+		// These methods record a failure but return normally. A live random
+		// value crossing that testing boundary remains benchmark input even
+		// when its surrounding bindings use no aggregate vocabulary.
+		engine.promoteLiveTestingInputs()
+		return nil, true
 	default:
 		// The receiver of a method expression was already consumed above.
 		// Handle all remaining testing methods here so the generic call path
@@ -6626,6 +6726,95 @@ func (engine *ps6101Engine) invokeTestingMethod(call *ast.CallExpr, callable *ps
 		}
 		return nil, true
 	}
+}
+
+func (engine *ps6101Engine) promoteLiveTestingInputs() {
+	for location, value := range engine.state {
+		if value.kind != ps6101Symmetric || len(value.sources) == 0 {
+			continue
+		}
+		value.eligible = true
+		engine.state[location] = value
+	}
+}
+
+func ps6101PromoteReturnedInputs(values []ps6101Value) {
+	for index := range values {
+		ps6101PromoteReturnedInput(&values[index])
+	}
+}
+
+func ps6101PromoteReturnedInput(value *ps6101Value) {
+	if value == nil {
+		return
+	}
+	if value.kind == ps6101Symmetric && len(value.sources) > 0 {
+		value.eligible = true
+	}
+	if len(value.elements) > 0 {
+		for index, element := range value.elements {
+			ps6101PromoteReturnedInput(&element)
+			value.elements[index] = element
+		}
+	}
+	if fields := value.fieldValues(); len(fields) > 0 {
+		promoted := make(map[string]ps6101Value, len(fields))
+		for path, field := range fields {
+			ps6101PromoteReturnedInput(&field)
+			promoted[path] = field
+		}
+		value.setFields(promoted)
+	}
+}
+
+func ps6101TestingCompatibleInterfaceCall(pass *analysis.Pass, call *ast.CallExpr) bool {
+	if pass == nil || pass.TypesInfo == nil || call == nil {
+		return false
+	}
+	selector, ok := ps6101Unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	selection := pass.TypesInfo.Selections[selector]
+	if selection == nil {
+		return false
+	}
+	if _, ok := types.Unalias(selection.Recv()).Underlying().(*types.Interface); !ok {
+		return false
+	}
+	method, ok := selection.Obj().(*types.Func)
+	if !ok {
+		return false
+	}
+	signature, ok := method.Type().(*types.Signature)
+	if !ok || signature.Results().Len() != 0 {
+		return false
+	}
+	parameters := signature.Params()
+	switch method.Name() {
+	case "Fail", "FailNow":
+		return !signature.Variadic() && parameters.Len() == 0
+	case "Error", "Fatal":
+		return signature.Variadic() && parameters.Len() == 1 && ps6101AnySlice(parameters.At(0).Type())
+	case "Errorf", "Fatalf":
+		return signature.Variadic() && parameters.Len() == 2 &&
+			ps6101StringType(parameters.At(0).Type()) && ps6101AnySlice(parameters.At(1).Type())
+	}
+	return false
+}
+
+func ps6101StringType(typ types.Type) bool {
+	basic, ok := types.Unalias(typ).Underlying().(*types.Basic)
+	return ok && basic.Kind() == types.String
+}
+
+func ps6101AnySlice(typ types.Type) bool {
+	slice, ok := types.Unalias(typ).Underlying().(*types.Slice)
+	if !ok {
+		return false
+	}
+	iface, ok := types.Unalias(slice.Elem()).Underlying().(*types.Interface)
+	return ok && iface.NumMethods() == 0
 }
 
 func (engine *ps6101Engine) appendedElements(call *ast.CallExpr, values []ps6101Value, destination ps6101Value, added int64, addedOK bool) map[int64]ps6101Value {
@@ -6645,7 +6834,7 @@ func (engine *ps6101Engine) appendedElements(call *ast.CallExpr, values []ps6101
 		value := last
 		if baseOK && last.offsetOK {
 			location := base
-			location.path += "[" + strconv.FormatInt(last.offset+index, 10) + "]"
+			location.path += ps6101IntegerIndexSegment(last.offset + index)
 			if stored, present := engine.state[location]; present {
 				value = stored
 			}
@@ -6675,7 +6864,7 @@ func (engine *ps6101Engine) appendPrefixValue(expression ast.Expr, source ps6101
 	}
 	for index := int64(0); index < source.length; index++ {
 		location := base
-		location.path += "[" + strconv.FormatInt(source.offset+index, 10) + "]"
+		location.path += ps6101IntegerIndexSegment(source.offset + index)
 		value, present := engine.state[location]
 		if !present {
 			return source
@@ -6786,6 +6975,10 @@ func (engine *ps6101Engine) invalidateMapMutation(call *ast.CallExpr, name strin
 		engine.invalidateSharedArgument(call.Args[0])
 		return
 	}
+	mapTarget := false
+	if typ := engine.pass.TypesInfo.TypeOf(call.Args[0]); typ != nil {
+		_, mapTarget = types.Unalias(typ).Underlying().(*types.Map)
+	}
 	prefixes := []ps6101Location{target}
 	if raw, rawOK := engine.location(call.Args[0], false); rawOK && raw != target {
 		prefixes = append(prefixes, raw)
@@ -6807,7 +7000,7 @@ func (engine *ps6101Engine) invalidateMapMutation(call *ast.CallExpr, name strin
 	segment := ""
 	if name == "delete" && len(call.Args) > 1 {
 		if key := engine.indexConstant(call.Args[1]); key != nil {
-			segment = "[" + key.ExactString() + "]"
+			segment = ps6101IndexSegment(key)
 		}
 	}
 	seen := make(map[ps6101Location]bool, len(prefixes))
@@ -6815,6 +7008,7 @@ func (engine *ps6101Engine) invalidateMapMutation(call *ast.CallExpr, name strin
 		if prefix.root == nil {
 			continue
 		}
+		parent := prefix
 		if segment != "" {
 			prefix.path += segment
 		}
@@ -6822,7 +7016,31 @@ func (engine *ps6101Engine) invalidateMapMutation(call *ast.CallExpr, name strin
 			continue
 		}
 		seen[prefix] = true
+		prior := engine.state[prefix]
+		parentValue := engine.state[parent]
 		engine.invalidateValuePrefix(prefix)
+		if segment != "" {
+			// A known delete leaves a readable zero value but no live entry.
+			// Remember absence separately from unknown provenance so reinsertion
+			// can restore exact cardinality instead of treating the key as present.
+			engine.state[prefix] = ps6101Value{mapAbsent: true}
+			if !prior.mapAbsent && parentValue.lengthOK && parentValue.length > 0 {
+				parentValue.length--
+				parentValue.nonempty = parentValue.length > 0
+				engine.state[parent] = parentValue
+			}
+			continue
+		}
+		// clear preserves the map value and its backing identity while making
+		// its exact cardinality zero. Keeping the reference is essential when a
+		// new alias is bound after the clear and later writes through that alias.
+		cleared := ps6101Value{lengthOK: true, reference: prior.reference}
+		if !mapTarget {
+			cleared.length, cleared.capacity, cleared.offset = prior.length, prior.capacity, prior.offset
+			cleared.lengthOK, cleared.capacityOK, cleared.offsetOK = prior.lengthOK, prior.capacityOK, prior.offsetOK
+			cleared.nonempty = prior.nonempty
+		}
+		engine.state[prefix] = cleared
 	}
 }
 
@@ -6998,6 +7216,7 @@ func (engine *ps6101Engine) analyzeLiteral(literal *ast.FuncLit, call *ast.CallE
 		}
 	}
 	results := engine.mergeReturns(engine.returns)
+	ps6101PromoteReturnedInputs(results)
 	localReturnOpaque := engine.returnOpaque
 	engine.mergeExits()
 	callExits := slices.Clone(engine.exits)
@@ -7013,6 +7232,7 @@ func (engine *ps6101Engine) analyzeLiteral(literal *ast.FuncLit, call *ast.CallE
 		callEscaped = &state
 	}
 	engine.refreshLiteralCaptures(callable)
+	engine.promoteReturnedReferences(results)
 	engine.retainFreshReferencedRoots(callerRoots, results)
 	engine.retainCallerVisibility(callerRoots, callerAliases)
 	engine.returns, engine.exits = oldReturns, oldExits
@@ -7566,7 +7786,7 @@ func (engine *ps6101Engine) invalidateAppendBacking(expression ast.Expr, destina
 	if startOK && addedOK && added >= 0 && added <= 256 {
 		for offset := int64(0); offset < added; offset++ {
 			location := base
-			location.path += "[" + strconv.FormatInt(start+offset, 10) + "]"
+			location.path += ps6101IntegerIndexSegment(start + offset)
 			engine.invalidatePrefix(location)
 		}
 		engine.recomputeIndexedValue(base)
@@ -8813,7 +9033,7 @@ func (engine *ps6101Engine) location(expression ast.Expr, followAlias bool) (ps6
 				index = constant.MakeInt64(exact + cached.offset)
 			}
 		}
-		base.path += "[" + index.ExactString() + "]"
+		base.path += ps6101IndexSegment(index)
 		if followAlias {
 			base = engine.followReference(base)
 		}
@@ -9187,6 +9407,7 @@ func ps6101SameValue(left, right ps6101Value) bool {
 	leftAnalysis, rightAnalysis := left.analysisValue(), right.analysisValue()
 	return left.kind == right.kind && left.eligible == right.eligible && left.aggregate == right.aggregate &&
 		left.nonempty == right.nonempty && left.threshold == right.threshold && left.testing == right.testing &&
+		left.mapAbsent == right.mapAbsent &&
 		left.revision == right.revision && left.identity == right.identity && leftAnalysis.squareID == rightAnalysis.squareID &&
 		leftAnalysis.squareSig == rightAnalysis.squareSig && leftAnalysis.squareSign == rightAnalysis.squareSign && ps6101SameReference(left.reference, right.reference) &&
 		left.callable == right.callable && ps6101SameDynamicType(leftAnalysis.dynamic, rightAnalysis.dynamic) && left.length == right.length && left.capacity == right.capacity && left.offset == right.offset &&
