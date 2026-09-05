@@ -191,11 +191,15 @@ func TestTestArgsBoundNestedParallelismAndTimeout(t *testing.T) {
 	}
 }
 
-func TestRetryableWindowsAccessViolation(t *testing.T) {
+func TestRetryableWindowsRuntimeCrash(t *testing.T) {
 	t.Parallel()
+	const waitingListCrash = "fatal error: G waiting list is corrupted\n\nruntime.throw({0x1?, 0x2?})\n\tC:/hostedtoolcache/windows/go/1.26.8/x64/src/runtime/panic.go:1229 +0x4d\nFAIL\n"
 	err := context.DeadlineExceeded
-	if !retryableWindowsAccessViolation(context.Background(), "windows", "exit status 0xC0000005\nFAIL", err) {
+	if !retryableWindowsRuntimeCrash(context.Background(), "windows", "exit status 0xC0000005\nFAIL", err) {
 		t.Fatal("Windows access violation was not retryable")
+	}
+	if !retryableWindowsRuntimeCrash(context.Background(), "windows", waitingListCrash, err) {
+		t.Fatal("Windows Go runtime corruption was not retryable")
 	}
 	for _, test := range []struct {
 		name   string
@@ -206,12 +210,16 @@ func TestRetryableWindowsAccessViolation(t *testing.T) {
 		{name: "success", goos: "windows", output: "ok", err: nil},
 		{name: "ordinary failure", goos: "windows", output: "--- FAIL: TestBroken", err: err},
 		{name: "test failure plus status text", goos: "windows", output: "--- FAIL: TestBroken\nexit status 0xc0000005", err: err},
+		{name: "test failure plus runtime corruption", goos: "windows", output: "--- FAIL: TestBroken\nfatal error: G waiting list is corrupted", err: err},
 		{name: "embedded status text", goos: "windows", output: "diagnostic: exit status 0xc0000005", err: err},
+		{name: "embedded runtime text", goos: "windows", output: "diagnostic: fatal error: G waiting list is corrupted", err: err},
+		{name: "marker without runtime stack", goos: "windows", output: "fatal error: G waiting list is corrupted\nFAIL", err: err},
+		{name: "unrelated fatal error", goos: "windows", output: "fatal error: concurrent map writes", err: err},
 		{name: "other platform", goos: "linux", output: "exit status 0xc0000005", err: err},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			if retryableWindowsAccessViolation(context.Background(), test.goos, test.output, test.err) {
+			if retryableWindowsRuntimeCrash(context.Background(), test.goos, test.output, test.err) {
 				t.Fatal("unexpected retry")
 			}
 		})
@@ -219,8 +227,34 @@ func TestRetryableWindowsAccessViolation(t *testing.T) {
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if retryableWindowsAccessViolation(canceled, "windows", "exit status 0xc0000005", err) {
+	if retryableWindowsRuntimeCrash(canceled, "windows", "exit status 0xc0000005", err) {
 		t.Fatal("canceled job was retryable")
+	}
+}
+
+func TestRetryableWindowsRuntimeCrashRejectsConclusiveFailures(t *testing.T) {
+	t.Parallel()
+	const waitingListCrash = "fatal error: G waiting list is corrupted\nruntime.throw({0x1?, 0x2?})\nC:/go/src/runtime/panic.go:1229 +0x4d\n"
+	err := context.DeadlineExceeded
+	for _, test := range []struct {
+		name   string
+		output string
+	}{
+		{name: "race warning", output: "WARNING: DATA RACE\n"},
+		{name: "race outside test", output: "testing: race detected outside of test execution\n"},
+		{name: "race summary", output: "Found 1 data race(s)\n"},
+		{name: "timeout", output: "panic: test timed out after 1s\n"},
+		{name: "panic", output: "panic: assertion failed [recovered, repanicked]\n"},
+		{name: "other fatal", output: "fatal error: concurrent map writes\n"},
+		{name: "deadlock", output: "fatal error: all goroutines are asleep - deadlock!\n"},
+		{name: "build", output: "FAIL example.com/pkg [build failed]\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if retryableWindowsRuntimeCrash(context.Background(), "windows", waitingListCrash+test.output+"FAIL\n", err) {
+				t.Fatal("conclusive failure was retryable")
+			}
+		})
 	}
 }
 
@@ -242,6 +276,25 @@ func TestRunTestAttemptsRetriesTwoConsecutiveAccessViolations(t *testing.T) {
 	}
 }
 
+func TestRunTestAttemptsRetriesRuntimeCorruption(t *testing.T) {
+	t.Parallel()
+	const waitingListCrash = "fatal error: G waiting list is corrupted\nruntime.throw({0x1?, 0x2?})\nC:\\go\\src\\runtime\\panic.go:1229 +0x4d\nFAIL\n"
+	attempts := 0
+	output, err := runTestAttempts(context.Background(), "windows", time.Minute, func(context.Context, time.Duration) (string, error) {
+		attempts++
+		if attempts == 1 {
+			return waitingListCrash, context.DeadlineExceeded
+		}
+		return "ok\n", nil
+	})
+	if err != nil || attempts != 2 {
+		t.Fatalf("err = %v, attempts = %d; want nil, 2", err, attempts)
+	}
+	if !strings.Contains(output, "Windows Go runtime crashed") || !strings.HasSuffix(output, "ok\n") {
+		t.Fatalf("combined output did not preserve retry evidence and success: %q", output)
+	}
+}
+
 func TestRunTestAttemptsKeepsPersistentCrashFailed(t *testing.T) {
 	t.Parallel()
 	attempts := 0
@@ -249,8 +302,8 @@ func TestRunTestAttemptsKeepsPersistentCrashFailed(t *testing.T) {
 		attempts++
 		return "exit status 0xc0000005\nFAIL\n", context.DeadlineExceeded
 	})
-	if err == nil || attempts != windowsAccessViolationAttempts {
-		t.Fatalf("err = %v, attempts = %d; want failure after %d attempts", err, attempts, windowsAccessViolationAttempts)
+	if err == nil || attempts != windowsRuntimeCrashAttempts {
+		t.Fatalf("err = %v, attempts = %d; want failure after %d attempts", err, attempts, windowsRuntimeCrashAttempts)
 	}
 }
 
@@ -263,6 +316,22 @@ func TestRunTestAttemptsDoesNotRetryOrdinaryFailure(t *testing.T) {
 	})
 	if err == nil || attempts != 1 {
 		t.Fatalf("err = %v, attempts = %d; want failure after 1 attempt", err, attempts)
+	}
+}
+
+func TestRunTestAttemptsDoesNotMaskConclusiveFailure(t *testing.T) {
+	t.Parallel()
+	const output = "WARNING: DATA RACE\nfatal error: G waiting list is corrupted\nruntime.throw({0x1?, 0x2?})\nC:/go/src/runtime/panic.go:1229 +0x4d\nFAIL\n"
+	attempts := 0
+	_, err := runTestAttempts(context.Background(), "windows", time.Minute, func(context.Context, time.Duration) (string, error) {
+		attempts++
+		if attempts == 1 {
+			return output, context.DeadlineExceeded
+		}
+		return "ok\n", nil
+	})
+	if err == nil || attempts != 1 {
+		t.Fatalf("conclusive failure was masked: err = %v, attempts = %d", err, attempts)
 	}
 }
 

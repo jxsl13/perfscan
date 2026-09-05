@@ -266,7 +266,7 @@ func runTestJob(ctx context.Context, job testJob, parallel int, timeout time.Dur
 	})
 }
 
-const windowsAccessViolationAttempts = 3
+const windowsRuntimeCrashAttempts = 3
 
 func runTestAttempts(ctx context.Context, goos string, timeout time.Duration, run func(context.Context, time.Duration) (string, error)) (string, error) {
 	attemptCtx := ctx
@@ -287,7 +287,7 @@ func runTestAttempts(ctx context.Context, goos string, timeout time.Duration, ru
 
 	var combined strings.Builder
 	combined.Grow(256)
-	for attempt := 1; attempt <= windowsAccessViolationAttempts; attempt++ {
+	for attempt := 1; attempt <= windowsRuntimeCrashAttempts; attempt++ {
 		remaining := timeout
 		if timeout > 0 {
 			remaining = time.Until(budgetDeadline)
@@ -297,13 +297,13 @@ func runTestAttempts(ctx context.Context, goos string, timeout time.Duration, ru
 		}
 		output, err := run(attemptCtx, remaining)
 		combined.WriteString(output)
-		if !retryableWindowsAccessViolation(attemptCtx, goos, output, err) || attempt == windowsAccessViolationAttempts {
+		if !retryableWindowsRuntimeCrash(attemptCtx, goos, output, err) || attempt == windowsRuntimeCrashAttempts {
 			return combined.String(), err
 		}
 		if timeout > 0 && time.Until(budgetDeadline) <= 0 {
 			return combined.String(), context.DeadlineExceeded
 		}
-		fmt.Fprintf(&combined, "testparallel: Windows test process exited with 0xc0000005; retrying this complete shard (attempt %d/%d)\n", attempt+1, windowsAccessViolationAttempts)
+		fmt.Fprintf(&combined, "testparallel: Windows Go runtime crashed; retrying this complete shard (attempt %d/%d)\n", attempt+1, windowsRuntimeCrashAttempts)
 	}
 	panic("unreachable")
 }
@@ -319,21 +319,37 @@ func testTimeoutGrace(timeout time.Duration) time.Duration {
 	return min(grace, 5*time.Second)
 }
 
-func retryableWindowsAccessViolation(ctx context.Context, goos, output string, err error) bool {
+func retryableWindowsRuntimeCrash(ctx context.Context, goos, output string, err error) bool {
 	if err == nil || ctx.Err() != nil || goos != "windows" {
 		return false
 	}
 	accessViolation := false
+	waitingListCorruption := false
+	runtimeThrow := false
+	runtimePanicSource := false
 	for line := range strings.SplitSeq(output, "\n") {
 		line = strings.TrimSpace(strings.ToLower(line))
-		if strings.HasPrefix(line, "--- fail:") {
+		switch {
+		case strings.HasPrefix(line, "--- fail:"),
+			line == "warning: data race",
+			strings.Contains(line, "race detected"),
+			strings.HasPrefix(line, "panic:"),
+			strings.Contains(line, "[build failed]"),
+			strings.HasPrefix(line, "found ") && strings.HasSuffix(line, " data race(s)"):
 			return false
-		}
-		if line == "exit status 0xc0000005" {
+		case line == "exit status 0xc0000005":
 			accessViolation = true
+		case line == "fatal error: g waiting list is corrupted":
+			waitingListCorruption = true
+		case strings.HasPrefix(line, "fatal error:"):
+			return false
+		case strings.HasPrefix(line, "runtime.throw("):
+			runtimeThrow = true
+		case strings.Contains(line, "/src/runtime/panic.go:") || strings.Contains(line, `\src\runtime\panic.go:`):
+			runtimePanicSource = true
 		}
 	}
-	return accessViolation
+	return accessViolation || waitingListCorruption && runtimeThrow && runtimePanicSource
 }
 
 func testArgs(job testJob, parallel int, timeout time.Duration, race bool) []string {
