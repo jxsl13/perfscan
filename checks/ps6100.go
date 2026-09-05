@@ -37,9 +37,10 @@ PS6100 recognizes two or more canonical full scans nested in one iterative
 loop. The scans must range over the same slice/array (or count from zero to its
 length), their boolean conditions must read a shared per-element input, and the
 outer iteration may contain at most four explicit writes to indexed elements
-of those inputs. Direct and generic package-local single-result helpers are
-followed through multiple call layers, so predicates expressed as
-helper(slice, index) or helper(slice[index]) remain visible.
+of those inputs. Direct, receiver, generic, and variadic package-local
+single-result helpers are followed through multiple call layers, so predicates
+expressed as helper(slice, index), slice.helper(index), or helper(slice[index])
+remain visible.
 Stable slice, map, and pointer aliases are resolved by object identity across
 direct, generic, and method helpers; branch-ambiguous helper aliases and
 dynamic dispatch remain explicit proof obligations. Simultaneous alias
@@ -53,7 +54,9 @@ reach each call site; opaque, recursive, and overflowed targets remain hazards.
 Stable direct, tuple, pointer-field, and self-reslice rebindings before the
 outer loop are canonicalized relative to the collection scanned by that loop.
 Direct short-variable and tuple initialization from slice views preserves the
-same backing-store offsets as a later assignment.
+same backing-store offsets as a later assignment. Simple package-local helpers
+that return an argument or a locally named view preserve that provenance and
+its exact slice offset as well.
 Nested selector and dereference assignments retain stable header locations.
 Stored value receivers snapshot their header, while a pointer-receiver method
 value formed from an addressable field retains that field's address and sees a
@@ -165,8 +168,9 @@ type ps6100Hazard struct {
 }
 
 type ps6100AddressExposure struct {
-	node    ast.Node
-	storage ps6100Storage
+	node       ast.Node
+	expression ast.Expr
+	storage    ps6100Storage
 }
 
 type ps6100MutationFacts struct {
@@ -209,7 +213,7 @@ type ps6100CallableResolution struct {
 
 func runPS6100(pass *analysis.Pass) (any, error) {
 	helpers := ps6100LocalFunctions(pass)
-	callables := ps6100LocalCallableBindings(pass)
+	callables := ps6100LocalCallableBindings(pass, helpers)
 	addresses := ps6100Addresses(pass)
 	for _, file := range pass.Files {
 		for _, declaration := range file.Decls {
@@ -239,7 +243,7 @@ func ps6100LocalFunctions(pass *analysis.Pass) ps6100Helpers {
 	return result
 }
 
-func ps6100LocalCallableBindings(pass *analysis.Pass) ps6100CallableBindings {
+func ps6100LocalCallableBindings(pass *analysis.Pass, helpers ps6100Helpers) ps6100CallableBindings {
 	result := ps6100CallableBindings{
 		all: make(ps6100CallableState), parents: make(map[ast.Node]ast.Node), before: make(map[ast.Node]ps6100CallableState),
 	}
@@ -281,7 +285,7 @@ func ps6100LocalCallableBindings(pass *analysis.Pass) ps6100CallableBindings {
 		for child, parent := range ps6087Parents(body) {
 			result.parents[child] = parent
 		}
-		aliasFlow := ps6100HelperAliasFlow(pass, body, nil)
+		aliasFlow := ps6100HelperAliasFlow(pass, body, nil, helpers)
 		reachability := ps6100ReachableNodes(pass, body)
 		recordAll := func(identifier *ast.Ident, assignment token.Token, source ast.Expr) {
 			if identifier == nil || identifier.Name == "_" {
@@ -756,6 +760,87 @@ func ps6100CallableActiveKey(target ps6100CallableTarget) string {
 	return "function:" + ps6100ObjectKey(target.function)
 }
 
+func ps6100BindInvocation(pass *analysis.Pass, signature *types.Signature, receiver ast.Expr, arguments []ast.Expr, ellipsis token.Pos, environment map[types.Object]ast.Expr) (map[types.Object]ast.Expr, bool) {
+	if signature == nil {
+		return nil, false
+	}
+	next := make(map[types.Object]ast.Expr, len(environment)+len(arguments)+1)
+	for object, expression := range environment {
+		next[object] = expression
+	}
+	if signature.Recv() != nil {
+		if receiver == nil {
+			return nil, false
+		}
+		next[signature.Recv()] = ps6100ResolveExpression(pass, receiver, environment, make(map[types.Object]bool))
+	}
+	parameterCount := signature.Params().Len()
+	fixedCount := parameterCount
+	if signature.Variadic() {
+		fixedCount--
+	}
+	if len(arguments) < fixedCount || !signature.Variadic() && len(arguments) != parameterCount {
+		return nil, false
+	}
+	for index := 0; index < fixedCount; index++ {
+		next[signature.Params().At(index)] = ps6100ResolveExpression(pass, arguments[index], environment, make(map[types.Object]bool))
+	}
+	if !signature.Variadic() {
+		return next, true
+	}
+	var variadic ast.Expr
+	if ellipsis.IsValid() {
+		if len(arguments) != parameterCount {
+			return nil, false
+		}
+		variadic = ps6100ResolveExpression(pass, arguments[fixedCount], environment, make(map[types.Object]bool))
+	} else {
+		elements := make([]ast.Expr, 0, len(arguments)-fixedCount)
+		for _, argument := range arguments[fixedCount:] {
+			elements = append(elements, ps6100ResolveExpression(pass, argument, environment, make(map[types.Object]bool)))
+		}
+		literal := &ast.CompositeLit{Elts: elements}
+		if pass.TypesInfo.Types != nil {
+			pass.TypesInfo.Types[literal] = types.TypeAndValue{Type: signature.Params().At(fixedCount).Type()}
+		}
+		if pass.TypesInfo.Implicits == nil {
+			pass.TypesInfo.Implicits = make(map[ast.Node]types.Object)
+		}
+		pass.TypesInfo.Implicits[literal] = signature.Params().At(fixedCount)
+		variadic = literal
+	}
+	next[signature.Params().At(fixedCount)] = variadic
+	return next, true
+}
+
+func ps6100DirectCallReceiver(pass *analysis.Pass, call *ast.CallExpr, signature *types.Signature) (ast.Expr, []ast.Expr, bool) {
+	if call == nil || signature == nil {
+		return nil, nil, false
+	}
+	arguments := call.Args
+	if signature.Recv() == nil {
+		return nil, arguments, true
+	}
+	selector, ok := ps2110Unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	selection := pass.TypesInfo.Selections[selector]
+	if selection == nil {
+		return nil, nil, false
+	}
+	switch selection.Kind() {
+	case types.MethodVal:
+		return selector.X, arguments, true
+	case types.MethodExpr:
+		if len(arguments) == 0 {
+			return nil, nil, false
+		}
+		return arguments[0], arguments[1:], true
+	}
+	return nil, nil, false
+}
+
 func ps6100CallableInvocation(
 	pass *analysis.Pass,
 	target ps6100CallableTarget,
@@ -775,23 +860,20 @@ func ps6100CallableInvocation(
 			signature, _ = types.Unalias(typ).Underlying().(*types.Signature)
 		}
 	} else if target.function != nil {
-		declaration := helpers[target.function.Origin()]
+		origin := target.function.Origin()
+		declaration := helpers[origin]
 		if declaration == nil {
 			return nil, nil, false
 		}
 		body = declaration.Body
-		signature, _ = target.function.Type().(*types.Signature)
+		signature, _ = origin.Type().(*types.Signature)
 	}
-	if body == nil || signature == nil || signature.Variadic() {
+	if body == nil || signature == nil {
 		return nil, nil, false
 	}
 	arguments := call.Args
-	next := make(map[types.Object]ast.Expr, len(environment)+len(arguments)+1)
-	for object, expression := range environment {
-		next[object] = expression
-	}
+	var receiver ast.Expr
 	if signature.Recv() != nil {
-		var receiver ast.Expr
 		switch {
 		case target.methodExpression && len(arguments) != 0:
 			receiver, arguments = arguments[0], arguments[1:]
@@ -802,13 +884,11 @@ func ps6100CallableInvocation(
 			return nil, nil, false
 		}
 		receiver = ps6100ResolveExpression(pass, receiver, environment, make(map[types.Object]bool))
-		next[signature.Recv()] = ps6100RebaseAliasExpression(pass, receiver, canonicalAliases)
+		receiver = ps6100RebaseAliasExpression(pass, receiver, canonicalAliases)
 	}
-	if len(arguments) != signature.Params().Len() {
+	next, ok := ps6100BindInvocation(pass, signature, receiver, arguments, call.Ellipsis, environment)
+	if !ok {
 		return nil, nil, false
-	}
-	for index, argument := range arguments {
-		next[signature.Params().At(index)] = ps6100ResolveExpression(pass, argument, environment, make(map[types.Object]bool))
 	}
 	return body, next, true
 }
@@ -816,7 +896,7 @@ func ps6100CallableInvocation(
 func ps6100Function(pass *analysis.Pass, function *ast.FuncDecl, helpers ps6100Helpers, callables ps6100CallableBindings, addresses []ps6100AddressExposure) {
 	parents := ps6087Parents(function.Body)
 	aliases := ps6100StableAliases(pass, function.Body, helpers, callables, addresses)
-	aliasFlow := ps6100HelperAliasFlow(pass, function.Body, nil)
+	aliasFlow := ps6100HelperAliasFlow(pass, function.Body, nil, helpers)
 	var ordered []*ps6100Loop
 	ast.Inspect(function.Body, func(node ast.Node) bool {
 		if literal, ok := node.(*ast.FuncLit); ok && literal != nil {
@@ -871,7 +951,7 @@ func ps6100Function(pass *analysis.Pass, function *ast.FuncDecl, helpers ps6100H
 		if outerBody == nil {
 			continue
 		}
-		ps6100Outer(pass, outerNode, function.Body, outerBody, scans, helpers, callables, addresses, aliases, aliasFlow.stateWithin(outerBody))
+		ps6100Outer(pass, outerNode, function.Body, outerBody, scans, helpers, callables, addresses, aliases, aliasFlow, aliasFlow.stateWithin(outerBody))
 	}
 }
 
@@ -1518,6 +1598,10 @@ func ps6100PredicateInputs(
 				invariants[storage.key] = storage
 			}
 		case *ast.IndexExpr:
+			if ps6100BoundCompositeIndexMayPanic(pass, value, environment) {
+				safe = false
+				return false
+			}
 			if ps6100MentionsAny(pass, value.Index, indexes, environment) {
 				if storage, ok := ps6100StorageOf(pass, value.X, environment); ok && ps6100Sequence(storage.typ) {
 					inputs[storage.key] = storage
@@ -1530,7 +1614,7 @@ func ps6100PredicateInputs(
 			}
 		case *ast.CallExpr:
 			function, signature, ok := typedCallee(pass, value.Fun)
-			if !ok || signature.Recv() != nil || signature.Variadic() || len(value.Args) != signature.Params().Len() {
+			if !ok {
 				if !ps6100SafePredicateCall(pass, value) {
 					safe = false
 					return false
@@ -1555,18 +1639,36 @@ func ps6100PredicateInputs(
 				safe = false
 				return false
 			}
-			for _, argument := range value.Args {
+			receiver, arguments, invocable := ps6100DirectCallReceiver(pass, value, signature)
+			if !invocable {
+				safe = false
+				return false
+			}
+			if signature.Variadic() && value.Ellipsis.IsValid() {
+				if len(arguments) == 0 {
+					safe = false
+					return false
+				}
+				if _, known := ps2110Unparen(arguments[len(arguments)-1]).(*ast.CompositeLit); !known {
+					safe = false
+					return false
+				}
+			}
+			evaluatedExpressions := arguments
+			if signature.Recv() != nil && receiver != nil {
+				evaluatedExpressions = append([]ast.Expr{receiver}, evaluatedExpressions...)
+			}
+			for _, argument := range evaluatedExpressions {
 				if !ps6100PredicateInputs(pass, argument, indexes, helpers, environment, active, evaluated, inputs, invariants, depth+1) {
 					safe = false
 					return false
 				}
 			}
-			next := make(map[types.Object]ast.Expr, len(environment)+len(value.Args))
-			for object, actual := range environment {
-				next[object] = actual
-			}
-			for position, argument := range value.Args {
-				next[signature.Params().At(position)] = ps6100ResolveExpression(pass, argument, environment, make(map[types.Object]bool))
+			originSignature, _ := function.Type().(*types.Signature)
+			next, bound := ps6100BindInvocation(pass, originSignature, receiver, arguments, value.Ellipsis, environment)
+			if !bound {
+				safe = false
+				return false
 			}
 			active[function] = true
 			safe = ps6100PredicateInputs(pass, returned.Results[0], indexes, helpers, next, active, evaluated, inputs, invariants, depth+1)
@@ -1579,6 +1681,23 @@ func ps6100PredicateInputs(
 		return true
 	})
 	return safe
+}
+
+func ps6100BoundCompositeIndexMayPanic(pass *analysis.Pass, index *ast.IndexExpr, environment map[types.Object]ast.Expr) bool {
+	if pass == nil || pass.TypesInfo == nil || index == nil || environment == nil {
+		return false
+	}
+	base := ps6100ResolveExpression(pass, index.X, environment, make(map[types.Object]bool))
+	literal, ok := ps2110Unparen(base).(*ast.CompositeLit)
+	if !ok {
+		return false
+	}
+	position := ps6100Constant(pass, ps6100ResolveExpression(pass, index.Index, environment, make(map[types.Object]bool)))
+	if position == nil || position.Kind() != constant.Int {
+		return true
+	}
+	value, exact := constant.Int64Val(position)
+	return !exact || value < 0 || value >= int64(len(literal.Elts))
 }
 
 func ps6100MentionsAny(pass *analysis.Pass, expression ast.Expr, targets []types.Object, environment map[types.Object]ast.Expr) bool {
@@ -1608,6 +1727,20 @@ func ps6100SafePredicateCall(pass *analysis.Pass, call *ast.CallExpr) bool {
 func ps6100ResolveExpression(pass *analysis.Pass, expression ast.Expr, environment map[types.Object]ast.Expr, seen map[types.Object]bool) ast.Expr {
 	for expression != nil {
 		expression = ps2110Unparen(expression)
+		if index, ok := expression.(*ast.IndexExpr); ok && environment != nil {
+			base := ps6100ResolveExpression(pass, index.X, environment, seen)
+			literal, synthetic := ps2110Unparen(base).(*ast.CompositeLit)
+			position := ps6100Constant(pass, index.Index)
+			if synthetic && position != nil && position.Kind() == constant.Int {
+				value, exact := constant.Int64Val(position)
+				if exact && value >= 0 && value < int64(len(literal.Elts)) {
+					if element, ok := literal.Elts[value].(ast.Expr); ok {
+						expression = element
+						continue
+					}
+				}
+			}
+		}
 		identifier, ok := expression.(*ast.Ident)
 		if !ok || environment == nil {
 			return expression
@@ -1661,6 +1794,11 @@ func ps6100StorageOf(pass *analysis.Pass, expression ast.Expr, environment map[t
 func ps6100StorageOfSeen(pass *analysis.Pass, expression ast.Expr, environment map[types.Object]ast.Expr, seen map[types.Object]bool) (ps6100Storage, bool) {
 	expression = ps6100ResolveExpression(pass, expression, environment, seen)
 	expression = ps2110Unparen(expression)
+	if selector, ok := expression.(*ast.SelectorExpr); ok {
+		if expanded := ps6100ExpandPromotedField(pass, selector); expanded != expression {
+			return ps6100StorageOfSeen(pass, expanded, environment, seen)
+		}
+	}
 	switch value := expression.(type) {
 	case *ast.Ident:
 		object := pass.TypesInfo.ObjectOf(value)
@@ -1707,6 +1845,40 @@ func ps6100StorageOfSeen(pass *analysis.Pass, expression ast.Expr, environment m
 		}
 	}
 	return ps6100Storage{}, false
+}
+
+func ps6100ExpandPromotedField(pass *analysis.Pass, selector *ast.SelectorExpr) ast.Expr {
+	if pass == nil || pass.TypesInfo == nil || selector == nil {
+		return selector
+	}
+	selection := pass.TypesInfo.Selections[selector]
+	if selection == nil || selection.Kind() != types.FieldVal || len(selection.Index()) <= 1 {
+		return selector
+	}
+	current := selector.X
+	currentType := selection.Recv()
+	for _, fieldIndex := range selection.Index() {
+		underlying := types.Unalias(currentType)
+		if pointer, ok := underlying.Underlying().(*types.Pointer); ok {
+			underlying = types.Unalias(pointer.Elem())
+		}
+		structure, ok := underlying.Underlying().(*types.Struct)
+		if !ok || fieldIndex < 0 || fieldIndex >= structure.NumFields() {
+			return selector
+		}
+		field := structure.Field(fieldIndex)
+		identifier := ast.NewIdent(field.Name())
+		if pass.TypesInfo.Uses != nil {
+			pass.TypesInfo.Uses[identifier] = field
+		}
+		next := &ast.SelectorExpr{X: current, Sel: identifier}
+		if pass.TypesInfo.Types != nil {
+			pass.TypesInfo.Types[next] = types.TypeAndValue{Type: field.Type()}
+		}
+		current = next
+		currentType = field.Type()
+	}
+	return current
 }
 
 func ps6100ObjectKey(object types.Object) string {
@@ -1834,7 +2006,7 @@ func ps6100BlocksReach(from, to []*cfg.Block) bool {
 	return false
 }
 
-func ps6100Outer(pass *analysis.Pass, outer ast.Node, frame, body *ast.BlockStmt, scans []ps6100Scan, helpers ps6100Helpers, callables ps6100CallableBindings, addresses []ps6100AddressExposure, aliases map[types.Object]ast.Expr, aliasState ps6100AliasState) {
+func ps6100Outer(pass *analysis.Pass, outer ast.Node, frame, body *ast.BlockStmt, scans []ps6100Scan, helpers ps6100Helpers, callables ps6100CallableBindings, addresses []ps6100AddressExposure, aliases map[types.Object]ast.Expr, aliasFlow *ps6100AliasFlow, aliasState ps6100AliasState) {
 	if !ps6100LoopMayExecute(pass, outer) {
 		return
 	}
@@ -1868,7 +2040,7 @@ func ps6100Outer(pass *analysis.Pass, outer ast.Node, frame, body *ast.BlockStmt
 				allInputs[key] = input
 			}
 		}
-		outerAliasState, canonicalAliases, aliasHazards := ps6100CanonicalOuterAliases(pass, outer, frame, body, aliasState, allInputs)
+		outerAliasState, canonicalAliases, aliasHazards := ps6100CanonicalOuterAliases(pass, outer, frame, body, aliasState, allInputs, helpers)
 		skip := make(map[ast.Node]bool, len(sameBound))
 		for _, scan := range sameBound {
 			skip[scan.loop.node] = true
@@ -1876,7 +2048,7 @@ func ps6100Outer(pass *analysis.Pass, outer ast.Node, frame, body *ast.BlockStmt
 		callableWork := ps6100MaxCallableWork
 		facts := ps6100CollectMutationFacts(pass, body, helpers, callables, allInputs, nil, aliases, outerAliasState, canonicalAliases, nil, make(map[string]bool), &callableWork, 0, false)
 		facts.hazards = append(facts.hazards, aliasHazards...)
-		facts.hazards = append(facts.hazards, ps6100AddressHazards(addresses, allInputs)...)
+		facts.hazards = append(facts.hazards, ps6100AddressHazards(pass, addresses, allInputs, frame, outer, aliasFlow, canonicalAliases)...)
 		mutated := make(map[string]bool, len(facts.mutations))
 		for _, mutation := range facts.mutations {
 			mutated[mutation.storage.key] = true
@@ -2212,17 +2384,22 @@ type ps6100AliasTransfer struct {
 
 type ps6100AliasFlow struct {
 	base    map[types.Object]ast.Expr
+	helpers ps6100Helpers
+	active  map[*types.Func]bool
 	parents map[ast.Node]ast.Node
 	before  map[ast.Node]ps6100AliasState
 }
 
-func ps6100HelperAliasFlow(pass *analysis.Pass, body *ast.BlockStmt, environment map[types.Object]ast.Expr) *ps6100AliasFlow {
-	return ps6100AliasFlowWithState(pass, body, environment, ps6100AliasState{})
+func ps6100HelperAliasFlow(pass *analysis.Pass, body *ast.BlockStmt, environment map[types.Object]ast.Expr, helpers ps6100Helpers) *ps6100AliasFlow {
+	return ps6100AliasFlowWithState(pass, body, environment, ps6100AliasState{}, helpers, nil)
 }
 
-func ps6100AliasFlowWithState(pass *analysis.Pass, body *ast.BlockStmt, environment map[types.Object]ast.Expr, seed ps6100AliasState) *ps6100AliasFlow {
+func ps6100AliasFlowWithState(pass *analysis.Pass, body *ast.BlockStmt, environment map[types.Object]ast.Expr, seed ps6100AliasState, helpers ps6100Helpers, active map[*types.Func]bool) *ps6100AliasFlow {
+	if active == nil {
+		active = make(map[*types.Func]bool)
+	}
 	result := &ps6100AliasFlow{
-		base: environment, parents: ps6087Parents(body), before: make(map[ast.Node]ps6100AliasState),
+		base: environment, helpers: helpers, active: active, parents: ps6087Parents(body), before: make(map[ast.Node]ps6100AliasState),
 	}
 	if body == nil {
 		return result
@@ -2233,7 +2410,7 @@ func ps6100AliasFlowWithState(pass *analysis.Pass, body *ast.BlockStmt, environm
 			if initial.objects == nil {
 				initial.objects = make(map[types.Object]ps6100AliasValues)
 			}
-			initial.objects[object] = ps6100AliasExpressionValues(pass, expression, ps6100AliasState{}, environment, make(map[types.Object]bool))
+			initial.objects[object] = ps6100AliasExpressionValuesWithHelpers(pass, expression, ps6100AliasState{}, environment, make(map[types.Object]bool), helpers, active)
 		}
 	}
 	graph := cfg.New(body, func(call *ast.CallExpr) bool { return ps6100CallMayReturn(pass, call) })
@@ -2254,7 +2431,7 @@ func ps6100AliasFlowWithState(pass *analysis.Pass, body *ast.BlockStmt, environm
 				continue
 			}
 			result.before[node], _ = ps6100MergeAliasStates(result.before[node], state)
-			ps6100TransferAliasNode(pass, node, state, environment)
+			ps6100TransferAliasNode(pass, node, state, environment, helpers, active)
 		}
 		for _, successor := range ps6100CFGSuccessors(pass, result.parents, block) {
 			merged, changed := ps6100MergeAliasStates(inputs[successor], state)
@@ -2268,7 +2445,7 @@ func ps6100AliasFlowWithState(pass *analysis.Pass, body *ast.BlockStmt, environm
 	return result
 }
 
-func ps6100TransferAliasNode(pass *analysis.Pass, node ast.Node, state ps6100AliasState, base map[types.Object]ast.Expr) {
+func ps6100TransferAliasNode(pass *analysis.Pass, node ast.Node, state ps6100AliasState, base map[types.Object]ast.Expr, helpers ps6100Helpers, active map[*types.Func]bool) {
 	switch value := node.(type) {
 	case *ast.AssignStmt:
 		transfers := make([]ps6100AliasTransfer, 0, len(value.Lhs))
@@ -2304,7 +2481,7 @@ func ps6100TransferAliasNode(pass *analysis.Pass, node ast.Node, state ps6100Ali
 			// Go evaluates every right-hand side before assigning any left-hand
 			// side. Resolve the complete tuple against the incoming snapshot so
 			// swaps such as a, b = b, a do not lose either alias.
-			transfer.values = ps6100AliasExpressionValues(pass, value.Rhs[index], state, base, make(map[types.Object]bool))
+			transfer.values = ps6100AliasExpressionValuesWithHelpers(pass, value.Rhs[index], state, base, make(map[types.Object]bool), helpers, active)
 			transfers = append(transfers, transfer)
 		}
 		for _, transfer := range transfers {
@@ -2330,7 +2507,7 @@ func ps6100TransferAliasNode(pass *analysis.Pass, node ast.Node, state ps6100Ali
 			if len(value.Names) == len(value.Values) {
 				transfers = append(transfers, ps6100AliasTransfer{
 					object: object,
-					values: ps6100AliasExpressionValues(pass, value.Values[index], state, base, make(map[types.Object]bool)),
+					values: ps6100AliasExpressionValuesWithHelpers(pass, value.Values[index], state, base, make(map[types.Object]bool), helpers, active),
 				})
 			} else if len(value.Values) == 0 {
 				transfers = append(transfers, ps6100AliasTransfer{object: object, values: ps6100AliasValues{expressions: map[string]ast.Expr{"nil": nil}}})
@@ -2348,6 +2525,10 @@ func ps6100TransferAliasNode(pass *analysis.Pass, node ast.Node, state ps6100Ali
 }
 
 func ps6100AliasExpressionValues(pass *analysis.Pass, expression ast.Expr, state ps6100AliasState, base map[types.Object]ast.Expr, seen map[types.Object]bool) ps6100AliasValues {
+	return ps6100AliasExpressionValuesWithHelpers(pass, expression, state, base, seen, nil, nil)
+}
+
+func ps6100AliasExpressionValuesWithHelpers(pass *analysis.Pass, expression ast.Expr, state ps6100AliasState, base map[types.Object]ast.Expr, seen map[types.Object]bool, helpers ps6100Helpers, active map[*types.Func]bool) ps6100AliasValues {
 	expression = ps2110Unparen(expression)
 	if expression == nil {
 		return ps6100AliasValues{unknown: true}
@@ -2365,7 +2546,7 @@ func ps6100AliasExpressionValues(pass *analysis.Pass, expression ast.Expr, state
 				return ps6100CloneAliasValues(values)
 			}
 			if actual := base[object]; actual != nil {
-				return ps6100AliasExpressionValues(pass, actual, state, base, seen)
+				return ps6100AliasExpressionValuesWithHelpers(pass, actual, state, base, seen, helpers, active)
 			}
 			// A reference-valued identifier that has no incoming abstract value
 			// denotes the value currently held by that variable, not a live link
@@ -2405,7 +2586,7 @@ func ps6100AliasExpressionValues(pass *analysis.Pass, expression ast.Expr, state
 			return ps6100AliasValues{expressions: map[string]ast.Expr{key: address}}
 		}
 	case *ast.SliceExpr:
-		underlying := ps6100AliasExpressionValues(pass, value.X, state, base, seen)
+		underlying := ps6100AliasExpressionValuesWithHelpers(pass, value.X, state, base, seen, helpers, active)
 		if underlying.unknown || len(underlying.expressions) != 1 {
 			// A view of multiple possible slice headers needs a relational
 			// state to retain the offset for each base. Keep it explicitly
@@ -2436,7 +2617,10 @@ func ps6100AliasExpressionValues(pass *analysis.Pass, expression ast.Expr, state
 		return ps6100AliasValues{expressions: map[string]ast.Expr{key: view}}
 	case *ast.CallExpr:
 		if len(value.Args) == 1 && pass.TypesInfo.Types[ps2110Unparen(value.Fun)].IsType() && ps6100ReferenceAliasType(pass.TypesInfo.TypeOf(value)) {
-			return ps6100AliasExpressionValues(pass, value.Args[0], state, base, seen)
+			return ps6100AliasExpressionValuesWithHelpers(pass, value.Args[0], state, base, seen, helpers, active)
+		}
+		if values, ok := ps6100HelperReturnAliasValues(pass, value, state, base, helpers, active); ok {
+			return values
 		}
 		if ps6100ReferenceAliasType(pass.TypesInfo.TypeOf(value)) && !typedBuiltinName(pass, value.Fun, "make") && !typedBuiltinName(pass, value.Fun, "new") {
 			return ps6100AliasValues{unknown: true}
@@ -2447,6 +2631,92 @@ func ps6100AliasExpressionValues(pass *analysis.Pass, expression ast.Expr, state
 	return ps6100AliasValues{expressions: map[string]ast.Expr{key: anchored}}
 }
 
+func ps6100HelperReturnAliasValues(pass *analysis.Pass, call *ast.CallExpr, state ps6100AliasState, base map[types.Object]ast.Expr, helpers ps6100Helpers, active map[*types.Func]bool) (ps6100AliasValues, bool) {
+	if call == nil || len(helpers) == 0 {
+		return ps6100AliasValues{}, false
+	}
+	function, signature, ok := typedCallee(pass, call.Fun)
+	if !ok {
+		return ps6100AliasValues{}, false
+	}
+	function = function.Origin()
+	if active != nil && active[function] {
+		return ps6100AliasValues{}, false
+	}
+	declaration := helpers[function]
+	if declaration == nil || declaration.Body == nil || len(declaration.Body.List) == 0 {
+		return ps6100AliasValues{}, false
+	}
+	returned, ok := declaration.Body.List[len(declaration.Body.List)-1].(*ast.ReturnStmt)
+	if !ok || len(returned.Results) != 1 {
+		return ps6100AliasValues{}, false
+	}
+	for _, statement := range declaration.Body.List[:len(declaration.Body.List)-1] {
+		switch value := statement.(type) {
+		case *ast.AssignStmt:
+			if len(value.Lhs) != len(value.Rhs) {
+				return ps6100AliasValues{}, false
+			}
+		case *ast.DeclStmt:
+			declaration, ok := value.Decl.(*ast.GenDecl)
+			if !ok || declaration.Tok != token.VAR {
+				return ps6100AliasValues{}, false
+			}
+		default:
+			return ps6100AliasValues{}, false
+		}
+	}
+	originSignature, _ := function.Type().(*types.Signature)
+	receiver, arguments, ok := ps6100DirectCallReceiver(pass, call, signature)
+	if !ok {
+		return ps6100AliasValues{}, false
+	}
+	environment, ok := ps6100BindInvocation(pass, originSignature, receiver, arguments, call.Ellipsis, base)
+	if !ok {
+		return ps6100AliasValues{}, false
+	}
+	formalObjects := make([]types.Object, 0, originSignature.Params().Len()+1)
+	if originSignature.Recv() != nil {
+		formalObjects = append(formalObjects, originSignature.Recv())
+	}
+	for index := range originSignature.Params().Len() {
+		formalObjects = append(formalObjects, originSignature.Params().At(index))
+	}
+	for _, object := range formalObjects {
+		expression := environment[object]
+		if object == nil || !ps6100ReferenceAliasType(object.Type()) {
+			continue
+		}
+		values := ps6100AliasExpressionValuesWithHelpers(pass, expression, state, base, make(map[types.Object]bool), helpers, active)
+		resolved, exact := ps6100SingleAliasExpression(values)
+		if !exact {
+			return ps6100AliasValues{unknown: true}, true
+		}
+		environment[object] = resolved
+	}
+	if active == nil {
+		active = make(map[*types.Func]bool)
+	}
+	active[function] = true
+	nestedState := ps6100CloneAliasState(ps6100AliasState{})
+	for _, statement := range declaration.Body.List[:len(declaration.Body.List)-1] {
+		switch value := statement.(type) {
+		case *ast.AssignStmt:
+			ps6100TransferAliasNode(pass, value, nestedState, environment, helpers, active)
+		case *ast.DeclStmt:
+			declaration := value.Decl.(*ast.GenDecl)
+			for _, specification := range declaration.Specs {
+				if values, ok := specification.(*ast.ValueSpec); ok {
+					ps6100TransferAliasNode(pass, values, nestedState, environment, helpers, active)
+				}
+			}
+		}
+	}
+	delete(active, function)
+	values := ps6100AliasExpressionValuesWithHelpers(pass, returned.Results[0], nestedState, environment, make(map[types.Object]bool), helpers, active)
+	return values, true
+}
+
 // ps6100AliasLocation identifies reference-valued lvalues whose stored header
 // can change independently of the object that contains them. The snapshot is a
 // deterministic synthetic value for the header currently held at the location;
@@ -2455,6 +2725,11 @@ func ps6100AliasLocation(pass *analysis.Pass, expression ast.Expr, state ps6100A
 	expression = ps2110Unparen(expression)
 	if expression == nil {
 		return "", nil, false
+	}
+	if selector, ok := expression.(*ast.SelectorExpr); ok {
+		if expanded := ps6100ExpandPromotedField(pass, selector); expanded != expression {
+			return ps6100AliasLocation(pass, expanded, state, base, seen)
+		}
 	}
 	var location string
 	switch value := expression.(type) {
@@ -2546,6 +2821,11 @@ func ps6100SingleAliasExpression(values ps6100AliasValues) (ast.Expr, bool) {
 // semantics for slice headers, maps, pointers, selectors, and tuple RHSs.
 func ps6100AnchorAliasExpression(pass *analysis.Pass, expression ast.Expr) ast.Expr {
 	expression = ps2110Unparen(expression)
+	if selector, ok := expression.(*ast.SelectorExpr); ok {
+		if expanded := ps6100ExpandPromotedField(pass, selector); expanded != expression {
+			return ps6100AnchorAliasExpression(pass, expanded)
+		}
+	}
 	copyType := func(target ast.Expr) ast.Expr {
 		if pass.TypesInfo.Types != nil {
 			if value, ok := pass.TypesInfo.Types[expression]; ok {
@@ -2762,7 +3042,7 @@ func (flow *ps6100AliasFlow) stateWithin(root ast.Node) ps6100AliasState {
 // rebindings; mutation evidence inside the loop instead needs indexes relative
 // to the collection actually scanned there. Rebase equal aliases and views,
 // but retain ambiguity when two tracked roots share the same incoming value.
-func ps6100CanonicalOuterAliases(pass *analysis.Pass, outer ast.Node, frame, outerBody *ast.BlockStmt, state ps6100AliasState, relevant map[string]ps6100Storage) (ps6100AliasState, map[string]ast.Expr, []ps6100Hazard) {
+func ps6100CanonicalOuterAliases(pass *analysis.Pass, outer ast.Node, frame, outerBody *ast.BlockStmt, state ps6100AliasState, relevant map[string]ps6100Storage, helpers ps6100Helpers) (ps6100AliasState, map[string]ast.Expr, []ps6100Hazard) {
 	result := ps6100CloneAliasState(state)
 	type rootValue struct {
 		key      string
@@ -2780,10 +3060,10 @@ func ps6100CanonicalOuterAliases(pass *analysis.Pass, outer ast.Node, frame, out
 		if storage.object == nil || storage.expr == nil {
 			continue
 		}
-		if ps6100RootReboundBeforeOuter(pass, frame, outerBody, storage.object) {
+		values, found := state.objects[storage.object]
+		if ps6100RootReboundBeforeOuter(pass, frame, outerBody, storage.object, helpers) {
 			if root := ps6100StorageRootExpression(pass, storage.expr, storage.object); root != nil {
 				key := "object:" + ps6100ObjectKey(storage.object)
-				values, found := state.objects[storage.object]
 				roots[key] = rootValue{key: key, root: root, object: storage.object, values: values, found: found}
 				rootObjects[storage.object] = true
 			}
@@ -3037,7 +3317,7 @@ func ps6100NegateIndex(pass *analysis.Pass, expression ast.Expr) ast.Expr {
 	return negated
 }
 
-func ps6100RootReboundBeforeOuter(pass *analysis.Pass, frame, outerBody *ast.BlockStmt, object types.Object) bool {
+func ps6100RootReboundBeforeOuter(pass *analysis.Pass, frame, outerBody *ast.BlockStmt, object types.Object, helpers ps6100Helpers) bool {
 	if frame == nil || outerBody == nil || object == nil {
 		return false
 	}
@@ -3060,14 +3340,14 @@ func ps6100RootReboundBeforeOuter(pass *analysis.Pass, frame, outerBody *ast.Blo
 					continue
 				}
 				definition := pass.TypesInfo.Defs[identifier] != nil
-				if !definition || len(statement.Lhs) == len(statement.Rhs) && ps6100CanonicalRootDefinition(pass, statement.Rhs[index]) {
+				if !definition || len(statement.Lhs) == len(statement.Rhs) && ps6100CanonicalRootDefinition(pass, statement.Rhs[index], helpers, make(map[*types.Func]bool)) {
 					rebound = true
 					return false
 				}
 			}
 		case *ast.ValueSpec:
 			for index, name := range statement.Names {
-				if pass.TypesInfo.Defs[name] == object && len(statement.Names) == len(statement.Values) && ps6100CanonicalRootDefinition(pass, statement.Values[index]) {
+				if pass.TypesInfo.Defs[name] == object && len(statement.Names) == len(statement.Values) && ps6100CanonicalRootDefinition(pass, statement.Values[index], helpers, make(map[*types.Func]bool)) {
 					rebound = true
 					return false
 				}
@@ -3078,13 +3358,42 @@ func ps6100RootReboundBeforeOuter(pass *analysis.Pass, frame, outerBody *ast.Blo
 	return rebound
 }
 
-func ps6100CanonicalRootDefinition(pass *analysis.Pass, expression ast.Expr) bool {
+func ps6100CanonicalRootDefinition(pass *analysis.Pass, expression ast.Expr, helpers ps6100Helpers, active map[*types.Func]bool) bool {
 	expression = ps2110Unparen(expression)
 	if _, ok := expression.(*ast.SliceExpr); ok {
 		return true
 	}
 	call, ok := expression.(*ast.CallExpr)
-	return ok && len(call.Args) == 1 && pass.TypesInfo.Types[ps2110Unparen(call.Fun)].IsType() && ps6100CanonicalRootDefinition(pass, call.Args[0])
+	if !ok {
+		return false
+	}
+	if len(call.Args) == 1 && pass.TypesInfo.Types[ps2110Unparen(call.Fun)].IsType() {
+		return ps6100CanonicalRootDefinition(pass, call.Args[0], helpers, active)
+	}
+	function, _, resolved := typedCallee(pass, call.Fun)
+	if !resolved {
+		return false
+	}
+	function = function.Origin()
+	if active[function] {
+		return false
+	}
+	declaration := helpers[function]
+	if declaration == nil || declaration.Body == nil || len(declaration.Body.List) == 0 {
+		return false
+	}
+	returned, ok := declaration.Body.List[len(declaration.Body.List)-1].(*ast.ReturnStmt)
+	if !ok || len(returned.Results) != 1 || !ps6100ReferenceAliasType(pass.TypesInfo.TypeOf(returned.Results[0])) {
+		return false
+	}
+	for _, statement := range declaration.Body.List[:len(declaration.Body.List)-1] {
+		switch statement.(type) {
+		case *ast.AssignStmt, *ast.DeclStmt:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func ps6100StorageRootExpression(pass *analysis.Pass, expression ast.Expr, object types.Object) ast.Expr {
@@ -3197,7 +3506,7 @@ func (flow *ps6100AliasFlow) expressionAt(pass *analysis.Pass, expression ast.Ex
 			state = inner
 		}
 	}
-	values := ps6100AliasExpressionValues(pass, expression, state, flow.base, make(map[types.Object]bool))
+	values := ps6100AliasExpressionValuesWithHelpers(pass, expression, state, flow.base, make(map[types.Object]bool), flow.helpers, flow.active)
 	return ps6100SingleAliasExpression(values)
 }
 
@@ -3267,7 +3576,7 @@ func ps6100CollectMutationFacts(
 	block, _ := root.(*ast.BlockStmt)
 	var aliasFlow *ps6100AliasFlow
 	if block != nil {
-		aliasFlow = ps6100AliasFlowWithState(pass, block, environment, aliasState)
+		aliasFlow = ps6100AliasFlowWithState(pass, block, environment, aliasState, helpers, nil)
 	}
 	var callableFlow ps6100CallableBindings
 	if depth > 0 && block != nil {
@@ -3700,7 +4009,7 @@ func ps6100CollectAddresses(pass *analysis.Pass, root ast.Node, reachability *ps
 			return true
 		}
 		if storage, ok := ps6100ExposedStorage(pass, address.X, nil); ok {
-			*addresses = append(*addresses, ps6100AddressExposure{node: address, storage: storage})
+			*addresses = append(*addresses, ps6100AddressExposure{node: address, expression: address.X, storage: storage})
 		}
 		return true
 	})
@@ -3755,7 +4064,7 @@ func ps6100StableAliases(pass *analysis.Pass, body *ast.BlockStmt, helpers ps610
 		var aliasFlow *ps6100AliasFlow
 		var callableFlow ps6100CallableBindings
 		if !outerFrame && block != nil {
-			aliasFlow = ps6100HelperAliasFlow(pass, block, environment)
+			aliasFlow = ps6100HelperAliasFlow(pass, block, environment, helpers)
 			callableFlow = ps6100CallableFlowForBody(pass, block, callableState, aliasFlow)
 		}
 		ast.Inspect(root, func(node ast.Node) bool {
@@ -3930,11 +4239,24 @@ func ps6100PackageVariable(object types.Object) bool {
 	return object != nil && object.Pkg() != nil && object.Parent() == object.Pkg().Scope()
 }
 
-func ps6100AddressHazards(addresses []ps6100AddressExposure, relevant map[string]ps6100Storage) []ps6100Hazard {
+func ps6100AddressHazards(pass *analysis.Pass, addresses []ps6100AddressExposure, relevant map[string]ps6100Storage, frame *ast.BlockStmt, outer ast.Node, flow *ps6100AliasFlow, replacements map[string]ast.Expr) []ps6100Hazard {
 	var hazards []ps6100Hazard
 	for _, address := range addresses {
-		if ps6100TouchesRelevant(relevant, address.storage) {
-			hazards = append(hazards, ps6100Hazard{node: address.node, reason: "address exposing " + address.storage.name + " escapes local proof"})
+		if frame == nil || outer == nil || address.node.Pos() < frame.Pos() || address.node.End() > frame.End() || address.node.Pos() >= outer.Pos() {
+			continue
+		}
+		storage := address.storage
+		if flow != nil && address.expression != nil {
+			state := flow.stateAt(address.node)
+			if _, snapshot, ok := ps6100AddressLocation(pass, address.expression, state, flow.base, make(map[types.Object]bool)); ok {
+				snapshot = ps6100RebaseAliasExpression(pass, snapshot, replacements)
+				if resolved, ok := ps6100StorageOf(pass, snapshot, nil); ok {
+					storage = resolved
+				}
+			}
+		}
+		if ps6100TouchesRelevant(relevant, storage) {
+			hazards = append(hazards, ps6100Hazard{node: address.node, reason: "address exposing " + storage.name + " escapes local proof"})
 		}
 	}
 	return hazards

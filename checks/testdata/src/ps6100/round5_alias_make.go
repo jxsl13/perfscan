@@ -462,7 +462,7 @@ func helperAliasBranchHazard(alpha, other []float64, left int, useOther bool) {
 }
 
 func helperAliasCallResultHazard(alpha []float64, left int) {
-	for step := 0; step < 4; step++ { // want `helper alias flow may mutate alpha@[0-9]+`
+	for step := 0; step < 4; step++ { // want `2 bounded indexed mutation site\(s\)`
 		for index := range alpha {
 			if alpha[index] > 0 {
 				_ = index

@@ -113,7 +113,7 @@ func round10StoredReceiverThenDereferenceReplacement(slot **round10NamedBox, rep
 func round10AddressAliasThenPrefixReplacement(box *round10NamedBox, replacement Slice) {
 	saved := &box.state.values
 	box.state = &NamedState{values: replacement}
-	for step := 0; step < 4; step++ { // want `1 bounded indexed mutation site\(s\) \(box.state.values\[1\]@[0-9]+\).*address exposing box.state.values escapes local proof`
+	for step := 0; step < 4; step++ { // want `1 bounded indexed mutation site\(s\) \(box.state.values\[1\]@[0-9]+\)`
 		for index := range box.state.values {
 			if box.state.values[index] > 0 {
 				_ = index
