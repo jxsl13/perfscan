@@ -56,8 +56,9 @@ siblings and attaches both as related locations. It ranks assembly over named
 SIMD calls over inferred vector-width loops. It also reports up to three direct
 same-package consumers in the scalar partition, retaining package-function and
 receiver-type identity, and up to three nearby vector leaves only when their
-import-path-resolved slice/result shape and semantic name family match the
-scalar symbol.
+slice/result shape and semantic name family match the scalar symbol. Shape
+identity comes from go/types for active files; ignored-file fallbacks resolve
+ordinary import paths and keep unresolved or receiver-bound names distinct.
 Those related locations are discovery evidence: they identify where a shared
 primitive may compound, but do not prove semantic interchangeability.
 
@@ -131,10 +132,20 @@ type ps6077Variant struct {
 	vectorKind       string
 	vectorScore      int
 	specificArch     int
-	sliceResultShape string
+	sliceResultShape ps6077Shape
 	nameFamilies     map[string]bool
 	allFamilies      map[string]bool
 	directCalls      map[string]bool
+}
+
+type ps6077Shape struct {
+	present         bool
+	typed           bool
+	typeParameters  int
+	sliceParameters int
+	results         int
+	components      []string
+	syntax          string
 }
 
 type ps6077Finding struct {
@@ -158,6 +169,7 @@ var ps6077Transcendentals = map[string]bool{
 
 func runPS6077(pass *analysis.Pass) (any, error) {
 	sources := ps6077PackageSources(pass)
+	receiverAliases := ps6077ReceiverAliases(sources)
 	groups := make(map[string][]*ps6077Variant)
 	var allVariants []*ps6077Variant
 	for sourceIndex := range sources {
@@ -171,13 +183,13 @@ func runPS6077(pass *analysis.Pass) (any, error) {
 			variant := &ps6077Variant{
 				source: source, function: function,
 				key:            ps6074SymbolKey(function),
-				symbolIdentity: ps6077DeclaredSymbolIdentity(pass, function),
+				symbolIdentity: ps6077DeclaredSymbolIdentity(pass, source, function, receiverAliases),
 				signature:      ps6077Signature(function),
 			}
 			variant.scalarCalls = ps6077ScalarCalls(pass, source, function, imports)
 			variant.vectorKind, variant.vectorScore = ps6077VectorEvidence(function)
 			variant.specificArch = len(ps6077SatisfiableArchitectures(*source))
-			variant.sliceResultShape = ps6077SliceResultShape(function, imports)
+			variant.sliceResultShape = ps6077SliceResultShape(pass, source, function, imports)
 			variant.nameFamilies = ps6077SemanticFamilies(function, false)
 			variant.allFamilies = ps6077SemanticFamilies(function, true)
 			variant.directCalls = ps6077DirectCalls(pass, variant)
@@ -450,8 +462,8 @@ func ps6077RelatedEvidence(scalar *ps6077Variant, variants []*ps6077Variant) ([]
 		if candidate.function == scalar.function || candidate.key == scalar.key {
 			continue
 		}
-		leafCandidate := candidate.vectorScore > 0 && shape != "" &&
-			shape == candidate.sliceResultShape &&
+		leafCandidate := candidate.vectorScore > 0 && shape.present &&
+			ps6077ShapesCompatible(shape, candidate.sliceResultShape) &&
 			ps6077FamiliesOverlap(families, candidate.allFamilies)
 		consumerCandidate := candidate.directCalls[scalar.symbolIdentity]
 		if !leafCandidate && !consumerCandidate || !ps6077PartitionsOverlap(*scalar.source, *candidate.source) {
@@ -496,8 +508,10 @@ func ps6077LimitRelated(variants []*ps6077Variant) []*ps6077Variant {
 // mode-selected SIMD primitive can match its public composite. Requiring the
 // ordered slice parameters and complete result signature keeps unrelated
 // numeric helpers out of the discovery evidence.
-func ps6077SliceResultShape(function *ast.FuncDecl, imports map[string]string) string {
+func ps6077SliceResultShape(pass *analysis.Pass, source *ps6077Source, function *ast.FuncDecl, imports map[string]string) ps6077Shape {
+	context := ps6077ShapeIdentityContext(source, function, imports)
 	var parameters []string
+	shape := ps6077Shape{}
 	for _, field := range function.Type.Params.List {
 		array, ok := ps2110Unparen(field.Type).(*ast.ArrayType)
 		if !ok || array.Len != nil {
@@ -508,16 +522,193 @@ func ps6077SliceResultShape(function *ast.FuncDecl, imports map[string]string) s
 			count = 1
 		}
 		for range count {
-			parameters = append(parameters, ps6077TypeIdentity(field.Type, imports))
+			parameters = append(parameters, ps6077TypeIdentity(field.Type, context))
 		}
 	}
 	if len(parameters) == 0 {
-		return ""
+		return shape
 	}
-	return "type=" + ps6077ShapeFieldTypes(function.Type.TypeParams, imports) + "|slices=(" + strings.Join(parameters, ",") + ")|results=" + ps6077ShapeFieldTypes(function.Type.Results, imports)
+	shape.present = true
+	shape.typeParameters = ps6077FieldCount(function.Type.TypeParams)
+	shape.sliceParameters = len(parameters)
+	shape.results = ps6077FieldCount(function.Type.Results)
+	shape.syntax = "type=" + ps6077ShapeFieldTypes(function.Type.TypeParams, context) + "|slices=(" + strings.Join(parameters, ",") + ")|results=" + ps6077ShapeFieldTypes(function.Type.Results, context)
+	if !source.active {
+		return shape
+	}
+	typeBinders := ps6077TypedTypeBinders(pass, function)
+	typed := true
+	appendFields := func(fields *ast.FieldList, slicesOnly bool) {
+		if fields == nil {
+			return
+		}
+		for _, field := range fields.List {
+			if slicesOnly {
+				array, ok := ps2110Unparen(field.Type).(*ast.ArrayType)
+				if !ok || array.Len != nil {
+					continue
+				}
+			}
+			fieldType := pass.TypesInfo.TypeOf(field.Type)
+			if fieldType == nil {
+				typed = false
+				continue
+			}
+			count := len(field.Names)
+			if count == 0 {
+				count = 1
+			}
+			for range count {
+				shape.components = append(shape.components, ps6077TypedTypeIdentity(fieldType, typeBinders))
+			}
+		}
+	}
+	appendFields(function.Type.TypeParams, false)
+	appendFields(function.Type.Params, true)
+	appendFields(function.Type.Results, false)
+	shape.typed = typed
+	return shape
 }
 
-func ps6077ShapeFieldTypes(fields *ast.FieldList, imports map[string]string) string {
+func ps6077FieldCount(fields *ast.FieldList) int {
+	if fields == nil {
+		return 0
+	}
+	count := 0
+	for _, field := range fields.List {
+		fieldCount := len(field.Names)
+		if fieldCount == 0 {
+			fieldCount = 1
+		}
+		count += fieldCount
+	}
+	return count
+}
+
+func ps6077ShapesCompatible(left, right ps6077Shape) bool {
+	if !left.present || !right.present ||
+		left.typeParameters != right.typeParameters ||
+		left.sliceParameters != right.sliceParameters || left.results != right.results {
+		return false
+	}
+	if !left.typed || !right.typed {
+		return left.syntax != "" && left.syntax == right.syntax
+	}
+	if len(left.components) != len(right.components) {
+		return false
+	}
+	for index := range left.components {
+		if left.components[index] != right.components[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func ps6077TypedTypeBinders(pass *analysis.Pass, function *ast.FuncDecl) map[*types.TypeParam]string {
+	result := make(map[*types.TypeParam]string)
+	object, _ := pass.TypesInfo.Defs[function.Name].(*types.Func)
+	if object == nil {
+		return result
+	}
+	signature, _ := object.Type().(*types.Signature)
+	if signature == nil {
+		return result
+	}
+	if parameters := signature.TypeParams(); parameters != nil {
+		for index := range parameters.Len() {
+			result[parameters.At(index)] = "function-type-parameter(" + strconv.Itoa(index) + ")"
+		}
+	}
+	if parameters := signature.RecvTypeParams(); parameters != nil {
+		for index := range parameters.Len() {
+			result[parameters.At(index)] = "receiver-type-parameter(" + strconv.Itoa(index) + ")"
+		}
+	}
+	return result
+}
+
+func ps6077TypedTypeIdentity(value types.Type, binders map[*types.TypeParam]string) string {
+	value = types.Unalias(value)
+	switch typed := value.(type) {
+	case *types.Basic:
+		return "basic(" + typed.Name() + ")"
+	case *types.Named:
+		origin := typed.Origin()
+		packagePath := ""
+		if origin.Obj().Pkg() != nil {
+			packagePath = origin.Obj().Pkg().Path()
+		}
+		arguments := make([]string, 0, typed.TypeArgs().Len())
+		for index := range typed.TypeArgs().Len() {
+			arguments = append(arguments, ps6077TypedTypeIdentity(typed.TypeArgs().At(index), binders))
+		}
+		return "named(" + strconv.Quote(packagePath) + "," + origin.Obj().Name() + "," + strings.Join(arguments, ",") + ")"
+	case *types.TypeParam:
+		if binder := binders[typed]; binder != "" {
+			return binder
+		}
+		return "unbound-type-parameter(" + typed.Obj().Name() + "," + types.TypeString(typed.Constraint(), ps6077TypeQualifier) + ")"
+	case *types.Pointer:
+		return "pointer(" + ps6077TypedTypeIdentity(typed.Elem(), binders) + ")"
+	case *types.Slice:
+		return "slice(" + ps6077TypedTypeIdentity(typed.Elem(), binders) + ")"
+	case *types.Array:
+		return "array(" + strconv.FormatInt(typed.Len(), 10) + "," + ps6077TypedTypeIdentity(typed.Elem(), binders) + ")"
+	case *types.Map:
+		return "map(" + ps6077TypedTypeIdentity(typed.Key(), binders) + "," + ps6077TypedTypeIdentity(typed.Elem(), binders) + ")"
+	case *types.Chan:
+		return "chan(" + strconv.Itoa(int(typed.Dir())) + "," + ps6077TypedTypeIdentity(typed.Elem(), binders) + ")"
+	case *types.Union:
+		terms := make([]string, 0, typed.Len())
+		for index := range typed.Len() {
+			term := typed.Term(index)
+			prefix := "exact"
+			if term.Tilde() {
+				prefix = "underlying"
+			}
+			terms = append(terms, prefix+"("+ps6077TypedTypeIdentity(term.Type(), binders)+")")
+		}
+		return "union(" + strings.Join(terms, "|") + ")"
+	default:
+		return "typed(" + types.TypeString(value, ps6077TypeQualifier) + ")"
+	}
+}
+
+func ps6077TypeQualifier(pkg *types.Package) string {
+	if pkg == nil {
+		return ""
+	}
+	return pkg.Path()
+}
+
+type ps6077TypeIdentityContext struct {
+	imports     map[string]string
+	binders     map[string]string
+	unqualified string
+}
+
+func ps6077ShapeIdentityContext(source *ps6077Source, function *ast.FuncDecl, imports map[string]string) ps6077TypeIdentityContext {
+	context := ps6077TypeIdentityContext{
+		imports: imports, binders: make(map[string]string),
+		unqualified: source.filename + "|" + function.Name.Name,
+	}
+	parameter := 0
+	if function.Type.TypeParams != nil {
+		for _, field := range function.Type.TypeParams.List {
+			for _, name := range field.Names {
+				context.binders[name.Name] = "function-type-parameter(" + strconv.Itoa(parameter) + ")"
+				parameter++
+			}
+		}
+	}
+	for index, name := range ps6077ReceiverTypeParameters(function.Recv) {
+		context.binders[name] = "receiver-type-parameter(" + strconv.Itoa(index) + ")"
+	}
+	return context
+}
+
+func ps6077ShapeFieldTypes(fields *ast.FieldList, context ps6077TypeIdentityContext) string {
 	if fields == nil {
 		return "()"
 	}
@@ -527,7 +718,7 @@ func ps6077ShapeFieldTypes(fields *ast.FieldList, imports map[string]string) str
 		if count == 0 {
 			count = 1
 		}
-		identity := ps6077TypeIdentity(field.Type, imports)
+		identity := ps6077TypeIdentity(field.Type, context)
 		for range count {
 			values = append(values, identity)
 		}
@@ -539,48 +730,54 @@ func ps6077ShapeFieldTypes(fields *ast.FieldList, imports map[string]string) str
 // related slice/result shapes. It deliberately retains named type identity:
 // two packages may expose equally spelled (or equally represented) element
 // types without making their slices interchangeable.
-func ps6077TypeIdentity(expression ast.Expr, imports map[string]string) string {
+func ps6077TypeIdentity(expression ast.Expr, context ps6077TypeIdentityContext) string {
 	switch value := ps2110Unparen(expression).(type) {
 	case *ast.Ident:
-		return "ident(" + value.Name + ")"
+		if ps6077PredeclaredTypes[value.Name] {
+			return "predeclared(" + value.Name + ")"
+		}
+		if binder := context.binders[value.Name]; binder != "" {
+			return binder
+		}
+		return "unresolved(" + strconv.Quote(context.unqualified) + "," + value.Name + ")"
 	case *ast.SelectorExpr:
 		if qualifier, ok := ps2110Unparen(value.X).(*ast.Ident); ok {
-			if path := imports[qualifier.Name]; path != "" {
+			if path := context.imports[qualifier.Name]; path != "" {
 				return "package(" + strconv.Quote(path) + ")." + value.Sel.Name
 			}
 		}
-		return "selector(" + ps6077TypeIdentity(value.X, imports) + ")." + value.Sel.Name
+		return "selector(" + ps6077TypeIdentity(value.X, context) + ")." + value.Sel.Name
 	case *ast.ArrayType:
 		if value.Len == nil {
-			return "slice(" + ps6077TypeIdentity(value.Elt, imports) + ")"
+			return "slice(" + ps6077TypeIdentity(value.Elt, context) + ")"
 		}
-		return "array(" + ps6077TypeIdentity(value.Len, imports) + "," + ps6077TypeIdentity(value.Elt, imports) + ")"
+		return "array(" + ps6077TypeIdentity(value.Len, context) + "," + ps6077TypeIdentity(value.Elt, context) + ")"
 	case *ast.StarExpr:
-		return "pointer(" + ps6077TypeIdentity(value.X, imports) + ")"
+		return "pointer(" + ps6077TypeIdentity(value.X, context) + ")"
 	case *ast.Ellipsis:
-		return "variadic(" + ps6077TypeIdentity(value.Elt, imports) + ")"
+		return "variadic(" + ps6077TypeIdentity(value.Elt, context) + ")"
 	case *ast.MapType:
-		return "map(" + ps6077TypeIdentity(value.Key, imports) + "," + ps6077TypeIdentity(value.Value, imports) + ")"
+		return "map(" + ps6077TypeIdentity(value.Key, context) + "," + ps6077TypeIdentity(value.Value, context) + ")"
 	case *ast.ChanType:
-		return "chan(" + strconv.Itoa(int(value.Dir)) + "," + ps6077TypeIdentity(value.Value, imports) + ")"
+		return "chan(" + strconv.Itoa(int(value.Dir)) + "," + ps6077TypeIdentity(value.Value, context) + ")"
 	case *ast.IndexExpr:
-		return "index(" + ps6077TypeIdentity(value.X, imports) + "," + ps6077TypeIdentity(value.Index, imports) + ")"
+		return "index(" + ps6077TypeIdentity(value.X, context) + "," + ps6077TypeIdentity(value.Index, context) + ")"
 	case *ast.IndexListExpr:
 		indices := make([]string, 0, len(value.Indices))
 		for _, index := range value.Indices {
-			indices = append(indices, ps6077TypeIdentity(index, imports))
+			indices = append(indices, ps6077TypeIdentity(index, context))
 		}
-		return "indices(" + ps6077TypeIdentity(value.X, imports) + "," + strings.Join(indices, ",") + ")"
+		return "indices(" + ps6077TypeIdentity(value.X, context) + "," + strings.Join(indices, ",") + ")"
 	case *ast.FuncType:
-		return "func(" + ps6077ShapeFieldTypes(value.TypeParams, imports) + "," + ps6077ShapeFieldTypes(value.Params, imports) + "," + ps6077ShapeFieldTypes(value.Results, imports) + ")"
+		return "func(" + ps6077ShapeFieldTypes(value.TypeParams, context) + "," + ps6077ShapeFieldTypes(value.Params, context) + "," + ps6077ShapeFieldTypes(value.Results, context) + ")"
 	case *ast.InterfaceType:
-		return "interface" + ps6077IdentityFields(value.Methods, imports, true)
+		return "interface" + ps6077IdentityFields(value.Methods, context, true)
 	case *ast.StructType:
-		return "struct" + ps6077IdentityFields(value.Fields, imports, false)
+		return "struct" + ps6077IdentityFields(value.Fields, context, false)
 	case *ast.UnaryExpr:
-		return "unary(" + value.Op.String() + "," + ps6077TypeIdentity(value.X, imports) + ")"
+		return "unary(" + value.Op.String() + "," + ps6077TypeIdentity(value.X, context) + ")"
 	case *ast.BinaryExpr:
-		return "binary(" + value.Op.String() + "," + ps6077TypeIdentity(value.X, imports) + "," + ps6077TypeIdentity(value.Y, imports) + ")"
+		return "binary(" + value.Op.String() + "," + ps6077TypeIdentity(value.X, context) + "," + ps6077TypeIdentity(value.Y, context) + ")"
 	case *ast.BasicLit:
 		return "literal(" + value.Kind.String() + "," + value.Value + ")"
 	default:
@@ -588,7 +785,16 @@ func ps6077TypeIdentity(expression ast.Expr, imports map[string]string) string {
 	}
 }
 
-func ps6077IdentityFields(fields *ast.FieldList, imports map[string]string, interfaceMethods bool) string {
+var ps6077PredeclaredTypes = map[string]bool{
+	"any": true, "bool": true, "byte": true, "comparable": true,
+	"complex64": true, "complex128": true, "error": true,
+	"float32": true, "float64": true,
+	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+	"rune": true, "string": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true, "uintptr": true,
+}
+
+func ps6077IdentityFields(fields *ast.FieldList, context ps6077TypeIdentityContext, interfaceMethods bool) string {
 	if fields == nil {
 		return "()"
 	}
@@ -598,7 +804,7 @@ func ps6077IdentityFields(fields *ast.FieldList, imports map[string]string, inte
 		for _, name := range field.Names {
 			names = append(names, name.Name)
 		}
-		entry := strings.Join(names, ",") + ":" + ps6077TypeIdentity(field.Type, imports)
+		entry := strings.Join(names, ",") + ":" + ps6077TypeIdentity(field.Type, context)
 		if !interfaceMethods && field.Tag != nil {
 			values = append(values, entry+":tag="+field.Tag.Value)
 			continue
@@ -688,11 +894,63 @@ func ps6077FamiliesOverlap(left, right map[string]bool) bool {
 	return false
 }
 
-func ps6077DeclaredSymbolIdentity(pass *analysis.Pass, function *ast.FuncDecl) string {
+func ps6077ReceiverAliases(sources []ps6077Source) map[string]string {
+	candidates := make(map[string]map[string]bool)
+	for sourceIndex := range sources {
+		for _, declaration := range sources[sourceIndex].file.Decls {
+			general, ok := declaration.(*ast.GenDecl)
+			if !ok || general.Tok != token.TYPE {
+				continue
+			}
+			for _, specification := range general.Specs {
+				typeSpecification, ok := specification.(*ast.TypeSpec)
+				if !ok || !typeSpecification.Assign.IsValid() {
+					continue
+				}
+				target, ok := ps2110Unparen(typeSpecification.Type).(*ast.Ident)
+				if !ok {
+					continue
+				}
+				if candidates[typeSpecification.Name.Name] == nil {
+					candidates[typeSpecification.Name.Name] = make(map[string]bool)
+				}
+				candidates[typeSpecification.Name.Name][target.Name] = true
+			}
+		}
+	}
+	result := make(map[string]string)
+	for alias, targets := range candidates {
+		if len(targets) == 1 {
+			for target := range targets {
+				result[alias] = target
+			}
+		}
+	}
+	return result
+}
+
+func ps6077ResolveReceiverAlias(name string, aliases map[string]string) string {
+	seen := make(map[string]bool)
+	for name != "" && aliases[name] != "" && !seen[name] {
+		seen[name] = true
+		name = aliases[name]
+	}
+	return name
+}
+
+func ps6077DeclaredSymbolIdentity(pass *analysis.Pass, source *ps6077Source, function *ast.FuncDecl, aliases map[string]string) string {
 	if function.Recv == nil {
 		return ps6077PackageFunctionIdentity(pass.Pkg.Path(), function.Name.Name)
 	}
-	return ps6077MethodIdentity(pass.Pkg.Path(), ps6074ReceiverName(function.Recv.List[0].Type), function.Name.Name)
+	if source.active {
+		if object, ok := pass.TypesInfo.Defs[function.Name].(*types.Func); ok {
+			if identity := ps6077ObjectIdentity(object); identity != "" {
+				return identity
+			}
+		}
+	}
+	receiver := ps6077ResolveReceiverAlias(ps6074ReceiverName(function.Recv.List[0].Type), aliases)
+	return ps6077MethodIdentity(pass.Pkg.Path(), receiver, function.Name.Name)
 }
 
 func ps6077PackageFunctionIdentity(packagePath, name string) string {
@@ -714,9 +972,9 @@ func ps6077ObjectIdentity(object *types.Func) string {
 	if !ok || signature.Recv() == nil {
 		return ps6077PackageFunctionIdentity(object.Pkg().Path(), object.Name())
 	}
-	receiver := signature.Recv().Type()
+	receiver := types.Unalias(signature.Recv().Type())
 	if pointer, ok := receiver.(*types.Pointer); ok {
-		receiver = pointer.Elem()
+		receiver = types.Unalias(pointer.Elem())
 	}
 	if named, ok := receiver.(*types.Named); ok {
 		named = named.Origin()

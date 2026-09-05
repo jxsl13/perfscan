@@ -65,22 +65,24 @@ func TestPS6077RelatedIdentityAndShape(t *testing.T) {
 		t.Fatal("same-named package function and method must have distinct identities")
 	}
 
-	parseFunction := func(importPath, alias string) (*ast.FuncDecl, map[string]string) {
+	parseFunction := func(importPath, alias string) ps6077Shape {
 		source := "package p\nimport " + alias + " \"" + importPath + "\"\nfunc Apply(values []" + alias + ".Value) float64 { return 0 }\n"
 		file, err := parser.ParseFile(token.NewFileSet(), "shape.go", source, parser.SkipObjectResolution)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return file.Decls[1].(*ast.FuncDecl), ps6077Imports(file)
+		function := file.Decls[1].(*ast.FuncDecl)
+		shapeSource := &ps6077Source{file: file, filename: importPath + ".go"}
+		pass := &analysis.Pass{Pkg: types.NewPackage("example.test/p", "p")}
+		return ps6077SliceResultShape(pass, shapeSource, function, ps6077Imports(file))
 	}
-	left, leftImports := parseFunction("example.test/left", "shared")
-	right, rightImports := parseFunction("example.test/right", "shared")
-	leftAgain, leftAgainImports := parseFunction("example.test/left", "renamed")
-	leftShape := ps6077SliceResultShape(left, leftImports)
-	if leftShape == ps6077SliceResultShape(right, rightImports) {
+	leftShape := parseFunction("example.test/left", "shared")
+	rightShape := parseFunction("example.test/right", "shared")
+	leftAgainShape := parseFunction("example.test/left", "renamed")
+	if ps6077ShapesCompatible(leftShape, rightShape) {
 		t.Fatal("same alias spelling must not erase imported named-type identity")
 	}
-	if leftShape != ps6077SliceResultShape(leftAgain, leftAgainImports) {
+	if !ps6077ShapesCompatible(leftShape, leftAgainShape) {
 		t.Fatal("different aliases of the same imported named type must retain one identity")
 	}
 }
@@ -106,5 +108,28 @@ func TestPS6077InactiveCallIndexScaling(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("inactive direct-call indexing must remain near-linear: %d calls took %s", calls, elapsed)
+	}
+}
+
+func TestPS6077BindingIdentity(t *testing.T) {
+	t.Parallel()
+	const child = "PERFSCAN_PS6077_BINDING_IDENTITY_ARCH"
+	if architecture := os.Getenv(child); architecture != "" {
+		analysistest.Run(t, analysistest.TestData(), PS6077.Analyzer,
+			"ps6077round2shape"+architecture,
+			"ps6077round2alias"+architecture,
+		)
+		return
+	}
+	for _, architecture := range []string{"arm64", "amd64"} {
+		architecture := architecture
+		t.Run(architecture, func(t *testing.T) {
+			t.Parallel()
+			command := exec.Command(os.Args[0], "-test.run=^TestPS6077BindingIdentity$", "-test.parallel=1")
+			command.Env = append(os.Environ(), "GOARCH="+architecture, child+"="+architecture)
+			if output, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("%s binding-identity analysistest child failed: %v\n%s", architecture, err, output)
+			}
+		})
 	}
 }
