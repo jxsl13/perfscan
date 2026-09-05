@@ -50,6 +50,8 @@ stored function or method values contribute their captured receiver, argument,
 and mutation effects. Per-iteration alias rebindings flow into captured
 variables, and stored-call targets are resolved from the assignments that can
 reach each call site; opaque, recursive, and overflowed targets remain hazards.
+Stable direct, tuple, pointer-field, and self-reslice rebindings before the
+outer loop are canonicalized relative to the collection scanned by that loop.
 A deferred body is applied at the return of its actual frame, so an outer-frame
 defer stays delayed while a defer inside an invoked helper or closure is visible
 before control returns to the scans.
@@ -121,6 +123,7 @@ type ps6100Storage struct {
 	name   string
 	typ    types.Type
 	object types.Object
+	expr   ast.Expr
 }
 
 type ps6100Loop struct {
@@ -576,23 +579,17 @@ func ps6100CapturedCallableReceiver(pass *analysis.Pass, receiver ast.Expr, flow
 	if flow == nil {
 		return receiver, receiver != nil
 	}
-	identifier, ok := receiver.(*ast.Ident)
-	if !ok {
-		return ps6100ResolveExpression(pass, receiver, flow.environmentAt(node), make(map[types.Object]bool)), true
+	values := ps6100AliasExpressionValues(pass, receiver, flow.stateAt(node), flow.base, make(map[types.Object]bool))
+	if values.unknown || len(values.expressions) != 1 {
+		return nil, false
 	}
-	object := pass.TypesInfo.ObjectOf(identifier)
-	if values, found := flow.stateAt(node)[object]; found {
-		if values.unknown || len(values.expressions) != 1 {
+	for _, expression := range values.expressions {
+		if expression == nil {
 			return nil, false
 		}
-		for _, expression := range values.expressions {
-			if expression == nil {
-				return nil, false
-			}
-			return expression, true
-		}
+		return expression, true
 	}
-	return receiver, true
+	return nil, false
 }
 
 func ps6100ResolveCallables(pass *analysis.Pass, expression ast.Expr, environment map[types.Object]ast.Expr, bindings ps6100CallableBindings, state ps6100CallableState) ps6100CallableResolution {
@@ -713,6 +710,7 @@ func ps6100CallableInvocation(
 	call *ast.CallExpr,
 	helpers ps6100Helpers,
 	environment map[types.Object]ast.Expr,
+	canonicalAliases map[string]ast.Expr,
 ) (*ast.BlockStmt, map[types.Object]ast.Expr, bool) {
 	if call == nil {
 		return nil, nil, false
@@ -751,7 +749,8 @@ func ps6100CallableInvocation(
 		if receiver == nil {
 			return nil, nil, false
 		}
-		next[signature.Recv()] = ps6100ResolveExpression(pass, receiver, environment, make(map[types.Object]bool))
+		receiver = ps6100ResolveExpression(pass, receiver, environment, make(map[types.Object]bool))
+		next[signature.Recv()] = ps6100RebaseAliasExpression(pass, receiver, canonicalAliases)
 	}
 	if len(arguments) != signature.Params().Len() {
 		return nil, nil, false
@@ -820,7 +819,7 @@ func ps6100Function(pass *analysis.Pass, function *ast.FuncDecl, helpers ps6100H
 		if outerBody == nil {
 			continue
 		}
-		ps6100Outer(pass, outerNode, outerBody, scans, helpers, callables, addresses, aliases, aliasFlow.stateWithin(outerBody))
+		ps6100Outer(pass, outerNode, function.Body, outerBody, scans, helpers, callables, addresses, aliases, aliasFlow.stateWithin(outerBody))
 	}
 }
 
@@ -1535,6 +1534,9 @@ func ps6100ResolveExpression(pass *analysis.Pass, expression ast.Expr, environme
 		if !ok || environment == nil {
 			return expression
 		}
+		if ps6100AnchoredAlias(pass, identifier) {
+			return expression
+		}
 		object := pass.TypesInfo.ObjectOf(identifier)
 		actual := environment[object]
 		if actual == nil || seen[object] {
@@ -1592,7 +1594,11 @@ func ps6100StorageOfSeen(pass *analysis.Pass, expression ast.Expr, environment m
 			// substitutions. A cycle is not a concrete storage identity.
 			return ps6100Storage{}, false
 		}
-		return ps6100Storage{key: ps6100ObjectKey(object), name: value.Name, typ: object.Type(), object: object}, true
+		key := ps6100ObjectKey(object)
+		if marker, anchored := pass.TypesInfo.Implicits[value]; anchored && marker != nil && marker != object {
+			key = ps6100ObjectKey(marker)
+		}
+		return ps6100Storage{key: key, name: value.Name, typ: object.Type(), object: object, expr: value}, true
 	case *ast.SelectorExpr:
 		base, ok := ps6100StorageOfSeen(pass, value.X, environment, seen)
 		if !ok {
@@ -1604,7 +1610,7 @@ func ps6100StorageOfSeen(pass *analysis.Pass, expression ast.Expr, environment m
 		}
 		return ps6100Storage{
 			key: base.key + "/" + ps6100ObjectKey(object), name: exprTextRendered(value),
-			typ: pass.TypesInfo.TypeOf(value), object: base.object,
+			typ: pass.TypesInfo.TypeOf(value), object: base.object, expr: value,
 		}, true
 	case *ast.IndexExpr:
 		return ps6100StorageOfSeen(pass, value.X, environment, seen)
@@ -1745,7 +1751,7 @@ func ps6100BlocksReach(from, to []*cfg.Block) bool {
 	return false
 }
 
-func ps6100Outer(pass *analysis.Pass, outer ast.Node, body *ast.BlockStmt, scans []ps6100Scan, helpers ps6100Helpers, callables ps6100CallableBindings, addresses []ps6100AddressExposure, aliases map[types.Object]ast.Expr, aliasState ps6100AliasState) {
+func ps6100Outer(pass *analysis.Pass, outer ast.Node, frame, body *ast.BlockStmt, scans []ps6100Scan, helpers ps6100Helpers, callables ps6100CallableBindings, addresses []ps6100AddressExposure, aliases map[types.Object]ast.Expr, aliasState ps6100AliasState) {
 	if !ps6100LoopMayExecute(pass, outer) {
 		return
 	}
@@ -1779,12 +1785,14 @@ func ps6100Outer(pass *analysis.Pass, outer ast.Node, body *ast.BlockStmt, scans
 				allInputs[key] = input
 			}
 		}
+		outerAliasState, canonicalAliases, aliasHazards := ps6100CanonicalOuterAliases(pass, outer, frame, body, aliasState, allInputs)
 		skip := make(map[ast.Node]bool, len(sameBound))
 		for _, scan := range sameBound {
 			skip[scan.loop.node] = true
 		}
 		callableWork := ps6100MaxCallableWork
-		facts := ps6100CollectMutationFacts(pass, body, helpers, callables, allInputs, nil, aliases, aliasState, nil, make(map[string]bool), &callableWork, 0, false)
+		facts := ps6100CollectMutationFacts(pass, body, helpers, callables, allInputs, nil, aliases, outerAliasState, canonicalAliases, nil, make(map[string]bool), &callableWork, 0, false)
+		facts.hazards = append(facts.hazards, aliasHazards...)
 		facts.hazards = append(facts.hazards, ps6100AddressHazards(addresses, allInputs)...)
 		mutated := make(map[string]bool, len(facts.mutations))
 		for _, mutation := range facts.mutations {
@@ -2175,6 +2183,10 @@ func ps6100AliasExpressionValues(pass *analysis.Pass, expression ast.Expr, state
 	}
 	switch value := expression.(type) {
 	case *ast.Ident:
+		if ps6100AnchoredAlias(pass, value) {
+			key := ps6100AliasExpressionKey(pass, value, base)
+			return ps6100AliasValues{expressions: map[string]ast.Expr{key: value}}
+		}
 		object := pass.TypesInfo.ObjectOf(value)
 		if object != nil && !seen[object] {
 			seen[object] = true
@@ -2184,6 +2196,12 @@ func ps6100AliasExpressionValues(pass *analysis.Pass, expression ast.Expr, state
 			if actual := base[object]; actual != nil {
 				return ps6100AliasExpressionValues(pass, actual, state, base, seen)
 			}
+			// A reference-valued identifier that has no incoming abstract value
+			// denotes the value currently held by that variable, not a live link
+			// to all of its future assignments. Preserve that snapshot explicitly.
+			anchor := ps6100AnchorAliasExpression(pass, value)
+			key := ps6100AliasExpressionKey(pass, anchor, base)
+			return ps6100AliasValues{expressions: map[string]ast.Expr{key: anchor}}
 		}
 	case *ast.SliceExpr:
 		underlying := ps6100AliasExpressionValues(pass, value.X, state, base, seen)
@@ -2223,8 +2241,79 @@ func ps6100AliasExpressionValues(pass *analysis.Pass, expression ast.Expr, state
 			return ps6100AliasValues{unknown: true}
 		}
 	}
-	key := ps6100AliasExpressionKey(pass, expression, base)
-	return ps6100AliasValues{expressions: map[string]ast.Expr{key: expression}}
+	anchored := ps6100AnchorAliasExpression(pass, expression)
+	key := ps6100AliasExpressionKey(pass, anchored, base)
+	return ps6100AliasValues{expressions: map[string]ast.Expr{key: anchored}}
+}
+
+// ps6100AnchorAliasExpression snapshots reference-valued lvalues used as alias
+// sources. Synthetic zero-position identifiers retain their types.Object but
+// deliberately stop later environment substitution, matching Go's value-copy
+// semantics for slice headers, maps, pointers, selectors, and tuple RHSs.
+func ps6100AnchorAliasExpression(pass *analysis.Pass, expression ast.Expr) ast.Expr {
+	expression = ps2110Unparen(expression)
+	copyType := func(target ast.Expr) ast.Expr {
+		if pass.TypesInfo.Types != nil {
+			if value, ok := pass.TypesInfo.Types[expression]; ok {
+				pass.TypesInfo.Types[target] = value
+			}
+		}
+		return target
+	}
+	switch value := expression.(type) {
+	case *ast.Ident:
+		object := pass.TypesInfo.ObjectOf(value)
+		if object == nil {
+			return expression
+		}
+		anchor := ast.NewIdent(value.Name)
+		if pass.TypesInfo.Uses != nil {
+			pass.TypesInfo.Uses[anchor] = object
+		}
+		if pass.TypesInfo.Implicits == nil {
+			pass.TypesInfo.Implicits = make(map[ast.Node]types.Object)
+		}
+		pass.TypesInfo.Implicits[anchor] = object
+		return copyType(anchor)
+	case *ast.SelectorExpr:
+		anchor := &ast.SelectorExpr{X: ps6100AnchorAliasExpression(pass, value.X), Sel: value.Sel}
+		if pass.TypesInfo.Selections != nil {
+			if selection := pass.TypesInfo.Selections[value]; selection != nil {
+				pass.TypesInfo.Selections[anchor] = selection
+			}
+		}
+		return copyType(anchor)
+	case *ast.StarExpr:
+		return copyType(&ast.StarExpr{Star: value.Star, X: ps6100AnchorAliasExpression(pass, value.X)})
+	case *ast.IndexExpr:
+		return copyType(&ast.IndexExpr{X: ps6100AnchorAliasExpression(pass, value.X), Lbrack: value.Lbrack, Index: value.Index, Rbrack: value.Rbrack})
+	}
+	return expression
+}
+
+func ps6100AnchoredAlias(pass *analysis.Pass, identifier *ast.Ident) bool {
+	if pass == nil || pass.TypesInfo == nil || identifier == nil || pass.TypesInfo.Implicits == nil {
+		return false
+	}
+	_, anchored := pass.TypesInfo.Implicits[identifier]
+	return anchored
+}
+
+func ps6100StaleAliasKey(object types.Object) string {
+	return "stale:" + ps6100ObjectKey(object)
+}
+
+func ps6100StaleAliasExpression(pass *analysis.Pass, expression ast.Expr, object types.Object) ast.Expr {
+	identifier, ok := ps2110Unparen(expression).(*ast.Ident)
+	if !ok || object == nil {
+		return nil
+	}
+	stale, ok := ps6100AnchorAliasExpression(pass, identifier).(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	pass.TypesInfo.Implicits[stale] = types.NewVar(object.Pos(), object.Pkg(), object.Name()+"#pre-rebind", object.Type())
+	return stale
 }
 
 func ps6100AliasExpressionKey(pass *analysis.Pass, expression ast.Expr, environment map[types.Object]ast.Expr) string {
@@ -2336,6 +2425,225 @@ func (flow *ps6100AliasFlow) stateWithin(root ast.Node) ps6100AliasState {
 	return result
 }
 
+// ps6100CanonicalOuterAliases treats the value held by every tracked scan root
+// at outer-loop entry as that root's canonical value. Full-function alias flow
+// uses absolute snapshots so it can distinguish tuple swaps and later source
+// rebindings; mutation evidence inside the loop instead needs indexes relative
+// to the collection actually scanned there. Rebase equal aliases and views,
+// but retain ambiguity when two tracked roots share the same incoming value.
+func ps6100CanonicalOuterAliases(pass *analysis.Pass, outer ast.Node, frame, outerBody *ast.BlockStmt, state ps6100AliasState, relevant map[string]ps6100Storage) (ps6100AliasState, map[string]ast.Expr, []ps6100Hazard) {
+	result := ps6100CloneAliasState(state)
+	roots := make(map[types.Object]ast.Expr)
+	for _, storage := range relevant {
+		if storage.object == nil || storage.expr == nil {
+			continue
+		}
+		if !ps6100RootReboundBeforeOuter(pass, frame, outerBody, storage.object) {
+			continue
+		}
+		if root := ps6100StorageRootExpression(pass, storage.expr, storage.object); root != nil {
+			roots[storage.object] = root
+		}
+	}
+
+	replacements := make(map[string]ast.Expr)
+	sources := make(map[string]ast.Expr)
+	record := func(source, target ast.Expr) bool {
+		if source == nil || target == nil {
+			return false
+		}
+		key := ps6100AliasExpressionKey(pass, source, nil)
+		if previous, found := replacements[key]; found && previous != nil && ps6100AliasExpressionKey(pass, previous, nil) != ps6100AliasExpressionKey(pass, target, nil) {
+			replacements[key] = nil
+			return true
+		}
+		if _, found := replacements[key]; !found {
+			replacements[key] = target
+			sources[key] = source
+		}
+		return false
+	}
+	var hazards []ps6100Hazard
+	for object, root := range roots {
+		values, found := state[object]
+		switch {
+		case !found:
+			current := ps6100AnchorAliasExpression(pass, root)
+			record(current, root)
+		case !values.unknown && len(values.expressions) == 1:
+			var current ast.Expr
+			for _, current = range values.expressions {
+			}
+			if current == nil {
+				continue
+			}
+			if record(current, root) {
+				hazards = append(hazards, ps6100Hazard{node: outer, reason: "pre-loop value may alias multiple tracked roots"})
+			}
+			if ps6100AliasExpressionKey(pass, current, nil) != ps6100AliasExpressionKey(pass, root, nil) {
+				replacements[ps6100StaleAliasKey(object)] = ps6100StaleAliasExpression(pass, root, object)
+			}
+		case !values.unknown && len(values.expressions) > 1:
+			// Keep the branch join intact rather than claiming every possible
+			// source is the root. Direct root writes can still form a candidate,
+			// with the ambiguity called out as an explicit proof obligation.
+			hazards = append(hazards, ps6100Hazard{node: outer, reason: "branch-ambiguous pre-loop rebind may alias " + exprTextRendered(root)})
+			continue
+		default:
+			// An opaque pre-loop rebind is not a canonical value. Retain it and
+			// surface an explicit proof obligation.
+			hazards = append(hazards, ps6100Hazard{node: outer, reason: "opaque pre-loop rebind may alias tracked input"})
+			continue
+		}
+		delete(result, object)
+	}
+
+	// If a tracked root was assigned from an otherwise unchanged identifier,
+	// that identifier denotes the same incoming value. Preserve the equality in
+	// the loop seed so writes spelled through either name remain visible.
+	for key, target := range replacements {
+		if target == nil {
+			continue
+		}
+		identifier, ok := ps2110Unparen(sources[key]).(*ast.Ident)
+		if !ok || !ps6100AnchoredAlias(pass, identifier) {
+			continue
+		}
+		object := pass.TypesInfo.ObjectOf(identifier)
+		if object == nil || roots[object] != nil {
+			continue
+		}
+		if _, changed := state[object]; changed {
+			continue
+		}
+		aliasKey := ps6100AliasExpressionKey(pass, target, nil)
+		result[object] = ps6100AliasValues{expressions: map[string]ast.Expr{aliasKey: target}}
+	}
+
+	for object, values := range result {
+		if len(values.expressions) == 0 {
+			continue
+		}
+		rebased := make(map[string]ast.Expr, len(values.expressions))
+		for _, expression := range values.expressions {
+			expression = ps6100RebaseAliasExpression(pass, expression, replacements)
+			rebased[ps6100AliasExpressionKey(pass, expression, nil)] = expression
+		}
+		values.expressions = rebased
+		result[object] = values
+	}
+	return result, replacements, hazards
+}
+
+func ps6100RootReboundBeforeOuter(pass *analysis.Pass, frame, outerBody *ast.BlockStmt, object types.Object) bool {
+	if frame == nil || outerBody == nil || object == nil {
+		return false
+	}
+	rebound := false
+	ast.Inspect(frame, func(node ast.Node) bool {
+		if rebound || node == nil || node.Pos() >= outerBody.Lbrace {
+			return false
+		}
+		if _, literal := node.(*ast.FuncLit); literal {
+			return false
+		}
+		assignment, ok := node.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for _, left := range assignment.Lhs {
+			identifier, ok := ps2110Unparen(left).(*ast.Ident)
+			if !ok || pass.TypesInfo.Defs[identifier] != nil {
+				continue
+			}
+			if pass.TypesInfo.ObjectOf(identifier) == object {
+				rebound = true
+				return false
+			}
+		}
+		return true
+	})
+	return rebound
+}
+
+func ps6100StorageRootExpression(pass *analysis.Pass, expression ast.Expr, object types.Object) ast.Expr {
+	expression = ps2110Unparen(expression)
+	if identifier, ok := expression.(*ast.Ident); ok && pass.TypesInfo.ObjectOf(identifier) == object {
+		return identifier
+	}
+	switch value := expression.(type) {
+	case *ast.SelectorExpr:
+		return ps6100StorageRootExpression(pass, value.X, object)
+	case *ast.StarExpr:
+		return ps6100StorageRootExpression(pass, value.X, object)
+	case *ast.IndexExpr:
+		return ps6100StorageRootExpression(pass, value.X, object)
+	case *ast.SliceExpr:
+		return ps6100StorageRootExpression(pass, value.X, object)
+	case *ast.UnaryExpr:
+		if value.Op == token.AND {
+			return ps6100StorageRootExpression(pass, value.X, object)
+		}
+	}
+	return nil
+}
+
+func ps6100RebaseAliasExpression(pass *analysis.Pass, expression ast.Expr, replacements map[string]ast.Expr) ast.Expr {
+	if expression == nil || len(replacements) == 0 {
+		return expression
+	}
+	expression = ps2110Unparen(expression)
+	if replacement, found := replacements[ps6100AliasExpressionKey(pass, expression, nil)]; found && replacement != nil {
+		return replacement
+	}
+	if identifier, anchored := expression.(*ast.Ident); anchored && ps6100AnchoredAlias(pass, identifier) {
+		if replacement := replacements[ps6100StaleAliasKey(pass.TypesInfo.ObjectOf(identifier))]; replacement != nil {
+			return replacement
+		}
+	}
+	copyType := func(source, target ast.Expr) ast.Expr {
+		if pass.TypesInfo.Types != nil {
+			if value, ok := pass.TypesInfo.Types[source]; ok {
+				pass.TypesInfo.Types[target] = value
+			}
+		}
+		return target
+	}
+	switch value := expression.(type) {
+	case *ast.SelectorExpr:
+		base := ps6100RebaseAliasExpression(pass, value.X, replacements)
+		if base == value.X {
+			return expression
+		}
+		rebased := &ast.SelectorExpr{X: base, Sel: value.Sel}
+		if pass.TypesInfo.Selections != nil {
+			if selection := pass.TypesInfo.Selections[value]; selection != nil {
+				pass.TypesInfo.Selections[rebased] = selection
+			}
+		}
+		return copyType(value, rebased)
+	case *ast.StarExpr:
+		base := ps6100RebaseAliasExpression(pass, value.X, replacements)
+		if base == value.X {
+			return expression
+		}
+		return copyType(value, &ast.StarExpr{Star: value.Star, X: base})
+	case *ast.IndexExpr:
+		base := ps6100RebaseAliasExpression(pass, value.X, replacements)
+		if base == value.X {
+			return expression
+		}
+		return copyType(value, &ast.IndexExpr{X: base, Lbrack: value.Lbrack, Index: value.Index, Rbrack: value.Rbrack})
+	case *ast.SliceExpr:
+		base := ps6100RebaseAliasExpression(pass, value.X, replacements)
+		if base == value.X {
+			return expression
+		}
+		return copyType(value, &ast.SliceExpr{X: base, Lbrack: value.Lbrack, Low: value.Low, High: value.High, Max: value.Max, Slice3: value.Slice3, Rbrack: value.Rbrack})
+	}
+	return expression
+}
+
 func (flow *ps6100AliasFlow) environmentAt(node ast.Node) map[types.Object]ast.Expr {
 	if flow == nil {
 		return nil
@@ -2405,6 +2713,7 @@ func ps6100CollectMutationFacts(
 	skip map[ast.Node]bool,
 	environment map[types.Object]ast.Expr,
 	aliasState ps6100AliasState,
+	canonicalAliases map[string]ast.Expr,
 	callableState ps6100CallableState,
 	active map[string]bool,
 	callableWork *int,
@@ -2503,7 +2812,7 @@ func ps6100CollectMutationFacts(
 			complete := !resolution.unknown && len(resolution.targets) != 0
 			localOpaque := resolution.unknown
 			for _, target := range resolution.targets {
-				body, next, callable := ps6100CallableInvocation(pass, target, value, helpers, nodeEnvironment)
+				body, next, callable := ps6100CallableInvocation(pass, target, value, helpers, nodeEnvironment, canonicalAliases)
 				if !callable {
 					complete = false
 					if (target.function != nil && helpers[target.function.Origin()] != nil) || target.literal != nil {
@@ -2525,7 +2834,7 @@ func ps6100CollectMutationFacts(
 				*callableWork = *callableWork - 1
 				active[key] = true
 				inner := ps6100CollectMutationFacts(
-					pass, body, helpers, callables, relevant, nil, next, nodeAliasState, nodeCallableState, active, callableWork, depth+1,
+					pass, body, helpers, callables, relevant, nil, next, nodeAliasState, canonicalAliases, nodeCallableState, active, callableWork, depth+1,
 					insideLoop || ps6100NestedLoopMutation(root, value, parents),
 				)
 				delete(active, key)
@@ -2669,6 +2978,9 @@ func ps6100IndexedPath(pass *analysis.Pass, index *ast.IndexExpr, environment ma
 func ps6100FlattenIndexedPath(pass *analysis.Pass, expression ast.Expr, environment map[types.Object]ast.Expr, seen map[types.Object]bool) (ast.Expr, []ast.Expr, ast.Expr, bool) {
 	expression = ps2110Unparen(expression)
 	if identifier, ok := expression.(*ast.Ident); ok && environment != nil {
+		if ps6100AnchoredAlias(pass, identifier) {
+			return identifier, nil, nil, true
+		}
 		object := pass.TypesInfo.ObjectOf(identifier)
 		if actual := environment[object]; actual != nil {
 			if seen[object] {
@@ -2910,7 +3222,7 @@ func ps6100StableAliases(pass *analysis.Pass, body *ast.BlockStmt, helpers ps610
 					unknownCallableInvocation = true
 				}
 				for _, target := range resolution.targets {
-					calleeBody, next, callable := ps6100CallableInvocation(pass, target, call, helpers, nodeEnvironment)
+					calleeBody, next, callable := ps6100CallableInvocation(pass, target, call, helpers, nodeEnvironment, nil)
 					if !callable {
 						if target.literal != nil || (target.function != nil && helpers[target.function.Origin()] != nil) {
 							unknownCallableInvocation = true
