@@ -135,7 +135,7 @@ func noDeadFallthroughEvidence(output, input []float64) {
 }
 
 func conservativelyReachableUnknownEvidence(output, input []float64) {
-	for index := range input { // want `loop calls scalar math.Atan exactly once per independent output element.*conservativelyReachableUnknown`
+	for index := range input {
 		output[index] = math.Atan(input[index])
 	}
 }

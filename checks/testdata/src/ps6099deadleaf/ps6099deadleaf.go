@@ -264,3 +264,61 @@ func reachableAfterShadowedPanicEvidence(output, input []float64) {
 		output[index] = math.Log2(input[index])
 	}
 }
+
+func AsyncExpF64(dst []float64) {
+	go simdops.ExpF64(dst)
+}
+
+func noAsyncLeafEvidence(output, input []float64) {
+	for index := range input {
+		output[index] = math.Exp(input[index])
+	}
+}
+
+var round2EnableSIMD bool
+
+func ConditionalLogF64(dst []float64) {
+	if round2EnableSIMD {
+		simdops.LogF64(dst)
+	}
+}
+
+func noConditionalLeafEvidence(output, input []float64) {
+	for index := range input {
+		output[index] = math.Log(input[index])
+	}
+}
+
+func DeferredSinF64(dst []float64) {
+	defer simdops.SinF64(dst)
+}
+
+func noDeferredLeafEvidence(output, input []float64) {
+	for index := range input {
+		output[index] = math.Sin(input[index])
+	}
+}
+
+func CreatedCosF64(dst []float64) {
+	_ = func() {
+		simdops.CosF64(dst)
+	}
+}
+
+func noCreatedClosureLeafEvidence(output, input []float64) {
+	for index := range input {
+		output[index] = math.Cos(input[index])
+	}
+}
+
+func ApplyLog10F64(dst []float64) {
+	(func() {
+		simdops.Log10F64(dst)
+	})()
+}
+
+func invokedClosureLeafEvidence(output, input []float64) {
+	for index := range input { // want `loop calls scalar math.Log10 exactly once per independent output element.*ApplyLog10F64`
+		output[index] = math.Log10(input[index])
+	}
+}

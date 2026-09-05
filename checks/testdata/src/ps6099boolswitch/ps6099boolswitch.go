@@ -194,7 +194,7 @@ func noDeadFallthroughEvidence(output, input []float64) {
 }
 
 func conservativelyReachableUnknownTagEvidence(output, input []float64) {
-	for index := range input { // want `loop calls scalar math.Erfc exactly once per independent output element.*conservativelyReachableUnknownTag`
+	for index := range input {
 		output[index] = math.Erfc(input[index])
 	}
 }
@@ -236,7 +236,7 @@ func liveNestedLogicalConditionEvidence(output, input []float64) {
 }
 
 func conservativelyReachableUnknownLogicalConditionEvidence(output, input []float64) {
-	for index := range input { // want `loop calls scalar math.Tan exactly once per independent output element.*conservativelyReachableUnknownLogicalCondition`
+	for index := range input {
 		output[index] = math.Tan(input[index])
 	}
 }

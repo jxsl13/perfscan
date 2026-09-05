@@ -279,6 +279,12 @@ func reciprocalSquareRootPower(output, input []float64) {
 	}
 }
 
+func squareRootPower(output, input []float64) {
+	for index := range input {
+		output[index] = m.Pow(input[index], 0.5)
+	}
+}
+
 func reciprocalPower(output, input []float64) {
 	for index := range input {
 		output[index] = m.Pow(input[index], -1)
@@ -288,6 +294,12 @@ func reciprocalPower(output, input []float64) {
 func smallNegativeIntegralPower(output, input []float64) {
 	for index := range input {
 		output[index] = m.Pow(input[index], -8)
+	}
+}
+
+func convertedSmallNegativeIntegralPower(output, input []float64) {
+	for index := range input {
+		output[index] = m.Pow(input[index], float64(int8(-8)))
 	}
 }
 

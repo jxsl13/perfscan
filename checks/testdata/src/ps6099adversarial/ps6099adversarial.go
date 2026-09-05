@@ -238,3 +238,158 @@ func concreteGenericMethodEvidence(output, input []float64) {
 		output[index] = math.Cosh(input[index])
 	}
 }
+
+func round2ExpSecond(_ float64, value float64) float64 {
+	return math.Exp(value)
+}
+
+func round2IgnoredPanickingArgument(output, input, scratch []float64) {
+	for index := range input {
+		output[index] = round2ExpSecond(scratch[1], input[index])
+	}
+}
+
+func round2ExpWithNestedIgnoredArgument(value float64, scratch []float64) float64 {
+	return round2ExpSecond(scratch[1], value)
+}
+
+func round2NestedIgnoredPanickingArgument(output, input, scratch []float64) {
+	for index := range input {
+		output[index] = round2ExpWithNestedIgnoredArgument(input[index], scratch)
+	}
+}
+
+var round2MutationCount int
+
+func round2MutateThenReturn(value float64) float64 {
+	round2MutationCount++
+	return value
+}
+
+func round2ExpAfterMutation(value float64) float64 {
+	return math.Exp(round2MutateThenReturn(value))
+}
+
+func round2NestedMutation(output, input []float64) {
+	for index := range input {
+		output[index] = round2ExpAfterMutation(input[index])
+	}
+}
+
+func round2GenericMutateThenReturn[T ~float64](value T) T {
+	round2MutationCount++
+	return value
+}
+
+func round2GenericExpAfterMutation[T ~float64](value T) float64 {
+	return math.Exp(float64(round2GenericMutateThenReturn(value)))
+}
+
+func round2NestedGenericMutation(output, input []float64) {
+	for index := range input {
+		output[index] = round2GenericExpAfterMutation(input[index])
+	}
+}
+
+func round2GenericIdentity[T ~float64](value T) T {
+	return value
+}
+
+func round2GenericExp[T ~float64](value T) float64 {
+	return math.Exp(float64(round2GenericIdentity[T](value)))
+}
+
+func round2ExplicitGenericChain(output, input []float64) {
+	for index := range input { // want `loop calls scalar math.Exp exactly once per independent output element.*ExpSIMDF64`
+		output[index] = round2GenericExp[float64](input[index])
+	}
+}
+
+func round2AllocateThenReturn(value float64) float64 {
+	scratch := []byte{byte(value)}
+	return value + float64(len(scratch)-1)
+}
+
+func round2ExpAfterAllocation(value float64) float64 {
+	return math.Exp(round2AllocateThenReturn(value))
+}
+
+func round2NestedAllocation(output, input []float64) {
+	for index := range input {
+		output[index] = round2ExpAfterAllocation(input[index])
+	}
+}
+
+func round2MaybeReturn(value float64, returnNow bool) float64 {
+	if returnNow {
+		return value
+	}
+	for {
+	}
+}
+
+func round2ExpAfterMaybeReturn(value float64, returnNow bool) float64 {
+	return math.Exp(round2MaybeReturn(value, returnNow))
+}
+
+func round2NotAllPathsReturn(output, input []float64, returnNow bool) {
+	for index := range input {
+		output[index] = round2ExpAfterMaybeReturn(input[index], returnNow)
+	}
+}
+
+func round2ExpOfCheapPow(value float64) float64 {
+	return math.Exp(math.Pow(value, 8))
+}
+
+func round2CheapPowInsideExp(output, input []float64) {
+	for index := range input { // want `loop calls scalar math.Exp exactly once per independent output element.*ExpSIMDF64`
+		output[index] = round2ExpOfCheapPow(input[index])
+	}
+}
+
+func round2PureBuiltinsDirect(output, input []float64) {
+	for index := range input { // want `loop calls scalar math.Exp exactly once per independent output element.*ExpSIMDF64`
+		output[index] = math.Exp(input[index] + float64(len(input)-len(input)))
+	}
+}
+
+func round2DeadShortCircuitScalar(output, input []float64) {
+	for index := range input { // want `loop calls scalar math.Exp exactly once per independent output element.*ExpSIMDF64`
+		if false && math.Log(input[index]) > 0 {
+			return
+		}
+		output[index] = math.Exp(input[index])
+	}
+}
+
+func round2DeadShortCircuitScalarNoExit(output, input []float64) {
+	for index := range input { // want `loop calls scalar math.Exp exactly once per independent output element.*ExpSIMDF64`
+		if false && math.Log(input[index]) > 0 {
+			_ = input[index]
+		}
+		output[index] = math.Exp(input[index])
+	}
+}
+
+func round2MutateBool() bool {
+	round2MutationCount++
+	return true
+}
+
+func round2ValueWithDeadMutation(value float64) float64 {
+	if false && round2MutateBool() {
+		return 0
+	}
+	return value
+}
+
+func round2ExpAfterDeadMutation(value float64) float64 {
+	return math.Exp(round2ValueWithDeadMutation(value))
+}
+
+func round2NestedDeadMutation(output, input []float64) {
+	for index := range input { // want `loop calls scalar math.Exp exactly once per independent output element.*ExpSIMDF64`
+		output[index] = round2ExpAfterDeadMutation(input[index])
+	}
+}
