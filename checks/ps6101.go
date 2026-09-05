@@ -43,10 +43,9 @@ The detector follows object-specific input and aggregate values through direct
 local helper and method calls, direct or stored numeric generic instantiations,
 positional variadic calls, interface boxing, single/comma-ok assertions and type
 switches, testing.B.Run sub-benchmarks, and testing.B.RunParallel workers.
-Direct recognized input bindings and corroborated scalar-input bindings preserve
-their provenance across local helper returns and testing-compatible calls. Those
-boundaries do not turn unrelated symmetric random values or aggregate names into
-benchmark inputs.
+Direct recognized input bindings preserve their provenance across local helper
+returns and testing-compatible calls. Those boundaries do not turn unrelated
+symmetric random values or aggregate names into benchmark inputs.
 Direct, method-expression, and stored testing.B method calls share the same
 timer/callback semantics.
 Pointer and named-pointer bindings preserve binding-local input facts through
@@ -153,8 +152,6 @@ type ps6101Value struct {
 	threshold  bool
 	testing    bool
 	mapAbsent  bool
-	inputHint  bool
-	callBound  bool
 	revision   uint64
 	identity   uint64
 	analysis   *ps6101ValueAnalysis
@@ -523,7 +520,7 @@ func (engine *ps6101Engine) analyzeFunction(function *ast.FuncDecl, call *ast.Ca
 	}
 	results := engine.mergeReturns(engine.returns)
 	if call != nil {
-		ps6101PromoteReturnedInputs(results)
+		ps6101MarkReturnedBoundaries(results, engine.resultTypes)
 	}
 	localReturnOpaque := engine.returnOpaque
 	engine.mergeExits()
@@ -540,7 +537,7 @@ func (engine *ps6101Engine) analyzeFunction(function *ast.FuncDecl, call *ast.Ca
 		callEscaped = &state
 	}
 	if call != nil {
-		engine.promoteReturnedReferences(results)
+		engine.markReturnedReferenceInputs(results, engine.resultTypes)
 		engine.retainFreshReferencedRoots(callerRoots, results)
 		engine.retainCallerVisibility(callerRoots, callerAliases)
 	}
@@ -4956,20 +4953,29 @@ func (engine *ps6101Engine) retainFreshReferencedRoots(roots map[types.Object]bo
 	}
 }
 
-func (engine *ps6101Engine) promoteFreshReferencedInputs(roots map[types.Object]bool) {
+// markFreshReturnedAggregateInputs records that random data in fresh storage
+// nested below a returned map or slice is caller-visible benchmark input. This
+// structural provenance must not be generalized to a directly returned pointer
+// or to plain scalar, tuple, struct, interface, or identity-function returns.
+func (engine *ps6101Engine) markFreshReturnedAggregateInputs(roots map[types.Object]bool) {
 	for location, value := range engine.state {
 		if !roots[location.root] || !engine.fresh[location.root] || len(value.sources) == 0 {
 			continue
 		}
-		value.callBound = true
+		value.eligible = true
 		engine.state[location] = value
 	}
 }
 
-func (engine *ps6101Engine) promoteReturnedReferences(values []ps6101Value) {
-	roots := make(map[types.Object]bool)
-	engine.retainFreshReferencedRoots(roots, values)
-	engine.promoteFreshReferencedInputs(roots)
+func (engine *ps6101Engine) markReturnedReferenceInputs(values []ps6101Value, resultTypes []types.Type) {
+	for index, value := range values {
+		if index >= len(resultTypes) || !ps6101BackingReference(resultTypes[index]) {
+			continue
+		}
+		roots := make(map[types.Object]bool)
+		engine.retainFreshReferencedRoots(roots, []ps6101Value{value})
+		engine.markFreshReturnedAggregateInputs(roots)
+	}
 }
 
 func (engine *ps6101Engine) retainCallerVisibility(roots, aliases map[types.Object]bool) {
@@ -5421,7 +5427,6 @@ func (engine *ps6101Engine) storeTarget(expression ast.Expr, target ps6101StoreT
 		value.nonempty = value.nonempty || parentValue.nonempty
 		value.eligible = value.eligible || parentValue.eligible
 		value.aggregate = value.aggregate || parentValue.aggregate
-		value.callBound = value.callBound || parentValue.callBound
 		if target.mapIndex {
 			stored, present := engine.state[location]
 			mapElementPresent = present && !stored.mapAbsent
@@ -5492,27 +5497,20 @@ func (engine *ps6101Engine) storeTarget(expression ast.Expr, target ps6101StoreT
 	}
 }
 
-// ps6101ApplyNamedValueSemantics keeps the vocabulary-driven facts attached
-// to every binding form. Type-switch variables are implicit go/types objects,
-// so they cannot pass through store with their own source identifier; applying
-// the same name rules explicitly prevents the switch guard from being the
-// first "weights" binding that silently loses eligibility.
+// ps6101ApplyNamedValueSemantics classifies explicit benchmark roles at their
+// bindings. Type-switch variables are implicit go/types objects, so they cannot
+// pass through store with their own source identifier; applying the same role
+// rules explicitly prevents the switch guard from being the first "weights"
+// binding that silently loses eligibility. Helper, testing, and return
+// boundaries only carry these facts; they never create them from generic names.
 func ps6101ApplyNamedValueSemantics(name string, value *ps6101Value) {
 	if value == nil {
 		return
 	}
-	if len(value.sources) > 0 && strings.EqualFold(name, "value") {
-		// "value" alone is intentionally too generic to establish benchmark
-		// aggregate provenance. Treat it as a possible scalar input, but require
-		// a corroborating call boundary before an aggregate binding can turn it
-		// into a reportable gate candidate.
-		value.inputHint = true
-		value.eligible = true
-	}
 	if ps6101BenchmarkInputName(name) && len(value.sources) > 0 {
 		value.eligible = true
 		value.aggregate = true
-	} else if ps6101AggregateName(name) && value.eligible && (!value.inputHint || value.callBound) && len(value.sources) > 0 {
+	} else if ps6101AggregateName(name) && value.eligible && len(value.sources) > 0 {
 		value.aggregate = true
 	}
 	if ps6101ThresholdName(name) {
@@ -6632,7 +6630,10 @@ func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 	function, receiver := engine.resolveCall(call)
 	if function == nil {
 		testingCompatible := ps6101TestingCompatibleInterfaceCall(engine.pass, call)
-		if engine.indirectCallable(call.Fun) {
+		// An opaque testing-compatible interface method may return even when
+		// named Fatal or FailNow. It must not discard already-proven caller facts,
+		// but it also cannot promote an unrelated live symmetric random value.
+		if engine.indirectCallable(call.Fun) && !testingCompatible {
 			engine.invalidateCapturedState()
 		}
 		if selector, ok := ps6101Unparen(call.Fun).(*ast.SelectorExpr); ok {
@@ -6641,12 +6642,6 @@ func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 		for _, argument := range call.Args {
 			engine.eval(argument)
 			engine.invalidateSharedArgument(argument)
-		}
-		if testingCompatible {
-			// An opaque testing-compatible interface call may return even when
-			// its method is named Fatal or FailNow. Preserve caller continuation
-			// without losing the live random facts that crossed the call.
-			engine.promoteLiveTestingInputs()
 		}
 		return nil
 	}
@@ -6723,10 +6718,9 @@ func (engine *ps6101Engine) invokeTestingMethod(call *ast.CallExpr, callable *ps
 			engine.eval(argument)
 			engine.invalidateSharedArgument(argument)
 		}
-		// These methods record a failure but return normally. A live random
-		// value crossing that testing boundary remains benchmark input even
-		// when its surrounding bindings use no aggregate vocabulary.
-		engine.promoteLiveTestingInputs()
+		// These methods record a failure but return normally. Existing input
+		// provenance remains live across the call without promoting unrelated
+		// symmetric random values.
 		return nil, true
 	default:
 		// The receiver of a method expression was already consumed above.
@@ -6737,45 +6731,6 @@ func (engine *ps6101Engine) invokeTestingMethod(call *ast.CallExpr, callable *ps
 			engine.invalidateSharedArgument(argument)
 		}
 		return nil, true
-	}
-}
-
-func (engine *ps6101Engine) promoteLiveTestingInputs() {
-	for location, value := range engine.state {
-		if value.kind != ps6101Symmetric || len(value.sources) == 0 || !value.eligible {
-			continue
-		}
-		value.callBound = true
-		engine.state[location] = value
-	}
-}
-
-func ps6101PromoteReturnedInputs(values []ps6101Value) {
-	for index := range values {
-		ps6101PromoteReturnedInput(&values[index])
-	}
-}
-
-func ps6101PromoteReturnedInput(value *ps6101Value) {
-	if value == nil {
-		return
-	}
-	if len(value.sources) > 0 {
-		value.callBound = true
-	}
-	if len(value.elements) > 0 {
-		for index, element := range value.elements {
-			ps6101PromoteReturnedInput(&element)
-			value.elements[index] = element
-		}
-	}
-	if fields := value.fieldValues(); len(fields) > 0 {
-		promoted := make(map[string]ps6101Value, len(fields))
-		for path, field := range fields {
-			ps6101PromoteReturnedInput(&field)
-			promoted[path] = field
-		}
-		value.setFields(promoted)
 	}
 }
 
@@ -6813,6 +6768,40 @@ func ps6101TestingCompatibleInterfaceCall(pass *analysis.Pass, call *ast.CallExp
 			ps6101StringType(parameters.At(0).Type()) && ps6101AnySlice(parameters.At(1).Type())
 	}
 	return false
+}
+
+// ps6101MarkReturnedBoundaries carries an already-derived input role through a
+// local return. A map or slice result additionally provides structural evidence
+// that its random contents are caller-visible benchmark inputs; ordinary value
+// returns never gain eligibility merely by crossing the boundary.
+func ps6101MarkReturnedBoundaries(values []ps6101Value, resultTypes []types.Type) {
+	for index := range values {
+		aggregate := index < len(resultTypes) && ps6101BackingReference(resultTypes[index])
+		ps6101MarkReturnedBoundary(&values[index], aggregate)
+	}
+}
+
+func ps6101MarkReturnedBoundary(value *ps6101Value, returnedAggregate bool) {
+	if value == nil {
+		return
+	}
+	if len(value.sources) > 0 {
+		value.eligible = value.eligible || returnedAggregate
+	}
+	if len(value.elements) > 0 {
+		for index, element := range value.elements {
+			ps6101MarkReturnedBoundary(&element, returnedAggregate)
+			value.elements[index] = element
+		}
+	}
+	if fields := value.fieldValues(); len(fields) > 0 {
+		marked := make(map[string]ps6101Value, len(fields))
+		for path, field := range fields {
+			ps6101MarkReturnedBoundary(&field, returnedAggregate)
+			marked[path] = field
+		}
+		value.setFields(marked)
+	}
 }
 
 func ps6101StringType(typ types.Type) bool {
@@ -7228,7 +7217,7 @@ func (engine *ps6101Engine) analyzeLiteral(literal *ast.FuncLit, call *ast.CallE
 		}
 	}
 	results := engine.mergeReturns(engine.returns)
-	ps6101PromoteReturnedInputs(results)
+	ps6101MarkReturnedBoundaries(results, engine.resultTypes)
 	localReturnOpaque := engine.returnOpaque
 	engine.mergeExits()
 	callExits := slices.Clone(engine.exits)
@@ -7244,7 +7233,7 @@ func (engine *ps6101Engine) analyzeLiteral(literal *ast.FuncLit, call *ast.CallE
 		callEscaped = &state
 	}
 	engine.refreshLiteralCaptures(callable)
-	engine.promoteReturnedReferences(results)
+	engine.markReturnedReferenceInputs(results, engine.resultTypes)
 	engine.retainFreshReferencedRoots(callerRoots, results)
 	engine.retainCallerVisibility(callerRoots, callerAliases)
 	engine.returns, engine.exits = oldReturns, oldExits
@@ -8045,8 +8034,7 @@ func ps6101JoinedValue(left, right ps6101Value) ps6101Value {
 	return ps6101Value{
 		sources: ps6101JoinSources(left.sources, right.sources), eligible: left.eligible || right.eligible,
 		aggregate: left.aggregate || right.aggregate, threshold: left.threshold || right.threshold,
-		testing: left.testing || right.testing, inputHint: left.inputHint || right.inputHint,
-		callBound: left.callBound || right.callBound,
+		testing: left.testing || right.testing,
 	}
 }
 
@@ -9420,7 +9408,7 @@ func ps6101SameValue(left, right ps6101Value) bool {
 	leftAnalysis, rightAnalysis := left.analysisValue(), right.analysisValue()
 	return left.kind == right.kind && left.eligible == right.eligible && left.aggregate == right.aggregate &&
 		left.nonempty == right.nonempty && left.threshold == right.threshold && left.testing == right.testing &&
-		left.mapAbsent == right.mapAbsent && left.inputHint == right.inputHint && left.callBound == right.callBound &&
+		left.mapAbsent == right.mapAbsent &&
 		left.revision == right.revision && left.identity == right.identity && leftAnalysis.squareID == rightAnalysis.squareID &&
 		leftAnalysis.squareSig == rightAnalysis.squareSig && leftAnalysis.squareSign == rightAnalysis.squareSign && ps6101SameReference(left.reference, right.reference) &&
 		left.callable == right.callable && ps6101SameDynamicType(leftAnalysis.dynamic, rightAnalysis.dynamic) && left.length == right.length && left.capacity == right.capacity && left.offset == right.offset &&

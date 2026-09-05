@@ -155,11 +155,14 @@ type fataler interface{ Fatal(...any) }
 type fatalfer interface{ Fatalf(string, ...any) }
 type failNower interface{ FailNow() }
 
+// A testing call can preserve an established benchmark-input role, but the
+// generic identifier "value" does not establish that role on its own. These
+// calls are therefore nonterminal controls without PS6101 diagnostics.
 func BenchmarkDirectErrorTotal(b *testing.B) {
 	value := rand.NormFloat64()
 	b.Error("continue")
 	total := value
-	if total > 0 { // want `benchmark feeds symmetric signed random inputs`
+	if total > 0 {
 		sink = total
 	}
 }
@@ -169,7 +172,7 @@ func BenchmarkDirectErrorClosureTotal(b *testing.B) {
 	call := func() { b.Error("continue") }
 	call()
 	total := value
-	if total > 0 { // want `benchmark feeds symmetric signed random inputs`
+	if total > 0 {
 		sink = total
 	}
 }
@@ -179,7 +182,7 @@ func BenchmarkDirectErrorfMethodValueTotal(b *testing.B) {
 	call := b.Errorf
 	call("%s", "continue")
 	total := value
-	if total > 0 { // want `benchmark feeds symmetric signed random inputs`
+	if total > 0 {
 		sink = total
 	}
 }
@@ -189,7 +192,7 @@ func BenchmarkDirectFailMethodValueTotal(b *testing.B) {
 	call := b.Fail
 	call()
 	total := value
-	if total > 0 { // want `benchmark feeds symmetric signed random inputs`
+	if total > 0 {
 		sink = total
 	}
 }
@@ -199,7 +202,7 @@ func BenchmarkProvenInterfaceErrorTotal(b *testing.B) {
 	var nonterminal errorer = b
 	nonterminal.Error("continue")
 	total := value
-	if total > 0 { // want `benchmark feeds symmetric signed random inputs`
+	if total > 0 {
 		sink = total
 	}
 }
@@ -210,7 +213,7 @@ func BenchmarkProvenInterfaceErrorfMethodValueTotal(b *testing.B) {
 	call := nonterminal.Errorf
 	call("%s", "continue")
 	total := value
-	if total > 0 { // want `benchmark feeds symmetric signed random inputs`
+	if total > 0 {
 		sink = total
 	}
 }
@@ -221,7 +224,7 @@ func BenchmarkProvenInterfaceFailClosureTotal(b *testing.B) {
 	call := func() { nonterminal.Fail() }
 	call()
 	total := value
-	if total > 0 { // want `benchmark feeds symmetric signed random inputs`
+	if total > 0 {
 		sink = total
 	}
 }
@@ -261,11 +264,13 @@ var opaqueFatal fataler
 var opaqueFatalf fatalfer
 var opaqueFailNow failNower
 
+// Opaque testing-compatible terminal names may return, but caller continuation
+// likewise cannot promote an otherwise unclassified random value.
 func BenchmarkOpaqueFatalContinues(b *testing.B) {
 	value := rand.NormFloat64()
 	opaqueFatal.Fatal("unknown")
 	total := value
-	if total > 0 { // want `benchmark feeds symmetric signed random inputs`
+	if total > 0 {
 		sink = total
 	}
 }
@@ -274,7 +279,7 @@ func BenchmarkOpaqueFatalfContinues(b *testing.B) {
 	value := rand.NormFloat64()
 	opaqueFatalf.Fatalf("%s", "unknown")
 	total := value
-	if total > 0 { // want `benchmark feeds symmetric signed random inputs`
+	if total > 0 {
 		sink = total
 	}
 }
@@ -283,7 +288,7 @@ func BenchmarkOpaqueFailNowContinues(b *testing.B) {
 	value := rand.NormFloat64()
 	opaqueFailNow.FailNow()
 	total := value
-	if total > 0 { // want `benchmark feeds symmetric signed random inputs`
+	if total > 0 {
 		sink = total
 	}
 }
