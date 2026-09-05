@@ -40,6 +40,13 @@ func TestPS6099ReachableDependence(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS6099.Analyzer, "ps6099flowreach")
 }
 
+func TestPS6099Round5(t *testing.T) {
+	t.Parallel()
+	analysistest.Run(t, analysistest.TestData(), PS6099.Analyzer,
+		"ps6099round5iife", "ps6099round5counter", "ps6099round5copy",
+		"ps6099round5typeswitch", "ps6099round5break", "ps6099round5swap")
+}
+
 func TestPS6099FlowExactIterationsScaling(t *testing.T) {
 	t.Parallel()
 	object := types.NewVar(token.NoPos, nil, "dependent", types.Typ[types.Bool])

@@ -45,7 +45,9 @@ unconditional, exactly one scalar transcendental lies on the element path,
 its argument depends on that index (possibly through local accumulator
 assignments) on every reaching path; maybe-empty nested loops retain their
 zero-trip path unless entry is source-proved, while fixed-point transfer covers
-every reachable iteration state. The destination and any aliases
+every reachable iteration state. Exact counted-loop transfer requires a stable,
+unescaped induction variable; switch and select breaks preserve their exit
+states without evaluating later assignments. The destination and any aliases
 formed before the loop have no other read, rebind, escape, capture, or opaque
 use on the candidate path.
 Package-local generic and nongeneric single-return wrappers are followed
@@ -59,7 +61,9 @@ pointer-to-array, and constant-integer ranges and concrete type-switch
 selections retained through straight-line initialization aliases. Immediately
 invoked closures preserve exact sequence identity through fixed and precisely
 indexed variadic actual-to-formal bindings, straight-line aliases, and exact
-whole-sequence generic type sets; created, deferred, asynchronous,
+whole-sequence generic type sets. Parallel assignments use the original RHS
+bindings, array copies cannot preserve sequence identity, and address captures
+invalidate concrete type-switch facts; created, deferred, asynchronous,
 conditional-only, or escaping closure paths are not evidence. A leaf
 and any vector leaf it calls must have result-free, consistently float32 or
 float64 sequence signatures. The destination must itself be that exact float
@@ -1093,6 +1097,12 @@ func ps6099UpdateConcreteTypeSwitchFacts(pass *analysis.Pass, statement ast.Stmt
 	switch value := statement.(type) {
 	case *ast.AssignStmt:
 		if len(value.Lhs) == len(value.Rhs) {
+			for _, expression := range value.Lhs {
+				ps6099InvalidateConcreteTypeSwitchFacts(pass, expression, known)
+			}
+			for _, expression := range value.Rhs {
+				ps6099InvalidateConcreteTypeSwitchFacts(pass, expression, known)
+			}
 			resolved := make([]types.Type, len(value.Rhs))
 			valid := make([]bool, len(value.Rhs))
 			for index, right := range value.Rhs {
@@ -1123,6 +1133,9 @@ func ps6099UpdateConcreteTypeSwitchFacts(pass *analysis.Pass, statement ast.Stmt
 				item, ok := specification.(*ast.ValueSpec)
 				if !ok {
 					continue
+				}
+				for _, expression := range item.Values {
+					ps6099InvalidateConcreteTypeSwitchFacts(pass, expression, known)
 				}
 				for index, name := range item.Names {
 					object := pass.TypesInfo.Defs[name]
@@ -1212,12 +1225,11 @@ func ps6099AlwaysEvaluatedWithin(pass *analysis.Pass, candidate, root ast.Node, 
 			node = invocation
 			continue
 		case *ast.BinaryExpr:
-			if value.Op != token.LAND && value.Op != token.LOR || !ps6099NodeWithin(node, value.Y) {
-				continue
-			}
-			left, known := ps6099BooleanCondition(pass, value.X)
-			if !known || value.Op == token.LAND && !left || value.Op == token.LOR && left {
-				return false
+			if (value.Op == token.LAND || value.Op == token.LOR) && ps6099NodeWithin(node, value.Y) {
+				left, known := ps6099BooleanCondition(pass, value.X)
+				if !known || value.Op == token.LAND && !left || value.Op == token.LOR && left {
+					return false
+				}
 			}
 		}
 		node = parent
@@ -1696,7 +1708,7 @@ func ps6099CallHasSequenceFormal(pass *analysis.Pass, call *ast.CallExpr, signat
 	aliases := ps6099CallSequenceAliases(pass, enclosing, call, parents, parameters)
 	if receiver := signature.Recv(); receiver != nil {
 		candidate, sequence := ps6099TypeSequencePrecision(receiver.Type())
-		if sequence && candidate == precision {
+		if sequence && candidate == precision && ps6099ReferenceSequence(receiver.Type()) {
 			if expression := ps6099CallReceiverExpression(pass, call); expression != nil &&
 				ps6099SequenceArgumentBaseKey(pass, expression, aliases) != "" {
 				return true
@@ -1705,7 +1717,8 @@ func ps6099CallHasSequenceFormal(pass *analysis.Pass, call *ast.CallExpr, signat
 	}
 	for index := 0; index < signature.Params().Len() && index+offset < len(call.Args); index++ {
 		candidate, sequence := ps6099TypeSequencePrecision(signature.Params().At(index).Type())
-		if sequence && candidate == precision && ps6099SequenceArgumentBaseKey(pass, call.Args[index+offset], aliases) != "" {
+		if sequence && candidate == precision && ps6099ReferenceSequence(signature.Params().At(index).Type()) &&
+			ps6099SequenceArgumentBaseKey(pass, call.Args[index+offset], aliases) != "" {
 			return true
 		}
 	}
@@ -1793,9 +1806,10 @@ func ps6099SyntaxCallHasSequenceFormal(pass *analysis.Pass, call *ast.CallExpr, 
 	position := 0
 	for _, field := range function.Type.Params.List {
 		candidate, sequence := ps6099SequenceKindPrecision(pass.TypesInfo.TypeOf(field.Type), field.Type, typesByName, make(map[string]bool))
+		reference := ps6099SyntaxReferenceSequence(pass.TypesInfo.TypeOf(field.Type), field.Type, typesByName, make(map[string]bool))
 		count := max(1, len(field.Names))
 		for range count {
-			if position < len(call.Args) && sequence && candidate == precision &&
+			if position < len(call.Args) && sequence && reference && candidate == precision &&
 				ps6099SequenceArgumentBaseKey(pass, call.Args[position], aliases) != "" {
 				return true
 			}
@@ -1878,6 +1892,64 @@ func ps6099TypeSequencePrecision(typ types.Type) (string, bool) {
 		return ps6099Precision(value.Elem()), true
 	}
 	return "", false
+}
+
+// A by-value array contains different storage even when its precision and
+// elements match. This gate applies both at a call boundary and while following
+// conversions/aliases, so an intervening array copy cannot regain identity.
+func ps6099ReferenceSequence(typ types.Type) bool {
+	if typ == nil {
+		return false
+	}
+	if parameter, ok := types.Unalias(typ).(*types.TypeParam); ok {
+		return ps6099ReferenceSequence(parameter.Constraint())
+	}
+	switch value := types.Unalias(typ).Underlying().(type) {
+	case *types.Slice, *types.Pointer:
+		return true
+	case *types.Interface:
+		found := false
+		for index := 0; index < value.NumEmbeddeds(); index++ {
+			embedded := types.Unalias(value.EmbeddedType(index))
+			if union, ok := embedded.(*types.Union); ok {
+				for term := 0; term < union.Len(); term++ {
+					if !ps6099ReferenceSequence(union.Term(term).Type()) {
+						return false
+					}
+				}
+				found = found || union.Len() > 0
+			} else if _, constraint := embedded.Underlying().(*types.Interface); constraint {
+				found = found || ps6099ReferenceSequence(embedded)
+			} else {
+				if !ps6099ReferenceSequence(embedded) {
+					return false
+				}
+				found = true
+			}
+		}
+		return found
+	}
+	return false
+}
+
+func ps6099SyntaxReferenceSequence(typ types.Type, syntax ast.Expr, typesByName map[string]ast.Expr, active map[string]bool) bool {
+	if typ != nil {
+		return ps6099ReferenceSequence(typ)
+	}
+	switch value := ps2110Unparen(syntax).(type) {
+	case *ast.ArrayType:
+		return value.Len == nil
+	case *ast.StarExpr:
+		return true
+	case *ast.Ident:
+		if active[value.Name] || typesByName[value.Name] == nil {
+			return false
+		}
+		active[value.Name] = true
+		defer delete(active, value.Name)
+		return ps6099SyntaxReferenceSequence(nil, typesByName[value.Name], typesByName, active)
+	}
+	return false
 }
 
 func ps6099SyntaxFunctions(sources []ps6077Source) map[string][]*ast.FuncDecl {
@@ -2170,6 +2242,9 @@ func ps6099BindIIFESequenceParameters(pass *analysis.Pass, literal *ast.FuncLit,
 }
 
 func ps6099SequenceArgumentBaseKey(pass *analysis.Pass, expression ast.Expr, aliases map[string]string) string {
+	if typ := pass.TypesInfo.TypeOf(expression); typ != nil && !ps6099ReferenceSequence(typ) {
+		return ""
+	}
 	expression = ps2110Unparen(expression)
 	switch value := expression.(type) {
 	case *ast.CallExpr:
@@ -2212,18 +2287,21 @@ func ps6099ExtendSequenceAliases(pass *analysis.Pass, body *ast.BlockStmt, befor
 		switch value := node.(type) {
 		case *ast.AssignStmt:
 			if len(value.Lhs) != len(value.Rhs) {
+				for _, left := range value.Lhs {
+					ps6099InvalidateSequenceAlias(pass, left, aliases)
+				}
 				return true
 			}
-			for index := range value.Lhs {
-				ps6099UpdateSequenceAlias(pass, value.Lhs[index], value.Rhs[index], aliases)
-			}
+			ps6099UpdateSequenceAliases(pass, value.Lhs, value.Rhs, aliases)
 		case *ast.ValueSpec:
 			if len(value.Names) != len(value.Values) {
 				return true
 			}
+			left := make([]ast.Expr, len(value.Names))
 			for index, name := range value.Names {
-				ps6099UpdateSequenceAlias(pass, name, value.Values[index], aliases)
+				left[index] = name
 			}
+			ps6099UpdateSequenceAliases(pass, left, value.Values, aliases)
 		case *ast.UnaryExpr:
 			if value.Op == token.AND {
 				ps6099InvalidateSequenceAlias(pass, value.X, aliases)
@@ -2291,18 +2369,25 @@ func ps6099StraightLineBefore(node ast.Node, body *ast.BlockStmt, parents map[as
 	return true
 }
 
-func ps6099UpdateSequenceAlias(pass *analysis.Pass, left, right ast.Expr, aliases map[string]string) {
-	key, ok := ps6099SequenceStorageKey(pass, left)
-	if !ok {
-		return
+func ps6099UpdateSequenceAliases(pass *analysis.Pass, left, right []ast.Expr, aliases map[string]string) {
+	keys := make([]string, len(left))
+	canonical := make([]string, len(right))
+	// Go evaluates all RHS values before changing any LHS. Snapshot both the
+	// storage keys and their sources before updating a swap or overlapping tuple.
+	for index := range left {
+		keys[index], _ = ps6099SequenceStorageKey(pass, left[index])
+		if unary, address := ps2110Unparen(right[index]).(*ast.UnaryExpr); !address || unary.Op != token.AND {
+			canonical[index] = ps6099SequenceArgumentBaseKey(pass, right[index], aliases)
+		}
 	}
-	canonical := ""
-	if unary, address := ps2110Unparen(right).(*ast.UnaryExpr); !address || unary.Op != token.AND {
-		canonical = ps6099SequenceArgumentBaseKey(pass, right, aliases)
-	}
-	ps6099ClearSequenceAlias(aliases, key)
-	if canonical != "" {
-		aliases[key] = canonical
+	for index, key := range keys {
+		if key == "" {
+			continue
+		}
+		ps6099ClearSequenceAlias(aliases, key)
+		if canonical[index] != "" {
+			aliases[key] = canonical[index]
+		}
 	}
 }
 
@@ -3045,7 +3130,7 @@ func ps6099BranchReachable(pass *analysis.Pass, branch *ast.BranchStmt, parents 
 			}
 			var clause *ast.CaseClause
 			for candidate := parents[branch]; candidate != nil && candidate != value; candidate = parents[candidate] {
-				if current, ok := candidate.(*ast.CaseClause); ok {
+				if current, ok := candidate.(*ast.CaseClause); ok && parents[parents[current]] == value {
 					clause = current
 					break
 				}
@@ -3089,6 +3174,19 @@ func ps6099BranchAffectsLoop(pass *analysis.Pass, scope *ast.BlockStmt, branch *
 	}
 	target := ps6099BranchTarget(pass, scope, branch, parents)
 	if target == nil || target == loop.node || ps6099NodeWithin(loop.node, target) {
+		return true
+	}
+	if branch.Label != nil {
+		for parent := parents[branch]; parent != nil; parent = parents[parent] {
+			switch parent.(type) {
+			case *ast.ForStmt, *ast.RangeStmt:
+				return true
+			case *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+				// Clause transfer consumes its own breaks. A labeled jump across
+				// another loop/switch needs a separate outer exit state.
+				return parent != target
+			}
+		}
 		return true
 	}
 	switch target.(type) {
@@ -3966,20 +4064,120 @@ func ps6099SelectedSwitchClause(pass *analysis.Pass, statement *ast.SwitchStmt) 
 	return defaultClause, true
 }
 
-// ps6099FlowSelectedSwitchClauses follows a source-proved switch selection.
-// It only proceeds into a later clause when the selected clause's direct last
-// statement is fallthrough; normal case completion exits the switch.
+// ps6099FlowSelectedSwitchClauses keeps early breaks separate from paths that
+// continue through a clause or fall through to the next one. An assignment after
+// break must neither create dependency nor kill an already dependent value.
 func ps6099FlowSelectedSwitchClauses(pass *analysis.Pass, clauses []ast.Stmt, selected int, before token.Pos, loop *ps6099Loop, state map[types.Object]bool) {
+	var exits map[types.Object]bool
 	for index := selected; index >= 0 && index < len(clauses); index++ {
 		clause, ok := clauses[index].(*ast.CaseClause)
 		if !ok {
 			return
 		}
-		ps6099FlowBlock(pass, &ast.BlockStmt{List: clause.Body}, before, loop, state)
-		if before.IsValid() && before <= clause.End() || !ps6099CaseFallsThrough(clause) {
+		outcome := ps6099FlowClauseBlock(pass, clause.Body, before, loop, state)
+		exits = ps6099JoinOptionalDependence(exits, outcome.breaks)
+		if outcome.next == nil {
+			if outcome.normal {
+				exits = ps6099JoinOptionalDependence(exits, state)
+			}
+			if exits != nil {
+				ps6099CopyDependence(state, exits)
+			} else {
+				ps6099InvalidateDependence(state)
+			}
 			return
 		}
+		ps6099CopyDependence(state, outcome.next)
 	}
+	if exits != nil {
+		ps6099MeetDependence(state, exits)
+	}
+}
+
+type ps6099ClauseOutcome struct {
+	normal bool
+	breaks map[types.Object]bool
+	next   map[types.Object]bool
+}
+
+func ps6099JoinOptionalDependence(left, right map[types.Object]bool) map[types.Object]bool {
+	if left == nil {
+		if right == nil {
+			return nil
+		}
+		return ps6099CloneDependence(right)
+	}
+	if right != nil {
+		ps6099MeetDependence(left, right)
+	}
+	return left
+}
+
+func ps6099FlowClauseBlock(pass *analysis.Pass, statements []ast.Stmt, before token.Pos, loop *ps6099Loop, state map[types.Object]bool) ps6099ClauseOutcome {
+	result := ps6099ClauseOutcome{normal: true}
+	for _, statement := range statements {
+		if before.IsValid() && statement.Pos() >= before {
+			break
+		}
+		outcome := ps6099FlowClauseStatement(pass, statement, before, loop, state)
+		result.breaks = ps6099JoinOptionalDependence(result.breaks, outcome.breaks)
+		result.next = ps6099JoinOptionalDependence(result.next, outcome.next)
+		result.normal = outcome.normal
+		if !outcome.normal || before.IsValid() && before <= statement.End() {
+			break
+		}
+	}
+	return result
+}
+
+func ps6099FlowClauseStatement(pass *analysis.Pass, statement ast.Stmt, before token.Pos, loop *ps6099Loop, state map[types.Object]bool) ps6099ClauseOutcome {
+	switch value := statement.(type) {
+	case *ast.BranchStmt:
+		if value.Tok == token.FALLTHROUGH {
+			return ps6099ClauseOutcome{next: ps6099CloneDependence(state)}
+		}
+		return ps6099ClauseOutcome{breaks: ps6099CloneDependence(state)}
+	case *ast.BlockStmt:
+		return ps6099FlowClauseBlock(pass, value.List, before, loop, state)
+	case *ast.LabeledStmt:
+		return ps6099FlowClauseStatement(pass, value.Stmt, before, loop, state)
+	case *ast.IfStmt:
+		if value.Init != nil {
+			ps6099FlowStmt(pass, value.Init, token.NoPos, loop, state)
+		}
+		if truth, known := ps6099BooleanCondition(pass, value.Cond); known {
+			if truth {
+				return ps6099FlowClauseBlock(pass, value.Body.List, before, loop, state)
+			}
+			if value.Else != nil {
+				return ps6099FlowClauseStatement(pass, value.Else, before, loop, state)
+			}
+			return ps6099ClauseOutcome{normal: true}
+		}
+		thenState, elseState := ps6099CloneDependence(state), ps6099CloneDependence(state)
+		thenResult := ps6099FlowClauseBlock(pass, value.Body.List, before, loop, thenState)
+		elseResult := ps6099ClauseOutcome{normal: true}
+		if value.Else != nil {
+			elseResult = ps6099FlowClauseStatement(pass, value.Else, before, loop, elseState)
+		}
+		var normal map[types.Object]bool
+		if thenResult.normal {
+			normal = ps6099JoinOptionalDependence(normal, thenState)
+		}
+		if elseResult.normal {
+			normal = ps6099JoinOptionalDependence(normal, elseState)
+		}
+		if normal != nil {
+			ps6099CopyDependence(state, normal)
+		}
+		return ps6099ClauseOutcome{
+			normal: normal != nil,
+			breaks: ps6099JoinOptionalDependence(thenResult.breaks, elseResult.breaks),
+			next:   ps6099JoinOptionalDependence(thenResult.next, elseResult.next),
+		}
+	}
+	ps6099FlowStmt(pass, statement, before, loop, state)
+	return ps6099ClauseOutcome{normal: true}
 }
 
 func ps6099CaseFallsThrough(clause *ast.CaseClause) bool {
@@ -4028,14 +4226,14 @@ func ps6099InvalidateDependence(state map[types.Object]bool) {
 func ps6099FlowClauses(pass *analysis.Pass, clauses []ast.Stmt, before token.Pos, loop *ps6099Loop, state map[types.Object]bool) {
 	var branches []map[types.Object]bool
 	hasDefault := false
-	for _, statement := range clauses {
+	for index, statement := range clauses {
 		clause, ok := statement.(*ast.CaseClause)
 		if !ok {
 			continue
 		}
 		hasDefault = hasDefault || len(clause.List) == 0
 		branch := ps6099CloneDependence(state)
-		ps6099FlowBlock(pass, &ast.BlockStmt{List: clause.Body}, before, loop, branch)
+		ps6099FlowSelectedSwitchClauses(pass, clauses, index, before, loop, branch)
 		branches = append(branches, branch)
 	}
 	if !hasDefault {
@@ -4055,7 +4253,15 @@ func ps6099FlowCommClauses(pass *analysis.Pass, clauses []ast.Stmt, before token
 		if clause.Comm != nil {
 			ps6099FlowStmt(pass, clause.Comm, token.NoPos, loop, branch)
 		}
-		ps6099FlowBlock(pass, &ast.BlockStmt{List: clause.Body}, before, loop, branch)
+		outcome := ps6099FlowClauseBlock(pass, clause.Body, before, loop, branch)
+		if outcome.normal {
+			outcome.breaks = ps6099JoinOptionalDependence(outcome.breaks, branch)
+		}
+		if outcome.breaks != nil {
+			ps6099CopyDependence(branch, outcome.breaks)
+		} else {
+			ps6099InvalidateDependence(branch)
+		}
 		branches = append(branches, branch)
 	}
 	ps6099MergeDependence(state, branches...)
@@ -4438,7 +4644,52 @@ func ps6099ForExactIterations(pass *analysis.Pass, loop *ast.ForStmt) (uint64, b
 	if !known || !ps6099IntPostRepresentable(pass, initial, step, iterations) {
 		return 0, false
 	}
+	if iterations != 0 && !ps6099ForCounterStable(pass, loop, object) {
+		return 0, false
+	}
 	return iterations, true
+}
+
+func ps6099ForCounterStable(pass *analysis.Pass, loop *ast.ForStmt, object types.Object) bool {
+	if ps6099LoopObjectEscapes(pass, loop, object) {
+		return false
+	}
+	stable := true
+	parents := ps6087Parents(loop)
+	ast.Inspect(loop.Body, func(node ast.Node) bool {
+		if !stable {
+			return false
+		}
+		switch value := node.(type) {
+		case *ast.AssignStmt:
+			for _, left := range value.Lhs {
+				if ps6099Object(pass, left, object) {
+					stable = false
+				}
+			}
+		case *ast.IncDecStmt:
+			stable = !ps6099Object(pass, value.X, object)
+		case *ast.RangeStmt:
+			stable = !ps6099Object(pass, value.Key, object) && !ps6099Object(pass, value.Value, object)
+		case *ast.UnaryExpr:
+			if value.Op == token.AND && ps6099Object(pass, value.X, object) {
+				stable = false
+			}
+		case *ast.FuncLit:
+			stable = !ps6099NodeMentionsObject(pass, value.Body, object)
+			return false
+		case *ast.BranchStmt:
+			if value.Tok == token.GOTO {
+				stable = false
+			} else if value.Tok == token.BREAK || value.Tok == token.CONTINUE {
+				target := ps6099LoopBranchTarget(pass, loop, value, parents)
+				stable = target != nil && ps6099NodeWithin(target, loop) &&
+					(value.Tok != token.BREAK || target != loop)
+			}
+		}
+		return stable
+	})
+	return stable
 }
 
 func ps6099PlainInt(typ types.Type) bool {
