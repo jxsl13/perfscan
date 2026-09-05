@@ -273,6 +273,30 @@ func freePowerOne(output, input []float64) {
 	}
 }
 
+func reciprocalSquareRootPower(output, input []float64) {
+	for index := range input {
+		output[index] = m.Pow(input[index], -0.5)
+	}
+}
+
+func reciprocalPower(output, input []float64) {
+	for index := range input {
+		output[index] = m.Pow(input[index], -1)
+	}
+}
+
+func smallNegativeIntegralPower(output, input []float64) {
+	for index := range input {
+		output[index] = m.Pow(input[index], -8)
+	}
+}
+
+func expensiveNegativeIntegralPower(output, input []float64) {
+	for index := range input { // want `loop calls scalar math.Pow exactly once per independent output element.*PowSIMDF64`
+		output[index] = m.Pow(input[index], -9)
+	}
+}
+
 func expensiveFractionalPower(output, input []float64) {
 	for index := range input { // want `loop calls scalar math.Pow exactly once per independent output element.*PowSIMDF64`
 		output[index] = m.Pow(input[index], 1.5)

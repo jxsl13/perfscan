@@ -36,6 +36,8 @@ When the package already exposes an operation- and precision-compatible SIMD,
 vector, batch, or assembly leaf, a two-pass candidate can write the exact
 transcendental input into the final destination and consume that completed
 band in place. The extra memory pass can be much cheaper than scalar libm.
+Pow exponents handled by square root or at most three successive-squaring
+steps, including their reciprocal forms, are excluded as cheap scalar work.
 
 PS6099 reports a deliberately narrow source-proved shape. The destination is
 written at the canonical range/counting-loop index, the assignment is
@@ -199,7 +201,7 @@ func ps6099Helpers(pass *analysis.Pass) map[*types.Func]ps6099Helper {
 		functions[object] = function
 	}
 	result := make(map[*types.Func]ps6099Helper)
-	scalarMemo := make(map[*types.Func]ps6099ScalarFunctionState)
+	scalarMemo := make(map[*types.Func]ps6099ScalarFunctionSummary)
 	for changed := true; changed; {
 		changed = false
 		for object, function := range functions {
@@ -319,7 +321,7 @@ type ps6099ScalarExpressionSummary struct {
 	valid     bool
 }
 
-func ps6099ExpressionScalarSummary(pass *analysis.Pass, expression ast.Expr, helpers map[*types.Func]ps6099Helper, functions map[*types.Func]*ast.FuncDecl, memo map[*types.Func]ps6099ScalarFunctionState) ps6099ScalarExpressionSummary {
+func ps6099ExpressionScalarSummary(pass *analysis.Pass, expression ast.Expr, helpers map[*types.Func]ps6099Helper, functions map[*types.Func]*ast.FuncDecl, memo map[*types.Func]ps6099ScalarFunctionSummary) ps6099ScalarExpressionSummary {
 	result := ps6099ScalarExpressionSummary{valid: true}
 	var inspect func(ast.Expr)
 	inspect = func(candidate ast.Expr) {
@@ -347,6 +349,16 @@ func ps6099ExpressionScalarSummary(pass *analysis.Pass, expression ast.Expr, hel
 				inspect(value.Y)
 				return false
 			case *ast.CallExpr:
+				// Go evaluates the function value and every argument before invoking
+				// the outer call. Inspect in that order so a non-returning or opaque
+				// argument cannot leave the outer scalar call counted as reachable.
+				inspect(value.Fun)
+				for _, argument := range value.Args {
+					inspect(argument)
+				}
+				if !result.valid {
+					return false
+				}
 				operation, scalar := ps6099DirectMathIdentity(pass, value)
 				var callee *types.Func
 				if !scalar {
@@ -362,7 +374,8 @@ func ps6099ExpressionScalarSummary(pass *analysis.Pass, expression ast.Expr, hel
 					}
 					result.count = min(2, result.count+1)
 				} else if !ps6099CompileTimeCall(pass, value) {
-					switch ps6099LocalScalarState(pass, callee, functions, memo, make(map[*types.Func]bool)) {
+					summary := ps6099LocalScalarSummary(pass, callee, functions, memo, make(map[*types.Func]bool))
+					switch summary.state {
 					case ps6099ScalarFunctionZero:
 					case ps6099ScalarFunctionPresent:
 						result.count = min(2, result.count+1)
@@ -370,7 +383,12 @@ func ps6099ExpressionScalarSummary(pass *analysis.Pass, expression ast.Expr, hel
 						result.valid = false
 						return false
 					}
+					if !summary.returns {
+						result.valid = false
+						return false
+					}
 				}
+				return false
 			}
 			return true
 		})
@@ -387,9 +405,14 @@ const (
 	ps6099ScalarFunctionPresent
 )
 
-func ps6099LocalScalarState(pass *analysis.Pass, function *types.Func, functions map[*types.Func]*ast.FuncDecl, memo map[*types.Func]ps6099ScalarFunctionState, active map[*types.Func]bool) ps6099ScalarFunctionState {
+type ps6099ScalarFunctionSummary struct {
+	state   ps6099ScalarFunctionState
+	returns bool
+}
+
+func ps6099LocalScalarSummary(pass *analysis.Pass, function *types.Func, functions map[*types.Func]*ast.FuncDecl, memo map[*types.Func]ps6099ScalarFunctionSummary, active map[*types.Func]bool) ps6099ScalarFunctionSummary {
 	if function == nil {
-		return ps6099ScalarFunctionUnknown
+		return ps6099ScalarFunctionSummary{state: ps6099ScalarFunctionUnknown}
 	}
 	function = function.Origin()
 	if state, known := memo[function]; known {
@@ -397,15 +420,23 @@ func ps6099LocalScalarState(pass *analysis.Pass, function *types.Func, functions
 	}
 	declaration := functions[function]
 	if declaration == nil || declaration.Body == nil || active[function] {
-		return ps6099ScalarFunctionUnknown
+		return ps6099ScalarFunctionSummary{state: ps6099ScalarFunctionUnknown}
 	}
 	active[function] = true
 	defer delete(active, function)
 	parents := ps6087Parents(declaration.Body)
-	reachable := ps6099ReachableCallsInBlock(pass, declaration.Body, parents)
-	state := ps6099ScalarFunctionZero
+	reachable := ps6099ReachableNodesInBlock(pass, declaration.Body, parents)
+	valid := true
+	present := false
+	returns := false
+	for node := range reachable {
+		if _, ok := node.(*ast.ReturnStmt); ok {
+			returns = true
+			break
+		}
+	}
 	ast.Inspect(declaration.Body, func(node ast.Node) bool {
-		if state == ps6099ScalarFunctionPresent {
+		if !valid {
 			return false
 		}
 		if _, nested := node.(*ast.FuncLit); nested {
@@ -416,28 +447,36 @@ func ps6099LocalScalarState(pass *analysis.Pass, function *types.Func, functions
 			return true
 		}
 		if _, scalar := ps6099DirectMathIdentity(pass, call); scalar {
-			state = ps6099ScalarFunctionPresent
-			return false
+			present = true
+			return true
 		}
 		if ps6099CompileTimeCall(pass, call) {
 			return true
 		}
 		callee, _, resolved := typedCallee(pass, call.Fun)
-		nestedState := ps6099ScalarFunctionUnknown
+		nested := ps6099ScalarFunctionSummary{state: ps6099ScalarFunctionUnknown}
 		if resolved {
-			nestedState = ps6099LocalScalarState(pass, callee, functions, memo, active)
+			nested = ps6099LocalScalarSummary(pass, callee, functions, memo, active)
 		}
-		switch nestedState {
+		switch nested.state {
 		case ps6099ScalarFunctionPresent:
-			state = ps6099ScalarFunctionPresent
-			return false
+			present = true
 		case ps6099ScalarFunctionUnknown:
-			state = ps6099ScalarFunctionUnknown
+			valid = false
 		}
+		valid = valid && nested.returns
 		return true
 	})
-	memo[function] = state
-	return state
+	state := ps6099ScalarFunctionUnknown
+	if valid {
+		state = ps6099ScalarFunctionZero
+		if present {
+			state = ps6099ScalarFunctionPresent
+		}
+	}
+	summary := ps6099ScalarFunctionSummary{state: state, returns: returns}
+	memo[function] = summary
+	return summary
 }
 
 func ps6099CompileTimeCall(pass *analysis.Pass, call *ast.CallExpr) bool {
@@ -451,8 +490,15 @@ func ps6099CompileTimeCall(pass *analysis.Pass, call *ast.CallExpr) bool {
 	if !ok {
 		return false
 	}
-	_, ok = pass.TypesInfo.ObjectOf(identifier).(*types.Builtin)
-	return ok
+	builtin, ok := pass.TypesInfo.ObjectOf(identifier).(*types.Builtin)
+	if !ok {
+		return false
+	}
+	switch builtin.Name() {
+	case "cap", "complex", "imag", "len", "max", "min", "real":
+		return true
+	}
+	return false
 }
 
 func ps6099DirectMathCall(pass *analysis.Pass, call *ast.CallExpr) (string, bool) {
@@ -484,8 +530,8 @@ func ps6099CheapPow(pass *analysis.Pass, call *ast.CallExpr) bool {
 		return false
 	}
 	exponent, exact := constant.Float64Val(value)
-	return exact && (exponent == 0 || exponent == 0.5 || exponent == 1 ||
-		exponent == float64(int64(exponent)) && exponent >= 2 && exponent <= 8)
+	return exact && (exponent == 0 || exponent == 0.5 || exponent == -0.5 || exponent == 1 || exponent == -1 ||
+		exponent == float64(int64(exponent)) && exponent >= -8 && exponent <= 8)
 }
 
 func ps6099CallOperation(pass *analysis.Pass, call *ast.CallExpr, helpers map[*types.Func]ps6099Helper) (string, bool) {
@@ -817,6 +863,16 @@ func ps6099ReachableCalls(pass *analysis.Pass, function *ast.FuncDecl, parents m
 
 func ps6099ReachableCallsInBlock(pass *analysis.Pass, body *ast.BlockStmt, parents map[ast.Node]ast.Node) map[*ast.CallExpr]bool {
 	result := make(map[*ast.CallExpr]bool)
+	for node := range ps6099ReachableNodesInBlock(pass, body, parents) {
+		if call, ok := node.(*ast.CallExpr); ok {
+			result[call] = true
+		}
+	}
+	return result
+}
+
+func ps6099ReachableNodesInBlock(pass *analysis.Pass, body *ast.BlockStmt, parents map[ast.Node]ast.Node) map[ast.Node]bool {
+	result := make(map[ast.Node]bool)
 	if body == nil {
 		return result
 	}
@@ -837,12 +893,13 @@ func ps6099ReachableCallsInBlock(pass *analysis.Pass, body *ast.BlockStmt, paren
 		seen[block] = true
 		for _, root := range block.Nodes {
 			ast.Inspect(root, func(node ast.Node) bool {
+				if node == nil {
+					return false
+				}
 				if _, nested := node.(*ast.FuncLit); nested {
 					return false
 				}
-				if call, ok := node.(*ast.CallExpr); ok {
-					result[call] = true
-				}
+				result[node] = true
 				return true
 			})
 		}
@@ -870,6 +927,9 @@ func ps6099ReachableSuccessors(pass *analysis.Pass, block *cfg.Block, parents ma
 }
 
 func ps6099ControlCondition(pass *analysis.Pass, expression ast.Expr, parents map[ast.Node]ast.Node) (bool, bool) {
+	if loop, ok := parents[expression].(*ast.ForStmt); ok && loop.Cond == expression && ps6099ForNeverTerminates(pass, loop) {
+		return true, true
+	}
 	if clause, caseExpression := parents[expression].(*ast.CaseClause); caseExpression {
 		statement, ok := parents[parents[clause]].(*ast.SwitchStmt)
 		if !ok {
@@ -1220,6 +1280,7 @@ func ps6099SyntaxFunctions(sources []ps6077Source) map[string][]*ast.FuncDecl {
 func ps6099DistinctLaneLoop(pass *analysis.Pass, body *ast.BlockStmt, parameters ps6099SequenceParameters) bool {
 	found := false
 	parents := ps6087Parents(body)
+	reachable := ps6099ReachableNodesInBlock(pass, body, parents)
 	ast.Inspect(body, func(node ast.Node) bool {
 		if found {
 			return false
@@ -1239,8 +1300,11 @@ func ps6099DistinctLaneLoop(pass *analysis.Pass, body *ast.BlockStmt, parameters
 		aliases := ps6099SequenceAliases(pass, body, loop.Pos(), parents, parameters)
 		offsets := make(map[string]map[int64]bool)
 		ast.Inspect(loop.Body, func(candidate ast.Node) bool {
+			if _, nested := candidate.(*ast.FuncLit); nested {
+				return false
+			}
 			index, ok := candidate.(*ast.IndexExpr)
-			if !ok {
+			if !ok || !reachable[index] {
 				return true
 			}
 			sequence := ps6099SequenceBaseKey(pass, index.X, aliases)
@@ -2007,6 +2071,8 @@ func ps6099OuterControlSafe(pass *analysis.Pass, scope *ast.BlockStmt, loop *ps6
 	}
 	safe := true
 	aliases := make(map[types.Object]bool)
+	parents := ps6087Parents(scope)
+	reachable := ps6099ReachableNodesInBlock(pass, loop.body, ps6087Parents(loop.body))
 	astutil.WithStack(loop.body, func(node ast.Node, _ []ast.Node) bool {
 		if !safe {
 			return false
@@ -2014,10 +2080,18 @@ func ps6099OuterControlSafe(pass *analysis.Pass, scope *ast.BlockStmt, loop *ps6
 		if literal, ok := node.(*ast.FuncLit); ok && literal != nil {
 			return false
 		}
+		if branch, ok := node.(*ast.BranchStmt); ok {
+			if !ps6099BranchReachable(pass, branch, parents) {
+				return true
+			}
+			safe = !ps6099BranchAffectsLoop(pass, scope, branch, loop, parents)
+			return safe
+		}
+		if !reachable[node] {
+			return true
+		}
 		switch value := node.(type) {
 		case *ast.ReturnStmt:
-			safe = false
-		case *ast.BranchStmt:
 			safe = false
 		case *ast.AssignStmt:
 			ps6099RecordLoopAliases(pass, value, loop, aliases)
@@ -2041,14 +2115,143 @@ func ps6099OuterControlSafe(pass *analysis.Pass, scope *ast.BlockStmt, loop *ps6
 	return safe
 }
 
+func ps6099BranchReachable(pass *analysis.Pass, branch *ast.BranchStmt, parents map[ast.Node]ast.Node) bool {
+	for node, parent := ast.Node(branch), parents[branch]; parent != nil; node, parent = parent, parents[parent] {
+		switch value := parent.(type) {
+		case *ast.IfStmt:
+			truth, known := ps6099BooleanCondition(pass, value.Cond)
+			if !known {
+				continue
+			}
+			inThen := ps6099NodeWithin(node, value.Body)
+			if truth != inThen {
+				return false
+			}
+		case *ast.ForStmt:
+			if ps6099NodeWithin(node, value.Body) {
+				if iterations, known := ps6099ForExactIterations(pass, value); known && iterations == 0 {
+					return false
+				}
+			}
+		case *ast.RangeStmt:
+			if ps6099NodeWithin(node, value.Body) {
+				if iterations, known := ps6099RangeExactIterations(pass, value.X); known && iterations == 0 {
+					return false
+				}
+			}
+		case *ast.SwitchStmt:
+			selected, known := ps6099SelectedSwitchClause(pass, value)
+			if !known {
+				continue
+			}
+			if selected < 0 {
+				return false
+			}
+			var clause *ast.CaseClause
+			for candidate := parents[branch]; candidate != nil && candidate != value; candidate = parents[candidate] {
+				if current, ok := candidate.(*ast.CaseClause); ok {
+					clause = current
+					break
+				}
+			}
+			if clause == nil {
+				continue
+			}
+			selectedClause := -1
+			for index, candidate := range value.Body.List {
+				if candidate == clause {
+					selectedClause = index
+					break
+				}
+			}
+			if selectedClause < selected {
+				return false
+			}
+			for index := selected; index < selectedClause; index++ {
+				candidate, ok := value.Body.List[index].(*ast.CaseClause)
+				if !ok || !ps6099CaseFallsThrough(candidate) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func ps6099BranchAffectsLoop(pass *analysis.Pass, scope *ast.BlockStmt, branch *ast.BranchStmt, loop *ps6099Loop, parents map[ast.Node]ast.Node) bool {
+	if branch == nil || loop == nil {
+		return true
+	}
+	switch branch.Tok {
+	case token.FALLTHROUGH:
+		return false
+	case token.GOTO:
+		return true
+	case token.BREAK, token.CONTINUE:
+	default:
+		return true
+	}
+	target := ps6099BranchTarget(pass, scope, branch, parents)
+	if target == nil || target == loop.node || ps6099NodeWithin(loop.node, target) {
+		return true
+	}
+	switch target.(type) {
+	case *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+		return false
+	}
+	// A nested-loop branch changes the iteration transfer and remains outside
+	// the deliberately narrow flow proof until break/continue states are modeled.
+	return true
+}
+
+func ps6099BranchTarget(pass *analysis.Pass, scope *ast.BlockStmt, branch *ast.BranchStmt, parents map[ast.Node]ast.Node) ast.Node {
+	if branch == nil {
+		return nil
+	}
+	if branch.Label != nil {
+		label := pass.TypesInfo.ObjectOf(branch.Label)
+		var target ast.Node
+		ast.Inspect(scope, func(node ast.Node) bool {
+			if target != nil {
+				return false
+			}
+			statement, ok := node.(*ast.LabeledStmt)
+			if ok && (label != nil && pass.TypesInfo.ObjectOf(statement.Label) == label ||
+				label == nil && statement.Label.Name == branch.Label.Name) {
+				target = statement.Stmt
+				return false
+			}
+			return true
+		})
+		return target
+	}
+	for parent := parents[branch]; parent != nil; parent = parents[parent] {
+		switch branch.Tok {
+		case token.BREAK:
+			switch parent.(type) {
+			case *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+				return parent
+			}
+		case token.CONTINUE:
+			switch parent.(type) {
+			case *ast.ForStmt, *ast.RangeStmt:
+				return parent
+			}
+		}
+	}
+	return nil
+}
+
 func ps6099LoopAddressTaken(pass *analysis.Pass, scope *ast.BlockStmt, loop *ps6099Loop) bool {
 	taken := false
+	parents := ps6087Parents(scope)
+	reachable := ps6099ReachableNodesInBlock(pass, scope, parents)
 	ast.Inspect(scope, func(node ast.Node) bool {
 		if taken {
 			return false
 		}
 		unary, ok := node.(*ast.UnaryExpr)
-		if ok && unary.Op == token.AND && ps6099LoopVariable(pass, unary.X, loop) {
+		if ok && reachable[unary] && unary.Op == token.AND && ps6099LoopVariable(pass, unary.X, loop) {
 			taken = true
 			return false
 		}
@@ -3103,6 +3306,67 @@ func ps6099ForGuaranteedEntry(pass *analysis.Pass, loop *ast.ForStmt) bool {
 		return bound != nil && constant.Compare(bound, condition.Op, initial)
 	}
 	return false
+}
+
+func ps6099ForNeverTerminates(pass *analysis.Pass, loop *ast.ForStmt) bool {
+	if loop == nil || !ps6099ForGuaranteedEntry(pass, loop) {
+		return false
+	}
+	initializer, ok := loop.Init.(*ast.AssignStmt)
+	if !ok || initializer.Tok != token.DEFINE || len(initializer.Lhs) != 1 {
+		return false
+	}
+	identifier, ok := ps2110Unparen(initializer.Lhs[0]).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	object := pass.TypesInfo.Defs[identifier]
+	if object == nil {
+		return false
+	}
+	if loop.Post != nil {
+		step, known := ps6099ForStep(pass, loop.Post, object)
+		if !known || step != 0 {
+			return false
+		}
+	}
+	stable := true
+	ast.Inspect(loop.Body, func(node ast.Node) bool {
+		if !stable {
+			return false
+		}
+		switch value := node.(type) {
+		case *ast.AssignStmt:
+			for _, left := range value.Lhs {
+				if ps6099Object(pass, left, object) {
+					stable = false
+					return false
+				}
+			}
+		case *ast.IncDecStmt:
+			if ps6099Object(pass, value.X, object) {
+				stable = false
+				return false
+			}
+		case *ast.RangeStmt:
+			if ps6099Object(pass, value.Key, object) || ps6099Object(pass, value.Value, object) {
+				stable = false
+				return false
+			}
+		case *ast.UnaryExpr:
+			if value.Op == token.AND && ps6099Object(pass, value.X, object) {
+				stable = false
+				return false
+			}
+		case *ast.BranchStmt:
+			if value.Tok == token.BREAK || value.Tok == token.GOTO {
+				stable = false
+				return false
+			}
+		}
+		return true
+	})
+	return stable
 }
 
 func ps6099ForExactIterations(pass *analysis.Pass, loop *ast.ForStmt) (uint64, bool) {

@@ -82,6 +82,40 @@ func expWithMaybeLog(condition bool, value float64) float64 {
 	return expWithFlag(condition && math.Log(value) > 0, value)
 }
 
+func alwaysPanic(value float64) float64 {
+	panic(value)
+}
+
+func expAfterPanic(value float64) float64 {
+	return math.Exp(alwaysPanic(value))
+}
+
+func neverReturns(value float64) float64 {
+	for {
+		_ = value
+	}
+}
+
+func expAfterNonreturn(value float64) float64 {
+	return math.Exp(neverReturns(value))
+}
+
+func expWithCopy(value float64, scratch []byte) float64 {
+	return math.Exp(value + float64(copy(scratch, scratch)))
+}
+
+func zeroWithCopy(scratch []byte) float64 {
+	return float64(copy(scratch, scratch))
+}
+
+func expViaNestedCopy(value float64, scratch []byte) float64 {
+	return math.Exp(value + zeroWithCopy(scratch))
+}
+
+func expWithLength(value float64, scratch []byte) float64 {
+	return math.Exp(value + float64(len(scratch)))
+}
+
 func noInterfaceDestination(output []any, input []float64) {
 	for index := range input {
 		output[index] = math.Exp(input[index])
@@ -133,6 +167,36 @@ func noLiveNestedHelper(output, input []float64) {
 func noMaybeNestedHelper(output, input []float64, condition bool) {
 	for index := range input {
 		output[index] = expWithMaybeLog(condition, input[index])
+	}
+}
+
+func noScalarAfterPanickingArgument(output, input []float64) {
+	for index := range input {
+		output[index] = expAfterPanic(input[index])
+	}
+}
+
+func noScalarAfterNonreturningArgument(output, input []float64) {
+	for index := range input {
+		output[index] = expAfterNonreturn(input[index])
+	}
+}
+
+func noRuntimeCopyHiddenByScalarHelper(output, input []float64, scratch []byte) {
+	for index := range input {
+		output[index] = expWithCopy(input[index], scratch)
+	}
+}
+
+func noNestedRuntimeCopyHiddenByScalarHelper(output, input []float64, scratch []byte) {
+	for index := range input {
+		output[index] = expViaNestedCopy(input[index], scratch)
+	}
+}
+
+func pureBuiltinInScalarHelper(output, input []float64, scratch []byte) {
+	for index := range input { // want `loop calls scalar math.Exp exactly once per independent output element.*ExpSIMDF64`
+		output[index] = expWithLength(input[index], scratch)
 	}
 }
 
