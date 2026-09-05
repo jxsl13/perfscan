@@ -52,15 +52,18 @@ composite elements, B.Run names/callbacks, and RunParallel callbacks are
 evaluated exactly once in Go order. Local deferred calls run in path-correlated
 LIFO order at normal returns and panic unwinds using the then-current timer
 state; their callable and argument values are snapshotted at registration.
+A finite set of stored callables selected by earlier branches keeps separate
+deferred unwind paths instead of becoming an opaque joined invocation.
 A panic makes the following body unreachable, and only a direct recover in a
 deferred frame produces a normal recovered exit. Bound value-receiver methods
 snapshot receiver fields, while pointer-receiver methods retain the receiver
 binding. Fresh new(T) pointees are tracked as distinct zero-initialized local
 storage while they remain transitively reachable through returned aggregates,
 closures, aliases, or deferred effects.
-runtime.Goexit and testing Fatal, Fatalf, or FailNow run the current deferred
-stack and make caller continuation unreachable; Error and Fail remain
-nonterminal.
+runtime.Goexit, os.Exit, and testing Fatal, Fatalf, or FailNow make caller
+continuation unreachable; testing terminals reached through a locally proven
+testing-compatible interface retain that behavior, while Error and Fail remain
+nonterminal and unknown interface implementations stay opaque.
 It recognizes NormFloat64 or centered uniform input from math/rand and
 math/rand/v2, but
 rejects overwritten, shadowed, unsigned/nonnegative, untimed, or
@@ -76,7 +79,10 @@ segments at constant induction comparisons. Bounded for tails recheck their
 real condition between segments and abandon fixed chronology when a body write
 changes the stored bound or induction value.
 Map allocation hints are never treated as lengths, and
-mutations that can change map iteration invalidate fixed-trip assumptions. Unknown or capped loops preserve
+mutations that can change map iteration invalidate fixed-trip assumptions.
+Exact one-entry maps preserve key and value provenance through range without
+assuming an order for larger maps, while delete and clear invalidate every
+tracked alias of the affected backing map. Unknown or capped loops preserve
 inputs they cannot write and conservatively invalidate possible future writes.
 Forward gotos and labeled loop controls merge
 only paths that can reach their target, while backward-goto regions are treated
@@ -175,6 +181,9 @@ type ps6101Callable struct {
 	typeArguments     map[*types.TypeParam]types.Type
 	captures          map[ps6101Location]ps6101Value
 	captureAliases    map[types.Object]ps6101Location
+	alternatives      []*ps6101Callable
+	selectionState    map[ps6101Location]ps6101Value
+	selectionAliases  map[types.Object]ps6101Location
 }
 
 // ps6101DeferredCall is a deferred invocation after its function value and
@@ -182,9 +191,11 @@ type ps6101Callable struct {
 // call dispatcher, while values makes replaying it at function exit obey Go's
 // "evaluate now, invoke later" rule without running an operand twice.
 type ps6101DeferredCall struct {
-	call       *ast.CallExpr
-	values     map[ast.Expr]ps6101Value
-	canRecover bool
+	call             *ast.CallExpr
+	values           map[ast.Expr]ps6101Value
+	selectionState   map[ps6101Location]ps6101Value
+	selectionAliases map[types.Object]ps6101Location
+	canRecover       bool
 }
 
 type ps6101Location struct {
@@ -1314,6 +1325,8 @@ func ps6101CloneDeferredStack(stack []ps6101DeferredCall) []ps6101DeferredCall {
 	for index, deferred := range stack {
 		cloned[index].call = deferred.call
 		cloned[index].canRecover = deferred.canRecover
+		cloned[index].selectionState = ps6101CloneState(deferred.selectionState)
+		cloned[index].selectionAliases = maps.Clone(deferred.selectionAliases)
 		if len(deferred.values) > 0 {
 			cloned[index].values = make(map[ast.Expr]ps6101Value, len(deferred.values))
 			for expression, value := range deferred.values {
@@ -1349,12 +1362,66 @@ func (engine *ps6101Engine) registerDeferredCall(call *ast.CallExpr) bool {
 	if len(engine.defers) == 0 {
 		engine.defers = [][]ps6101DeferredCall{{}}
 	}
-	canRecover := engine.deferredCallableCanRecover(call, values[call.Fun].callable)
-	for index := range engine.defers {
-		deferred := ps6101DeferredCall{call: call, values: values, canRecover: canRecover}
-		engine.defers[index] = append(engine.defers[index], deferred)
+	callables := ps6101CallableAlternatives(values[call.Fun].callable)
+	if len(callables) == 0 {
+		callables = []*ps6101Callable{nil}
 	}
+	paths := make([][]ps6101DeferredCall, 0, min(len(engine.defers)*len(callables), ps6101DeferredPathLimit))
+	canRecover := false
+	for _, stack := range engine.defers {
+		for _, callable := range callables {
+			if len(paths) >= ps6101DeferredPathLimit {
+				engine.deferOpaque = true
+				break
+			}
+			snapshots := make(map[ast.Expr]ps6101Value, len(values))
+			for expression, value := range values {
+				snapshots[expression] = ps6101CloneValue(value)
+			}
+			function := snapshots[call.Fun]
+			function.callable = callable
+			snapshots[call.Fun] = function
+			recovers := engine.deferredCallableCanRecover(call, callable)
+			canRecover = canRecover || recovers
+			path := ps6101CloneDeferredStack(stack)
+			deferred := ps6101DeferredCall{call: call, values: snapshots, canRecover: recovers}
+			if callable != nil {
+				deferred.selectionState = ps6101CloneState(callable.selectionState)
+				deferred.selectionAliases = maps.Clone(callable.selectionAliases)
+			}
+			path = append(path, deferred)
+			paths = append(paths, path)
+		}
+	}
+	engine.defers = paths
 	return canRecover
+}
+
+func ps6101CallableAlternatives(callable *ps6101Callable) []*ps6101Callable {
+	if callable == nil {
+		return nil
+	}
+	if len(callable.alternatives) == 0 {
+		return []*ps6101Callable{callable}
+	}
+	result := make([]*ps6101Callable, 0, len(callable.alternatives))
+	seen := make(map[*ps6101Callable]bool)
+	var appendCallable func(*ps6101Callable)
+	appendCallable = func(candidate *ps6101Callable) {
+		if candidate == nil || seen[candidate] {
+			return
+		}
+		seen[candidate] = true
+		if len(candidate.alternatives) > 0 {
+			for _, alternative := range candidate.alternatives {
+				appendCallable(alternative)
+			}
+			return
+		}
+		result = append(result, candidate)
+	}
+	appendCallable(callable)
+	return result
 }
 
 func (engine *ps6101Engine) invokeDeferredCall(deferred ps6101DeferredCall, panicking bool) []ps6101DeferredOutcome {
@@ -1370,6 +1437,16 @@ func (engine *ps6101Engine) invokeDeferredCall(deferred ps6101DeferredCall, pani
 	engine.recoverFrame, engine.recoverCalled = 0, false
 	engine.recoverVariants = nil
 	engine.lastCallExits, engine.lastCallEscaped = nil, nil
+	for location, value := range deferred.selectionState {
+		if _, present := engine.state[location]; !present {
+			engine.state[location] = ps6101CloneValue(value)
+		}
+	}
+	for object, location := range deferred.selectionAliases {
+		if _, present := engine.aliases[object]; !present {
+			engine.aliases[object] = location
+		}
+	}
 	if panicking && deferred.canRecover {
 		// Local function and literal calls enter exactly one frame here. A
 		// recover reached through another call is therefore at a deeper depth
@@ -4425,11 +4502,19 @@ func (engine *ps6101Engine) analyzeRangeTransfer(
 }
 
 func (engine *ps6101Engine) bindRangeIteration(statement *ast.RangeStmt, ranged ps6101Value, iteration int64, exact bool, count int64, countOK bool) {
+	mapType := false
+	if typ := engine.pass.TypesInfo.TypeOf(statement.X); typ != nil {
+		_, mapType = types.Unalias(typ).Underlying().(*types.Map)
+	}
+	mapKey, mapValue, exactMapEntry := ps6101SingleMapEntry(ranged)
+	exactMapEntry = exactMapEntry && countOK && count == 1
 	if identifier, ok := statement.Key.(*ast.Ident); ok && identifier.Name != "_" {
 		value := ps6101Value{}
-		if exact {
+		if mapType && exactMapEntry {
+			value = ps6101ConstantValue(mapKey)
+		} else if !mapType && exact {
 			value = ps6101ConstantValue(constant.MakeInt64(iteration))
-		} else if countOK && iteration >= 0 && iteration < count {
+		} else if !mapType && countOK && iteration >= 0 && iteration < count {
 			basic, integer := types.Unalias(engine.pass.TypesInfo.TypeOf(identifier)).Underlying().(*types.Basic)
 			if integer && basic.Info()&types.IsInteger != 0 {
 				value.kind = ps6101Nonnegative
@@ -4442,7 +4527,12 @@ func (engine *ps6101Engine) bindRangeIteration(statement *ast.RangeStmt, ranged 
 	}
 	if identifier, ok := statement.Value.(*ast.Ident); ok && identifier.Name != "_" {
 		value := ranged
-		if location, ok := engine.location(statement.X, true); ok && exact {
+		if mapType {
+			value = ps6101Value{}
+			if exactMapEntry {
+				value = ps6101CloneValue(mapValue)
+			}
+		} else if location, ok := engine.location(statement.X, true); ok && exact {
 			element := location
 			element.path += "[" + strconv.FormatInt(iteration, 10) + "]"
 			if stored, present := engine.state[element]; present {
@@ -4453,6 +4543,45 @@ func (engine *ps6101Engine) bindRangeIteration(statement *ast.RangeStmt, ranged 
 	}
 }
 
+// ps6101SingleMapEntry resolves a map range only when the abstract map has one
+// exact top-level entry. Map order is deliberately irrelevant in that case;
+// larger or unknown maps keep their range bindings conservative.
+func ps6101SingleMapEntry(value ps6101Value) (constant.Value, ps6101Value, bool) {
+	var key constant.Value
+	var entry ps6101Value
+	found := false
+	for path, candidate := range value.fieldValues() {
+		parsed := ps6101MapPathConstant(path)
+		if parsed == nil {
+			continue
+		}
+		if found {
+			return nil, ps6101Value{}, false
+		}
+		key, entry, found = parsed, ps6101CloneValue(candidate), true
+	}
+	return key, entry, found
+}
+
+func ps6101MapPathConstant(path string) constant.Value {
+	if len(path) < 3 || path[0] != '[' || path[len(path)-1] != ']' {
+		return nil
+	}
+	literal := path[1 : len(path)-1]
+	if literal == "true" {
+		return constant.MakeBool(true)
+	}
+	if literal == "false" {
+		return constant.MakeBool(false)
+	}
+	for _, kind := range []token.Token{token.STRING, token.INT, token.FLOAT, token.IMAG} {
+		if value := constant.MakeFromLiteral(literal, kind, 0); value.Kind() != constant.Unknown {
+			return value
+		}
+	}
+	return nil
+}
+
 func (engine *ps6101Engine) mergeFallthrough(states []map[ps6101Location]ps6101Value, aliases []map[types.Object]ps6101Location) {
 	if len(states) == 0 {
 		engine.state = make(map[ps6101Location]ps6101Value)
@@ -4460,11 +4589,10 @@ func (engine *ps6101Engine) mergeFallthrough(states []map[ps6101Location]ps6101V
 		return
 	}
 	engine.state = engine.copyState(states[0])
-	for _, state := range states[1:] {
-		engine.state = ps6101MergeStates(engine.state, state)
-	}
 	engine.aliases = engine.copyAliases(aliases[0])
-	for _, alias := range aliases[1:] {
+	for index, state := range states[1:] {
+		alias := aliases[index+1]
+		engine.state = ps6101MergeStates(engine.state, state, engine.aliases, alias)
 		engine.aliases = ps6101MergeAliases(engine.aliases, alias)
 	}
 }
@@ -4695,6 +4823,15 @@ func (engine *ps6101Engine) retainFreshReferencedRoots(roots map[types.Object]bo
 			}
 			for _, alias := range callable.captureAliases {
 				retainLocation(alias)
+			}
+			for _, value := range callable.selectionState {
+				retainValue(value)
+			}
+			for _, alias := range callable.selectionAliases {
+				retainLocation(alias)
+			}
+			for _, alternative := range callable.alternatives {
+				retainValue(ps6101Value{callable: alternative})
 			}
 		}
 		for _, candidate := range candidates {
@@ -5764,6 +5901,11 @@ func (engine *ps6101Engine) evalUncached(expression ast.Expr) ps6101Value {
 				if method, ok := selection.Obj().(*types.Func); ok && ps6101InterfaceType(selection.Recv()) {
 					switch selection.Kind() {
 					case types.MethodVal:
+						if testingMethod := engine.dynamicTestingMethod(baseValue, method); testingMethod != "" {
+							callable := &ps6101Callable{testingMethod: testingMethod, receiver: selector.X}
+							engine.snapshotCallableReceiver(callable, selector.X, baseValue)
+							return ps6101Value{callable: callable}
+						}
 						if declaration := engine.dynamicMethodDeclaration(baseValue, method); declaration != nil {
 							callable := &ps6101Callable{function: declaration, receiver: selector.X}
 							engine.snapshotCallableReceiver(callable, selector.X, baseValue)
@@ -6128,6 +6270,26 @@ func (engine *ps6101Engine) dynamicMethodDeclaration(receiver ps6101Value, metho
 	return engine.functionDeclaration(implementation)
 }
 
+func (engine *ps6101Engine) dynamicTestingMethod(receiver ps6101Value, method *types.Func) string {
+	if method == nil || !receiver.testing {
+		return ""
+	}
+	dynamic := engine.resolveTypeArgument(receiver.analysisValue().dynamic)
+	if dynamic == nil {
+		return ""
+	}
+	implementation, _, _ := types.LookupFieldOrMethod(dynamic, false, method.Pkg(), method.Name())
+	function, ok := implementation.(*types.Func)
+	if !ok || function.Pkg() == nil || function.Pkg().Path() != "testing" {
+		return ""
+	}
+	switch function.Name() {
+	case "Fatal", "Fatalf", "FailNow", "Error", "Errorf", "Fail":
+		return function.Name()
+	}
+	return ""
+}
+
 func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 	if call == nil {
 		return nil
@@ -6143,6 +6305,13 @@ func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 	// result also prevents method receivers and returned function values from
 	// being evaluated again during dispatch.
 	target := engine.eval(call.Fun)
+	if engine.osExitCall(call) {
+		for _, argument := range call.Args {
+			engine.eval(argument)
+		}
+		engine.goexitEscaped = true
+		return nil
+	}
 	if target.callable != nil && target.callable.testingMethod != "" {
 		if results, handled := engine.invokeTestingMethod(call, target.callable); handled {
 			return results
@@ -6251,7 +6420,11 @@ func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 					engine.eval(argument)
 				}
 				if len(call.Args) > 0 {
-					engine.invalidateSharedArgument(call.Args[0])
+					if builtin.Name() == "clear" || builtin.Name() == "delete" {
+						engine.invalidateMapMutation(call, builtin.Name())
+					} else {
+						engine.invalidateSharedArgument(call.Args[0])
+					}
 				}
 				return nil
 			default:
@@ -6272,6 +6445,12 @@ func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 				return nil
 			}
 			receiver := engine.eval(call.Args[0])
+			if testingMethod := engine.dynamicTestingMethod(receiver, target.callable.interfaceMethod); testingMethod != "" {
+				adjusted := *call
+				adjusted.Args = call.Args[1:]
+				results, _ := engine.invokeTestingMethod(&adjusted, &ps6101Callable{testingMethod: testingMethod})
+				return results
+			}
 			declaration := engine.dynamicMethodDeclaration(receiver, target.callable.interfaceMethod)
 			if declaration == nil {
 				engine.invalidateSharedArgument(call.Args[0])
@@ -6338,6 +6517,13 @@ func (engine *ps6101Engine) invokeTestingMethod(call *ast.CallExpr, callable *ps
 		}
 	}
 	switch callable.testingMethod {
+	case "Fatal", "Fatalf", "FailNow":
+		for _, argument := range adjusted.Args {
+			engine.eval(argument)
+			engine.invalidateSharedArgument(argument)
+		}
+		engine.goexitEscaped = true
+		return nil, true
 	case "ResetTimer":
 		for _, argument := range adjusted.Args {
 			engine.eval(argument)
@@ -6531,6 +6717,59 @@ func (engine *ps6101Engine) invalidateSharedArgument(argument ast.Expr) {
 	}
 	if location, ok := engine.location(argument, true); ok {
 		engine.invalidateLocationAndReferences(location)
+	}
+}
+
+// invalidateMapMutation invalidates both the backing map and every tracked
+// local owner that refers to it. Returned maps keep copied per-entry facts on
+// their caller bindings, so invalidating only the fresh backing location would
+// otherwise leave stale provenance visible through an alias.
+func (engine *ps6101Engine) invalidateMapMutation(call *ast.CallExpr, name string) {
+	if call == nil || len(call.Args) == 0 {
+		return
+	}
+	target, ok := engine.location(call.Args[0], true)
+	if !ok {
+		engine.invalidateSharedArgument(call.Args[0])
+		return
+	}
+	prefixes := []ps6101Location{target}
+	if raw, rawOK := engine.location(call.Args[0], false); rawOK && raw != target {
+		prefixes = append(prefixes, raw)
+	}
+	for object, alias := range engine.aliases {
+		if engine.followReference(alias) == target {
+			prefixes = append(prefixes, ps6101Location{root: object})
+		}
+	}
+	for location, value := range engine.state {
+		if location.path != "" || value.reference == nil {
+			continue
+		}
+		if engine.followReference(*value.reference) == target {
+			prefixes = append(prefixes, location)
+		}
+	}
+
+	segment := ""
+	if name == "delete" && len(call.Args) > 1 {
+		if key := engine.indexConstant(call.Args[1]); key != nil {
+			segment = "[" + key.ExactString() + "]"
+		}
+	}
+	seen := make(map[ps6101Location]bool, len(prefixes))
+	for _, prefix := range prefixes {
+		if prefix.root == nil {
+			continue
+		}
+		if segment != "" {
+			prefix.path += segment
+		}
+		if seen[prefix] {
+			continue
+		}
+		seen[prefix] = true
+		engine.invalidatePrefix(prefix)
 	}
 }
 
@@ -8016,11 +8255,26 @@ func (engine *ps6101Engine) terminalFailureCall(call *ast.CallExpr) bool {
 	if engine.runtimeGoexitCall(call) {
 		return true
 	}
+	if engine.osExitCall(call) {
+		return true
+	}
 	switch engine.testingMethod(call) {
 	case "Fatal", "Fatalf", "FailNow":
 		return true
 	}
 	return false
+}
+
+func (engine *ps6101Engine) osExitCall(call *ast.CallExpr) bool {
+	if call == nil {
+		return false
+	}
+	selector, ok := ps6101Unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != "Exit" {
+		return false
+	}
+	function, ok := identObject(engine.pass, selector.Sel).(*types.Func)
+	return ok && function.Pkg() != nil && function.Pkg().Path() == "os" && function.Name() == "Exit"
 }
 
 func (engine *ps6101Engine) runtimeGoexitCall(call *ast.CallExpr) bool {
@@ -8631,10 +8885,25 @@ func (engine *ps6101Engine) indexConstant(expression ast.Expr) constant.Value {
 	if value := engine.pass.TypesInfo.Types[expression].Value; value != nil {
 		return value
 	}
+	if conversion, ok := ps6101Unparen(expression).(*ast.CallExpr); ok && len(conversion.Args) == 1 {
+		target := engine.pass.TypesInfo.Types[conversion.Fun]
+		if target.IsType() && ps6101ComparableType(target.Type) {
+			if value := engine.indexConstant(conversion.Args[0]); value != nil {
+				return value
+			}
+		}
+	}
 	if location, ok := engine.location(expression, true); ok {
 		return engine.state[location].constant
 	}
 	return nil
+}
+
+func ps6101ComparableType(typ types.Type) bool {
+	if typ == nil {
+		return false
+	}
+	return types.Comparable(types.Unalias(typ))
 }
 
 func (engine *ps6101Engine) followReference(location ps6101Location) ps6101Location {
@@ -8731,6 +9000,10 @@ func (engine *ps6101Engine) cloneState() map[ps6101Location]ps6101Value {
 }
 
 func (engine *ps6101Engine) copyState(source map[ps6101Location]ps6101Value) map[ps6101Location]ps6101Value {
+	return ps6101CloneState(source)
+}
+
+func ps6101CloneState(source map[ps6101Location]ps6101Value) map[ps6101Location]ps6101Value {
 	copy := make(map[ps6101Location]ps6101Value, len(source))
 	for location, value := range source {
 		copy[location] = ps6101CloneValue(value)
@@ -8750,15 +9023,101 @@ func (engine *ps6101Engine) copyAliases(source map[types.Object]ps6101Location) 
 	return copy
 }
 
-func ps6101MergeStates(left, right map[ps6101Location]ps6101Value) map[ps6101Location]ps6101Value {
+func ps6101MergeStates(
+	left, right map[ps6101Location]ps6101Value,
+	leftAliases, rightAliases map[types.Object]ps6101Location,
+) map[ps6101Location]ps6101Value {
 	merged := make(map[ps6101Location]ps6101Value)
 	for location, leftValue := range left {
 		rightValue, ok := right[location]
-		if ok && ps6101SameValue(leftValue, rightValue) {
+		if !ok {
+			continue
+		}
+		if ps6101SameValue(leftValue, rightValue) {
 			merged[location] = ps6101CloneValue(leftValue)
+			continue
+		}
+		if callable, ok := ps6101MergeCallableValue(
+			leftValue, rightValue, left, right, leftAliases, rightAliases,
+		); ok {
+			merged[location] = callable
 		}
 	}
 	return merged
+}
+
+// ps6101MergeCallableValue retains the finite set of function values selected
+// by control flow. The alternatives are consumed when a later defer snapshots
+// the function operand, so each callable gets its own unwind path instead of a
+// branch join turning the deferred invocation opaque.
+func ps6101MergeCallableValue(
+	left, right ps6101Value,
+	leftState, rightState map[ps6101Location]ps6101Value,
+	leftAliases, rightAliases map[types.Object]ps6101Location,
+) (ps6101Value, bool) {
+	if left.callable == nil || right.callable == nil {
+		return ps6101Value{}, false
+	}
+	leftCallable, rightCallable := left.callable, right.callable
+	left.callable, right.callable = nil, nil
+	left.revision, left.identity = 0, 0
+	right.revision, right.identity = 0, 0
+	leftAnalysis, rightAnalysis := left.mutableAnalysis(), right.mutableAnalysis()
+	leftAnalysis.squareID, leftAnalysis.squareSig, leftAnalysis.squareSign = 0, "", 0
+	rightAnalysis.squareID, rightAnalysis.squareSig, rightAnalysis.squareSign = 0, "", 0
+	if !ps6101SameValue(left, right) {
+		return ps6101Value{}, false
+	}
+	result := ps6101CloneValue(left)
+	leftAlternatives := ps6101CallableAlternatives(leftCallable)
+	for index, callable := range leftAlternatives {
+		leftAlternatives[index] = ps6101CallableSelection(callable, leftState, rightState, leftAliases, rightAliases)
+	}
+	rightAlternatives := ps6101CallableAlternatives(rightCallable)
+	for index, callable := range rightAlternatives {
+		rightAlternatives[index] = ps6101CallableSelection(callable, rightState, leftState, rightAliases, leftAliases)
+	}
+	alternatives := append(leftAlternatives, rightAlternatives...)
+	if len(alternatives) > ps6101DeferredPathLimit {
+		alternatives = alternatives[:ps6101DeferredPathLimit]
+	}
+	result.callable = &ps6101Callable{alternatives: alternatives}
+	return result, true
+}
+
+func ps6101CallableSelection(
+	callable *ps6101Callable,
+	selected, other map[ps6101Location]ps6101Value,
+	selectedAliases, otherAliases map[types.Object]ps6101Location,
+) *ps6101Callable {
+	if callable == nil {
+		return nil
+	}
+	result := *callable
+	result.selectionState = ps6101CloneState(callable.selectionState)
+	if result.selectionState == nil {
+		result.selectionState = make(map[ps6101Location]ps6101Value)
+	}
+	for location, value := range selected {
+		if value.callable != nil {
+			continue
+		}
+		if otherValue, present := other[location]; present && ps6101SameValue(value, otherValue) {
+			continue
+		}
+		result.selectionState[location] = ps6101CloneValue(value)
+	}
+	result.selectionAliases = maps.Clone(callable.selectionAliases)
+	if result.selectionAliases == nil {
+		result.selectionAliases = make(map[types.Object]ps6101Location)
+	}
+	for object, location := range selectedAliases {
+		if otherLocation, present := otherAliases[object]; present && otherLocation == location {
+			continue
+		}
+		result.selectionAliases[object] = location
+	}
+	return &result
 }
 
 func ps6101MergeAliases(left, right map[types.Object]ps6101Location) map[types.Object]ps6101Location {
