@@ -23,7 +23,7 @@ var ps6101BenchmarkInputKeywords = [...]string{
 	"gate", "logit", "routing", "score", "mixture", "expert",
 }
 
-var ps6101AggregateKeywords = [...]string{"denom", "sum", "total", "norm", "scale", "mass", "score"}
+var ps6101AggregateKeywords = [...]string{"weight", "denom", "sum", "total", "norm", "scale", "mass", "score"}
 
 // PS6101 starts the perfscan-original verification block. Benchmark validity is
 // a verification concern even when the benchmark itself is statistically stable.
@@ -39,8 +39,9 @@ sign/nonzero/threshold gate may time a cheap fallback rather than the named
 kernel. This is a benchmark-validity issue: a statistically stable timing can
 still measure the wrong branch mixture.
 
-The detector follows object-specific input and aggregate values through direct
-local helper and method calls, direct or stored numeric generic instantiations,
+The detector follows object-specific input and aggregate values, including
+directly gated weights, through direct local helper and method calls, direct or
+stored numeric generic instantiations,
 positional variadic calls, interface boxing, single/comma-ok assertions and type
 switches, testing.B.Run sub-benchmarks, and testing.B.RunParallel workers.
 Direct, method-expression, and stored testing.B method calls share the same
@@ -62,7 +63,7 @@ storage while they remain transitively reachable through returned aggregates,
 closures, aliases, or deferred effects.
 runtime.Goexit, os.Exit, and testing Fatal, Fatalf, or FailNow make caller
 continuation unreachable; testing terminals reached through a locally proven
-testing-compatible interface retain that behavior, while Error and Fail remain
+testing-compatible interface retain that behavior, while Error, Errorf, and Fail remain
 nonterminal and unknown interface implementations stay opaque.
 It recognizes NormFloat64 or centered uniform input from math/rand and
 math/rand/v2, but
@@ -80,9 +81,11 @@ real condition between segments and abandon fixed chronology when a body write
 changes the stored bound or induction value.
 Map allocation hints are never treated as lengths, and
 mutations that can change map iteration invalidate fixed-trip assumptions.
-Exact one-entry maps preserve key and value provenance through range without
-assuming an order for larger maps, while delete and clear invalidate every
-tracked alias of the affected backing map. Unknown or capped loops preserve
+Exact one-entry maps preserve nested key and value provenance through range,
+including constant keys boxed as interface values, without assuming an order
+for larger maps. Delete and clear invalidate values through every tracked alias
+of the affected backing map while preserving the alias topology for later
+writes. Unknown or capped loops preserve
 inputs they cannot write and conservatively invalidate possible future writes.
 Forward gotos and labeled loop controls merge
 only paths that can reach their target, while backward-goto regions are treated
@@ -3858,6 +3861,18 @@ func (engine *ps6101Engine) testingExpression(expression ast.Expr) bool {
 }
 
 func (engine *ps6101Engine) invalidatePrefix(prefix ps6101Location) {
+	engine.invalidateValuePrefix(prefix)
+	for object, location := range engine.aliases {
+		if object == prefix.root || ps6101HasLocationPrefix(location, prefix) {
+			delete(engine.aliases, object)
+		}
+	}
+}
+
+// invalidateValuePrefix clears facts without severing reference identity.
+// Map delete and clear mutate a backing object: aliases survive the mutation
+// and must observe later writes made through any other alias.
+func (engine *ps6101Engine) invalidateValuePrefix(prefix ps6101Location) {
 	engine.killPrefix(prefix)
 	// Keep an explicit unknown at the written location so an indexed or field
 	// read cannot fall back to stale aggregate provenance from its parent.
@@ -3870,11 +3885,6 @@ func (engine *ps6101Engine) invalidatePrefix(prefix ps6101Location) {
 	for location := range engine.counterRevs {
 		if ps6101HasLocationPrefix(location, prefix) {
 			delete(engine.counterRevs, location)
-		}
-	}
-	for object, location := range engine.aliases {
-		if object == prefix.root || ps6101HasLocationPrefix(location, prefix) {
-			delete(engine.aliases, object)
 		}
 	}
 }
@@ -4549,18 +4559,61 @@ func (engine *ps6101Engine) bindRangeIteration(statement *ast.RangeStmt, ranged 
 func ps6101SingleMapEntry(value ps6101Value) (constant.Value, ps6101Value, bool) {
 	var key constant.Value
 	var entry ps6101Value
-	found := false
+	var prefix string
+	children := make(map[string]ps6101Value)
+	found, parentFound := false, false
 	for path, candidate := range value.fieldValues() {
-		parsed := ps6101MapPathConstant(path)
-		if parsed == nil {
+		parsed, head, remainder, ok := ps6101MapPathHead(path)
+		if !ok {
 			continue
 		}
-		if found {
+		if found && head != prefix {
 			return nil, ps6101Value{}, false
 		}
-		key, entry, found = parsed, ps6101CloneValue(candidate), true
+		if !found {
+			key, prefix, found = parsed, head, true
+		}
+		if remainder == "" {
+			entry, parentFound = ps6101CloneValue(candidate), true
+			continue
+		}
+		remainder = strings.TrimPrefix(remainder, ".")
+		if remainder != "" {
+			children[remainder] = ps6101CloneValue(candidate)
+		}
 	}
-	return key, entry, found
+	if !found || !parentFound {
+		return nil, ps6101Value{}, false
+	}
+	for path, child := range entry.fieldValues() {
+		children[path] = ps6101CloneValue(child)
+	}
+	entry.setFields(children)
+	return key, entry, true
+}
+
+// ps6101MapPathHead splits one flattened exact map-entry path into its first
+// constant key and the path below that entry. Trying each closing bracket is
+// deliberate: a quoted string key may itself contain a closing bracket.
+func ps6101MapPathHead(path string) (constant.Value, string, string, bool) {
+	if len(path) < 3 || path[0] != '[' {
+		return nil, "", "", false
+	}
+	for end := 1; end < len(path); end++ {
+		if path[end] != ']' {
+			continue
+		}
+		head := path[:end+1]
+		key := ps6101MapPathConstant(head)
+		if key == nil {
+			continue
+		}
+		remainder := path[end+1:]
+		if remainder == "" || remainder[0] == '.' || remainder[0] == '[' {
+			return key, head, remainder, true
+		}
+	}
+	return nil, "", "", false
 }
 
 func ps6101MapPathConstant(path string) constant.Value {
@@ -5034,7 +5087,7 @@ func (engine *ps6101Engine) compositeSegment(composite *ast.CompositeLit, elemen
 	if keyed, ok := element.(*ast.KeyValueExpr); ok {
 		if typ := engine.pass.TypesInfo.TypeOf(composite); typ != nil {
 			if _, isMap := types.Unalias(typ).Underlying().(*types.Map); isMap {
-				if value := engine.pass.TypesInfo.Types[keyed.Key].Value; value != nil {
+				if value := engine.indexConstant(keyed.Key); value != nil {
 					return "[" + value.ExactString() + "]", ""
 				}
 				return "", ""
@@ -6305,7 +6358,7 @@ func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 	// result also prevents method receivers and returned function values from
 	// being evaluated again during dispatch.
 	target := engine.eval(call.Fun)
-	if engine.osExitCall(call) {
+	if engine.osExitCall(call) || engine.runtimeGoexitCall(call) {
 		for _, argument := range call.Args {
 			engine.eval(argument)
 		}
@@ -6769,7 +6822,7 @@ func (engine *ps6101Engine) invalidateMapMutation(call *ast.CallExpr, name strin
 			continue
 		}
 		seen[prefix] = true
-		engine.invalidatePrefix(prefix)
+		engine.invalidateValuePrefix(prefix)
 	}
 }
 
