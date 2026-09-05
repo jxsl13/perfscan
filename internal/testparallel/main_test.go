@@ -12,14 +12,17 @@ import (
 func TestListTestsUsesRequestedRaceBuild(t *testing.T) {
 	t.Parallel()
 	const fixture = "./testdata/racefixture"
-	ordinary, err := listTests(context.Background(), fixture, false)
+	ordinary, err := listTests(context.Background(), fixture, false, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if slices.Contains(ordinary, "TestRaceBuildOnly") {
 		t.Fatalf("ordinary discovery unexpectedly included race-tagged test: %v", ordinary)
 	}
-	traced, err := listTests(context.Background(), fixture, true)
+	if !slices.Contains(ordinary, "Test") {
+		t.Fatalf("ordinary discovery omitted valid bare Test function: %v", ordinary)
+	}
+	traced, err := listTests(context.Background(), fixture, true, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,8 +44,8 @@ func TestListPackagesUsesRequestedRaceBuild(t *testing.T) {
 
 func TestParseTestNamesExcludesBenchmarksAndNoise(t *testing.T) {
 	t.Parallel()
-	got := parseTestNames("TestBeta\nBenchmarkHot\nExampleThing\nFuzzInput\nok pkg 0.1s\nTestAlpha\n")
-	want := []string{"ExampleThing", "FuzzInput", "TestAlpha", "TestBeta"}
+	got := parseTestNames("TestBeta\nBenchmarkHot\nExampleThing\nFuzzInput\nok pkg 0.1s\nTestAlpha\nTestAlpha\nTestlower\nTest Fake\nTest\nFuzz\nExample\nFuzzlower\nExamplelower\n")
+	want := []string{"Example", "ExampleThing", "Fuzz", "FuzzInput", "Test", "TestAlpha", "TestBeta"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseTestNames() = %v, want %v", got, want)
 	}
@@ -54,6 +57,111 @@ func TestPartitionIsStableAndBalanced(t *testing.T) {
 	want := [][]string{{"A", "D"}, {"B", "E"}, {"C"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("partition() = %v, want %v", got, want)
+	}
+}
+
+func TestValidateExternalShard(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name         string
+		index, count int
+		wantError    bool
+	}{
+		{name: "single shard", index: 0, count: 1},
+		{name: "last shard", index: 3, count: 4},
+		{name: "zero count", index: 0, count: 0, wantError: true},
+		{name: "negative count", index: 0, count: -1, wantError: true},
+		{name: "negative index", index: -1, count: 2, wantError: true},
+		{name: "index at count", index: 2, count: 2, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if err := validateExternalShard(test.index, test.count); (err != nil) != test.wantError {
+				t.Fatalf("validateExternalShard(%d, %d) error = %v, wantError = %v", test.index, test.count, err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestExternalShardsAreStableDisjointAndComplete(t *testing.T) {
+	t.Parallel()
+	names := []string{"A", "B", "C", "D", "E", "F", "G"}
+	for _, count := range []int{1, 2, 3, 8} {
+		seen := make(map[string]int, len(names))
+		for index := range count {
+			selected := selectExternalShard("example.com/p", names, index, count)
+			if !slices.IsSorted(selected) {
+				t.Fatalf("count %d index %d: unstable order %v", count, index, selected)
+			}
+			for _, name := range selected {
+				seen[name]++
+			}
+		}
+		for _, name := range names {
+			if seen[name] != 1 {
+				t.Fatalf("count %d: %s appeared %d times across external shards, want once", count, name, seen[name])
+			}
+		}
+	}
+	maxInt := int(^uint(0) >> 1)
+	for _, name := range names {
+		index := externalShardForName("example.com/p", name, maxInt)
+		if got, want := selectExternalShard("example.com/p", names, index, maxInt), []string{name}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("selectExternalShard() with maximum shard count = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestCommonNamesKeepAssignmentAcrossDiscoveryLists(t *testing.T) {
+	t.Parallel()
+	const count = 2
+	workerNames := [][]string{
+		{"TestA", "TestC"},
+		{"TestA", "TestB", "TestC"},
+	}
+	for _, name := range []string{"TestA", "TestC"} {
+		seen := 0
+		for index, names := range workerNames {
+			if slices.Contains(selectExternalShard("example.com/p", names, index, count), name) {
+				seen++
+			}
+		}
+		if seen != 1 {
+			t.Fatalf("%s appeared %d times across workers with different discovery lists, want once", name, seen)
+		}
+	}
+}
+
+func TestExternalAssignmentIncludesPackageIdentity(t *testing.T) {
+	t.Parallel()
+	const count = 17
+	assignments := make(map[int]bool)
+	for _, pkg := range []string{"example.com/a", "example.com/b", "example.com/c", "example.com/d"} {
+		assignments[externalShardForName(pkg, "TestBasic", count)] = true
+	}
+	if len(assignments) == 1 {
+		t.Fatalf("same-named tests in distinct packages all mapped to one of %d shards", count)
+	}
+}
+
+func TestExternalAndWorkerShardsCoverEveryTestOnce(t *testing.T) {
+	t.Parallel()
+	names := []string{"TestA", "TestB", "TestC", "TestD", "TestE", "TestF", "TestG"}
+	seen := make(map[string]int, len(names))
+	for external := range 2 {
+		for _, job := range makeTestJobs("example.com/p", names, 3, external, 2) {
+			if job.pkg != "example.com/p" || job.shardCount < 1 || job.shard >= job.shardCount {
+				t.Fatalf("invalid job metadata: %+v", job)
+			}
+			for _, name := range job.names {
+				seen[name]++
+			}
+		}
+	}
+	for _, name := range names {
+		if seen[name] != 1 {
+			t.Fatalf("%s appeared %d times after both sharding layers, want once", name, seen[name])
+		}
 	}
 }
 

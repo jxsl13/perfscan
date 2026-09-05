@@ -5,8 +5,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
@@ -17,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 type testJob struct {
@@ -33,6 +37,8 @@ func main() {
 	parallel := flag.Int("parallel", 1, "maximum tests run in parallel within each shard")
 	timeout := flag.Duration("timeout", 20*time.Minute, "timeout for each test shard")
 	race := flag.Bool("race", false, "run each shard with the race detector")
+	shardIndex := flag.Int("shard-index", 0, "zero-based external shard assigned to this process")
+	shardCount := flag.Int("shard-count", 1, "number of external shards covering the complete test set")
 	flag.Parse()
 	if *workers < 1 {
 		_, _ = io.WriteString(os.Stderr, "testparallel: -workers must be at least 1\n")
@@ -44,6 +50,10 @@ func main() {
 	}
 	if *timeout <= 0 {
 		_, _ = io.WriteString(os.Stderr, "testparallel: -timeout must be greater than zero\n")
+		os.Exit(2)
+	}
+	if err := validateExternalShard(*shardIndex, *shardCount); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 	patterns := flag.Args()
@@ -60,19 +70,69 @@ func main() {
 	}
 	jobs := make([]testJob, 0, len(packages)*(*workers))
 	for _, pkg := range packages {
-		names, err := listTests(ctx, pkg, *race)
+		names, err := listTests(ctx, pkg, *race, *timeout)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		for shard, group := range partition(names, *workers) {
-			jobs = append(jobs, testJob{pkg: pkg, shard: shard, shardCount: min(*workers, len(names)), names: group})
-		}
+		jobs = append(jobs, makeTestJobs(pkg, names, *workers, *shardIndex, *shardCount)...)
 	}
 	if err := runJobs(ctx, jobs, *workers, *parallel, *timeout, *race); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func validateExternalShard(index, count int) error {
+	if count < 1 {
+		return errors.New("testparallel: -shard-count must be at least 1")
+	}
+	if index < 0 || index >= count {
+		return fmt.Errorf("testparallel: -shard-index must be between 0 and %d", count-1)
+	}
+	return nil
+}
+
+func makeTestJobs(pkg string, names []string, workers, externalIndex, externalCount int) []testJob {
+	selected := selectExternalShard(pkg, names, externalIndex, externalCount)
+	groups := partition(selected, workers)
+	jobs := make([]testJob, 0, len(groups))
+	for shard, group := range groups {
+		jobs = append(jobs, testJob{pkg: pkg, shard: shard, shardCount: len(groups), names: group})
+	}
+	return jobs
+}
+
+// selectExternalShard assigns each test by a stable hash of its package and
+// name. Package qualification avoids concentrating common names such as
+// TestBasic on one external runner. Names shared by independently discovered
+// lists retain the same assignment instead of shifting with list position.
+func selectExternalShard(pkg string, names []string, index, count int) []string {
+	if count == 1 {
+		return names
+	}
+	selected := make([]string, 0, len(names)/count+1)
+	for _, name := range names {
+		if externalShardForName(pkg, name, count) == index {
+			selected = append(selected, name)
+		}
+	}
+	return selected
+}
+
+func externalShardForName(pkg, name string, count int) int {
+	const (
+		fnvOffset64 = uint64(14695981039346656037)
+		fnvPrime64  = uint64(1099511628211)
+	)
+	hash := fnvOffset64
+	for _, value := range []string{pkg, "\x00", name} {
+		for i := range len(value) {
+			hash ^= uint64(value[i])
+			hash *= fnvPrime64
+		}
+	}
+	return int(hash % uint64(count))
 }
 
 func listPackages(ctx context.Context, patterns []string, race bool) ([]string, error) {
@@ -94,32 +154,46 @@ func listPackages(ctx context.Context, patterns []string, race bool) ([]string, 
 	return packages, nil
 }
 
-func listTests(ctx context.Context, pkg string, race bool) ([]string, error) {
-	args := []string{"test"}
-	if race {
-		args = append(args, "-race")
-	}
-	args = append(args, "-list", ".", pkg)
-	cmd := exec.CommandContext(ctx, "go", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+func listTests(ctx context.Context, pkg string, race bool, timeout time.Duration) ([]string, error) {
+	out, err := runTestAttempts(ctx, runtime.GOOS, timeout, func(attemptCtx context.Context, remaining time.Duration) (string, error) {
+		args := []string{"test"}
+		if race {
+			args = append(args, "-race")
+		}
+		args = append(args, "-timeout", remaining.String(), "-list", ".", pkg)
+		cmd := exec.CommandContext(attemptCtx, "go", args...)
+		output, err := cmd.CombinedOutput()
+		return string(output), err
+	})
 	if err != nil {
-		return nil, fmt.Errorf("testparallel: listing %s failed: %w\n%s%s", pkg, err, out, stderr.Bytes())
+		return nil, fmt.Errorf("testparallel: listing %s failed: %w\n%s", pkg, err, out)
 	}
-	return parseTestNames(string(out)), nil
+	return parseTestNames(out), nil
 }
 
 func parseTestNames(output string) []string {
 	var names []string
 	for line := range strings.SplitSeq(output, "\n") {
 		name := strings.TrimSpace(line)
-		if strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "Example") || strings.HasPrefix(name, "Fuzz") {
+		if token.IsIdentifier(name) && (isTestName(name, "Test") || isTestName(name, "Fuzz") || isTestName(name, "Example")) {
 			names = append(names, name)
 		}
 	}
 	slices.Sort(names)
-	return names
+	return slices.Compact(names)
+}
+
+// isTestName mirrors cmd/go's test-name rule: the bare prefix is valid, and
+// a suffix must not begin with a lower-case Unicode letter.
+func isTestName(name, prefix string) bool {
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	if len(name) == len(prefix) {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(name[len(prefix):])
+	return !unicode.IsLower(r)
 }
 
 func partition(names []string, workers int) [][]string {

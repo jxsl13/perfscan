@@ -2,4 +2,10 @@ package racefixture
 
 import "testing"
 
-func TestOrdinary(t *testing.T) {}
+func Test(t *testing.T) {
+	t.Parallel()
+}
+
+func TestOrdinary(t *testing.T) {
+	t.Parallel()
+}
