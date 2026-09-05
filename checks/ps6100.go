@@ -52,9 +52,13 @@ variables, and stored-call targets are resolved from the assignments that can
 reach each call site; opaque, recursive, and overflowed targets remain hazards.
 Stable direct, tuple, pointer-field, and self-reslice rebindings before the
 outer loop are canonicalized relative to the collection scanned by that loop.
-Selector and dereference assignments retain header snapshots for stored method
-receivers, while retained sources of tail reslices preserve their element
-offsets. Resolved nil and zero-length make rebindings remain zero-trip scans.
+Nested selector and dereference assignments retain stable header locations.
+Stored value receivers snapshot their header, while a pointer-receiver method
+value formed from an addressable field retains that field's address and sees a
+later header replacement. Retained sources of tail and compatible full-slice
+reslices preserve their element offsets; imprecise bounds remain hazards.
+Resolved nil, zero-length make, and constant-empty reslice rebindings remain
+zero-trip scans.
 A deferred body is applied at the return of its actual frame, so an outer-frame
 defer stays delayed while a defer inside an invoked helper or closure is visible
 before control returns to the scans.
@@ -559,7 +563,7 @@ func ps6100CallableSourceAt(pass *analysis.Pass, expression ast.Expr, flow *ps61
 			if selection := pass.TypesInfo.Selections[selector]; selection != nil {
 				switch selection.Kind() {
 				case types.MethodVal:
-					receiver, precise := ps6100CapturedCallableReceiver(pass, selector.X, flow, expression)
+					receiver, precise := ps6100CapturedCallableReceiver(pass, selector.X, flow, expression, ps6100ImplicitAddressReceiver(pass, selection, selector.X))
 					if !precise {
 						return ps6100CallableSource{unknown: true}
 					}
@@ -577,8 +581,42 @@ func ps6100CallableSourceAt(pass *analysis.Pass, expression ast.Expr, flow *ps61
 	return ps6100CallableSource{unknown: true}
 }
 
-func ps6100CapturedCallableReceiver(pass *analysis.Pass, receiver ast.Expr, flow *ps6100AliasFlow, node ast.Node) (ast.Expr, bool) {
+func ps6100ImplicitAddressReceiver(pass *analysis.Pass, selection *types.Selection, receiver ast.Expr) bool {
+	if pass == nil || selection == nil || receiver == nil {
+		return false
+	}
+	signature, _ := selection.Obj().Type().(*types.Signature)
+	if signature == nil || signature.Recv() == nil {
+		return false
+	}
+	if _, pointer := types.Unalias(signature.Recv().Type()).Underlying().(*types.Pointer); !pointer {
+		return false
+	}
+	receiverType := pass.TypesInfo.TypeOf(receiver)
+	if receiverType == nil {
+		return false
+	}
+	_, alreadyPointer := types.Unalias(receiverType).Underlying().(*types.Pointer)
+	return !alreadyPointer
+}
+
+func ps6100CapturedCallableReceiver(pass *analysis.Pass, receiver ast.Expr, flow *ps6100AliasFlow, node ast.Node, captureAddress bool) (ast.Expr, bool) {
 	receiver = ps2110Unparen(receiver)
+	if captureAddress {
+		// A method value formed from an addressable value for a pointer-receiver
+		// method captures the value's address, not a copy of its current contents.
+		// Anchor the selector/dereference base evaluated at formation time while
+		// retaining the addressed field location, whose header may later change.
+		anchored := ps6100AnchorAliasExpression(pass, receiver)
+		if anchored == nil || pass.TypesInfo.TypeOf(receiver) == nil {
+			return nil, false
+		}
+		address := &ast.UnaryExpr{Op: token.AND, X: anchored}
+		if pass.TypesInfo.Types != nil {
+			pass.TypesInfo.Types[address] = types.TypeAndValue{Type: types.NewPointer(pass.TypesInfo.TypeOf(receiver))}
+		}
+		return address, true
+	}
 	if flow == nil {
 		return receiver, receiver != nil
 	}
@@ -1924,6 +1962,16 @@ func ps6100RangeMayExecute(pass *analysis.Pass, expression ast.Expr) (bool, bool
 	if expression == nil {
 		return false, false
 	}
+	if view, ok := expression.(*ast.SliceExpr); ok {
+		low, lowKnown := ps6100SliceBoundConstant(pass, view.Low, 0)
+		high, highKnown := ps6100SliceBoundConstant(pass, view.High, 0)
+		if view.High != nil && lowKnown && highKnown {
+			return constant.Compare(high, token.GTR, low), true
+		}
+		if view.Low != nil && view.High != nil && ps6100SameStableBound(pass, view.Low, view.High) {
+			return false, true
+		}
+	}
 	if identifier, ok := expression.(*ast.Ident); ok && identifier.Name == "nil" {
 		return false, true
 	}
@@ -1988,6 +2036,21 @@ func ps6100RangeMayExecute(pass *analysis.Pass, expression ast.Expr) (bool, bool
 		return false, false
 	}
 	return ps6100RangeMayExecute(pass, argument)
+}
+
+func ps6100SliceBoundConstant(pass *analysis.Pass, expression ast.Expr, omitted int64) (constant.Value, bool) {
+	if expression == nil {
+		return constant.MakeInt64(omitted), true
+	}
+	value := ps6100Constant(pass, expression)
+	return value, value != nil && value.Kind() == constant.Int
+}
+
+func ps6100SameStableBound(pass *analysis.Pass, left, right ast.Expr) bool {
+	left, right = ps2110Unparen(left), ps2110Unparen(right)
+	leftIdentifier, leftOK := left.(*ast.Ident)
+	rightIdentifier, rightOK := right.(*ast.Ident)
+	return leftOK && rightOK && pass.TypesInfo.ObjectOf(leftIdentifier) != nil && pass.TypesInfo.ObjectOf(leftIdentifier) == pass.TypesInfo.ObjectOf(rightIdentifier)
 }
 
 func ps6100ConversionPreservesRangeEmptiness(source, target types.Type) bool {
@@ -2371,7 +2434,10 @@ func ps6100AliasLocation(pass *analysis.Pass, expression ast.Expr, state ps6100A
 		pass.TypesInfo.Implicits = make(map[ast.Node]types.Object)
 	}
 	markerName := storage.object.Name() + "#header:" + location
-	pass.TypesInfo.Implicits[snapshot] = types.NewVar(expression.Pos(), storage.object.Pkg(), markerName, pass.TypesInfo.TypeOf(expression))
+	// The marker identifies the logical lvalue, not this particular syntactic
+	// occurrence. NoPos keeps recursively nested selector/deref locations stable
+	// between the assignment and later scan expressions.
+	pass.TypesInfo.Implicits[snapshot] = types.NewVar(token.NoPos, storage.object.Pkg(), markerName, pass.TypesInfo.TypeOf(expression))
 	if pass.TypesInfo.Types != nil {
 		if typed, found := pass.TypesInfo.Types[expression]; found {
 			pass.TypesInfo.Types[snapshot] = typed
@@ -2695,8 +2761,12 @@ func ps6100CanonicalOuterAliases(pass *analysis.Pass, outer ast.Node, frame, out
 				replacements[ps6100StaleAliasKey(tracked.object)] = ps6100StaleAliasExpression(pass, root, tracked.object)
 			}
 			if view, ok := ps2110Unparen(current).(*ast.SliceExpr); ok {
-				if source, inverse, ok := ps6100InverseSliceAlias(pass, view, root); ok && record(source, inverse) {
-					hazards = append(hazards, ps6100Hazard{node: outer, reason: "pre-loop slice view may alias multiple tracked roots"})
+				if source, inverse, precise := ps6100InverseSliceAlias(pass, view, root); precise {
+					if record(source, inverse) {
+						hazards = append(hazards, ps6100Hazard{node: outer, reason: "pre-loop slice view may alias multiple tracked roots"})
+					}
+				} else {
+					hazards = append(hazards, ps6100Hazard{node: outer, reason: "pre-loop slice bounds prevent exact alias offset proof for " + exprTextRendered(root)})
 				}
 			}
 		case !values.unknown && len(values.expressions) > 1:
@@ -2827,14 +2897,14 @@ func ps6100SyntheticAliasValue(pass *analysis.Pass, identifier *ast.Ident) bool 
 // is alpha[index-low]. Constant negative results are discarded later because
 // they address elements before the scanned view.
 func ps6100InverseSliceAlias(pass *analysis.Pass, view *ast.SliceExpr, root ast.Expr) (ast.Expr, ast.Expr, bool) {
-	if view == nil || root == nil || view.High != nil || view.Max != nil {
+	if view == nil || root == nil || !ps6100SliceExtendsToEnd(pass, view) {
 		return nil, nil, false
 	}
 	source := ps2110Unparen(view.X)
 	offset := view.Low
 	for {
 		inner, ok := source.(*ast.SliceExpr)
-		if !ok || inner.High != nil || inner.Max != nil {
+		if !ok || !ps6100SliceExtendsToEnd(pass, inner) {
 			break
 		}
 		offset = ps6100OffsetIndex(pass, inner.Low, offset)
@@ -2851,6 +2921,19 @@ func ps6100InverseSliceAlias(pass *analysis.Pass, view *ast.SliceExpr, root ast.
 		}
 	}
 	return source, inverse, true
+}
+
+func ps6100SliceExtendsToEnd(pass *analysis.Pass, view *ast.SliceExpr) bool {
+	if view == nil || view.High == nil {
+		return view != nil
+	}
+	high, ok := ps2110Unparen(view.High).(*ast.CallExpr)
+	if !ok || len(high.Args) != 1 || !typedBuiltinName(pass, high.Fun, "len") {
+		return false
+	}
+	source, sourceOK := ps6100StorageOf(pass, view.X, nil)
+	bound, boundOK := ps6100StorageOf(pass, high.Args[0], nil)
+	return sourceOK && boundOK && source.key == bound.key
 }
 
 func ps6100NegateIndex(pass *analysis.Pass, expression ast.Expr) ast.Expr {
