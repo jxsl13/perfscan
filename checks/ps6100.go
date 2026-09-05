@@ -52,10 +52,14 @@ variables, and stored-call targets are resolved from the assignments that can
 reach each call site; opaque, recursive, and overflowed targets remain hazards.
 Stable direct, tuple, pointer-field, and self-reslice rebindings before the
 outer loop are canonicalized relative to the collection scanned by that loop.
+Direct short-variable and tuple initialization from slice views preserves the
+same backing-store offsets as a later assignment.
 Nested selector and dereference assignments retain stable header locations.
 Stored value receivers snapshot their header, while a pointer-receiver method
 value formed from an addressable field retains that field's address and sees a
-later header replacement. Retained sources of tail and compatible full-slice
+later header replacement. Replacing a selector or dereference prefix does not
+retarget an address or pointer-method value captured from the old object.
+Retained sources of tail and compatible full-slice
 reslices preserve their element offsets; imprecise bounds remain hazards.
 Resolved nil, zero-length make, and constant-empty reslice rebindings remain
 zero-trip scans.
@@ -605,13 +609,20 @@ func ps6100CapturedCallableReceiver(pass *analysis.Pass, receiver ast.Expr, flow
 	if captureAddress {
 		// A method value formed from an addressable value for a pointer-receiver
 		// method captures the value's address, not a copy of its current contents.
-		// Anchor the selector/dereference base evaluated at formation time while
-		// retaining the addressed field location, whose header may later change.
-		anchored := ps6100AnchorAliasExpression(pass, receiver)
-		if anchored == nil || pass.TypesInfo.TypeOf(receiver) == nil {
+		// A nested selector/dereference must therefore retain the exact lvalue
+		// location reached at formation time. If a prefix pointer is replaced
+		// later, the saved receiver still addresses the field in the old object;
+		// assigning the header at that same location remains visible.
+		addressed := ps6100AnchorAliasExpression(pass, receiver)
+		if flow != nil {
+			if _, snapshot, ok := ps6100AddressLocation(pass, receiver, flow.stateAt(node), flow.base, make(map[types.Object]bool)); ok {
+				addressed = snapshot
+			}
+		}
+		if addressed == nil || pass.TypesInfo.TypeOf(receiver) == nil {
 			return nil, false
 		}
-		address := &ast.UnaryExpr{Op: token.AND, X: anchored}
+		address := &ast.UnaryExpr{Op: token.AND, X: addressed}
 		if pass.TypesInfo.Types != nil {
 			pass.TypesInfo.Types[address] = types.TypeAndValue{Type: types.NewPointer(pass.TypesInfo.TypeOf(receiver))}
 		}
@@ -2050,7 +2061,32 @@ func ps6100SameStableBound(pass *analysis.Pass, left, right ast.Expr) bool {
 	left, right = ps2110Unparen(left), ps2110Unparen(right)
 	leftIdentifier, leftOK := left.(*ast.Ident)
 	rightIdentifier, rightOK := right.(*ast.Ident)
-	return leftOK && rightOK && pass.TypesInfo.ObjectOf(leftIdentifier) != nil && pass.TypesInfo.ObjectOf(leftIdentifier) == pass.TypesInfo.ObjectOf(rightIdentifier)
+	if leftOK && rightOK && pass.TypesInfo.ObjectOf(leftIdentifier) != nil && pass.TypesInfo.ObjectOf(leftIdentifier) == pass.TypesInfo.ObjectOf(rightIdentifier) {
+		return true
+	}
+	if ps6100PredicateShape(pass, left) != ps6100PredicateShape(pass, right) {
+		return false
+	}
+	stable := true
+	ast.Inspect(left, func(node ast.Node) bool {
+		if !stable || node == nil {
+			return stable
+		}
+		switch value := node.(type) {
+		case *ast.CallExpr:
+			if !ps6100SafePredicateCall(pass, value) {
+				stable = false
+				return false
+			}
+		case *ast.UnaryExpr:
+			if value.Op == token.ARROW {
+				stable = false
+				return false
+			}
+		}
+		return true
+	})
+	return stable
 }
 
 func ps6100ConversionPreservesRangeEmptiness(source, target types.Type) bool {
@@ -2350,6 +2386,24 @@ func ps6100AliasExpressionValues(pass *analysis.Pass, expression ast.Expr, state
 			key := ps6100AliasExpressionKey(pass, snapshot, base)
 			return ps6100AliasValues{expressions: map[string]ast.Expr{key: snapshot}}
 		}
+	case *ast.UnaryExpr:
+		if value.Op == token.AND {
+			// Taking the address of a nested field evaluates every selector and
+			// dereference prefix immediately. Preserve that concrete lvalue
+			// location so replacing a prefix pointer cannot retarget the alias.
+			addressed := ps6100AnchorAliasExpression(pass, value.X)
+			if _, snapshot, ok := ps6100AddressLocation(pass, value.X, state, base, seen); ok {
+				addressed = snapshot
+			}
+			address := &ast.UnaryExpr{Op: token.AND, X: addressed}
+			if pass.TypesInfo.Types != nil {
+				if typed, found := pass.TypesInfo.Types[value]; found {
+					pass.TypesInfo.Types[address] = typed
+				}
+			}
+			key := ps6100AliasExpressionKey(pass, address, base)
+			return ps6100AliasValues{expressions: map[string]ast.Expr{key: address}}
+		}
 	case *ast.SliceExpr:
 		underlying := ps6100AliasExpressionValues(pass, value.X, state, base, seen)
 		if underlying.unknown || len(underlying.expressions) != 1 {
@@ -2437,6 +2491,36 @@ func ps6100AliasLocation(pass *analysis.Pass, expression ast.Expr, state ps6100A
 	// The marker identifies the logical lvalue, not this particular syntactic
 	// occurrence. NoPos keeps recursively nested selector/deref locations stable
 	// between the assignment and later scan expressions.
+	pass.TypesInfo.Implicits[snapshot] = types.NewVar(token.NoPos, storage.object.Pkg(), markerName, pass.TypesInfo.TypeOf(expression))
+	if pass.TypesInfo.Types != nil {
+		if typed, found := pass.TypesInfo.Types[expression]; found {
+			pass.TypesInfo.Types[snapshot] = typed
+		}
+	}
+	return location, snapshot, true
+}
+
+// ps6100AddressLocation identifies the lvalue reached when an address is
+// evaluated. It is deliberately distinct from ps6100AliasLocation's header
+// snapshot: a stored value receiver keeps the old header, while a stored
+// pointer receiver keeps the location and observes later header writes there.
+func ps6100AddressLocation(pass *analysis.Pass, expression ast.Expr, state ps6100AliasState, base map[types.Object]ast.Expr, seen map[types.Object]bool) (string, ast.Expr, bool) {
+	location, _, ok := ps6100AliasLocation(pass, expression, state, base, seen)
+	if !ok {
+		return "", nil, false
+	}
+	storage, ok := ps6100StorageOf(pass, expression, base)
+	if !ok || storage.object == nil {
+		return "", nil, false
+	}
+	snapshot := ast.NewIdent(exprTextRendered(expression))
+	if pass.TypesInfo.Uses != nil {
+		pass.TypesInfo.Uses[snapshot] = storage.object
+	}
+	if pass.TypesInfo.Implicits == nil {
+		pass.TypesInfo.Implicits = make(map[ast.Node]types.Object)
+	}
+	markerName := storage.object.Name() + "#address:" + location
 	pass.TypesInfo.Implicits[snapshot] = types.NewVar(token.NoPos, storage.object.Pkg(), markerName, pass.TypesInfo.TypeOf(expression))
 	if pass.TypesInfo.Types != nil {
 		if typed, found := pass.TypesInfo.Types[expression]; found {
@@ -2684,6 +2768,7 @@ func ps6100CanonicalOuterAliases(pass *analysis.Pass, outer ast.Node, frame, out
 		key      string
 		root     ast.Expr
 		live     ast.Expr
+		address  ast.Expr
 		object   types.Object
 		location string
 		values   ps6100AliasValues
@@ -2705,7 +2790,7 @@ func ps6100CanonicalOuterAliases(pass *analysis.Pass, outer ast.Node, frame, out
 		}
 		switch ps2110Unparen(storage.expr).(type) {
 		case *ast.SelectorExpr, *ast.StarExpr:
-			location, _, ok := ps6100AliasLocation(pass, storage.expr, state, nil, make(map[types.Object]bool))
+			location, address, ok := ps6100AddressLocation(pass, storage.expr, state, nil, make(map[types.Object]bool))
 			if !ok {
 				continue
 			}
@@ -2716,7 +2801,7 @@ func ps6100CanonicalOuterAliases(pass *analysis.Pass, outer ast.Node, frame, out
 			}
 			key := "location:" + location
 			root := ps6100CanonicalReferenceRoot(pass, storage.expr)
-			roots[key] = rootValue{key: key, root: root, live: storage.expr, object: storage.object, location: location, values: values, found: found}
+			roots[key] = rootValue{key: key, root: root, live: storage.expr, address: address, object: storage.object, location: location, values: values, found: found}
 		}
 	}
 
@@ -2742,6 +2827,7 @@ func ps6100CanonicalOuterAliases(pass *analysis.Pass, outer ast.Node, frame, out
 		root, values, found := tracked.root, tracked.values, tracked.found
 		if tracked.location != "" {
 			record(tracked.live, root)
+			record(tracked.address, root)
 		}
 		switch {
 		case !found:
@@ -2963,23 +3049,42 @@ func ps6100RootReboundBeforeOuter(pass *analysis.Pass, frame, outerBody *ast.Blo
 		if _, literal := node.(*ast.FuncLit); literal {
 			return false
 		}
-		assignment, ok := node.(*ast.AssignStmt)
-		if !ok {
-			return true
-		}
-		for _, left := range assignment.Lhs {
-			identifier, ok := ps2110Unparen(left).(*ast.Ident)
-			if !ok || pass.TypesInfo.Defs[identifier] != nil {
-				continue
+		switch statement := node.(type) {
+		case *ast.AssignStmt:
+			for index, left := range statement.Lhs {
+				identifier, ok := ps2110Unparen(left).(*ast.Ident)
+				if !ok {
+					continue
+				}
+				if ps6100AssignedObject(pass, identifier, statement.Tok) != object {
+					continue
+				}
+				definition := pass.TypesInfo.Defs[identifier] != nil
+				if !definition || len(statement.Lhs) == len(statement.Rhs) && ps6100CanonicalRootDefinition(pass, statement.Rhs[index]) {
+					rebound = true
+					return false
+				}
 			}
-			if pass.TypesInfo.ObjectOf(identifier) == object {
-				rebound = true
-				return false
+		case *ast.ValueSpec:
+			for index, name := range statement.Names {
+				if pass.TypesInfo.Defs[name] == object && len(statement.Names) == len(statement.Values) && ps6100CanonicalRootDefinition(pass, statement.Values[index]) {
+					rebound = true
+					return false
+				}
 			}
 		}
 		return true
 	})
 	return rebound
+}
+
+func ps6100CanonicalRootDefinition(pass *analysis.Pass, expression ast.Expr) bool {
+	expression = ps2110Unparen(expression)
+	if _, ok := expression.(*ast.SliceExpr); ok {
+		return true
+	}
+	call, ok := expression.(*ast.CallExpr)
+	return ok && len(call.Args) == 1 && pass.TypesInfo.Types[ps2110Unparen(call.Fun)].IsType() && ps6100CanonicalRootDefinition(pass, call.Args[0])
 }
 
 func ps6100StorageRootExpression(pass *analysis.Pass, expression ast.Expr, object types.Object) ast.Expr {
