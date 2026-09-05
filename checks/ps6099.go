@@ -54,11 +54,13 @@ wrapper must return on every path and cannot hide a panic hazard, allocation,
 mutation, another scalar transcendental, or an opaque runtime call. A package
 function or ignored architecture sibling must independently provide matching
 vector/batch/assembly evidence; delegated vector work must run synchronously on
-every path, including through source-proved single-iteration ranges and
-concrete type-switch selections. Immediately invoked closures preserve exact
-sequence identity through their actual-to-formal bindings and straight-line
-aliases; created, deferred, asynchronous, conditional-only, or escaping closure
-paths are not evidence. A leaf
+every path, including through source-proved single-iteration array,
+pointer-to-array, and constant-integer ranges and concrete type-switch
+selections retained through straight-line initialization aliases. Immediately
+invoked closures preserve exact sequence identity through fixed and precisely
+indexed variadic actual-to-formal bindings, straight-line aliases, and exact
+whole-sequence generic type sets; created, deferred, asynchronous,
+conditional-only, or escaping closure paths are not evidence. A leaf
 and any vector leaf it calls must have result-free, consistently float32 or
 float64 sequence signatures. The destination must itself be that exact float
 sequence precision and be assignable, or representation-preservingly
@@ -890,7 +892,7 @@ func ps6099PromoteDeterministicExecutionSites(pass *analysis.Pass, body *ast.Blo
 			}
 			nestedBody, promoted = value.Body, value.X
 		case *ast.TypeSwitchStmt:
-			clause, known := ps6099SelectedTypeSwitchClause(pass, value)
+			clause, known := ps6099SelectedTypeSwitchClause(pass, value, parents)
 			if !known || clause == nil {
 				return true
 			}
@@ -899,7 +901,7 @@ func ps6099PromoteDeterministicExecutionSites(pass *analysis.Pass, body *ast.Blo
 		default:
 			return true
 		}
-		if nestedBody == nil || promoted == nil || ps6099DeterministicBodyEscapes(pass, nestedBody) {
+		if nestedBody == nil || promoted == nil {
 			return true
 		}
 		var nestedSites []ast.Node
@@ -928,8 +930,17 @@ func ps6099RangeEvidenceExpressionSafe(pass *analysis.Pass, expression ast.Expr)
 		if typ == nil {
 			return false
 		}
-		_, array := types.Unalias(typ).Underlying().(*types.Array)
-		return array
+		switch underlying := types.Unalias(typ).Underlying().(type) {
+		case *types.Array:
+			return true
+		case *types.Pointer:
+			_, array := types.Unalias(underlying.Elem()).Underlying().(*types.Array)
+			return array
+		}
+	case *ast.UnaryExpr:
+		if value.Op == token.AND {
+			return ps6099PassiveRangeElement(pass, value.X)
+		}
 	case *ast.CompositeLit:
 		for _, element := range value.Elts {
 			expression := ast.Expr(element)
@@ -967,31 +978,7 @@ func ps6099PassiveRangeElement(pass *analysis.Pass, expression ast.Expr) bool {
 	return false
 }
 
-func ps6099DeterministicBodyEscapes(pass *analysis.Pass, body *ast.BlockStmt) bool {
-	escapes := false
-	ast.Inspect(body, func(node ast.Node) bool {
-		if escapes {
-			return false
-		}
-		if _, nested := node.(*ast.FuncLit); nested {
-			return false
-		}
-		switch value := node.(type) {
-		case *ast.ReturnStmt, *ast.BranchStmt:
-			escapes = true
-			return false
-		case *ast.CallExpr:
-			if typedBuiltinName(pass, value.Fun, "panic") {
-				escapes = true
-				return false
-			}
-		}
-		return true
-	})
-	return escapes
-}
-
-func ps6099SelectedTypeSwitchClause(pass *analysis.Pass, statement *ast.TypeSwitchStmt) (*ast.CaseClause, bool) {
+func ps6099SelectedTypeSwitchClause(pass *analysis.Pass, statement *ast.TypeSwitchStmt, parents map[ast.Node]ast.Node) (*ast.CaseClause, bool) {
 	if statement == nil {
 		return nil, false
 	}
@@ -999,7 +986,7 @@ func ps6099SelectedTypeSwitchClause(pass *analysis.Pass, statement *ast.TypeSwit
 	if assertion == nil || assertion.Type != nil {
 		return nil, false
 	}
-	dynamic, known := ps6099ConcreteTypeSwitchDynamicType(pass, assertion.X)
+	dynamic, known := ps6099ConcreteTypeSwitchDynamicTypeAt(pass, assertion.X, statement, parents)
 	if !known {
 		return nil, false
 	}
@@ -1058,6 +1045,123 @@ func ps6099ConcreteTypeSwitchDynamicType(pass *analysis.Pass, expression ast.Exp
 		return nil, false
 	}
 	return types.Default(typ), true
+}
+
+func ps6099ConcreteTypeSwitchDynamicTypeAt(pass *analysis.Pass, expression ast.Expr, statement *ast.TypeSwitchStmt, parents map[ast.Node]ast.Node) (types.Type, bool) {
+	known := make(map[types.Object]types.Type)
+	var body *ast.BlockStmt
+	for parent := parents[statement]; parent != nil; parent = parents[parent] {
+		if block, ok := parent.(*ast.BlockStmt); ok {
+			body = block
+			break
+		}
+	}
+	if body != nil {
+		for _, candidate := range body.List {
+			if candidate == statement || candidate.Pos() >= statement.Pos() {
+				break
+			}
+			ps6099UpdateConcreteTypeSwitchFacts(pass, candidate, known)
+		}
+	}
+	if statement.Init != nil {
+		ps6099UpdateConcreteTypeSwitchFacts(pass, statement.Init, known)
+	}
+	return ps6099ConcreteTypeSwitchExpressionType(pass, expression, known)
+}
+
+func ps6099ConcreteTypeSwitchExpressionType(pass *analysis.Pass, expression ast.Expr, known map[types.Object]types.Type) (types.Type, bool) {
+	expression = ps2110Unparen(expression)
+	if identifier, ok := expression.(*ast.Ident); ok {
+		typ, found := known[pass.TypesInfo.ObjectOf(identifier)]
+		return typ, found
+	}
+	if dynamic, ok := ps6099ConcreteTypeSwitchDynamicType(pass, expression); ok {
+		return dynamic, true
+	}
+	typ := pass.TypesInfo.TypeOf(expression)
+	if typ == nil || ps6099InterfaceType(typ) || !ps6099ConcreteTypeSwitchValueSafe(pass, expression) {
+		return nil, false
+	}
+	return types.Default(typ), true
+}
+
+func ps6099UpdateConcreteTypeSwitchFacts(pass *analysis.Pass, statement ast.Stmt, known map[types.Object]types.Type) {
+	if statement == nil {
+		return
+	}
+	switch value := statement.(type) {
+	case *ast.AssignStmt:
+		if len(value.Lhs) == len(value.Rhs) {
+			resolved := make([]types.Type, len(value.Rhs))
+			valid := make([]bool, len(value.Rhs))
+			for index, right := range value.Rhs {
+				resolved[index], valid[index] = ps6099ConcreteTypeSwitchExpressionType(pass, right, known)
+			}
+			for index, left := range value.Lhs {
+				identifier, ok := ps2110Unparen(left).(*ast.Ident)
+				if !ok || identifier.Name == "_" {
+					continue
+				}
+				object := pass.TypesInfo.ObjectOf(identifier)
+				if object == nil {
+					continue
+				}
+				_, newlyDefined := pass.TypesInfo.Defs[identifier]
+				if value.Tok != token.DEFINE || !newlyDefined || !valid[index] {
+					delete(known, object)
+					continue
+				}
+				known[object] = resolved[index]
+			}
+			return
+		}
+	case *ast.DeclStmt:
+		declaration, ok := value.Decl.(*ast.GenDecl)
+		if ok && declaration.Tok == token.VAR {
+			for _, specification := range declaration.Specs {
+				item, ok := specification.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for index, name := range item.Names {
+					object := pass.TypesInfo.Defs[name]
+					if object == nil || index >= len(item.Values) {
+						continue
+					}
+					if typ, valid := ps6099ConcreteTypeSwitchExpressionType(pass, item.Values[index], known); valid {
+						known[object] = typ
+					}
+				}
+			}
+			return
+		}
+	}
+	ps6099InvalidateConcreteTypeSwitchFacts(pass, statement, known)
+}
+
+func ps6099InvalidateConcreteTypeSwitchFacts(pass *analysis.Pass, root ast.Node, known map[types.Object]types.Type) {
+	ast.Inspect(root, func(node ast.Node) bool {
+		switch value := node.(type) {
+		case *ast.AssignStmt:
+			for _, left := range value.Lhs {
+				if identifier, ok := ps2110Unparen(left).(*ast.Ident); ok {
+					delete(known, pass.TypesInfo.ObjectOf(identifier))
+				}
+			}
+		case *ast.IncDecStmt:
+			if identifier, ok := ps2110Unparen(value.X).(*ast.Ident); ok {
+				delete(known, pass.TypesInfo.ObjectOf(identifier))
+			}
+		case *ast.UnaryExpr:
+			if value.Op == token.AND {
+				if identifier, ok := ps2110Unparen(value.X).(*ast.Ident); ok {
+					delete(known, pass.TypesInfo.ObjectOf(identifier))
+				}
+			}
+		}
+		return true
+	})
 }
 
 func ps6099ConcreteTypeSwitchValueSafe(pass *analysis.Pass, expression ast.Expr) bool {
@@ -1762,6 +1866,9 @@ func ps6099TypeSequencePrecision(typ types.Type) (string, bool) {
 	if typ == nil {
 		return "", false
 	}
+	if parameter, ok := types.Unalias(typ).(*types.TypeParam); ok {
+		return ps6099TypeParameterSequencePrecision(parameter)
+	}
 	switch value := types.Unalias(typ).Underlying().(type) {
 	case *types.Pointer:
 		return ps6099TypeSequencePrecision(value.Elem())
@@ -2018,18 +2125,37 @@ func ps6099BindIIFESequenceParameters(pass *analysis.Pass, literal *ast.FuncLit,
 	if literal == nil || literal.Type == nil || literal.Type.Params == nil || invocation == nil || invocation.Ellipsis.IsValid() {
 		return
 	}
-	count := 0
-	for _, field := range literal.Type.Params.List {
-		if _, variadic := ps2110Unparen(field.Type).(*ast.Ellipsis); variadic {
-			return
+	fixed := 0
+	variadic := false
+	for index, field := range literal.Type.Params.List {
+		_, fieldVariadic := ps2110Unparen(field.Type).(*ast.Ellipsis)
+		if fieldVariadic {
+			if index != len(literal.Type.Params.List)-1 || len(field.Names) != 1 {
+				return
+			}
+			variadic = true
+			continue
 		}
-		count += max(1, len(field.Names))
+		fixed += max(1, len(field.Names))
 	}
-	if count != len(invocation.Args) {
+	if !variadic && fixed != len(invocation.Args) || variadic && fixed > len(invocation.Args) {
 		return
 	}
 	position := 0
 	for _, field := range literal.Type.Params.List {
+		if _, fieldVariadic := ps2110Unparen(field.Type).(*ast.Ellipsis); fieldVariadic {
+			object := pass.TypesInfo.ObjectOf(field.Names[0])
+			if object == nil {
+				return
+			}
+			key := ps6099ObjectKey(object)
+			for index := position; index < len(invocation.Args); index++ {
+				if canonical := ps6099SequenceArgumentBaseKey(pass, invocation.Args[index], aliases); canonical != "" {
+					aliases[ps6099VariadicSequenceKey(key, index-position)] = canonical
+				}
+			}
+			return
+		}
 		fieldCount := max(1, len(field.Names))
 		for index := 0; index < fieldCount; index++ {
 			canonical := ps6099SequenceArgumentBaseKey(pass, invocation.Args[position], aliases)
@@ -2102,6 +2228,12 @@ func ps6099ExtendSequenceAliases(pass *analysis.Pass, body *ast.BlockStmt, befor
 			if value.Op == token.AND {
 				ps6099InvalidateSequenceAlias(pass, value.X, aliases)
 			}
+		case *ast.CallExpr:
+			for _, argument := range value.Args {
+				if storage, ok := ps6099StorageOf(pass, argument); ok {
+					ps6099ClearVariadicSequenceAliases(aliases, storage.key)
+				}
+			}
 		}
 		return true
 	})
@@ -2114,6 +2246,13 @@ func ps6099InvalidateSequenceAlias(pass *analysis.Pass, expression ast.Expr, ali
 }
 
 func ps6099SequenceStorageKey(pass *analysis.Pass, expression ast.Expr) (string, bool) {
+	if index, ok := ps2110Unparen(expression).(*ast.IndexExpr); ok {
+		storage, storageOK := ps6099StorageOf(pass, index.X)
+		offset, offsetOK := ps6099ConstantNonnegativeIndex(pass, index.Index)
+		if storageOK && offsetOK {
+			return ps6099VariadicSequenceKey(storage.key, offset), true
+		}
+	}
 	if storage, ok := ps6099StorageOf(pass, expression); ok {
 		return storage.key, true
 	}
@@ -2128,6 +2267,14 @@ func ps6099ClearSequenceAlias(aliases map[string]string, key string) {
 	delete(aliases, key)
 	for candidate := range aliases {
 		if strings.HasPrefix(candidate, key+"/") {
+			delete(aliases, candidate)
+		}
+	}
+}
+
+func ps6099ClearVariadicSequenceAliases(aliases map[string]string, key string) {
+	for candidate := range aliases {
+		if strings.HasPrefix(candidate, key+"/variadic:") {
 			delete(aliases, candidate)
 		}
 	}
@@ -2163,7 +2310,12 @@ func ps6099SequenceBaseKey(pass *analysis.Pass, expression ast.Expr, aliases map
 	switch value := ps2110Unparen(expression).(type) {
 	case *ast.SliceExpr:
 		return ps6099SequenceBaseKey(pass, value.X, aliases)
-	case *ast.IndexListExpr, *ast.IndexExpr:
+	case *ast.IndexExpr:
+		if key, ok := ps6099SequenceStorageKey(pass, value); ok {
+			return aliases[key]
+		}
+		return ""
+	case *ast.IndexListExpr:
 		return ""
 	}
 	if storage, ok := ps6099StorageOf(pass, expression); ok {
@@ -2173,6 +2325,22 @@ func ps6099SequenceBaseKey(pass *analysis.Pass, expression ast.Expr, aliases map
 		return aliases["syntax:"+identifier.Name]
 	}
 	return ""
+}
+
+func ps6099VariadicSequenceKey(base string, index int) string {
+	return base + "/variadic:" + strconv.Itoa(index)
+}
+
+func ps6099ConstantNonnegativeIndex(pass *analysis.Pass, expression ast.Expr) (int, bool) {
+	value := pass.TypesInfo.Types[expression].Value
+	if value == nil || value.Kind() != constant.Int || constant.Sign(value) < 0 {
+		return 0, false
+	}
+	integer, exact := constant.Int64Val(value)
+	if !exact || integer > int64(^uint(0)>>1) {
+		return 0, false
+	}
+	return int(integer), true
 }
 
 func ps6099LaneOffset(expression ast.Expr, indexName string) (int64, bool) {
@@ -2302,6 +2470,9 @@ func ps6099SequencePrecision(typ types.Type, syntax ast.Expr, typesByName map[st
 
 func ps6099SequenceKindPrecision(typ types.Type, syntax ast.Expr, typesByName map[string]ast.Expr, active map[string]bool) (string, bool) {
 	if typ != nil {
+		if parameter, ok := types.Unalias(typ).(*types.TypeParam); ok {
+			return ps6099TypeParameterSequencePrecision(parameter)
+		}
 		switch sequence := types.Unalias(typ).Underlying().(type) {
 		case *types.Slice:
 			return ps6099Precision(sequence.Elem()), true
@@ -4615,6 +4786,55 @@ func ps6099TypeParameterPrecision(parameter *types.TypeParam) string {
 	return precision
 }
 
+func ps6099TypeParameterSequencePrecision(parameter *types.TypeParam) (string, bool) {
+	if parameter == nil {
+		return "", false
+	}
+	constraint, ok := parameter.Constraint().Underlying().(*types.Interface)
+	if !ok {
+		return "", false
+	}
+	constraint.Complete()
+	precision := ""
+	found := false
+	for index := 0; index < constraint.NumEmbeddeds(); index++ {
+		embedded := types.Unalias(constraint.EmbeddedType(index))
+		union, ok := embedded.(*types.Union)
+		if !ok {
+			candidate, sequence := ps6099ConcreteSequencePrecision(embedded)
+			if !sequence {
+				continue
+			}
+			if candidate == "" || precision != "" && precision != candidate {
+				return "", false
+			}
+			precision, found = candidate, true
+			continue
+		}
+		for termIndex := 0; termIndex < union.Len(); termIndex++ {
+			candidate, sequence := ps6099ConcreteSequencePrecision(union.Term(termIndex).Type())
+			if !sequence || candidate == "" || precision != "" && precision != candidate {
+				return "", false
+			}
+			precision, found = candidate, true
+		}
+	}
+	return precision, found && precision != ""
+}
+
+func ps6099ConcreteSequencePrecision(typ types.Type) (string, bool) {
+	if typ == nil {
+		return "", false
+	}
+	switch sequence := types.Unalias(typ).Underlying().(type) {
+	case *types.Slice:
+		return ps6099Precision(sequence.Elem()), true
+	case *types.Array:
+		return ps6099Precision(sequence.Elem()), true
+	}
+	return "", false
+}
+
 func ps6099BestLeaf(leaves []ps6099Leaf, precision string, destination types.Type) (ps6099Leaf, bool) {
 	if precision == "" || ps6099SequencePrecision(destination, nil, nil) != precision {
 		return ps6099Leaf{}, false
@@ -4666,6 +4886,12 @@ func ps6099DestinationSliceType(destination types.Type) types.Type {
 func ps6099TypedSequenceAccepts(actual, formal types.Type) bool {
 	if actual == nil || formal == nil {
 		return false
+	}
+	if parameter, ok := types.Unalias(formal).(*types.TypeParam); ok {
+		precision, sequence := ps6099TypeParameterSequencePrecision(parameter)
+		actualPrecision, actualSequence := ps6099ConcreteSequencePrecision(actual)
+		constraint, constraintOK := parameter.Constraint().Underlying().(*types.Interface)
+		return sequence && actualSequence && precision == actualPrecision && constraintOK && types.Satisfies(actual, constraint)
 	}
 	if _, ok := types.Unalias(formal).Underlying().(*types.Slice); !ok {
 		return false

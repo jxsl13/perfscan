@@ -20,6 +20,9 @@ func TestPS6099(t *testing.T) {
 		"ps6099operationreach", "ps6099deadscalar")
 	analysistest.Run(t, analysistest.TestData(), PS6099.Analyzer, "ps6099leafpaths")
 	analysistest.Run(t, analysistest.TestData(), PS6099.Analyzer, "ps6099adversarial")
+	analysistest.Run(t, analysistest.TestData(), PS6099.Analyzer,
+		"ps6099round4range", "ps6099round4typeswitch", "ps6099round4iife",
+		"ps6099round4generic", "ps6099round4genericmixed")
 }
 
 func TestPS6099BooleanSwitchReachability(t *testing.T) {
