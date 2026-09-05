@@ -1,11 +1,18 @@
 package checks
 
 import (
+	"go/ast"
 	"go/build/constraint"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
+	"time"
 
+	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 
@@ -47,5 +54,57 @@ func TestPS6077PartitionSatisfiability(t *testing.T) {
 	arches := ps6077SatisfiableArchitectures(simd)
 	if len(arches) != 1 || !arches["arm64"] {
 		t.Fatalf("unexpected satisfiable architecture set: %v", arches)
+	}
+}
+
+func TestPS6077RelatedIdentityAndShape(t *testing.T) {
+	t.Parallel()
+	packageIdentity := ps6077PackageFunctionIdentity("example.test/p", "Apply")
+	methodIdentity := ps6077MethodIdentity("example.test/p", "Processor", "Apply")
+	if packageIdentity == methodIdentity {
+		t.Fatal("same-named package function and method must have distinct identities")
+	}
+
+	parseFunction := func(importPath, alias string) (*ast.FuncDecl, map[string]string) {
+		source := "package p\nimport " + alias + " \"" + importPath + "\"\nfunc Apply(values []" + alias + ".Value) float64 { return 0 }\n"
+		file, err := parser.ParseFile(token.NewFileSet(), "shape.go", source, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return file.Decls[1].(*ast.FuncDecl), ps6077Imports(file)
+	}
+	left, leftImports := parseFunction("example.test/left", "shared")
+	right, rightImports := parseFunction("example.test/right", "shared")
+	leftAgain, leftAgainImports := parseFunction("example.test/left", "renamed")
+	leftShape := ps6077SliceResultShape(left, leftImports)
+	if leftShape == ps6077SliceResultShape(right, rightImports) {
+		t.Fatal("same alias spelling must not erase imported named-type identity")
+	}
+	if leftShape != ps6077SliceResultShape(leftAgain, leftAgainImports) {
+		t.Fatal("different aliases of the same imported named type must retain one identity")
+	}
+}
+
+func TestPS6077InactiveCallIndexScaling(t *testing.T) {
+	t.Parallel()
+	const calls = 12_000
+	source := "package p\nfunc Large() {\n" + strings.Repeat("f()\n", calls) + "}\n"
+	file, err := parser.ParseFile(token.NewFileSet(), "large_amd64.go", source, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	variant := &ps6077Variant{
+		source:   &ps6077Source{active: false},
+		function: file.Decls[0].(*ast.FuncDecl),
+	}
+	pass := &analysis.Pass{Pkg: types.NewPackage("example.test/p", "p")}
+	start := time.Now()
+	direct := ps6077DirectCalls(pass, variant)
+	elapsed := time.Since(start)
+	if !direct[ps6077PackageFunctionIdentity(pass.Pkg.Path(), "f")] {
+		t.Fatal("large inactive function lost its direct package call")
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("inactive direct-call indexing must remain near-linear: %d calls took %s", calls, elapsed)
 	}
 }

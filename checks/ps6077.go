@@ -8,6 +8,7 @@ import (
 	"go/types"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -53,9 +54,10 @@ least two and whose body touches multiple indexed lanes.
 The diagnostic prints the exact constraint label and file:line span of both
 siblings and attaches both as related locations. It ranks assembly over named
 SIMD calls over inferred vector-width loops. It also reports up to three direct
-package-function consumers in the scalar partition and up to three nearby
-vector leaves only when their slice/result shape and semantic name family match
-the scalar symbol.
+same-package consumers in the scalar partition, retaining package-function and
+receiver-type identity, and up to three nearby vector leaves only when their
+import-path-resolved slice/result shape and semantic name family match the
+scalar symbol.
 Those related locations are discovery evidence: they identify where a shared
 primitive may compound, but do not prove semantic interchangeability.
 
@@ -123,6 +125,7 @@ type ps6077Variant struct {
 	source           *ps6077Source
 	function         *ast.FuncDecl
 	key              string
+	symbolIdentity   string
 	signature        string
 	scalarCalls      []string
 	vectorKind       string
@@ -131,7 +134,7 @@ type ps6077Variant struct {
 	sliceResultShape string
 	nameFamilies     map[string]bool
 	allFamilies      map[string]bool
-	packageCalls     map[string]bool
+	directCalls      map[string]bool
 }
 
 type ps6077Finding struct {
@@ -167,15 +170,17 @@ func runPS6077(pass *analysis.Pass) (any, error) {
 			}
 			variant := &ps6077Variant{
 				source: source, function: function,
-				key: ps6074SymbolKey(function), signature: ps6077Signature(function),
+				key:            ps6074SymbolKey(function),
+				symbolIdentity: ps6077DeclaredSymbolIdentity(pass, function),
+				signature:      ps6077Signature(function),
 			}
 			variant.scalarCalls = ps6077ScalarCalls(pass, source, function, imports)
 			variant.vectorKind, variant.vectorScore = ps6077VectorEvidence(function)
 			variant.specificArch = len(ps6077SatisfiableArchitectures(*source))
-			variant.sliceResultShape = ps6077SliceResultShape(function)
+			variant.sliceResultShape = ps6077SliceResultShape(function, imports)
 			variant.nameFamilies = ps6077SemanticFamilies(function, false)
 			variant.allFamilies = ps6077SemanticFamilies(function, true)
-			variant.packageCalls = ps6077PackageCalls(pass, variant)
+			variant.directCalls = ps6077DirectCalls(pass, variant)
 			groups[variant.key+"|"+variant.signature] = append(groups[variant.key+"|"+variant.signature], variant)
 			allVariants = append(allVariants, variant)
 		}
@@ -356,9 +361,9 @@ func ps6077ScalarCalls(pass *analysis.Pass, source *ps6077Source, function *ast.
 	if function.Body == nil {
 		return nil
 	}
-	var parents map[ast.Node]ast.Node
+	var bindings ps6077BindingIndex
 	if !source.active {
-		parents = ps6077ParentMap(function.Body)
+		bindings = ps6077NewBindingIndex(function)
 	}
 	seen := make(map[string]bool)
 	var names []string
@@ -375,7 +380,7 @@ func ps6077ScalarCalls(pass *analysis.Pass, source *ps6077Source, function *ast.
 			return true
 		}
 		qualifier, ok := ps2110Unparen(selector.X).(*ast.Ident)
-		if !ok || imports[qualifier.Name] != "math" || !ps6077MathSelector(pass, source, function, selector, qualifier, parents) {
+		if !ok || imports[qualifier.Name] != "math" || !ps6077MathSelector(pass, source, selector, qualifier, bindings) {
 			return true
 		}
 		name := "math." + selector.Sel.Name
@@ -392,16 +397,15 @@ func ps6077ScalarCalls(pass *analysis.Pass, source *ps6077Source, function *ast.
 func ps6077MathSelector(
 	pass *analysis.Pass,
 	source *ps6077Source,
-	function *ast.FuncDecl,
 	selector *ast.SelectorExpr,
 	qualifier *ast.Ident,
-	parents map[ast.Node]ast.Node,
+	bindings ps6077BindingIndex,
 ) bool {
 	if source.active {
 		called, ok := pass.TypesInfo.Uses[selector.Sel].(*types.Func)
 		return ok && called.Pkg() != nil && called.Pkg().Path() == "math" && called.Name() == selector.Sel.Name
 	}
-	return !ps6077HasLocalBindingAt(function, qualifier.Name, qualifier.Pos(), parents)
+	return !bindings.has(qualifier.Name, qualifier.Pos())
 }
 
 func ps6077VectorEvidence(function *ast.FuncDecl) (string, int) {
@@ -449,7 +453,7 @@ func ps6077RelatedEvidence(scalar *ps6077Variant, variants []*ps6077Variant) ([]
 		leafCandidate := candidate.vectorScore > 0 && shape != "" &&
 			shape == candidate.sliceResultShape &&
 			ps6077FamiliesOverlap(families, candidate.allFamilies)
-		consumerCandidate := candidate.packageCalls[scalar.function.Name.Name]
+		consumerCandidate := candidate.directCalls[scalar.symbolIdentity]
 		if !leafCandidate && !consumerCandidate || !ps6077PartitionsOverlap(*scalar.source, *candidate.source) {
 			continue
 		}
@@ -492,7 +496,7 @@ func ps6077LimitRelated(variants []*ps6077Variant) []*ps6077Variant {
 // mode-selected SIMD primitive can match its public composite. Requiring the
 // ordered slice parameters and complete result signature keeps unrelated
 // numeric helpers out of the discovery evidence.
-func ps6077SliceResultShape(function *ast.FuncDecl) string {
+func ps6077SliceResultShape(function *ast.FuncDecl, imports map[string]string) string {
 	var parameters []string
 	for _, field := range function.Type.Params.List {
 		array, ok := ps2110Unparen(field.Type).(*ast.ArrayType)
@@ -504,13 +508,104 @@ func ps6077SliceResultShape(function *ast.FuncDecl) string {
 			count = 1
 		}
 		for range count {
-			parameters = append(parameters, exprTextRendered(field.Type))
+			parameters = append(parameters, ps6077TypeIdentity(field.Type, imports))
 		}
 	}
 	if len(parameters) == 0 {
 		return ""
 	}
-	return "type=" + ps6077FieldTypes(function.Type.TypeParams) + "|slices=(" + strings.Join(parameters, ",") + ")|results=" + ps6077FieldTypes(function.Type.Results)
+	return "type=" + ps6077ShapeFieldTypes(function.Type.TypeParams, imports) + "|slices=(" + strings.Join(parameters, ",") + ")|results=" + ps6077ShapeFieldTypes(function.Type.Results, imports)
+}
+
+func ps6077ShapeFieldTypes(fields *ast.FieldList, imports map[string]string) string {
+	if fields == nil {
+		return "()"
+	}
+	var values []string
+	for _, field := range fields.List {
+		count := len(field.Names)
+		if count == 0 {
+			count = 1
+		}
+		identity := ps6077TypeIdentity(field.Type, imports)
+		for range count {
+			values = append(values, identity)
+		}
+	}
+	return "(" + strings.Join(values, ",") + ")"
+}
+
+// ps6077TypeIdentity resolves file-local import aliases before comparing
+// related slice/result shapes. It deliberately retains named type identity:
+// two packages may expose equally spelled (or equally represented) element
+// types without making their slices interchangeable.
+func ps6077TypeIdentity(expression ast.Expr, imports map[string]string) string {
+	switch value := ps2110Unparen(expression).(type) {
+	case *ast.Ident:
+		return "ident(" + value.Name + ")"
+	case *ast.SelectorExpr:
+		if qualifier, ok := ps2110Unparen(value.X).(*ast.Ident); ok {
+			if path := imports[qualifier.Name]; path != "" {
+				return "package(" + strconv.Quote(path) + ")." + value.Sel.Name
+			}
+		}
+		return "selector(" + ps6077TypeIdentity(value.X, imports) + ")." + value.Sel.Name
+	case *ast.ArrayType:
+		if value.Len == nil {
+			return "slice(" + ps6077TypeIdentity(value.Elt, imports) + ")"
+		}
+		return "array(" + ps6077TypeIdentity(value.Len, imports) + "," + ps6077TypeIdentity(value.Elt, imports) + ")"
+	case *ast.StarExpr:
+		return "pointer(" + ps6077TypeIdentity(value.X, imports) + ")"
+	case *ast.Ellipsis:
+		return "variadic(" + ps6077TypeIdentity(value.Elt, imports) + ")"
+	case *ast.MapType:
+		return "map(" + ps6077TypeIdentity(value.Key, imports) + "," + ps6077TypeIdentity(value.Value, imports) + ")"
+	case *ast.ChanType:
+		return "chan(" + strconv.Itoa(int(value.Dir)) + "," + ps6077TypeIdentity(value.Value, imports) + ")"
+	case *ast.IndexExpr:
+		return "index(" + ps6077TypeIdentity(value.X, imports) + "," + ps6077TypeIdentity(value.Index, imports) + ")"
+	case *ast.IndexListExpr:
+		indices := make([]string, 0, len(value.Indices))
+		for _, index := range value.Indices {
+			indices = append(indices, ps6077TypeIdentity(index, imports))
+		}
+		return "indices(" + ps6077TypeIdentity(value.X, imports) + "," + strings.Join(indices, ",") + ")"
+	case *ast.FuncType:
+		return "func(" + ps6077ShapeFieldTypes(value.TypeParams, imports) + "," + ps6077ShapeFieldTypes(value.Params, imports) + "," + ps6077ShapeFieldTypes(value.Results, imports) + ")"
+	case *ast.InterfaceType:
+		return "interface" + ps6077IdentityFields(value.Methods, imports, true)
+	case *ast.StructType:
+		return "struct" + ps6077IdentityFields(value.Fields, imports, false)
+	case *ast.UnaryExpr:
+		return "unary(" + value.Op.String() + "," + ps6077TypeIdentity(value.X, imports) + ")"
+	case *ast.BinaryExpr:
+		return "binary(" + value.Op.String() + "," + ps6077TypeIdentity(value.X, imports) + "," + ps6077TypeIdentity(value.Y, imports) + ")"
+	case *ast.BasicLit:
+		return "literal(" + value.Kind.String() + "," + value.Value + ")"
+	default:
+		return "syntax(" + exprTextRendered(expression) + ")"
+	}
+}
+
+func ps6077IdentityFields(fields *ast.FieldList, imports map[string]string, interfaceMethods bool) string {
+	if fields == nil {
+		return "()"
+	}
+	values := make([]string, 0, len(fields.List))
+	for _, field := range fields.List {
+		names := make([]string, 0, len(field.Names))
+		for _, name := range field.Names {
+			names = append(names, name.Name)
+		}
+		entry := strings.Join(names, ",") + ":" + ps6077TypeIdentity(field.Type, imports)
+		if !interfaceMethods && field.Tag != nil {
+			values = append(values, entry+":tag="+field.Tag.Value)
+			continue
+		}
+		values = append(values, entry)
+	}
+	return "(" + strings.Join(values, ";") + ")"
 }
 
 var ps6077SemanticAliases = map[string]string{
@@ -593,16 +688,52 @@ func ps6077FamiliesOverlap(left, right map[string]bool) bool {
 	return false
 }
 
-func ps6077PackageCalls(pass *analysis.Pass, consumer *ps6077Variant) map[string]bool {
-	if consumer.function.Recv != nil || consumer.function.Body == nil {
-		// A same-named selector on an ignored architecture file cannot be
-		// resolved safely to a receiver type. Keep the cross-file fallback
-		// precise by reporting package functions only.
+func ps6077DeclaredSymbolIdentity(pass *analysis.Pass, function *ast.FuncDecl) string {
+	if function.Recv == nil {
+		return ps6077PackageFunctionIdentity(pass.Pkg.Path(), function.Name.Name)
+	}
+	return ps6077MethodIdentity(pass.Pkg.Path(), ps6074ReceiverName(function.Recv.List[0].Type), function.Name.Name)
+}
+
+func ps6077PackageFunctionIdentity(packagePath, name string) string {
+	return "package|" + packagePath + "|" + name
+}
+
+func ps6077MethodIdentity(packagePath, receiver, name string) string {
+	if receiver == "" {
+		return ""
+	}
+	return "method|" + packagePath + "|" + receiver + "|" + name
+}
+
+func ps6077ObjectIdentity(object *types.Func) string {
+	if object == nil || object.Pkg() == nil {
+		return ""
+	}
+	signature, ok := object.Type().(*types.Signature)
+	if !ok || signature.Recv() == nil {
+		return ps6077PackageFunctionIdentity(object.Pkg().Path(), object.Name())
+	}
+	receiver := signature.Recv().Type()
+	if pointer, ok := receiver.(*types.Pointer); ok {
+		receiver = pointer.Elem()
+	}
+	if named, ok := receiver.(*types.Named); ok {
+		named = named.Origin()
+		if named.Obj().Pkg() != nil {
+			return ps6077MethodIdentity(named.Obj().Pkg().Path(), named.Obj().Name(), object.Name())
+		}
+	}
+	return ""
+}
+
+func ps6077DirectCalls(pass *analysis.Pass, consumer *ps6077Variant) map[string]bool {
+	if consumer.function.Body == nil {
 		return nil
 	}
-	var parents map[ast.Node]ast.Node
+	var bindings ps6077BindingIndex
 	if !consumer.source.active {
-		parents = ps6077ParentMap(consumer.function.Body)
+		bindings = ps6077NewBindingIndex(consumer.function)
 	}
 	result := make(map[string]bool)
 	ast.Inspect(consumer.function.Body, func(node ast.Node) bool {
@@ -613,25 +744,44 @@ func ps6077PackageCalls(pass *analysis.Pass, consumer *ps6077Variant) map[string
 		if !ok {
 			return true
 		}
-		identifier, ok := ps6077CalledIdentifier(call.Fun)
-		if !ok {
-			return true
-		}
 		if consumer.source.active {
-			object := pass.TypesInfo.Uses[identifier]
-			function, ok := object.(*types.Func)
-			if ok && function.Pkg() == pass.Pkg && function.Parent() == pass.Pkg.Scope() {
-				result[function.Name()] = true
+			if identity := ps6077ActiveCallIdentity(pass, call.Fun); identity != "" {
+				result[identity] = true
 			}
 			return true
 		}
-		if ps6077HasLocalBindingAt(consumer.function, identifier.Name, identifier.Pos(), parents) {
+		identifier, ok := ps6077CalledIdentifier(call.Fun)
+		if !ok || bindings.has(identifier.Name, identifier.Pos()) {
 			return true
 		}
-		result[identifier.Name] = true
+		result[ps6077PackageFunctionIdentity(pass.Pkg.Path(), identifier.Name)] = true
 		return true
 	})
 	return result
+}
+
+func ps6077ActiveCallIdentity(pass *analysis.Pass, expression ast.Expr) string {
+	switch value := ps2110Unparen(expression).(type) {
+	case *ast.Ident:
+		function, ok := pass.TypesInfo.Uses[value].(*types.Func)
+		if !ok || function.Pkg() != pass.Pkg || function.Parent() != pass.Pkg.Scope() {
+			return ""
+		}
+		return ps6077ObjectIdentity(function)
+	case *ast.SelectorExpr:
+		selection := pass.TypesInfo.Selections[value]
+		if selection == nil {
+			return ""
+		}
+		function, _ := selection.Obj().(*types.Func)
+		return ps6077ObjectIdentity(function)
+	case *ast.IndexExpr:
+		return ps6077ActiveCallIdentity(pass, value.X)
+	case *ast.IndexListExpr:
+		return ps6077ActiveCallIdentity(pass, value.X)
+	default:
+		return ""
+	}
 }
 
 func ps6077CalledIdentifier(expression ast.Expr) (*ast.Ident, bool) {
@@ -664,62 +814,126 @@ func ps6077ParentMap(root ast.Node) map[ast.Node]ast.Node {
 	return parents
 }
 
-func ps6077HasLocalBindingAt(function *ast.FuncDecl, name string, position token.Pos, parents map[ast.Node]ast.Node) bool {
-	fieldLists := []*ast.FieldList{function.Recv, function.Type.TypeParams, function.Type.Params, function.Type.Results}
-	for _, fields := range fieldLists {
+type ps6077BindingRange struct {
+	start token.Pos
+	end   token.Pos
+}
+
+type ps6077BindingIndex map[string][]ps6077BindingRange
+
+func ps6077NewBindingIndex(function *ast.FuncDecl) ps6077BindingIndex {
+	result := make(ps6077BindingIndex)
+	if function.Body == nil {
+		return result
+	}
+	add := func(name string, start, end token.Pos) {
+		if name == "" || name == "_" || start >= end {
+			return
+		}
+		result[name] = append(result[name], ps6077BindingRange{start: start, end: end})
+	}
+	addFields := func(fields *ast.FieldList) {
 		if fields == nil {
-			continue
+			return
 		}
 		for _, field := range fields.List {
 			for _, identifier := range field.Names {
-				if identifier.Name == name {
-					return true
-				}
+				add(identifier.Name, function.Body.Pos(), function.Body.End())
 			}
 		}
 	}
-	shadowed := false
+	fieldLists := []*ast.FieldList{function.Recv, function.Type.TypeParams, function.Type.Params, function.Type.Results}
+	for _, fields := range fieldLists {
+		addFields(fields)
+	}
+	for _, name := range ps6077ReceiverTypeParameters(function.Recv) {
+		add(name, function.Body.Pos(), function.Body.End())
+	}
+	parents := ps6077ParentMap(function.Body)
 	ast.Inspect(function.Body, func(node ast.Node) bool {
-		if shadowed {
-			return false
-		}
 		switch value := node.(type) {
 		case *ast.AssignStmt:
-			if value.Tok == token.DEFINE && value.End() <= position && ps6077ScopeContains(ps6077BindingScope(parents, value), position) {
+			if value.Tok == token.DEFINE {
+				scope := ps6077BindingScope(parents, value)
 				for _, expression := range value.Lhs {
-					if identifier, ok := ps2110Unparen(expression).(*ast.Ident); ok && identifier.Name == name {
-						shadowed = true
-						return false
+					if identifier, ok := ps2110Unparen(expression).(*ast.Ident); ok && scope != nil {
+						add(identifier.Name, value.End(), scope.End())
 					}
 				}
 			}
 		case *ast.RangeStmt:
-			if value.Tok == token.DEFINE && value.Pos() < position && ps6077ScopeContains(value.Body, position) {
+			if value.Tok == token.DEFINE {
 				for _, expression := range []ast.Expr{value.Key, value.Value} {
-					if identifier, ok := ps2110Unparen(expression).(*ast.Ident); ok && identifier.Name == name {
-						shadowed = true
-						return false
+					if identifier, ok := ps2110Unparen(expression).(*ast.Ident); ok {
+						add(identifier.Name, value.Body.Pos(), value.Body.End())
 					}
 				}
 			}
 		case *ast.ValueSpec:
-			if value.End() <= position && ps6077ScopeContains(ps6077BindingScope(parents, value), position) {
+			if scope := ps6077BindingScope(parents, value); scope != nil {
 				for _, identifier := range value.Names {
-					if identifier.Name == name {
-						shadowed = true
-						return false
-					}
+					add(identifier.Name, value.End(), scope.End())
 				}
 			}
 		case *ast.TypeSpec:
-			if value.End() <= position && value.Name.Name == name && ps6077ScopeContains(ps6077BindingScope(parents, value), position) {
-				shadowed = true
-				return false
+			if scope := ps6077BindingScope(parents, value); scope != nil {
+				add(value.Name.Name, value.End(), scope.End())
 			}
 		}
 		return true
 	})
-	return shadowed
+	for name, ranges := range result {
+		slices.SortFunc(ranges, func(left, right ps6077BindingRange) int {
+			if byStart := cmp.Compare(left.start, right.start); byStart != 0 {
+				return byStart
+			}
+			return cmp.Compare(left.end, right.end)
+		})
+		merged := ranges[:0]
+		for _, current := range ranges {
+			if len(merged) == 0 || current.start > merged[len(merged)-1].end {
+				merged = append(merged, current)
+				continue
+			}
+			if current.end > merged[len(merged)-1].end {
+				merged[len(merged)-1].end = current.end
+			}
+		}
+		result[name] = merged
+	}
+	return result
+}
+
+func ps6077ReceiverTypeParameters(receiver *ast.FieldList) []string {
+	if receiver == nil || len(receiver.List) == 0 {
+		return nil
+	}
+	expression := ps2110Unparen(receiver.List[0].Type)
+	if pointer, ok := expression.(*ast.StarExpr); ok {
+		expression = ps2110Unparen(pointer.X)
+	}
+	var arguments []ast.Expr
+	switch value := expression.(type) {
+	case *ast.IndexExpr:
+		arguments = []ast.Expr{value.Index}
+	case *ast.IndexListExpr:
+		arguments = value.Indices
+	}
+	result := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		if identifier, ok := ps2110Unparen(argument).(*ast.Ident); ok {
+			result = append(result, identifier.Name)
+		}
+	}
+	return result
+}
+
+func (index ps6077BindingIndex) has(name string, position token.Pos) bool {
+	ranges := index[name]
+	match := sort.Search(len(ranges), func(i int) bool {
+		return ranges[i].start > position
+	})
+	return match > 0 && position < ranges[match-1].end
 }
 
 func ps6077BindingScope(parents map[ast.Node]ast.Node, declaration ast.Node) ast.Node {
@@ -754,10 +968,6 @@ func ps6077BindingScope(parents map[ast.Node]ast.Node, declaration ast.Node) ast
 		}
 	}
 	return nil
-}
-
-func ps6077ScopeContains(scope ast.Node, position token.Pos) bool {
-	return scope != nil && scope.Pos() <= position && position < scope.End()
 }
 
 func ps6077RelatedMessage(pass *analysis.Pass, finding *ps6077Finding) string {
