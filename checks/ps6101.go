@@ -49,10 +49,15 @@ Pointer and named-pointer bindings preserve binding-local input facts through
 multiple dereferences without relabeling the underlying storage outside scope.
 Function values, receivers, arguments, deferred operands, sends, selectors,
 composite elements, B.Run names/callbacks, and RunParallel callbacks are
-evaluated exactly once in Go order. Local deferred calls run in LIFO order at
-each normal function exit using the then-current timer state; their callable
-and argument values are snapshotted at registration. Fresh new(T) pointees are
-tracked as distinct zero-initialized local storage while they remain reachable.
+evaluated exactly once in Go order. Local deferred calls run in path-correlated
+LIFO order at normal returns and panic unwinds using the then-current timer
+state; their callable and argument values are snapshotted at registration.
+A panic makes the following body unreachable, and only a direct recover in a
+deferred frame produces a normal recovered exit. Bound value-receiver methods
+snapshot receiver fields, while pointer-receiver methods retain the receiver
+binding. Fresh new(T) pointees are tracked as distinct zero-initialized local
+storage while they remain transitively reachable through returned aggregates,
+closures, aliases, or deferred effects.
 It recognizes NormFloat64 or centered uniform input from math/rand and
 math/rand/v2, but
 rejects overwritten, shadowed, unsigned/nonnegative, untimed, or
@@ -174,8 +179,9 @@ type ps6101Callable struct {
 // call dispatcher, while values makes replaying it at function exit obey Go's
 // "evaluate now, invoke later" rule without running an operand twice.
 type ps6101DeferredCall struct {
-	call   *ast.CallExpr
-	values map[ast.Expr]ps6101Value
+	call       *ast.CallExpr
+	values     map[ast.Expr]ps6101Value
+	canRecover bool
 }
 
 type ps6101Location struct {
@@ -244,6 +250,7 @@ type ps6101ExitState struct {
 	recoverable  int
 	defers       [][]ps6101DeferredCall
 	deferOpaque  bool
+	panicEscaped bool
 }
 
 type ps6101ControlStates struct {
@@ -305,6 +312,10 @@ type ps6101Engine struct {
 	recoverable     int
 	defers          [][]ps6101DeferredCall
 	deferOpaque     bool
+	panicEscaped    bool
+	returnOpaque    bool
+	recoverFrame    int
+	recoverCalled   bool
 	fresh           map[types.Object]bool
 	freshCount      int
 	evalCache       map[ast.Expr]ps6101Value
@@ -409,6 +420,7 @@ func (engine *ps6101Engine) analyzeFunction(function *ast.FuncDecl, call *ast.Ca
 		engine.bindCall(function, call, receiver, callable)
 	}
 	if call != nil && !engine.enterCall() {
+		engine.returnOpaque = true
 		engine.invalidateCapturedState()
 		engine.retainCallerVisibility(callerRoots, callerAliases)
 		engine.typeArguments = oldTypeArguments
@@ -418,6 +430,7 @@ func (engine *ps6101Engine) analyzeFunction(function *ast.FuncDecl, call *ast.Ca
 		defer engine.leaveCall()
 	}
 	if object != nil && engine.active[object] {
+		engine.returnOpaque = true
 		engine.invalidateCapturedState()
 		engine.retainCallerVisibility(callerRoots, callerAliases)
 		engine.typeArguments = oldTypeArguments
@@ -427,6 +440,8 @@ func (engine *ps6101Engine) analyzeFunction(function *ast.FuncDecl, call *ast.Ca
 		engine.active[object] = true
 		defer delete(engine.active, object)
 	}
+	oldReturnOpaque := engine.returnOpaque
+	engine.returnOpaque = false
 	engine.clearLocals(function)
 	oldReturns := engine.returns
 	engine.returns = nil
@@ -445,6 +460,8 @@ func (engine *ps6101Engine) analyzeFunction(function *ast.FuncDecl, call *ast.Ca
 		delete(engine.aliases, result)
 	}
 	oldRecoverable := engine.recoverable
+	oldPanicEscaped := engine.panicEscaped
+	engine.panicEscaped = false
 	oldDefers, oldDeferOpaque := engine.defers, engine.deferOpaque
 	engine.defers, engine.deferOpaque = [][]ps6101DeferredCall{{}}, false
 	flow := engine.analyzeBlock(function.Body)
@@ -457,6 +474,7 @@ func (engine *ps6101Engine) analyzeFunction(function *ast.FuncDecl, call *ast.Ca
 		}
 	}
 	results := engine.mergeReturns(engine.returns)
+	localReturnOpaque := engine.returnOpaque
 	engine.mergeExits()
 	if call != nil {
 		engine.retainFreshReferencedRoots(callerRoots, results)
@@ -467,6 +485,8 @@ func (engine *ps6101Engine) analyzeFunction(function *ast.FuncDecl, call *ast.Ca
 	engine.jumps = oldJumps
 	engine.controls = oldControls
 	engine.recoverable = oldRecoverable
+	engine.panicEscaped = oldPanicEscaped || engine.panicEscaped
+	engine.returnOpaque = oldReturnOpaque || localReturnOpaque
 	engine.defers, engine.deferOpaque = oldDefers, oldDeferOpaque
 	engine.resultObjects = oldResultObjects
 	engine.resultTypes = oldResultTypes
@@ -726,6 +746,19 @@ func (engine *ps6101Engine) snapshotCallableReceiver(callable *ps6101Callable, e
 		return
 	}
 	value := ps6101CloneValue(evaluated)
+	if engine.callableHasPointerReceiver(callable) {
+		// A bound pointer-receiver method captures the receiver pointer, not a
+		// copy of the receiver's fields. Preserve an implicit &value for an
+		// addressable value receiver expression so later writes remain visible
+		// when a deferred method or method value is eventually invoked.
+		if value.reference == nil {
+			if source, ok := engine.location(expression, false); ok {
+				value.reference = ps6101Reference(source)
+			}
+		}
+		callable.receiverValue = &value
+		return
+	}
 	callable.receiverValue = &value
 	source, ok := engine.location(expression, true)
 	if !ok {
@@ -740,6 +773,22 @@ func (engine *ps6101Engine) snapshotCallableReceiver(callable *ps6101Callable, e
 		fields[suffix] = ps6101CloneValue(stored)
 	}
 	callable.receiverFields = fields
+}
+
+func (engine *ps6101Engine) callableHasPointerReceiver(callable *ps6101Callable) bool {
+	if callable == nil || callable.function == nil {
+		return false
+	}
+	function, ok := identObject(engine.pass, callable.function.Name).(*types.Func)
+	if !ok {
+		return false
+	}
+	signature, ok := function.Type().(*types.Signature)
+	if !ok || signature.Recv() == nil {
+		return false
+	}
+	_, pointer := types.Unalias(signature.Recv().Type()).(*types.Pointer)
+	return pointer
 }
 
 func (engine *ps6101Engine) bindParameter(name *ast.Ident, argument ast.Expr) {
@@ -910,6 +959,15 @@ func (engine *ps6101Engine) analyzeBlock(block *ast.BlockStmt) ps6101Flow {
 			continue
 		}
 		statementFlow := engine.analyzeStatement(statement)
+		if engine.panicEscaped {
+			engine.panicEscaped = false
+			start := len(engine.exits)
+			engine.capturePanicExit()
+			if len(engine.resultObjects) > 0 {
+				engine.appendExitResults(start)
+			}
+			statementFlow = statementFlow&^ps6101FallsThrough | ps6101Returns
+		}
 		flow = flow&^ps6101FallsThrough | statementFlow
 	}
 	return flow
@@ -932,6 +990,9 @@ func (engine *ps6101Engine) analyzeStatement(statement ast.Stmt) ps6101Flow {
 	case *ast.ExprStmt:
 		engine.eval(value.X)
 		if call, ok := ps6101Unparen(value.X).(*ast.CallExpr); ok && engine.terminalFailureCall(call) {
+			if engine.panickingCall(call) {
+				engine.panicEscaped = true
+			}
 			return ps6101Returns
 		}
 	case *ast.ReturnStmt:
@@ -954,6 +1015,9 @@ func (engine *ps6101Engine) analyzeStatement(statement ast.Stmt) ps6101Flow {
 				result = append(result, engine.returnValue(expression))
 			}
 		}
+		if engine.panicEscaped {
+			return ps6101Returns
+		}
 		sourceTypes := engine.expressionTypes(value.Results)
 		for index := range result {
 			if index < len(engine.resultTypes) {
@@ -970,8 +1034,17 @@ func (engine *ps6101Engine) analyzeStatement(statement ast.Stmt) ps6101Flow {
 			engine.captureExit()
 			engine.appendExitResults(start)
 		} else {
-			engine.returns = append(engine.returns, result)
+			start := len(engine.exits)
 			engine.captureExit()
+			exitCount := len(engine.exits) - start
+			cloned := make([]ps6101Value, exitCount*len(result))
+			for exitIndex := range exitCount {
+				exitResult := cloned[exitIndex*len(result) : (exitIndex+1)*len(result)]
+				for index := range result {
+					exitResult[index] = ps6101CloneValue(result[index])
+				}
+				engine.returns = append(engine.returns, exitResult)
+			}
 		}
 		return ps6101Returns
 	case *ast.BranchStmt:
@@ -1046,7 +1119,7 @@ func (engine *ps6101Engine) analyzeStatement(statement ast.Stmt) ps6101Flow {
 		return engine.analyzeSelect(value)
 	case *ast.DeferStmt:
 		engine.registerDeferredCall(value.Call)
-		if engine.deferredCallCanRecover(value.Call) {
+		if !engine.panicEscaped && engine.deferredCallCanRecover(value.Call) {
 			engine.recoverable++
 		}
 	case *ast.SendStmt:
@@ -1121,6 +1194,7 @@ func ps6101CloneDeferredStack(stack []ps6101DeferredCall) []ps6101DeferredCall {
 	cloned := make([]ps6101DeferredCall, len(stack))
 	for index, deferred := range stack {
 		cloned[index].call = deferred.call
+		cloned[index].canRecover = deferred.canRecover
 		if len(deferred.values) > 0 {
 			cloned[index].values = make(map[ast.Expr]ps6101Value, len(deferred.values))
 			for expression, value := range deferred.values {
@@ -1141,31 +1215,50 @@ func (engine *ps6101Engine) registerDeferredCall(call *ast.CallExpr) {
 	restore := engine.beginSingleEvaluation()
 	values := make(map[ast.Expr]ps6101Value, len(call.Args)+1)
 	values[call.Fun] = ps6101CloneValue(engine.eval(call.Fun))
+	if engine.panicEscaped {
+		restore()
+		return
+	}
 	for _, argument := range call.Args {
 		values[argument] = ps6101CloneValue(engine.eval(argument))
+		if engine.panicEscaped {
+			restore()
+			return
+		}
 	}
 	restore()
 	if len(engine.defers) == 0 {
 		engine.defers = [][]ps6101DeferredCall{{}}
 	}
 	for index := range engine.defers {
-		deferred := ps6101DeferredCall{call: call, values: values}
+		deferred := ps6101DeferredCall{call: call, values: values, canRecover: engine.deferredCallCanRecover(call)}
 		engine.defers[index] = append(engine.defers[index], deferred)
 	}
 }
 
-func (engine *ps6101Engine) invokeDeferredCall(deferred ps6101DeferredCall) {
+func (engine *ps6101Engine) invokeDeferredCall(deferred ps6101DeferredCall, panicking bool) bool {
 	if deferred.call == nil {
-		return
+		return false
 	}
 	oldValues, oldBools := engine.evalCache, engine.boolCache
+	oldRecoverFrame, oldRecoverCalled := engine.recoverFrame, engine.recoverCalled
 	engine.evalCache = make(map[ast.Expr]ps6101Value, len(deferred.values))
 	engine.boolCache = make(map[ast.Expr]int)
+	engine.recoverFrame, engine.recoverCalled = 0, false
+	if panicking && deferred.canRecover {
+		// Local function and literal calls enter exactly one frame here. A
+		// recover reached through another call is therefore at a deeper depth
+		// and cannot recover this unwind.
+		engine.recoverFrame = engine.callDepth + 1
+	}
 	for expression, value := range deferred.values {
 		engine.evalCache[expression] = ps6101CloneValue(value)
 	}
 	engine.evalCall(deferred.call)
+	recovered := engine.recoverFrame != 0 && engine.recoverCalled
 	engine.evalCache, engine.boolCache = oldValues, oldBools
+	engine.recoverFrame, engine.recoverCalled = oldRecoverFrame, oldRecoverCalled
+	return recovered
 }
 
 func ps6101MergeDeferredPaths(states []ps6101ExitState) ([][]ps6101DeferredCall, bool) {
@@ -1201,7 +1294,7 @@ func ps6101SameDeferredStack(left, right []ps6101DeferredCall) bool {
 		return false
 	}
 	for index := range left {
-		if left[index].call != right[index].call || len(left[index].values) != len(right[index].values) {
+		if left[index].call != right[index].call || left[index].canRecover != right[index].canRecover || len(left[index].values) != len(right[index].values) {
 			return false
 		}
 		for expression, value := range left[index].values {
@@ -1403,7 +1496,7 @@ func (engine *ps6101Engine) currentExitState() ps6101ExitState {
 		counterGates: ps6101CopyCounterGates(engine.counterGates),
 		counterRevs:  ps6101CopyCounterRevisions(engine.counterRevs),
 		timer:        engine.timer, recoverable: engine.recoverable,
-		defers: ps6101CloneDeferredPaths(engine.defers), deferOpaque: engine.deferOpaque,
+		defers: ps6101CloneDeferredPaths(engine.defers), deferOpaque: engine.deferOpaque, panicEscaped: engine.panicEscaped,
 	}
 }
 
@@ -1417,6 +1510,7 @@ func (engine *ps6101Engine) loadExitState(state ps6101ExitState) {
 	engine.recoverable = state.recoverable
 	engine.defers = ps6101CloneDeferredPaths(state.defers)
 	engine.deferOpaque = state.deferOpaque
+	engine.panicEscaped = state.panicEscaped
 }
 
 func (engine *ps6101Engine) mergeJumpStates(states []ps6101ExitState) {
@@ -1519,6 +1613,7 @@ func (engine *ps6101Engine) analyzeIf(statement *ast.IfStmt) ps6101Flow {
 	entryGates := slices.Clone(engine.gates)
 	entryCounterGates, entryCounterRevs := ps6101CopyCounterGates(engine.counterGates), ps6101CopyCounterRevisions(engine.counterRevs)
 	entryTimer, entryRecoverable := engine.timer, engine.recoverable
+	entryPanicEscaped := engine.panicEscaped
 	entryDefers, entryDeferOpaque := ps6101CloneDeferredPaths(engine.defers), engine.deferOpaque
 	engine.conditional++
 	oldActive := len(engine.activeGates)
@@ -1531,6 +1626,7 @@ func (engine *ps6101Engine) analyzeIf(statement *ast.IfStmt) ps6101Flow {
 		}
 	}
 	bodyFlow := engine.analyzeBlock(statement.Body)
+	bodyPanicEscaped := engine.panicEscaped
 	engine.activeGates = engine.activeGates[:oldActive]
 	bodyState, bodyAliases := engine.cloneState(), engine.cloneAliases()
 	bodyGates, bodyTimer, bodyRecoverable := slices.Clone(engine.gates), engine.timer, engine.recoverable
@@ -1538,6 +1634,7 @@ func (engine *ps6101Engine) analyzeIf(statement *ast.IfStmt) ps6101Flow {
 	bodyDefers, bodyDeferOpaque := ps6101CloneDeferredPaths(engine.defers), engine.deferOpaque
 	engine.state, engine.aliases = entryState, entryAliases
 	engine.gates, engine.timer, engine.recoverable = slices.Clone(entryGates), entryTimer, entryRecoverable
+	engine.panicEscaped = entryPanicEscaped
 	engine.counterGates, engine.counterRevs = ps6101CopyCounterGates(entryCounterGates), ps6101CopyCounterRevisions(entryCounterRevs)
 	engine.defers, engine.deferOpaque = ps6101CloneDeferredPaths(entryDefers), entryDeferOpaque
 	if engine.loopAbstract > 0 {
@@ -1547,6 +1644,7 @@ func (engine *ps6101Engine) analyzeIf(statement *ast.IfStmt) ps6101Flow {
 	if statement.Else != nil {
 		elseFlow = engine.analyzeStatement(statement.Else)
 	}
+	elsePanicEscaped := engine.panicEscaped
 	elseState, elseAliases := engine.cloneState(), engine.cloneAliases()
 	elseGates, elseTimer, elseRecoverable := slices.Clone(engine.gates), engine.timer, engine.recoverable
 	elseCounterGates, elseCounterRevs := ps6101CopyCounterGates(engine.counterGates), ps6101CopyCounterRevisions(engine.counterRevs)
@@ -1581,6 +1679,10 @@ func (engine *ps6101Engine) analyzeIf(statement *ast.IfStmt) ps6101Flow {
 		engine.timer |= elseTimer
 		engine.recoverable = max(engine.recoverable, elseRecoverable)
 	}
+	// An unknown branch can continue normally whenever either side does. Only
+	// propagate a panic to the caller when every feasible side necessarily
+	// escapes by panic.
+	engine.panicEscaped = entryPanicEscaped || bodyPanicEscaped && elsePanicEscaped
 	return bodyFlow | elseFlow
 }
 
@@ -4096,20 +4198,42 @@ func (engine *ps6101Engine) mergeFallthrough(states []map[ps6101Location]ps6101V
 }
 
 func (engine *ps6101Engine) captureExit() {
+	engine.captureUnwind(false)
+}
+
+func (engine *ps6101Engine) capturePanicExit() {
+	engine.captureUnwind(true)
+}
+
+// captureUnwind replays every feasible deferred stack in strict LIFO order.
+// A panic makes the remainder of the function body unreachable; only a direct
+// recover in a deferred frame converts that unwind into a normal function exit.
+// A panic raised by a deferred call starts a new unwind even during return.
+func (engine *ps6101Engine) captureUnwind(panicking bool) {
 	entry := engine.currentExitState()
 	paths := entry.defers
 	if len(paths) == 0 {
 		paths = [][]ps6101DeferredCall{{}}
 	}
 	start := len(engine.exits)
+	var escaped *ps6101ExitState
 	for _, stack := range paths {
 		engine.loadExitState(entry)
 		// A deferred invocation belongs to its own callee context.  Clearing the
 		// pending outer stack here prevents an opaque nested call from observing
 		// or replaying the caller's registrations.
 		engine.defers, engine.deferOpaque = [][]ps6101DeferredCall{{}}, false
+		activePanic := panicking
 		for index := len(stack) - 1; index >= 0; index-- {
-			engine.invokeDeferredCall(stack[index])
+			deferred := stack[index]
+			incomingPanic := activePanic
+			engine.panicEscaped = false
+			recovered := engine.invokeDeferredCall(deferred, incomingPanic)
+			deferredPanic := engine.panicEscaped
+			if incomingPanic && recovered {
+				incomingPanic = false
+			}
+			activePanic = incomingPanic || deferredPanic
 		}
 		if entry.deferOpaque {
 			engine.invalidateCapturedState()
@@ -4117,10 +4241,20 @@ func (engine *ps6101Engine) captureExit() {
 		state := engine.currentExitState()
 		state.defers = [][]ps6101DeferredCall{{}}
 		state.deferOpaque = false
+		state.panicEscaped = activePanic
+		if activePanic {
+			copy := state
+			escaped = &copy
+			continue
+		}
 		engine.exits = append(engine.exits, state)
 	}
 	if len(engine.exits) > start {
 		engine.loadExitState(engine.exits[len(engine.exits)-1])
+		engine.panicEscaped = false
+	} else if escaped != nil {
+		engine.loadExitState(*escaped)
+		engine.panicEscaped = true
 	}
 }
 
@@ -4168,6 +4302,8 @@ func ps6101MergeExitStates(left, right map[ps6101Location]ps6101Value) map[ps610
 		switch {
 		case leftOK && rightOK && ps6101SameValue(leftValue, rightValue):
 			merged[location] = ps6101CloneValue(leftValue)
+		case leftOK && rightOK && ps6101RiskValue(leftValue) && ps6101RiskValue(rightValue):
+			merged[location] = ps6101MergeRiskValues(leftValue, rightValue)
 		case leftOK && ps6101RiskValue(leftValue) && (!rightOK || !ps6101RiskValue(rightValue)):
 			merged[location] = ps6101CloneValue(leftValue)
 		case rightOK && ps6101RiskValue(rightValue) && (!leftOK || !ps6101RiskValue(leftValue)):
@@ -4189,6 +4325,25 @@ func ps6101SameRisk(left, right ps6101Value) bool {
 		ps6101SourceSignature(left.sources) == ps6101SourceSignature(right.sources)
 }
 
+func ps6101MergeRiskValues(left, right ps6101Value) ps6101Value {
+	merged := ps6101CloneValue(left)
+	merged.sources = ps6101JoinSources(left.sources, right.sources)
+	merged.eligible = left.eligible || right.eligible
+	merged.aggregate = left.aggregate || right.aggregate
+	if left.identity != right.identity {
+		merged.identity = 0
+	}
+	if left.revision != right.revision {
+		merged.revision = 0
+	}
+	leftAnalysis, rightAnalysis := left.analysisValue(), right.analysisValue()
+	if leftAnalysis.squareID != rightAnalysis.squareID || leftAnalysis.squareSign != rightAnalysis.squareSign || leftAnalysis.squareSig != rightAnalysis.squareSig {
+		analysis := merged.mutableAnalysis()
+		analysis.squareID, analysis.squareSign, analysis.squareSig = 0, 0, ""
+	}
+	return merged
+}
+
 func (engine *ps6101Engine) callerVisibility() (map[types.Object]bool, map[types.Object]bool) {
 	roots := make(map[types.Object]bool, len(engine.state)+len(engine.counterRevs))
 	for location := range engine.state {
@@ -4208,21 +4363,63 @@ func (engine *ps6101Engine) retainFreshReferencedRoots(roots map[types.Object]bo
 	if roots == nil {
 		return
 	}
-	for _, value := range values {
-		if value.reference != nil && engine.fresh[value.reference.root] {
-			roots[value.reference.root] = true
-		}
-	}
-	for {
+	retainValues := func(candidates []ps6101Value) bool {
 		changed := false
-		for location, value := range engine.state {
-			if !roots[location.root] || value.reference == nil || roots[value.reference.root] {
-				continue
+		remaining := ps6101ReferenceFieldSnapshotLimit * 4
+		seenCallables := make(map[*ps6101Callable]bool)
+		var retainValue func(ps6101Value)
+		retainLocation := func(location ps6101Location) {
+			if location.root != nil && engine.fresh[location.root] && !roots[location.root] {
+				roots[location.root] = true
+				changed = true
 			}
-			roots[value.reference.root] = true
-			changed = true
 		}
-		if !changed {
+		retainValue = func(value ps6101Value) {
+			if remaining <= 0 {
+				return
+			}
+			remaining--
+			if value.reference != nil {
+				retainLocation(*value.reference)
+			}
+			for _, element := range value.elements {
+				retainValue(element)
+			}
+			for _, field := range value.fieldValues() {
+				retainValue(field)
+			}
+			callable := value.callable
+			if callable == nil || seenCallables[callable] {
+				return
+			}
+			seenCallables[callable] = true
+			if callable.receiverValue != nil {
+				retainValue(*callable.receiverValue)
+			}
+			for _, field := range callable.receiverFields {
+				retainValue(field)
+			}
+			for _, capture := range callable.captures {
+				retainValue(capture)
+			}
+			for _, alias := range callable.captureAliases {
+				retainLocation(alias)
+			}
+		}
+		for _, candidate := range candidates {
+			retainValue(candidate)
+		}
+		return changed
+	}
+	retainValues(values)
+	for {
+		var visible []ps6101Value
+		for location, value := range engine.state {
+			if roots[location.root] {
+				visible = append(visible, value)
+			}
+		}
+		if !retainValues(visible) {
 			return
 		}
 	}
@@ -5353,6 +5550,7 @@ func (engine *ps6101Engine) evalUncached(expression ast.Expr) ps6101Value {
 			result.aggregate = result.aggregate || pointer.aggregate
 			result.threshold = result.threshold || pointer.threshold
 			result.testing = result.testing || pointer.testing
+			ps6101ApplyNamedValueSemantics(ps6101ExpressionName(value.X), &result)
 			return result
 		}
 		return ps6101Value{}
@@ -5679,6 +5877,17 @@ func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 	if identifier, ok := call.Fun.(*ast.Ident); ok {
 		if builtin, ok := identObject(engine.pass, identifier).(*types.Builtin); ok {
 			switch builtin.Name() {
+			case "recover":
+				if engine.recoverFrame != 0 && engine.callDepth == engine.recoverFrame {
+					engine.recoverCalled = true
+				}
+				return nil
+			case "panic":
+				for _, argument := range call.Args {
+					engine.eval(argument)
+				}
+				engine.panicEscaped = true
+				return nil
 			case "append":
 				values := make([]ps6101Value, len(call.Args))
 				for index, argument := range call.Args {
@@ -6141,23 +6350,29 @@ func (engine *ps6101Engine) analyzeLiteral(literal *ast.FuncLit, call *ast.CallE
 	// only after its own arguments have been evaluated in Go order.
 	engine.bindParameters(literal.Type.Params, call)
 	if !engine.enterCall() {
+		engine.returnOpaque = true
 		engine.invalidateCapturedState()
 		engine.retainCallerVisibility(callerRoots, callerAliases)
 		return nil
 	}
 	defer engine.leaveCall()
 	if engine.activeLiteral[literal] {
+		engine.returnOpaque = true
 		engine.invalidateCapturedState()
 		engine.retainCallerVisibility(callerRoots, callerAliases)
 		return nil
 	}
 	engine.activeLiteral[literal] = true
 	defer delete(engine.activeLiteral, literal)
+	oldReturnOpaque := engine.returnOpaque
+	engine.returnOpaque = false
 	engine.clearNodeLocals(literal.Body)
 	oldReturns, oldExits := engine.returns, engine.exits
 	oldJumps := engine.jumps
 	oldControls := engine.controls
 	oldResultObjects, oldResultTypes, oldRecoverable := engine.resultObjects, engine.resultTypes, engine.recoverable
+	oldPanicEscaped := engine.panicEscaped
+	engine.panicEscaped = false
 	oldDefers, oldDeferOpaque := engine.defers, engine.deferOpaque
 	engine.returns = nil
 	engine.exits = nil
@@ -6179,6 +6394,7 @@ func (engine *ps6101Engine) analyzeLiteral(literal *ast.FuncLit, call *ast.CallE
 		}
 	}
 	results := engine.mergeReturns(engine.returns)
+	localReturnOpaque := engine.returnOpaque
 	engine.mergeExits()
 	engine.refreshLiteralCaptures(callable)
 	engine.retainFreshReferencedRoots(callerRoots, results)
@@ -6187,6 +6403,8 @@ func (engine *ps6101Engine) analyzeLiteral(literal *ast.FuncLit, call *ast.CallE
 	engine.jumps = oldJumps
 	engine.controls = oldControls
 	engine.resultObjects, engine.resultTypes, engine.recoverable = oldResultObjects, oldResultTypes, oldRecoverable
+	engine.panicEscaped = oldPanicEscaped || engine.panicEscaped
+	engine.returnOpaque = oldReturnOpaque || localReturnOpaque
 	engine.defers, engine.deferOpaque = oldDefers, oldDeferOpaque
 	return results
 }
@@ -7462,14 +7680,22 @@ func (engine *ps6101Engine) terminalFailureCall(call *ast.CallExpr) bool {
 	if call == nil {
 		return false
 	}
-	if identifier, ok := ps6101Unparen(call.Fun).(*ast.Ident); ok {
-		return engine.recoverable == 0 && identifier.Name == "panic" && identObject(engine.pass, identifier) == types.Universe.Lookup("panic")
+	if engine.panickingCall(call) {
+		return true
 	}
 	switch engine.testingMethod(call) {
 	case "Fatal", "Fatalf", "FailNow":
 		return true
 	}
 	return false
+}
+
+func (engine *ps6101Engine) panickingCall(call *ast.CallExpr) bool {
+	if call == nil {
+		return false
+	}
+	identifier, ok := ps6101Unparen(call.Fun).(*ast.Ident)
+	return ok && identifier.Name == "panic" && identObject(engine.pass, identifier) == types.Universe.Lookup("panic")
 }
 
 func (engine *ps6101Engine) deferredCallCanRecover(call *ast.CallExpr) bool {
@@ -7492,6 +7718,12 @@ func (engine *ps6101Engine) deferredCallCanRecover(call *ast.CallExpr) bool {
 	found := false
 	ast.Inspect(root, func(node ast.Node) bool {
 		if found {
+			return false
+		}
+		// recover is effective only when it is called directly by the deferred
+		// function. A call in a nested literal runs in a different frame and
+		// must not make the surrounding defer recover a panic.
+		if _, nested := node.(*ast.FuncLit); nested {
 			return false
 		}
 		called, ok := node.(*ast.CallExpr)
@@ -8191,9 +8423,22 @@ func (engine *ps6101Engine) mergeReturns(returns [][]ps6101Value) []ps6101Value 
 	for index := 0; index < width; index++ {
 		result[index] = ps6101CloneValue(returns[0][index])
 		for _, values := range returns[1:] {
-			if !ps6101SameValue(result[index], values[index]) {
+			if engine.returnOpaque {
+				if !ps6101SameValue(result[index], values[index]) {
+					result[index] = ps6101Value{}
+					break
+				}
+				continue
+			}
+			switch {
+			case ps6101SameValue(result[index], values[index]):
+			case ps6101RiskValue(result[index]) && ps6101RiskValue(values[index]):
+				result[index] = ps6101MergeRiskValues(result[index], values[index])
+			case ps6101RiskValue(result[index]):
+			case ps6101RiskValue(values[index]):
+				result[index] = ps6101CloneValue(values[index])
+			default:
 				result[index] = ps6101Value{}
-				break
 			}
 		}
 	}
