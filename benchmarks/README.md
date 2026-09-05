@@ -84,3 +84,9 @@ Rules without a pair, and why:
   tradeoffs. A fixed toy pair would turn a machine-code verification obligation
   into a misleading universal speedup claim; inspect the exact instantiated
   symbol and benchmark the real operation mix instead.
+- **PS6099** (scalar-transcendental output-staging advisory): the After arm is
+  an already available architecture-specific SIMD/batched transcendental leaf,
+  not portable Go. A toy scalar second pass would benchmark an extra memory
+  walk without the mechanism the rule proves is present. The check documents
+  the owner SVC campaign; benchmark the exact routed leaf, precision, band size,
+  alias regime, and iterative solver end to end.
