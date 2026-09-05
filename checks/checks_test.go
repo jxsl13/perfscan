@@ -329,6 +329,11 @@ func TestPS1001(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), PS1001.Analyzer, "ps1001")
 }
 
+func TestPS6101(t *testing.T) {
+	t.Parallel()
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS6101.Analyzer, "ps6101")
+}
+
 func TestPS1002(t *testing.T) {
 	defer config.SetForTesting(refVocab)()
 	analysistest.Run(t, analysistest.TestData(), PS1002.Analyzer, "ps1002")
