@@ -43,9 +43,10 @@ The detector follows object-specific input and aggregate values through direct
 local helper and method calls, direct or stored numeric generic instantiations,
 positional variadic calls, interface boxing, single/comma-ok assertions and type
 switches, testing.B.Run sub-benchmarks, and testing.B.RunParallel workers.
-Direct recognized input bindings, local helper results, and facts live across
-testing-compatible calls preserve input provenance without treating an unrelated
-aggregate name as an input.
+Direct recognized input bindings and corroborated scalar-input bindings preserve
+their provenance across local helper returns and testing-compatible calls. Those
+boundaries do not turn unrelated symmetric random values or aggregate names into
+benchmark inputs.
 Direct, method-expression, and stored testing.B method calls share the same
 timer/callback semantics.
 Pointer and named-pointer bindings preserve binding-local input facts through
@@ -152,6 +153,8 @@ type ps6101Value struct {
 	threshold  bool
 	testing    bool
 	mapAbsent  bool
+	inputHint  bool
+	callBound  bool
 	revision   uint64
 	identity   uint64
 	analysis   *ps6101ValueAnalysis
@@ -4955,10 +4958,10 @@ func (engine *ps6101Engine) retainFreshReferencedRoots(roots map[types.Object]bo
 
 func (engine *ps6101Engine) promoteFreshReferencedInputs(roots map[types.Object]bool) {
 	for location, value := range engine.state {
-		if !roots[location.root] || !engine.fresh[location.root] || value.kind != ps6101Symmetric || len(value.sources) == 0 {
+		if !roots[location.root] || !engine.fresh[location.root] || len(value.sources) == 0 {
 			continue
 		}
-		value.eligible = true
+		value.callBound = true
 		engine.state[location] = value
 	}
 }
@@ -5418,6 +5421,7 @@ func (engine *ps6101Engine) storeTarget(expression ast.Expr, target ps6101StoreT
 		value.nonempty = value.nonempty || parentValue.nonempty
 		value.eligible = value.eligible || parentValue.eligible
 		value.aggregate = value.aggregate || parentValue.aggregate
+		value.callBound = value.callBound || parentValue.callBound
 		if target.mapIndex {
 			stored, present := engine.state[location]
 			mapElementPresent = present && !stored.mapAbsent
@@ -5497,10 +5501,18 @@ func ps6101ApplyNamedValueSemantics(name string, value *ps6101Value) {
 	if value == nil {
 		return
 	}
+	if len(value.sources) > 0 && strings.EqualFold(name, "value") {
+		// "value" alone is intentionally too generic to establish benchmark
+		// aggregate provenance. Treat it as a possible scalar input, but require
+		// a corroborating call boundary before an aggregate binding can turn it
+		// into a reportable gate candidate.
+		value.inputHint = true
+		value.eligible = true
+	}
 	if ps6101BenchmarkInputName(name) && len(value.sources) > 0 {
 		value.eligible = true
 		value.aggregate = true
-	} else if ps6101AggregateName(name) && value.eligible && len(value.sources) > 0 {
+	} else if ps6101AggregateName(name) && value.eligible && (!value.inputHint || value.callBound) && len(value.sources) > 0 {
 		value.aggregate = true
 	}
 	if ps6101ThresholdName(name) {
@@ -6730,10 +6742,10 @@ func (engine *ps6101Engine) invokeTestingMethod(call *ast.CallExpr, callable *ps
 
 func (engine *ps6101Engine) promoteLiveTestingInputs() {
 	for location, value := range engine.state {
-		if value.kind != ps6101Symmetric || len(value.sources) == 0 {
+		if value.kind != ps6101Symmetric || len(value.sources) == 0 || !value.eligible {
 			continue
 		}
-		value.eligible = true
+		value.callBound = true
 		engine.state[location] = value
 	}
 }
@@ -6748,8 +6760,8 @@ func ps6101PromoteReturnedInput(value *ps6101Value) {
 	if value == nil {
 		return
 	}
-	if value.kind == ps6101Symmetric && len(value.sources) > 0 {
-		value.eligible = true
+	if len(value.sources) > 0 {
+		value.callBound = true
 	}
 	if len(value.elements) > 0 {
 		for index, element := range value.elements {
@@ -8033,7 +8045,8 @@ func ps6101JoinedValue(left, right ps6101Value) ps6101Value {
 	return ps6101Value{
 		sources: ps6101JoinSources(left.sources, right.sources), eligible: left.eligible || right.eligible,
 		aggregate: left.aggregate || right.aggregate, threshold: left.threshold || right.threshold,
-		testing: left.testing || right.testing,
+		testing: left.testing || right.testing, inputHint: left.inputHint || right.inputHint,
+		callBound: left.callBound || right.callBound,
 	}
 }
 
@@ -9407,7 +9420,7 @@ func ps6101SameValue(left, right ps6101Value) bool {
 	leftAnalysis, rightAnalysis := left.analysisValue(), right.analysisValue()
 	return left.kind == right.kind && left.eligible == right.eligible && left.aggregate == right.aggregate &&
 		left.nonempty == right.nonempty && left.threshold == right.threshold && left.testing == right.testing &&
-		left.mapAbsent == right.mapAbsent &&
+		left.mapAbsent == right.mapAbsent && left.inputHint == right.inputHint && left.callBound == right.callBound &&
 		left.revision == right.revision && left.identity == right.identity && leftAnalysis.squareID == rightAnalysis.squareID &&
 		leftAnalysis.squareSig == rightAnalysis.squareSig && leftAnalysis.squareSign == rightAnalysis.squareSign && ps6101SameReference(left.reference, right.reference) &&
 		left.callable == right.callable && ps6101SameDynamicType(leftAnalysis.dynamic, rightAnalysis.dynamic) && left.length == right.length && left.capacity == right.capacity && left.offset == right.offset &&
