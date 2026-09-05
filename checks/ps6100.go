@@ -64,8 +64,16 @@ later header replacement. Replacing a selector or dereference prefix does not
 retarget an address or pointer-method value captured from the old object.
 Retained sources of tail and compatible full-slice
 reslices preserve their element offsets; imprecise bounds remain hazards.
+Scalar slice bounds are snapshotted through direct, compound, increment,
+range-target, local-pointer, and local-helper writes; a bound whose captured
+value is not provable remains an explicit offset hazard rather than a live
+post-capture variable in an asserted index.
 Resolved nil, zero-length make, and constant-empty reslice rebindings remain
 zero-trip scans.
+A by-value array or struct argument owns its copied value storage while slice,
+map, and pointer components still refer to shared backing storage. Helper
+mutation summaries preserve that boundary for ordinary, method, and generic
+calls, including mixed type-set instantiations.
 A deferred body is applied at the return of its actual frame, so an outer-frame
 defer stays delayed while a defer inside an invoked helper or closure is visible
 before control returns to the scans.
@@ -90,6 +98,8 @@ reported, including aliases established before the iterative loop.
 Reference-backed inputs are also called out for an alias proof.
 Predicates with unknown calls, recursion, or channel receives stay silent
 because reducing their evaluation count could change observable behavior.
+Recursive calls hidden behind a source-proven or runtime short-circuit operand
+do not make reachable scans after that expression unreachable.
 
 There is NO automatic fix. A correct refactor initializes a compact byte or
 bitset once, refreshes exactly the changed indexes on every path, and preserves
@@ -921,7 +931,7 @@ func ps6100CallableInvocation(
 			receiver, arguments = ps6100ProjectMethodReceiver(pass, target.receiverSelection, arguments[0]), arguments[1:]
 		case target.receiver != nil:
 			receiver = target.receiver
-			if target.receiverSource != nil && ps6100PointerExpression(pass, target.receiverSource) && !ps6100ReceiverReboundBetween(pass, target.receiverSource, target.receiverCapture, call.Pos()) {
+			if target.receiverSource != nil && ps6100PointerExpression(pass, target.receiverSource) && !ps6100ReceiverReboundBetween(pass, target.receiverSource, target.receiverCapture, call) {
 				receiver = target.receiverSource
 			}
 		}
@@ -953,35 +963,81 @@ func ps6100PointerExpression(pass *analysis.Pass, expression ast.Expr) bool {
 	return pointer
 }
 
-func ps6100ReceiverReboundBetween(pass *analysis.Pass, receiver ast.Expr, after, before token.Pos) bool {
-	if pass == nil || receiver == nil || !after.IsValid() || !before.IsValid() || after >= before {
+func ps6100ReceiverReboundBetween(pass *analysis.Pass, receiver ast.Expr, after token.Pos, call *ast.CallExpr) bool {
+	if pass == nil || receiver == nil || call == nil || !after.IsValid() || after >= call.Pos() {
 		return false
 	}
-	path := exprTextRendered(receiver)
-	rebound := false
+	receiverStorage, ok := ps6100StorageOf(pass, receiver, nil)
+	if !ok {
+		return true
+	}
 	for _, file := range pass.Files {
-		ast.Inspect(file, func(node ast.Node) bool {
-			if rebound || node == nil {
-				return false
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Body == nil || function.Pos() > after || function.End() < call.End() {
+				continue
 			}
-			assignment, ok := node.(*ast.AssignStmt)
-			if !ok || assignment.Pos() <= after || assignment.Pos() >= before {
-				return true
-			}
-			for _, left := range assignment.Lhs {
-				prefix := exprTextRendered(ps2110Unparen(left))
-				if prefix != "" && (path == prefix || strings.HasPrefix(path, prefix+".")) {
-					rebound = true
+			environment := make(map[types.Object]ast.Expr)
+			rebound := false
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				if rebound || node == nil || node.Pos() >= call.Pos() {
 					return false
 				}
-			}
-			return true
-		})
-		if rebound {
-			break
+				if literal, nested := node.(*ast.FuncLit); nested && !(literal.Pos() <= call.Pos() && literal.End() >= call.End()) {
+					return false
+				}
+				assignment, assignmentOK := node.(*ast.AssignStmt)
+				if assignmentOK {
+					if assignment.Pos() > after {
+						for _, left := range assignment.Lhs {
+							storage, found := ps6100StorageOf(pass, left, environment)
+							if found && (storage.key == receiverStorage.key || strings.HasPrefix(receiverStorage.key, storage.key+"/")) {
+								rebound = true
+								return false
+							}
+						}
+					}
+					if len(assignment.Lhs) == len(assignment.Rhs) {
+						for index, left := range assignment.Lhs {
+							identifier, found := ps2110Unparen(left).(*ast.Ident)
+							if !found {
+								continue
+							}
+							object := pass.TypesInfo.ObjectOf(identifier)
+							if object != nil && ps6100ReferenceAliasType(object.Type()) {
+								environment[object] = ps6100ResolveExpression(pass, assignment.Rhs[index], environment, make(map[types.Object]bool))
+							}
+						}
+					}
+				}
+				if ranged, rangeOK := node.(*ast.RangeStmt); rangeOK && ranged.Tok == token.ASSIGN && ranged.Pos() > after {
+					for _, target := range []ast.Expr{ranged.Key, ranged.Value} {
+						if target == nil {
+							continue
+						}
+						storage, found := ps6100StorageOf(pass, target, environment)
+						if found && (storage.key == receiverStorage.key || strings.HasPrefix(receiverStorage.key, storage.key+"/")) {
+							rebound = true
+							return false
+						}
+					}
+				}
+				candidate, callOK := node.(*ast.CallExpr)
+				if callOK && candidate.Pos() > after && candidate != call && !ps6100SafeCall(pass, candidate) {
+					for _, argument := range candidate.Args {
+						storage, found := ps6100StorageOf(pass, argument, environment)
+						if found && (storage.key == receiverStorage.key || strings.HasPrefix(receiverStorage.key, storage.key+"/")) {
+							rebound = true
+							return false
+						}
+					}
+				}
+				return true
+			})
+			return rebound
 		}
 	}
-	return rebound
+	return true
 }
 
 func ps6100DetachValueArrayBindings(pass *analysis.Pass, signature *types.Signature, environment map[types.Object]ast.Expr) {
@@ -989,18 +1045,27 @@ func ps6100DetachValueArrayBindings(pass *analysis.Pass, signature *types.Signat
 		return
 	}
 	detach := func(object types.Object) {
-		if object == nil || !ps6100ValueArrayType(object.Type(), make(map[types.Type]bool)) {
+		if object == nil {
+			return
+		}
+		actual := environment[object]
+		typ := object.Type()
+		if actual != nil && pass.TypesInfo.TypeOf(actual) != nil {
+			typ = pass.TypesInfo.TypeOf(actual)
+		}
+		if !ps6100ValueAggregateType(typ) {
 			return
 		}
 		name := object.Name() + "#value-copy"
-		copyObject := types.NewVar(token.NoPos, object.Pkg(), name, object.Type())
-		copyValue := ast.NewIdent(name)
-		if pass.TypesInfo.Uses != nil {
-			pass.TypesInfo.Uses[copyValue] = copyObject
-		}
+		copyObject := types.NewVar(token.NoPos, object.Pkg(), name, typ)
+		copyValue := &ast.CompositeLit{Elts: []ast.Expr{actual}}
 		if pass.TypesInfo.Types != nil {
-			pass.TypesInfo.Types[copyValue] = types.TypeAndValue{Type: object.Type()}
+			pass.TypesInfo.Types[copyValue] = types.TypeAndValue{Type: typ}
 		}
+		if pass.TypesInfo.Implicits == nil {
+			pass.TypesInfo.Implicits = make(map[ast.Node]types.Object)
+		}
+		pass.TypesInfo.Implicits[copyValue] = copyObject
 		environment[object] = copyValue
 	}
 	if signature.Recv() != nil {
@@ -1011,43 +1076,12 @@ func ps6100DetachValueArrayBindings(pass *analysis.Pass, signature *types.Signat
 	}
 }
 
-func ps6100ValueArrayType(typ types.Type, seen map[types.Type]bool) bool {
+func ps6100ValueAggregateType(typ types.Type) bool {
 	if typ == nil {
 		return false
 	}
-	typ = types.Unalias(typ)
-	if seen[typ] {
-		return false
-	}
-	seen[typ] = true
-	defer delete(seen, typ)
-	if parameter, ok := typ.(*types.TypeParam); ok {
-		return ps6100ValueArrayType(parameter.Constraint(), seen)
-	}
-	if union, ok := typ.(*types.Union); ok {
-		if union.Len() == 0 {
-			return false
-		}
-		for index := range union.Len() {
-			if !ps6100ValueArrayType(union.Term(index).Type(), seen) {
-				return false
-			}
-		}
-		return true
-	}
-	switch underlying := typ.Underlying().(type) {
-	case *types.Array:
-		return true
-	case *types.Interface:
-		underlying.Complete()
-		if underlying.NumEmbeddeds() == 0 {
-			return false
-		}
-		for index := range underlying.NumEmbeddeds() {
-			if !ps6100ValueArrayType(underlying.EmbeddedType(index), seen) {
-				return false
-			}
-		}
+	switch types.Unalias(typ).Underlying().(type) {
+	case *types.Array, *types.Struct:
 		return true
 	}
 	return false
@@ -1147,6 +1181,7 @@ func ps6100TopLevelNonreturnBefore(pass *analysis.Pass, body *ast.BlockStmt, bef
 		}
 		found := false
 		for _, expression := range expressions {
+			parents := ps6087Parents(expression)
 			ast.Inspect(expression, func(node ast.Node) bool {
 				if found || node == nil {
 					return false
@@ -1157,6 +1192,9 @@ func ps6100TopLevelNonreturnBefore(pass *analysis.Pass, body *ast.BlockStmt, bef
 				call, ok := node.(*ast.CallExpr)
 				if !ok {
 					return true
+				}
+				if !ps6100DefinitelyEvaluatedCall(pass, call, expression, parents) {
+					return false
 				}
 				function, _, resolved := typedCallee(pass, call.Fun)
 				if resolved && ps6100DirectReturnCycle(pass, function.Origin(), make(map[*types.Func]bool)) {
@@ -1174,6 +1212,29 @@ func ps6100TopLevelNonreturnBefore(pass *analysis.Pass, body *ast.BlockStmt, bef
 		}
 	}
 	return false
+}
+
+// ps6100DefinitelyEvaluatedCall follows Go's left-to-right short-circuit
+// rules. A recursive call in the right operand of && or || is not a
+// top-level terminator unless the left operand proves that the right operand
+// is evaluated. Unknown conditions therefore cannot make later code dead.
+func ps6100DefinitelyEvaluatedCall(pass *analysis.Pass, call *ast.CallExpr, root ast.Expr, parents map[ast.Node]ast.Node) bool {
+	child := ast.Node(call)
+	for parent := parents[child]; parent != nil; child, parent = parent, parents[parent] {
+		binary, ok := parent.(*ast.BinaryExpr)
+		if !ok || child != binary.Y || binary.Op != token.LAND && binary.Op != token.LOR {
+			continue
+		}
+		left := ps6100Constant(pass, binary.X)
+		if left == nil || left.Kind() != constant.Bool {
+			return false
+		}
+		truth := constant.BoolVal(left)
+		if binary.Op == token.LAND && !truth || binary.Op == token.LOR && truth {
+			return false
+		}
+	}
+	return child == root || parents[child] == nil
 }
 
 func ps6100ScanMayExecuteAt(pass *analysis.Pass, node ast.Node, flow *ps6100AliasFlow) bool {
@@ -2743,14 +2804,22 @@ func ps6100TransferAliasNode(pass *analysis.Pass, node ast.Node, state ps6100Ali
 				}
 				transfer.scalar = !ps6100ReferenceAliasType(transfer.object.Type())
 			} else {
-				if !ps6100ReferenceAliasType(pass.TypesInfo.TypeOf(ps2110Unparen(left))) {
+				if object := ps6100IndirectScalarObject(pass, left, state, base); object != nil {
+					transfer.object = object
+					transfer.scalar = true
+				} else if !ps6100ReferenceAliasType(pass.TypesInfo.TypeOf(ps2110Unparen(left))) {
 					continue
 				}
-				location, _, found := ps6100AliasLocation(pass, left, state, base, make(map[types.Object]bool))
-				if !found {
-					continue
+				if transfer.object != nil {
+					// The scalar object reached through a local pointer is updated
+					// in the same scalar snapshot map as a direct assignment.
+				} else {
+					location, _, found := ps6100AliasLocation(pass, left, state, base, make(map[types.Object]bool))
+					if !found {
+						continue
+					}
+					transfer.location = location
 				}
-				transfer.location = location
 			}
 			if transfer.object == nil && transfer.location == "" {
 				continue
@@ -2763,7 +2832,11 @@ func ps6100TransferAliasNode(pass *analysis.Pass, node ast.Node, state ps6100Ali
 			// Go evaluates every right-hand side before assigning any left-hand
 			// side. Resolve the complete tuple against the incoming snapshot so
 			// swaps such as a, b = b, a do not lose either alias.
-			transfer.values = ps6100AssignmentValues(pass, transfer.object, value.Rhs[index], state, base, helpers, active)
+			if transfer.scalar && value.Tok != token.ASSIGN && value.Tok != token.DEFINE {
+				transfer.values = ps6100CompoundScalarValues(pass, transfer.object, value.Tok, value.Rhs[index], state, base)
+			} else {
+				transfer.values = ps6100AssignmentValues(pass, transfer.object, value.Rhs[index], state, base, helpers, active)
+			}
 			transfers = append(transfers, transfer)
 		}
 		for _, transfer := range transfers {
@@ -2800,7 +2873,15 @@ func ps6100TransferAliasNode(pass *analysis.Pass, node ast.Node, state ps6100Ali
 					scalar: !ps6100ReferenceAliasType(object.Type()),
 				})
 			} else if len(value.Values) == 0 {
-				transfers = append(transfers, ps6100AliasTransfer{object: object, values: ps6100AliasValues{expressions: map[string]ast.Expr{"nil": nil}}, scalar: !ps6100ReferenceAliasType(object.Type())})
+				if ps6100ReferenceAliasType(object.Type()) {
+					transfers = append(transfers, ps6100AliasTransfer{object: object, values: ps6100AliasValues{expressions: map[string]ast.Expr{"nil": nil}}})
+				} else {
+					zero := &ast.BasicLit{Kind: token.INT, Value: "0"}
+					if pass.TypesInfo.Types != nil {
+						pass.TypesInfo.Types[zero] = types.TypeAndValue{Type: object.Type(), Value: constant.MakeInt64(0)}
+					}
+					transfers = append(transfers, ps6100AliasTransfer{object: object, values: ps6100AliasValues{expressions: map[string]ast.Expr{"scalar:0": zero}}, scalar: true})
+				}
 			} else {
 				transfers = append(transfers, ps6100AliasTransfer{object: object, values: ps6100AliasValues{unknown: true}, scalar: !ps6100ReferenceAliasType(object.Type())})
 			}
@@ -2824,8 +2905,139 @@ func ps6100TransferAliasNode(pass *analysis.Pass, node ast.Node, state ps6100Ali
 				if state.scalars == nil {
 					state.scalars = make(map[types.Object]ps6100AliasValues)
 				}
-				state.scalars[object] = ps6100AliasValues{unknown: true}
+				op := token.ADD_ASSIGN
+				if value.Tok == token.DEC {
+					op = token.SUB_ASSIGN
+				}
+				one := &ast.BasicLit{Kind: token.INT, Value: "1"}
+				if pass.TypesInfo.Types != nil {
+					pass.TypesInfo.Types[one] = types.TypeAndValue{Type: object.Type(), Value: constant.MakeInt64(1)}
+				}
+				state.scalars[object] = ps6100CompoundScalarValues(pass, object, op, one, state, base)
 			}
+		}
+	case *ast.CallExpr:
+		ps6100TransferScalarHelperCall(pass, value, state, base, helpers, active)
+	case *ast.ExprStmt:
+		if call, ok := ps2110Unparen(value.X).(*ast.CallExpr); ok {
+			ps6100TransferScalarHelperCall(pass, call, state, base, helpers, active)
+		}
+	case *ast.DeclStmt:
+		declaration, ok := value.Decl.(*ast.GenDecl)
+		if !ok || declaration.Tok != token.VAR {
+			return
+		}
+		for _, specification := range declaration.Specs {
+			if values, ok := specification.(*ast.ValueSpec); ok {
+				ps6100TransferAliasNode(pass, values, state, base, helpers, active)
+			}
+		}
+	}
+}
+
+func ps6100CompoundScalarValues(pass *analysis.Pass, object types.Object, assignment token.Token, right ast.Expr, state ps6100AliasState, base map[types.Object]ast.Expr) ps6100AliasValues {
+	values, found := state.scalars[object]
+	if !found {
+		return ps6100AliasValues{unknown: true}
+	}
+	left, exact := ps6100SingleAliasExpression(values)
+	if !exact {
+		return ps6100AliasValues{unknown: true}
+	}
+	op := map[token.Token]token.Token{token.ADD_ASSIGN: token.ADD, token.SUB_ASSIGN: token.SUB}[assignment]
+	if op == token.ILLEGAL {
+		return ps6100AliasValues{unknown: true}
+	}
+	var expression ast.Expr = &ast.BinaryExpr{X: left, Op: op, Y: ps6100SnapshotExpression(pass, right, state, base, make(map[types.Object]bool))}
+	if pass.TypesInfo.Types != nil {
+		pass.TypesInfo.Types[expression] = types.TypeAndValue{Type: object.Type()}
+	}
+	binary := expression.(*ast.BinaryExpr)
+	if leftValue, rightValue := ps6100Constant(pass, left), ps6100Constant(pass, binary.Y); leftValue != nil && rightValue != nil {
+		if folded := constant.BinaryOp(leftValue, op, rightValue); folded != nil {
+			literal := &ast.BasicLit{Kind: token.INT, Value: folded.ExactString()}
+			if pass.TypesInfo.Types != nil {
+				pass.TypesInfo.Types[literal] = types.TypeAndValue{Type: object.Type(), Value: folded}
+			}
+			expression = literal
+		}
+	}
+	return ps6100AliasValues{expressions: map[string]ast.Expr{"scalar:" + exprTextRendered(expression): expression}}
+}
+
+func ps6100IndirectScalarObject(pass *analysis.Pass, expression ast.Expr, state ps6100AliasState, base map[types.Object]ast.Expr) types.Object {
+	star, ok := ps2110Unparen(expression).(*ast.StarExpr)
+	if !ok {
+		return nil
+	}
+	values := ps6100AliasExpressionValues(pass, star.X, state, base, make(map[types.Object]bool))
+	resolved, exact := ps6100SingleAliasExpression(values)
+	if !exact {
+		return nil
+	}
+	address, ok := ps2110Unparen(resolved).(*ast.UnaryExpr)
+	if !ok || address.Op != token.AND {
+		return nil
+	}
+	identifier := ps6100StorageRootIdentifier(address.X)
+	if identifier == nil {
+		return nil
+	}
+	object := pass.TypesInfo.ObjectOf(identifier)
+	if object == nil || ps6100ReferenceAliasType(object.Type()) || !ps6100AliasStateType(object.Type()) {
+		return nil
+	}
+	return object
+}
+
+func ps6100TransferScalarHelperCall(pass *analysis.Pass, call *ast.CallExpr, state ps6100AliasState, base map[types.Object]ast.Expr, helpers ps6100Helpers, active map[*types.Func]bool) {
+	function, signature, ok := typedCallee(pass, call.Fun)
+	if !ok || function == nil {
+		return
+	}
+	function = function.Origin()
+	if active != nil && active[function] {
+		return
+	}
+	declaration := helpers[function]
+	origin, _ := function.Type().(*types.Signature)
+	if declaration == nil || declaration.Body == nil || origin == nil {
+		return
+	}
+	receiver, arguments, ok := ps6100DirectCallReceiver(pass, call, signature)
+	if !ok {
+		return
+	}
+	environment, ok := ps6100BindInvocation(pass, origin, receiver, arguments, call.Ellipsis, base)
+	if !ok {
+		return
+	}
+	for _, statement := range declaration.Body.List {
+		switch statement.(type) {
+		case *ast.AssignStmt, *ast.ExprStmt, *ast.IncDecStmt, *ast.DeclStmt, *ast.EmptyStmt, *ast.ReturnStmt:
+		default:
+			ps6100InvalidateScalarPointerArguments(pass, arguments, state, base)
+			return
+		}
+	}
+	if active == nil {
+		active = make(map[*types.Func]bool)
+	}
+	active[function] = true
+	for _, statement := range declaration.Body.List {
+		ps6100TransferAliasNode(pass, statement, state, environment, helpers, active)
+	}
+	delete(active, function)
+}
+
+func ps6100InvalidateScalarPointerArguments(pass *analysis.Pass, arguments []ast.Expr, state ps6100AliasState, base map[types.Object]ast.Expr) {
+	for _, argument := range arguments {
+		star := &ast.StarExpr{X: argument}
+		if object := ps6100IndirectScalarObject(pass, star, state, base); object != nil {
+			if state.scalars == nil {
+				state.scalars = make(map[types.Object]ps6100AliasValues)
+			}
+			state.scalars[object] = ps6100AliasValues{unknown: true}
 		}
 	}
 }
@@ -2884,6 +3096,11 @@ func ps6100TransferRangeTarget(pass *analysis.Pass, loop *ast.RangeStmt, target 
 				state.objects = make(map[types.Object]ps6100AliasValues)
 			}
 			state.objects[object] = values
+		} else if ps6100AliasStateType(object.Type()) {
+			if state.scalars == nil {
+				state.scalars = make(map[types.Object]ps6100AliasValues)
+			}
+			state.scalars[object] = values
 		}
 		return
 	}
@@ -3632,7 +3849,7 @@ func ps6100CanonicalOuterAliases(pass *analysis.Pass, outer ast.Node, frame, out
 				replacements[ps6100StaleAliasKey(tracked.object)] = ps6100StaleAliasExpression(pass, root, tracked.object)
 			}
 			if view, ok := ps2110Unparen(current).(*ast.SliceExpr); ok {
-				if source, inverse, precise := ps6100InverseSliceAlias(pass, view, root); precise {
+				if source, inverse, precise := ps6100InverseSliceAlias(pass, view, root); precise && ps6100CapturedSliceBoundsStable(pass, view, state) {
 					if record(source, inverse) {
 						hazards = append(hazards, ps6100Hazard{node: outer, reason: "pre-loop slice view may alias multiple tracked roots"})
 					}
@@ -3709,6 +3926,35 @@ func ps6100CanonicalOuterAliases(pass *analysis.Pass, outer ast.Node, frame, out
 	return result, replacements, hazards
 }
 
+func ps6100CapturedSliceBoundsStable(pass *analysis.Pass, view *ast.SliceExpr, state ps6100AliasState) bool {
+	if view == nil {
+		return false
+	}
+	stable := true
+	for _, bound := range []ast.Expr{view.Low, view.High, view.Max} {
+		if bound == nil {
+			continue
+		}
+		ast.Inspect(bound, func(node ast.Node) bool {
+			identifier, ok := node.(*ast.Ident)
+			if !ok || !stable {
+				return stable
+			}
+			object := pass.TypesInfo.ObjectOf(identifier)
+			values, found := state.scalars[object]
+			if !found {
+				return true
+			}
+			current, exact := ps6100SingleAliasExpression(values)
+			if !exact || exprTextRendered(current) != exprTextRendered(identifier) {
+				stable = false
+			}
+			return stable
+		})
+	}
+	return stable
+}
+
 func ps6100CanonicalReferenceRoot(pass *analysis.Pass, expression ast.Expr) ast.Expr {
 	expression = ps2110Unparen(expression)
 	copyType := func(source, target ast.Expr) ast.Expr {
@@ -3769,6 +4015,9 @@ func ps6100SyntheticAliasValue(pass *analysis.Pass, identifier *ast.Ident) bool 
 // they address elements before the scanned view.
 func ps6100InverseSliceAlias(pass *analysis.Pass, view *ast.SliceExpr, root ast.Expr) (ast.Expr, ast.Expr, bool) {
 	if view == nil || root == nil || !ps6100SliceExtendsToEnd(pass, view) {
+		return nil, nil, false
+	}
+	if view.Low != nil && ps6100AnchoredAliasNode(pass, view.Low) {
 		return nil, nil, false
 	}
 	source := ps2110Unparen(view.X)
@@ -4304,11 +4553,15 @@ func ps6100AppendCallableHazards(facts *ps6100MutationFacts, relevant map[string
 
 func ps6100RecordMutation(pass *analysis.Pass, root ast.Node, parents map[ast.Node]ast.Node, expression ast.Expr, environment map[types.Object]ast.Expr, relevant map[string]ps6100Storage, insideLoop bool, facts *ps6100MutationFacts) {
 	expression = ps2110Unparen(expression)
-	index, ok := ps6100MutationIndex(pass, expression, environment, make(map[types.Object]bool))
+	mutationEnvironment, shared := ps6100ValueCopyMutationEnvironment(pass, expression, environment)
+	if !shared {
+		return
+	}
+	index, ok := ps6100MutationIndex(pass, expression, mutationEnvironment, make(map[types.Object]bool))
 	if !ok {
 		return
 	}
-	storage, display, identity, ok := ps6100IndexedPath(pass, index, environment)
+	storage, display, identity, ok := ps6100IndexedPath(pass, index, mutationEnvironment)
 	if !ok || !ps6100TouchesRelevant(relevant, storage) {
 		return
 	}
@@ -4322,6 +4575,68 @@ func ps6100RecordMutation(pass *analysis.Pass, root ast.Node, parents map[ast.No
 		identity: identity,
 		node:     expression,
 	})
+}
+
+// ps6100ValueCopyMutationEnvironment distinguishes storage copied by value
+// from reference-bearing fields/elements inside that copy. Direct writes to
+// an array or struct copy stay detached; once a selector/index/dereference
+// crosses a slice, map, or pointer boundary, the referent is shared with the
+// caller and the original actual binding is restored for this mutation only.
+func ps6100ValueCopyMutationEnvironment(pass *analysis.Pass, expression ast.Expr, environment map[types.Object]ast.Expr) (map[types.Object]ast.Expr, bool) {
+	if environment == nil {
+		return environment, true
+	}
+	root := ps6100StorageRootIdentifier(expression)
+	if root == nil {
+		return environment, true
+	}
+	object := pass.TypesInfo.ObjectOf(root)
+	wrapper, ok := ps2110Unparen(environment[object]).(*ast.CompositeLit)
+	if !ok || len(wrapper.Elts) != 1 || pass.TypesInfo.Implicits[wrapper] == nil || !strings.Contains(pass.TypesInfo.Implicits[wrapper].Name(), "#value-copy") {
+		return environment, true
+	}
+	actual, ok := wrapper.Elts[0].(ast.Expr)
+	if !ok || actual == nil {
+		return environment, false
+	}
+	shared := false
+	var walk func(ast.Expr) bool
+	walk = func(current ast.Expr) bool {
+		current = ps2110Unparen(current)
+		if identifier, ok := current.(*ast.Ident); ok {
+			return pass.TypesInfo.ObjectOf(identifier) == object
+		}
+		var child ast.Expr
+		switch value := current.(type) {
+		case *ast.IndexExpr:
+			child = value.X
+		case *ast.SelectorExpr:
+			child = value.X
+		case *ast.StarExpr:
+			child = value.X
+		default:
+			return false
+		}
+		if !walk(child) {
+			return false
+		}
+		if typ := pass.TypesInfo.TypeOf(child); typ != nil {
+			switch types.Unalias(typ).Underlying().(type) {
+			case *types.Pointer, *types.Slice, *types.Map:
+				shared = true
+			}
+		}
+		return true
+	}
+	if !walk(expression) || !shared {
+		return environment, false
+	}
+	result := make(map[types.Object]ast.Expr, len(environment))
+	for key, value := range environment {
+		result[key] = value
+	}
+	result[object] = actual
+	return result, true
 }
 
 func ps6100MutationIndex(pass *analysis.Pass, expression ast.Expr, environment map[types.Object]ast.Expr, seen map[types.Object]bool) (*ast.IndexExpr, bool) {
