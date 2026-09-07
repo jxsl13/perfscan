@@ -250,6 +250,36 @@ boundedScratchFlowContracts:
     replacementRejectsUnsupported: true
     replacementFailureUnmodified: true
 
+# Exact ownership contracts for PS6107 receiver-owned high-water staging.
+# Names do not imply semantics: every boolean is an explicit project promise.
+# The optional overwrite entry supports one exact row-tiling source shape; omit
+# it only when the candidate method itself has a canonical whole-slice `=` loop.
+# maxRetainedBytes is a recommendation ceiling (and must be <= 64 MiB), not a
+# claim that retaining that amount is safe for every application.
+receiverStagingContracts:
+  - name: decoder-prefill-upload
+    candidateMethod: example.com/project/decoder.Decoder.prefill
+    overwrite: example.com/project/decoder.Decoder.gatherInto
+    overwriteKind: method
+    overwriteArg: 0
+    consumer: example.com/project/device.Buffer.UploadF32
+    consumerKind: method
+    consumerArg: 0
+    lifecycleMethod: example.com/project/decoder.Decoder.Release
+    maxRetainedBytes: 65536
+    receiverCallsSequential: true
+    overwriteWritesAllBeforeRead: true
+    overwriteCompletesBeforeReturn: true
+    overwriteDoesNotRetainArgument: true
+    overwriteAccessesOnlyArgumentLength: true
+    overwriteIgnoresCapacityAndIdentity: true
+    overwritePreservesExtentInputs: true
+    extentIsNonNegativeAndNonOverflowing: true
+    consumerCompletesBeforeReturn: true
+    consumerDoesNotRetainArgument: true
+    lifecycleEndsReceiverUse: true
+    contentsMayPersistUntilLifecycle: true
+
 # ---------------------------------------------------------------------------
 # Concrete instance — a tensor / numerical library (e.g. goai). The SAME 29
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the
@@ -287,4 +317,6 @@ boundedScratchFlowContracts:
 #     - {name: swiglu-eager, producer: example.com/tensor.Linear.Forward, activation: example.com/backend.Executor.SiLU, activationInputArg: 0, binary: example.com/backend.Executor.Mul, binaryActivationArg: 0, binaryOtherArg: 1, capabilityInterface: example.com/backend.SwiGLUInPlaceFuser, capabilityMethod: FuseSwiGLUInPlace, nonRecordingGuard: example.com/backend.Executor.IsEager, producerReturnsFreshOwned: true, activationReturnsFreshOwned: true, binaryReturnsFreshOwned: true, capabilityOverwritesFirstArg: true, capabilityPreservesSecondArg: true, capabilityRejectsUnsupported: true, capabilityFailureUnmodified: true, capabilityMatchesComposition: true, guardProvesNonRecording: true}
 #   boundedScratchFlowContracts:
 #     - {name: bounded-gelu, allocator: example.com/backend.Device.Alloc, allocatorCapacityArg: 1, producer: example.com/backend.Device.AddBias, producerBufferArg: 1, producerActiveArg: 2, consumer: example.com/backend.Device.GELU, consumerBufferArg: 1, observers: [{function: example.com/backend.Device.Observe, bufferArg: 1, activeArg: 2}], configuredCapacityElements: 3145728, configuredActiveElements: 3072, configuredRepeatCount: 12, allocatorReturnsFreshOwned: true, producerWritesOnlyActivePrefix: true, consumerTraversesFullCapacity: true, observersReadOnlyActivePrefix: true, callsDoNotRetainBuffer: true, callsExecuteSynchronously: true, inactiveTailNotRequired: true, replacement: example.com/backend.Device.BiasGELU, replacementMatchesComposition: true, replacementPreservesActivePrefixBits: true, replacementLeavesInactiveTail: true, replacementPreservesErrorsSideEffects: true, replacementPreservesProviderFallback: true, replacementRejectsUnsupported: true, replacementFailureUnmodified: true}
+#   receiverStagingContracts:
+#     - {name: decoder-prefill-upload, candidateMethod: example.com/decoder.Decoder.prefill, overwrite: example.com/decoder.Decoder.gatherInto, overwriteKind: method, overwriteArg: 0, consumer: example.com/device.Buffer.UploadF32, consumerKind: method, consumerArg: 0, lifecycleMethod: example.com/decoder.Decoder.Release, maxRetainedBytes: 65536, receiverCallsSequential: true, overwriteWritesAllBeforeRead: true, overwriteCompletesBeforeReturn: true, overwriteDoesNotRetainArgument: true, overwriteAccessesOnlyArgumentLength: true, overwriteIgnoresCapacityAndIdentity: true, overwritePreservesExtentInputs: true, extentIsNonNegativeAndNonOverflowing: true, consumerCompletesBeforeReturn: true, consumerDoesNotRetainArgument: true, lifecycleEndsReceiverUse: true, contentsMayPersistUntilLifecycle: true}
 # ---------------------------------------------------------------------------
