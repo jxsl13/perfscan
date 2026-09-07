@@ -96,3 +96,42 @@ func TestMissingVocabTopKOneContracts(t *testing.T) {
 		t.Fatalf("missingVocab(mixed valid/invalid) = %v, want none", got)
 	}
 }
+
+func TestMissingVocabNativeSnapshotStringCopyContracts(t *testing.T) {
+	t.Parallel()
+	check := &lint.Check{NeedsConfig: true, Vocab: []string{"nativeSnapshotStringCopyContracts"}}
+	if got := missingVocab(check, &config.Config{}); len(got) != 1 || got[0] != "nativeSnapshotStringCopyContracts" {
+		t.Fatalf("missingVocab(empty) = %v, want nativeSnapshotStringCopyContracts", got)
+	}
+	invalid := config.Config{NativeSnapshotStringCopyContracts: []config.NativeSnapshotStringCopyContract{{Name: "incomplete"}}}
+	if got := missingVocab(check, &invalid); len(got) != 1 || got[0] != "nativeSnapshotStringCopyContracts" {
+		t.Fatalf("missingVocab(invalid) = %v, want nativeSnapshotStringCopyContracts", got)
+	}
+	configured := config.Config{NativeSnapshotStringCopyContracts: []config.NativeSnapshotStringCopyContract{{
+		Name:                                 "labels",
+		CandidateCallable:                    "example.com/project.Recorder.Profile",
+		CandidateKind:                        config.NativeSnapshotCallMethod,
+		DestinationResultPosition:            1,
+		DestinationStringField:               "Label",
+		AcquireCallable:                      "C.snapshot",
+		AcquireKind:                          config.NativeSnapshotCallCgo,
+		RecordsOutArgumentPosition:           1,
+		CountOutArgumentPosition:             2,
+		AcquireStatusResultPosition:          1,
+		NativeStringField:                    "label",
+		CopyKind:                             config.NativeSnapshotCopyGoString,
+		CopyPointerArgumentPosition:          1,
+		CopyStringResultPosition:             1,
+		LifecycleCallable:                    "example.com/project.Recorder.Free",
+		LifecycleKind:                        config.NativeSnapshotCallMethod,
+		SnapshotStableThroughCandidateReturn: true,
+		SnapshotNotMutatedDuringExtraction:   true,
+		ExtractionIsSynchronous:              true,
+		CopyReturnsExactOwnedString:          true,
+		ReturnedStringsOutliveLifecycle:      true,
+		ExactContentCheckRequired:            true,
+	}}}
+	if got := missingVocab(check, &configured); len(got) != 0 {
+		t.Fatalf("missingVocab(configured) = %v, want none", got)
+	}
+}

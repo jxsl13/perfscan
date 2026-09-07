@@ -171,6 +171,13 @@ type Config struct {
 	// replacement scalar argmax API.
 	TopKOneContracts []TopKOneContract `json:"topKOneContracts,omitempty" yaml:"topKOneContracts"`
 
+	// NativeSnapshotStringCopyContracts are explicit project-owned ownership
+	// contracts for PS6110. They bind one exact result-materializing callable
+	// to one exact local native snapshot acquisition and string-copy shape.
+	// Local Go syntax cannot prove foreign snapshot lifetime or post-lifecycle
+	// ownership, so PS6110 stays silent unless every assertion is present.
+	NativeSnapshotStringCopyContracts []NativeSnapshotStringCopyContract `json:"nativeSnapshotStringCopyContracts,omitempty" yaml:"nativeSnapshotStringCopyContracts"`
+
 	// InputViewFuncs and OutputViewFuncs expose repository-specific typed views
 	// over input and destination storage respectively.
 	InputViewFuncs  []string `json:"inputViewFuncs,omitempty" yaml:"inputViewFuncs"`
@@ -377,6 +384,106 @@ func psTypedFunctionIDValid(id string, kind ReceiverStagingCallKind) bool {
 	}
 }
 
+// NativeSnapshotCallKind identifies an exact typed function/method or a real
+// cgo symbol in the candidate's import-C translation unit.
+type NativeSnapshotCallKind string
+
+const (
+	NativeSnapshotCallFunction  NativeSnapshotCallKind = "function"
+	NativeSnapshotCallMethod    NativeSnapshotCallKind = "method"
+	NativeSnapshotCallCgo       NativeSnapshotCallKind = "cgo"
+	NativeSnapshotCopyGoString  NativeSnapshotCallKind = "c-go-string"
+	NativeSnapshotCopyGoStringN NativeSnapshotCallKind = "c-go-string-n"
+)
+
+// NativeSnapshotStringCopyContract describes one bulk native snapshot whose
+// direct result-record string field is copied once per record. All positions
+// are one-based and exclude a method receiver. Version one deliberately
+// supports local out-argument acquisition, a required integer status, and a
+// resolved external lifecycle only.
+type NativeSnapshotStringCopyContract struct {
+	Name                                 string                 `json:"name" yaml:"name"`
+	CandidateCallable                    string                 `json:"candidateCallable" yaml:"candidateCallable"`
+	CandidateKind                        NativeSnapshotCallKind `json:"candidateKind" yaml:"candidateKind"`
+	DestinationResultPosition            int                    `json:"destinationResultPosition" yaml:"destinationResultPosition"`
+	DestinationSliceField                string                 `json:"destinationSliceField,omitempty" yaml:"destinationSliceField,omitempty"`
+	DestinationStringField               string                 `json:"destinationStringField" yaml:"destinationStringField"`
+	AcquireCallable                      string                 `json:"acquireCallable" yaml:"acquireCallable"`
+	AcquireKind                          NativeSnapshotCallKind `json:"acquireKind" yaml:"acquireKind"`
+	RecordsOutArgumentPosition           int                    `json:"recordsOutArgumentPosition" yaml:"recordsOutArgumentPosition"`
+	CountOutArgumentPosition             int                    `json:"countOutArgumentPosition" yaml:"countOutArgumentPosition"`
+	AcquireStatusResultPosition          int                    `json:"acquireStatusResultPosition" yaml:"acquireStatusResultPosition"`
+	AcquireSuccessInteger                int64                  `json:"acquireSuccessInteger" yaml:"acquireSuccessInteger"`
+	NativeStringField                    string                 `json:"nativeStringField" yaml:"nativeStringField"`
+	NativeLengthField                    string                 `json:"nativeLengthField,omitempty" yaml:"nativeLengthField,omitempty"`
+	CopyKind                             NativeSnapshotCallKind `json:"copyKind" yaml:"copyKind"`
+	CopyCallable                         string                 `json:"copyCallable,omitempty" yaml:"copyCallable,omitempty"`
+	CopyPointerArgumentPosition          int                    `json:"copyPointerArgumentPosition" yaml:"copyPointerArgumentPosition"`
+	CopyLengthArgumentPosition           int                    `json:"copyLengthArgumentPosition" yaml:"copyLengthArgumentPosition"`
+	CopyStringResultPosition             int                    `json:"copyStringResultPosition" yaml:"copyStringResultPosition"`
+	LifecycleCallable                    string                 `json:"lifecycleCallable" yaml:"lifecycleCallable"`
+	LifecycleKind                        NativeSnapshotCallKind `json:"lifecycleKind" yaml:"lifecycleKind"`
+	SnapshotStableThroughCandidateReturn bool                   `json:"snapshotStableThroughCandidateReturn" yaml:"snapshotStableThroughCandidateReturn"`
+	SnapshotNotMutatedDuringExtraction   bool                   `json:"snapshotNotMutatedDuringExtraction" yaml:"snapshotNotMutatedDuringExtraction"`
+	ExtractionIsSynchronous              bool                   `json:"extractionIsSynchronous" yaml:"extractionIsSynchronous"`
+	CopyReturnsExactOwnedString          bool                   `json:"copyReturnsExactOwnedString" yaml:"copyReturnsExactOwnedString"`
+	ReturnedStringsOutliveLifecycle      bool                   `json:"returnedStringsOutliveLifecycle" yaml:"returnedStringsOutliveLifecycle"`
+	ExactContentCheckRequired            bool                   `json:"exactContentCheckRequired" yaml:"exactContentCheckRequired"`
+}
+
+// Valid reports whether every foreign-lifetime assertion and source role
+// needed by PS6110 is explicit. C.GoBytes is intentionally not representable.
+func (c NativeSnapshotStringCopyContract) Valid() bool { //perfscan:ignore PS3106 preserve the public value receiver alongside existing contracts
+	if c.Name == "" || !nativeSnapshotCallableValid(c.CandidateCallable, c.CandidateKind, false) ||
+		!nativeSnapshotCallableValid(c.AcquireCallable, c.AcquireKind, true) ||
+		!nativeSnapshotCallableValid(c.LifecycleCallable, c.LifecycleKind, false) ||
+		c.DestinationResultPosition <= 0 || c.RecordsOutArgumentPosition <= 0 ||
+		c.CountOutArgumentPosition <= 0 || c.RecordsOutArgumentPosition == c.CountOutArgumentPosition ||
+		c.AcquireStatusResultPosition <= 0 || c.CopyPointerArgumentPosition <= 0 ||
+		c.CopyLengthArgumentPosition < 0 || c.CopyLengthArgumentPosition > 0 &&
+		c.CopyLengthArgumentPosition == c.CopyPointerArgumentPosition ||
+		c.CopyStringResultPosition <= 0 || !nativeSnapshotFieldValid(c.DestinationSliceField, true) ||
+		!nativeSnapshotFieldValid(c.DestinationStringField, false) ||
+		!nativeSnapshotFieldValid(c.NativeStringField, false) ||
+		!c.SnapshotStableThroughCandidateReturn || !c.SnapshotNotMutatedDuringExtraction ||
+		!c.ExtractionIsSynchronous || !c.CopyReturnsExactOwnedString ||
+		!c.ReturnedStringsOutliveLifecycle || !c.ExactContentCheckRequired {
+		return false
+	}
+	switch c.CopyKind {
+	case NativeSnapshotCopyGoString:
+		return c.CopyCallable == "" && c.CopyPointerArgumentPosition == 1 &&
+			c.CopyLengthArgumentPosition == 0 && c.CopyStringResultPosition == 1 &&
+			c.NativeLengthField == ""
+	case NativeSnapshotCopyGoStringN:
+		return c.CopyCallable == "" && c.CopyPointerArgumentPosition == 1 &&
+			c.CopyLengthArgumentPosition == 2 && c.CopyStringResultPosition == 1 &&
+			nativeSnapshotFieldValid(c.NativeLengthField, false)
+	case NativeSnapshotCallFunction, NativeSnapshotCallMethod:
+		return nativeSnapshotCallableValid(c.CopyCallable, c.CopyKind, false) &&
+			(c.CopyLengthArgumentPosition == 0) == (c.NativeLengthField == "")
+	default:
+		return false
+	}
+}
+
+func nativeSnapshotCallableValid(id string, kind NativeSnapshotCallKind, allowCgo bool) bool {
+	switch kind {
+	case NativeSnapshotCallFunction:
+		return psTopKFunctionIDValid(id)
+	case NativeSnapshotCallMethod:
+		return psTopKMethodIDValid(id)
+	case NativeSnapshotCallCgo:
+		return allowCgo && strings.HasPrefix(id, "C.") && psTopKIdentifierValid(strings.TrimPrefix(id, "C."))
+	default:
+		return false
+	}
+}
+
+func nativeSnapshotFieldValid(field string, optional bool) bool {
+	return optional && field == "" || psTopKIdentifierValid(field)
+}
+
 // InPlaceFusionContract binds one last-use fusion candidate to exact project
 // APIs. Function identifiers use "import/path.Type.Method" for methods and
 // "import/path.Function" for package functions. PS6087 currently accepts
@@ -506,36 +613,37 @@ func psTopKImportPathValid(importPath string) bool {
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
 type Sets struct {
-	CacheLineBytes              int
-	ElementAccessors            map[string]bool
-	FastPathHelpers             map[string]bool
-	SelectorPromotionSymbols    map[string]bool
-	ElementCountMethods         map[string]bool
-	ShapeMethods                map[string]bool
-	IndexDecomposeFuncs         map[string]bool
-	AllocatorFuncs              map[string]bool
-	PerElementVisitors          map[string]bool
-	BulkCopyHelpers             map[string]bool
-	VectorizedSiblingFuncs      map[string]bool
-	FanOutHelpers               map[string]bool
-	DtypeMethods                map[string]bool
-	OutputBufferElemTypes       map[string]bool
-	CompiledResourceFuncs       map[string]bool
-	GPUReductionKernels         map[string]bool
-	PureComputeFuncs            map[string]bool
-	LayoutOpConstants           map[string]bool
-	PointerTypeNames            map[string]bool
-	VariadicDispatchWrappers    map[string]bool
-	TopKSelectorFuncs           map[string]bool
-	TopKOneContracts            []TopKOneContract
-	InputViewFuncs              map[string]bool
-	OutputViewFuncs             map[string]bool
-	ReferenceBackendPkg         string
-	OptimizedBackendPkgs        map[string]bool
-	KernelRegisterFuncs         map[string]bool
-	InPlaceFusionContracts      []InPlaceFusionContract
-	BoundedScratchFlowContracts []BoundedScratchFlowContract
-	ReceiverStagingContracts    []ReceiverStagingContract
+	CacheLineBytes                    int
+	ElementAccessors                  map[string]bool
+	FastPathHelpers                   map[string]bool
+	SelectorPromotionSymbols          map[string]bool
+	ElementCountMethods               map[string]bool
+	ShapeMethods                      map[string]bool
+	IndexDecomposeFuncs               map[string]bool
+	AllocatorFuncs                    map[string]bool
+	PerElementVisitors                map[string]bool
+	BulkCopyHelpers                   map[string]bool
+	VectorizedSiblingFuncs            map[string]bool
+	FanOutHelpers                     map[string]bool
+	DtypeMethods                      map[string]bool
+	OutputBufferElemTypes             map[string]bool
+	CompiledResourceFuncs             map[string]bool
+	GPUReductionKernels               map[string]bool
+	PureComputeFuncs                  map[string]bool
+	LayoutOpConstants                 map[string]bool
+	PointerTypeNames                  map[string]bool
+	VariadicDispatchWrappers          map[string]bool
+	TopKSelectorFuncs                 map[string]bool
+	TopKOneContracts                  []TopKOneContract
+	NativeSnapshotStringCopyContracts []NativeSnapshotStringCopyContract
+	InputViewFuncs                    map[string]bool
+	OutputViewFuncs                   map[string]bool
+	ReferenceBackendPkg               string
+	OptimizedBackendPkgs              map[string]bool
+	KernelRegisterFuncs               map[string]bool
+	InPlaceFusionContracts            []InPlaceFusionContract
+	BoundedScratchFlowContracts       []BoundedScratchFlowContract
+	ReceiverStagingContracts          []ReceiverStagingContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -552,36 +660,37 @@ func toSet(xs []string) map[string]bool {
 // Compile converts the config into set form.
 func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep the public value API source-compatible
 	return Sets{
-		CacheLineBytes:              c.CacheLineBytes,
-		ElementAccessors:            toSet(c.ElementAccessors),
-		FastPathHelpers:             toSet(c.FastPathHelpers),
-		SelectorPromotionSymbols:    toSet(c.SelectorPromotionSymbols),
-		ElementCountMethods:         toSet(c.ElementCountMethods),
-		ShapeMethods:                toSet(c.ShapeMethods),
-		IndexDecomposeFuncs:         toSet(c.IndexDecomposeFuncs),
-		AllocatorFuncs:              toSet(c.AllocatorFuncs),
-		PerElementVisitors:          toSet(c.PerElementVisitors),
-		BulkCopyHelpers:             toSet(c.BulkCopyHelpers),
-		VectorizedSiblingFuncs:      toSet(c.VectorizedSiblingFuncs),
-		FanOutHelpers:               toSet(c.FanOutHelpers),
-		DtypeMethods:                toSet(c.DtypeMethods),
-		OutputBufferElemTypes:       toSet(c.OutputBufferElemTypes),
-		CompiledResourceFuncs:       toSet(c.CompiledResourceFuncs),
-		GPUReductionKernels:         toSet(c.GPUReductionKernels),
-		PureComputeFuncs:            toSet(c.PureComputeFuncs),
-		LayoutOpConstants:           toSet(c.LayoutOpConstants),
-		PointerTypeNames:            toSet(c.PointerTypeNames),
-		VariadicDispatchWrappers:    toSet(c.VariadicDispatchWrappers),
-		TopKSelectorFuncs:           toSet(c.TopKSelectorFuncs),
-		TopKOneContracts:            slices.Clone(c.TopKOneContracts),
-		InputViewFuncs:              toSet(c.InputViewFuncs),
-		OutputViewFuncs:             toSet(c.OutputViewFuncs),
-		ReferenceBackendPkg:         c.ReferenceBackendPkg,
-		OptimizedBackendPkgs:        toSet(c.OptimizedBackendPkgs),
-		KernelRegisterFuncs:         toSet(c.KernelRegisterFuncs),
-		InPlaceFusionContracts:      slices.Clone(c.InPlaceFusionContracts),
-		BoundedScratchFlowContracts: cloneBoundedScratchFlowContracts(c.BoundedScratchFlowContracts),
-		ReceiverStagingContracts:    slices.Clone(c.ReceiverStagingContracts),
+		CacheLineBytes:                    c.CacheLineBytes,
+		ElementAccessors:                  toSet(c.ElementAccessors),
+		FastPathHelpers:                   toSet(c.FastPathHelpers),
+		SelectorPromotionSymbols:          toSet(c.SelectorPromotionSymbols),
+		ElementCountMethods:               toSet(c.ElementCountMethods),
+		ShapeMethods:                      toSet(c.ShapeMethods),
+		IndexDecomposeFuncs:               toSet(c.IndexDecomposeFuncs),
+		AllocatorFuncs:                    toSet(c.AllocatorFuncs),
+		PerElementVisitors:                toSet(c.PerElementVisitors),
+		BulkCopyHelpers:                   toSet(c.BulkCopyHelpers),
+		VectorizedSiblingFuncs:            toSet(c.VectorizedSiblingFuncs),
+		FanOutHelpers:                     toSet(c.FanOutHelpers),
+		DtypeMethods:                      toSet(c.DtypeMethods),
+		OutputBufferElemTypes:             toSet(c.OutputBufferElemTypes),
+		CompiledResourceFuncs:             toSet(c.CompiledResourceFuncs),
+		GPUReductionKernels:               toSet(c.GPUReductionKernels),
+		PureComputeFuncs:                  toSet(c.PureComputeFuncs),
+		LayoutOpConstants:                 toSet(c.LayoutOpConstants),
+		PointerTypeNames:                  toSet(c.PointerTypeNames),
+		VariadicDispatchWrappers:          toSet(c.VariadicDispatchWrappers),
+		TopKSelectorFuncs:                 toSet(c.TopKSelectorFuncs),
+		TopKOneContracts:                  slices.Clone(c.TopKOneContracts),
+		NativeSnapshotStringCopyContracts: slices.Clone(c.NativeSnapshotStringCopyContracts),
+		InputViewFuncs:                    toSet(c.InputViewFuncs),
+		OutputViewFuncs:                   toSet(c.OutputViewFuncs),
+		ReferenceBackendPkg:               c.ReferenceBackendPkg,
+		OptimizedBackendPkgs:              toSet(c.OptimizedBackendPkgs),
+		KernelRegisterFuncs:               toSet(c.KernelRegisterFuncs),
+		InPlaceFusionContracts:            slices.Clone(c.InPlaceFusionContracts),
+		BoundedScratchFlowContracts:       cloneBoundedScratchFlowContracts(c.BoundedScratchFlowContracts),
+		ReceiverStagingContracts:          slices.Clone(c.ReceiverStagingContracts),
 	}
 }
 

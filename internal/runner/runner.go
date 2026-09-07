@@ -336,34 +336,35 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		return nil
 	}
 	fields := map[string]int{
-		"elementAccessors":         len(cfg.ElementAccessors),
-		"fastPathHelpers":          len(cfg.FastPathHelpers),
-		"selectorPromotionSymbols": len(cfg.SelectorPromotionSymbols),
-		"elementCountMethods":      len(cfg.ElementCountMethods),
-		"shapeMethods":             len(cfg.ShapeMethods),
-		"indexDecomposeFuncs":      len(cfg.IndexDecomposeFuncs),
-		"allocatorFuncs":           len(cfg.AllocatorFuncs),
-		"perElementVisitors":       len(cfg.PerElementVisitors),
-		"bulkCopyHelpers":          len(cfg.BulkCopyHelpers),
-		"vectorizedSiblingFuncs":   len(cfg.VectorizedSiblingFuncs),
-		"fanOutHelpers":            len(cfg.FanOutHelpers),
-		"dtypeMethods":             len(cfg.DtypeMethods),
-		"outputBufferElemTypes":    len(cfg.OutputBufferElemTypes),
-		"compiledResourceFuncs":    len(cfg.CompiledResourceFuncs),
-		"gpuReductionKernels":      len(cfg.GPUReductionKernels),
-		"pureComputeFuncs":         len(cfg.PureComputeFuncs),
-		"layoutOpConstants":        len(cfg.LayoutOpConstants),
-		"pointerTypeNames":         len(cfg.PointerTypeNames),
-		"variadicDispatchWrappers": len(cfg.VariadicDispatchWrappers),
-		"topKSelectorFuncs":        len(cfg.TopKSelectorFuncs),
-		"topKOneContracts":         validTopKOneContracts(cfg.TopKOneContracts),
-		"inputViewFuncs":           len(cfg.InputViewFuncs),
-		"outputViewFuncs":          len(cfg.OutputViewFuncs),
-		"referenceBackendPkg":      len(cfg.ReferenceBackendPkg),
-		"optimizedBackendPkgs":     len(cfg.OptimizedBackendPkgs),
-		"kernelRegisterFuncs":      len(cfg.KernelRegisterFuncs),
-		"inPlaceFusionContracts":   len(cfg.InPlaceFusionContracts),
-		"receiverStagingContracts": validReceiverStagingContracts(cfg.ReceiverStagingContracts),
+		"elementAccessors":                  len(cfg.ElementAccessors),
+		"fastPathHelpers":                   len(cfg.FastPathHelpers),
+		"selectorPromotionSymbols":          len(cfg.SelectorPromotionSymbols),
+		"elementCountMethods":               len(cfg.ElementCountMethods),
+		"shapeMethods":                      len(cfg.ShapeMethods),
+		"indexDecomposeFuncs":               len(cfg.IndexDecomposeFuncs),
+		"allocatorFuncs":                    len(cfg.AllocatorFuncs),
+		"perElementVisitors":                len(cfg.PerElementVisitors),
+		"bulkCopyHelpers":                   len(cfg.BulkCopyHelpers),
+		"vectorizedSiblingFuncs":            len(cfg.VectorizedSiblingFuncs),
+		"fanOutHelpers":                     len(cfg.FanOutHelpers),
+		"dtypeMethods":                      len(cfg.DtypeMethods),
+		"outputBufferElemTypes":             len(cfg.OutputBufferElemTypes),
+		"compiledResourceFuncs":             len(cfg.CompiledResourceFuncs),
+		"gpuReductionKernels":               len(cfg.GPUReductionKernels),
+		"pureComputeFuncs":                  len(cfg.PureComputeFuncs),
+		"layoutOpConstants":                 len(cfg.LayoutOpConstants),
+		"pointerTypeNames":                  len(cfg.PointerTypeNames),
+		"variadicDispatchWrappers":          len(cfg.VariadicDispatchWrappers),
+		"topKSelectorFuncs":                 len(cfg.TopKSelectorFuncs),
+		"topKOneContracts":                  validTopKOneContracts(cfg.TopKOneContracts),
+		"nativeSnapshotStringCopyContracts": validNativeSnapshotStringCopyContracts(cfg.NativeSnapshotStringCopyContracts),
+		"inputViewFuncs":                    len(cfg.InputViewFuncs),
+		"outputViewFuncs":                   len(cfg.OutputViewFuncs),
+		"referenceBackendPkg":               len(cfg.ReferenceBackendPkg),
+		"optimizedBackendPkgs":              len(cfg.OptimizedBackendPkgs),
+		"kernelRegisterFuncs":               len(cfg.KernelRegisterFuncs),
+		"inPlaceFusionContracts":            len(cfg.InPlaceFusionContracts),
+		"receiverStagingContracts":          validReceiverStagingContracts(cfg.ReceiverStagingContracts),
 	}
 	missing := make([]string, 0, len(c.Vocab))
 	for _, v := range c.Vocab {
@@ -375,6 +376,16 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 }
 
 func validReceiverStagingContracts(contracts []config.ReceiverStagingContract) int {
+	valid := 0
+	for index := range contracts {
+		if contracts[index].Valid() {
+			valid++
+		}
+	}
+	return valid
+}
+
+func validNativeSnapshotStringCopyContracts(contracts []config.NativeSnapshotStringCopyContract) int {
 	valid := 0
 	for index := range contracts {
 		if contracts[index].Valid() {
