@@ -13,6 +13,8 @@ import (
 // argument is a non-pointer, or a New func literal returning one. Each such
 // value is boxed into an interface on the way into the pool, allocating —
 // exactly the allocation the pool exists to avoid.
+const ps2114OwnershipAdvice = "when ownership spans the pool lifetime, allocate the wrapper only on a cold miss, carry that same pointer through the owner, and return it to sync.Pool; a fresh wrapper at every Put still allocates; removing allocations alone does not prove a wall-time win, so benchmark the actual call site"
+
 var PS2114 = register(&lint.Check{
 	ID:       "PS2114",
 	Category: "alloc",
@@ -39,6 +41,28 @@ The remedy is to pool a pointer to the value instead:
 
 or to pool a pointer to a small wrapper struct holding the slice.
 
+The pointer must be a reusable ownership token, not merely fresh pointer
+syntax at the release site. Allocate the wrapper only on a cold miss
+(normally in Pool.New), carry that same pointer in the object that owns the
+buffer from acquire through release, and return the same pointer to Put.
+Taking &b for an escaping slice-header variable on every release still
+allocates one wrapper per cycle.
+
+Keep sync.Pool when its GC reclamation and per-P behavior are part of the
+design; replacing it with an unbounded private freelist changes those
+semantics. A public API that exposes only a raw slice is an explicit fallback
+boundary because it cannot return the ownership token. Its raw-slice Put still
+boxes and should still be reported even when a separate owned path exists. A
+shared pool can bridge the forms with a type switch: preserve the token on the
+owned path, and create or discard at most one token when crossing the raw
+boundary while retaining the backing buffer. Suppress the raw fallback only
+with evidence that the measured production path is intercepted by the owned
+API.
+
+Eliminating the boxed slice header establishes an allocation reduction, not a
+universal wall-time improvement. Benchmark the actual call site with paired
+measurements, especially for parallel consumers.
+
 No automatic fix is attached, deliberately: a safe rewrite must change
 the New function, every Put call site, and every Get consumer's type
 assertion in one coherent step — for an exported pool those sites can
@@ -56,14 +80,32 @@ allocating) are deliberately not reported.`,
 b := bufPool.Get().([]byte)
 // ... use b ...
 bufPool.Put(b) // boxes the 24-byte slice header: allocates every cycle`,
-		After: `var bufPool = sync.Pool{New: func() any { b := make([]byte, 0, 1024); return &b }}
-p := bufPool.Get().(*[]byte)
-// ... use *p ...
-bufPool.Put(p) // one-word pointer: no allocation`,
-		MeasuredWin: `BenchmarkPS2114 (Get, append ~6 bytes, Put; Apple M2
-Pro): value pool 24.7 ns/op 24 B/op 1 alloc/op -> pointer pool
-8.5 ns/op 0 B/op 0 allocs/op (~2.9x, and the per-cycle allocation —
-the very thing the pool was installed to avoid — drops to zero).`,
+		After: `type bufferOwner struct { token *[]byte }
+
+var bufPool = sync.Pool{New: func() any { b := make([]byte, 0, 1024); return &b }}
+
+func acquireBuffer() bufferOwner {
+	p := bufPool.Get().(*[]byte)
+	*p = (*p)[:0]
+	return bufferOwner{token: p} // carry the cold-miss token with its owner
+}
+
+func (o *bufferOwner) release() {
+	bufPool.Put(o.token) // return the same token; do not allocate a fresh &slice
+	o.token = nil
+}`,
+		MeasuredWin: `Historic repository microbenchmark evidence, recorded on an
+Apple M2 Pro (not remeasured for this documentation change):
+BenchmarkPS2114 Get/append/Put measured the value pool at 24.7 ns/op,
+24 B/op, 1 alloc/op and the pointer pool at 8.5 ns/op, 0 B/op,
+0 allocs/op (~2.9x).
+
+That isolated result is not a general wall-time claim. In a later
+owner-reported parallel MoE scratch experiment, the ownership token removed
+6–8 allocations and roughly 23 KiB/op but made F32 1.170x slower; a persistent
+worker-pool variant made F64 1.121x slower. Both experiments were reverted.
+Treat allocation removal as an allocation fact and require paired timing at
+the actual call site, especially for parallel consumers.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS2114",
@@ -144,7 +186,7 @@ func ps2114CheckPut(pass *analysis.Pass, call *ast.CallExpr) {
 	pass.Report(analysis.Diagnostic{
 		Pos:     call.Pos(),
 		End:     call.End(),
-		Message: "sync.Pool.Put of non-pointer value (type " + types.TypeString(t, types.RelativeTo(pass.Pkg)) + ") boxes it into an interface, allocating on every Put; pool a pointer instead",
+		Message: "sync.Pool.Put of non-pointer value (type " + types.TypeString(t, types.RelativeTo(pass.Pkg)) + ") boxes it into an interface, allocating on every Put; pool a pointer instead; " + ps2114OwnershipAdvice,
 	})
 }
 
@@ -170,7 +212,7 @@ func ps2114CheckNew(pass *analysis.Pass, fl *ast.FuncLit) {
 		pass.Report(analysis.Diagnostic{
 			Pos:     ret.Results[0].Pos(),
 			End:     ret.Results[0].End(),
-			Message: "sync.Pool New returns non-pointer value (type " + types.TypeString(t, types.RelativeTo(pass.Pkg)) + "); every pool cycle boxes it, allocating; return a pointer instead",
+			Message: "sync.Pool New returns non-pointer value (type " + types.TypeString(t, types.RelativeTo(pass.Pkg)) + "); every pool cycle boxes it, allocating; return a pointer instead; " + ps2114OwnershipAdvice,
 		})
 		return true
 	})
