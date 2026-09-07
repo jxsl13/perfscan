@@ -32,7 +32,12 @@ var PS6095 = register(&lint.Check{
 		Text: `A reduction or combine kernel can evaluate the same floating-point
 division for every output element even though neither operand depends on the
 output index. Computing the original division once and reusing that rounded
-result removes repeated high-latency divisions and is bit-identical.
+result is bit-identical and can remove repeated high-latency divisions when
+the compiler has not already hoisted them. A source finding does not prove
+repeated machine instructions: the compiler may already hoist a simple scalar
+quotient. Inspect optimized code and benchmark the real caller before treating
+the rewrite as a speedup; deterministic source equivalence is not a runtime
+performance guarantee.
 
 Replacing x/y with x*(1/y) is not the same transformation. The reciprocal is
 rounded before the multiplication and can change finite result bits, NaN
@@ -97,7 +102,15 @@ binary pairs improved F64 median latency from 13.416355 ms to 10.386168 ms
 (1.292x, 8/9 wins) and F32 from 11.755059 ms to 10.988136 ms (1.070x, 7/9
 wins), without an allocation-count regression. Serial and parallel mutation
 tests remained bit-exact; the reciprocal-multiply alternative changed F64
-output bits.`,
+output bits.
+
+The repository's simple scalar benchmark was neutral under Go 1.27.0 on
+darwin/arm64, Apple M2 Pro, GOMAXPROCS=3: six alternating fresh-process pairs
+of two-second arms measured medians of 89.68 ns/op before and 89.405 ns/op
+after, with zero bytes and allocations in both arms. Both compiled functions
+already execute one division before the loop, so this microbenchmark proves
+no additional speedup. Do not generalize the owner's indexed production gain
+to scalar expressions that the compiler already optimizes.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS6095",
@@ -959,7 +972,7 @@ func ps6095InspectLoop(
 	diagnostic := analysis.Diagnostic{
 		Pos:     selected.candidate.expression.Pos(),
 		End:     selected.candidate.expression.End(),
-		Message: "this floating-point quotient is invariant in output index " + loop.index.Name() + "; compute the original division once and reuse its rounded result (never replace it with reciprocal multiplication, which is not bit-equivalent)",
+		Message: "this floating-point quotient is invariant in output index " + loop.index.Name() + "; compute the original division once and reuse its rounded result (never replace it with reciprocal multiplication, which is not bit-equivalent); the compiler may already hoist this quotient, so inspect optimized code and benchmark the caller before claiming a speedup",
 	}
 	if fix := ps6095Fix(pass, context.parents, context.usedNames, context.hasGoto, context.comments, loop, fixable); fix != nil {
 		diagnostic.SuggestedFixes = []analysis.SuggestedFix{*fix}

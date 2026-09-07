@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**388 checks total** — **264 with a bit-identical auto-fix**, 124 advisory. By fix level: **246 L1** (idiomatic), **119 L2** (structured), **23 L3** (aggressive).
+**390 checks total** — **264 with a bit-identical auto-fix**, 126 advisory. By fix level: **246 L1** (idiomatic), **120 L2** (structured), **24 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -183,6 +183,7 @@ checks' fixes.
 | [PS4002](PS4002.md) | vector | L3 |  | a scalar math transcendental in a loop beside a vectorized sibling kernel |
 | [PS4008](PS4008.md) | vector | L3 | yes | a matmul whose innermost loop is a serial scalar dot accumulator |
 | [PS4101](PS4101.md) | vector | L1 | yes | an element-copy loop replaceable by the copy builtin |
+| [PS4102](PS4102.md) | vector | L3 |  | a full-width endian decode used only for a final-byte subfield |
 | [PS5001](PS5001.md) | arith | L3 |  | a divide by a loop-invariant scalar on every element |
 | [PS5002](PS5002.md) | arith | L2 | yes | a nested loop accumulating a full symmetric matrix |
 | [PS5003](PS5003.md) | alloc | L1 | yes | Write([]byte{c}) copies one byte through a throwaway slice; WriteByte(c) appends it directly |
@@ -400,4 +401,5 @@ checks' fixes.
 | [PS6099](PS6099.md) | vector | L3 |  | a scalar transcendental per independent output can stage into that output for a known batched leaf |
 | [PS6100](PS6100.md) | cpu | L2 |  | iterative full scans repeatedly derive finite per-element membership |
 | [PS6101](PS6101.md) | verify | L2 |  | symmetric random benchmark inputs bypass a gated hot branch |
+| [PS6102](PS6102.md) | verify | L2 |  | a performance pass/fail assertion remains reachable under testing.Short |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |

@@ -90,3 +90,8 @@ Rules without a pair, and why:
   walk without the mechanism the rule proves is present. The check documents
   the owner SVC campaign; benchmark the exact routed leaf, precision, band size,
   alias regime, and iterative solver end to end.
+- **PS6102** (short-mode performance-gate advisory): the finding prevents an
+  environment-sensitive threshold from running on shared or constrained test
+  lanes. Its remedy is test selection and coverage structure, not a faster code
+  shape, so a Before/After micro-benchmark would only recreate the flaky gate
+  the check asks users to isolate.
