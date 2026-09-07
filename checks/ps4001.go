@@ -86,6 +86,7 @@ func isBinaryEndianCall(info *types.Info, call *ast.CallExpr) (string, bool) {
 func runPS4001(pass *analysis.Pass) (any, error) {
 	bulk := config.Current().BulkCopyHelpers
 	for _, f := range pass.Files {
+		subfieldCalls := ps4102RecognizedCalls(pass, f)
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
@@ -100,6 +101,9 @@ func runPS4001(pass *analysis.Pass) (any, error) {
 			astutil.WithStack(fn.Body, func(n ast.Node, stack []ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
+					return true
+				}
+				if subfieldCalls[call] {
 					return true
 				}
 				name, ok := isBinaryEndianCall(pass.TypesInfo, call)
