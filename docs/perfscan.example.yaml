@@ -317,6 +317,45 @@ receiverStagingContracts:
     consumerDoesNotRetainArgument: true
     lifecycleEndsReceiverUse: true
     contentsMayPersistUntilLifecycle: true
+# Exact lifecycle contracts for PS6109 reusable Go shells around always-fresh
+# one-shot native handles. Every identity is typed and every boolean is a
+# project-owned semantic promise; names such as New/Reset/Free prove nothing.
+reusableOneShotWrapperContracts:
+  - name: recorder-shell
+    wrapperType: example.com/project/backend.Recorder
+    providerType: example.com/project/backend.Device
+    acquisition: example.com/project/model.CommandFactory.NewRecorder
+    concreteAcquisition: example.com/project/backend.Device.NewRecorder
+    wrapperConstructor: example.com/project/backend.NewRecorder
+    terminal: {static: example.com/project/model.CommandRecorder.Free, concrete: example.com/project/backend.Recorder.Free}
+    reset: {static: example.com/project/model.CommandRecorder.Reset, concrete: example.com/project/backend.Recorder.Reset}
+    freshNativeHandleFactory: example.com/project/backend.Device.NewCommandBuffer
+    nativeHandleField: example.com/project/backend.Recorder.commandBuffer
+    mutableStateFields: [example.com/project/backend.Recorder.encoder, example.com/project/backend.Recorder.committed]
+    allowedSynchronousUses:
+      - {static: example.com/project/model.CommandRecorder.Encode, concrete: example.com/project/backend.Recorder.Encode}
+    acquisitionWrapperResult: 1
+    acquisitionStatusResult: 2
+    constructorWrapperResult: 1
+    resetStatusResult: 1
+    acquisitionFailureMode: nil-error
+    resetFailureState: error-leaves-empty-terminal-safe
+    slotBound: 1
+    acquisitionCreatesFreshGoWrapper: true
+    acquisitionHasExactDynamicWrapper: true
+    failedAcquisitionHasNoGeneration: true
+    nativeHandleIsOneShot: true
+    resetAlwaysCreatesFreshHandle: true
+    terminalSynchronouslyReleases: true
+    terminalClearsHandle: true
+    terminalIsIdempotent: true
+    resetClearsMutableState: true
+    usesExecuteSynchronously: true
+    usesDoNotRetainGeneration: true
+    noStaleGenerationReferences: true
+    ownerAccessIsNonConcurrent: true
+    providerFallbackIsPreserved: true
+    failuresAndPanicsArePreserved: true
 
 # ---------------------------------------------------------------------------
 # Concrete instance — a tensor / numerical library (e.g. goai). The SAME 29
@@ -357,4 +396,6 @@ receiverStagingContracts:
 #     - {name: bounded-gelu, allocator: example.com/backend.Device.Alloc, allocatorCapacityArg: 1, producer: example.com/backend.Device.AddBias, producerBufferArg: 1, producerActiveArg: 2, consumer: example.com/backend.Device.GELU, consumerBufferArg: 1, observers: [{function: example.com/backend.Device.Observe, bufferArg: 1, activeArg: 2}], configuredCapacityElements: 3145728, configuredActiveElements: 3072, configuredRepeatCount: 12, allocatorReturnsFreshOwned: true, producerWritesOnlyActivePrefix: true, consumerTraversesFullCapacity: true, observersReadOnlyActivePrefix: true, callsDoNotRetainBuffer: true, callsExecuteSynchronously: true, inactiveTailNotRequired: true, replacement: example.com/backend.Device.BiasGELU, replacementMatchesComposition: true, replacementPreservesActivePrefixBits: true, replacementLeavesInactiveTail: true, replacementPreservesErrorsSideEffects: true, replacementPreservesProviderFallback: true, replacementRejectsUnsupported: true, replacementFailureUnmodified: true}
 #   receiverStagingContracts:
 #     - {name: decoder-prefill-upload, candidateMethod: example.com/decoder.Decoder.prefill, overwrite: example.com/decoder.Decoder.gatherInto, overwriteKind: method, overwriteArg: 0, consumer: example.com/device.Buffer.UploadF32, consumerKind: method, consumerArg: 0, lifecycleMethod: example.com/decoder.Decoder.Release, maxRetainedBytes: 65536, receiverCallsSequential: true, overwriteWritesAllBeforeRead: true, overwriteCompletesBeforeReturn: true, overwriteDoesNotRetainArgument: true, overwriteAccessesOnlyArgumentLength: true, overwriteIgnoresCapacityAndIdentity: true, overwritePreservesExtentInputs: true, extentIsNonNegativeAndNonOverflowing: true, consumerCompletesBeforeReturn: true, consumerDoesNotRetainArgument: true, lifecycleEndsReceiverUse: true, contentsMayPersistUntilLifecycle: true}
+#   reusableOneShotWrapperContracts:
+#     - {name: recorder-shell, wrapperType: example.com/backend.Recorder, providerType: example.com/backend.Device, acquisition: example.com/model.CommandFactory.NewRecorder, concreteAcquisition: example.com/backend.Device.NewRecorder, wrapperConstructor: example.com/backend.NewRecorder, terminal: {static: example.com/model.CommandRecorder.Free, concrete: example.com/backend.Recorder.Free}, reset: {static: example.com/model.CommandRecorder.Reset, concrete: example.com/backend.Recorder.Reset}, freshNativeHandleFactory: example.com/backend.Device.NewCommandBuffer, nativeHandleField: example.com/backend.Recorder.commandBuffer, mutableStateFields: [example.com/backend.Recorder.encoder], allowedSynchronousUses: [{static: example.com/model.CommandRecorder.Encode, concrete: example.com/backend.Recorder.Encode}], acquisitionWrapperResult: 1, acquisitionStatusResult: 2, constructorWrapperResult: 1, resetStatusResult: 1, acquisitionFailureMode: nil-error, resetFailureState: error-leaves-empty-terminal-safe, slotBound: 1, acquisitionCreatesFreshGoWrapper: true, acquisitionHasExactDynamicWrapper: true, failedAcquisitionHasNoGeneration: true, nativeHandleIsOneShot: true, resetAlwaysCreatesFreshHandle: true, terminalSynchronouslyReleases: true, terminalClearsHandle: true, terminalIsIdempotent: true, resetClearsMutableState: true, usesExecuteSynchronously: true, usesDoNotRetainGeneration: true, noStaleGenerationReferences: true, ownerAccessIsNonConcurrent: true, providerFallbackIsPreserved: true, failuresAndPanicsArePreserved: true}
 # ---------------------------------------------------------------------------

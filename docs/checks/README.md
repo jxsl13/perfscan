@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**399 checks total** — **265 with a bit-identical auto-fix**, 134 advisory. By fix level: **246 L1** (idiomatic), **122 L2** (structured), **31 L3** (aggressive).
+**400 checks total** — **265 with a bit-identical auto-fix**, 135 advisory. By fix level: **246 L1** (idiomatic), **122 L2** (structured), **32 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -410,5 +410,6 @@ checks' fixes.
 | [PS6106](PS6106.md) | verify | L3 |  | elementwise scratch consumer traverses beyond the active prefix |
 | [PS6107](PS6107.md) | alloc | L3 |  | fully overwritten per-call staging has a contract-safe receiver high-water lifetime |
 | [PS6108](PS6108.md) | verify | L3 |  | a coefficient loop repeatedly calls the same packed-field helper |
+| [PS6109](PS6109.md) | alloc | L3 |  | a fixed repeated path creates fresh Go shells around one-shot native handles |
 | [PS6110](PS6110.md) | alloc | L3 |  | bulk native snapshot clones an owned Go string once per record |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |
