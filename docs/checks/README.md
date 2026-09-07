@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**394 checks total** — **265 with a bit-identical auto-fix**, 129 advisory. By fix level: **246 L1** (idiomatic), **122 L2** (structured), **26 L3** (aggressive).
+**395 checks total** — **265 with a bit-identical auto-fix**, 130 advisory. By fix level: **246 L1** (idiomatic), **122 L2** (structured), **27 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -406,4 +406,5 @@ checks' fixes.
 | [PS6102](PS6102.md) | verify | L2 |  | a performance pass/fail assertion remains reachable under testing.Short |
 | [PS6103](PS6103.md) | alloc | L3 |  | a fixed-count loop repeatedly creates a short-lived operation result that can use caller-owned output |
 | [PS6104](PS6104.md) | verify | L3 |  | an accelerator block loop repeats a launch-invariant row-tail predicate |
+| [PS6105](PS6105.md) | alloc | L3 |  | constructor-stored projection scratch has no ordinary typed consumer |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |
