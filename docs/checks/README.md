@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**387 checks total** — **263 with a bit-identical auto-fix**, 124 advisory. By fix level: **246 L1** (idiomatic), **118 L2** (structured), **23 L3** (aggressive).
+**388 checks total** — **263 with a bit-identical auto-fix**, 125 advisory. By fix level: **246 L1** (idiomatic), **119 L2** (structured), **23 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -120,6 +120,7 @@ checks' fixes.
 | [PS2141](PS2141.md) | alloc | L1 | yes | fmt.Appendf(buf, "%s", s) runs fmt's formatter to append bytes append writes directly |
 | [PS2142](PS2142.md) | alloc | L2 |  | an os.Open file is fully heap-staged by io.ReadAll before decode |
 | [PS2143](PS2143.md) | alloc | L2 |  | a partial ReadAt payload is rebuilt with a synthetic JSON header for a full collection parser, then one item is selected |
+| [PS2144](PS2144.md) | alloc | L2 |  | adjacent same-shape scratch slices remain live together and may share one guarded backing allocation |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
