@@ -170,6 +170,44 @@ topKOneContracts:
     kArgPosition: 2
     indicesResultPosition: 1
 
+# Exact string-ownership boundaries for PS6110. Positions are one-based and
+# exclude a method receiver. The candidate must locally acquire the native
+# record pointer and count through this exact typed/cgo call, build the returned
+# []record field from that count, and copy the configured direct native field
+# into the configured direct string field with the same zero-based index.
+# Every boolean is an explicit foreign-lifetime promise; names alone prove none
+# of them. C.GoBytes/[]byte are intentionally unsupported because sharing fresh
+# mutable results changes aliasing. PS6110 is advisory and never emits a fix.
+# Version one requires these local out-arguments, an integer status guard, and
+# a resolved external typed lifecycle; other acquisition/release modes wait for
+# concrete owner APIs and separate proof coverage.
+nativeSnapshotStringCopyContracts:
+  - name: recorder-profile-labels
+    candidateCallable: example.com/project/backend/metal.Recorder.Profile
+    candidateKind: method
+    destinationResultPosition: 1
+    destinationSliceField: Events
+    destinationStringField: Label
+    acquireCallable: C.mtl_recorder_profile_snapshot
+    acquireKind: cgo
+    recordsOutArgumentPosition: 2
+    countOutArgumentPosition: 3
+    acquireStatusResultPosition: 1
+    acquireSuccessInteger: 0
+    nativeStringField: label
+    copyKind: c-go-string
+    copyPointerArgumentPosition: 1
+    copyLengthArgumentPosition: 0
+    copyStringResultPosition: 1
+    lifecycleCallable: example.com/project/backend/metal.Recorder.Free
+    lifecycleKind: method
+    snapshotStableThroughCandidateReturn: true
+    snapshotNotMutatedDuringExtraction: true
+    extractionIsSynchronous: true
+    copyReturnsExactOwnedString: true
+    returnedStringsOutliveLifecycle: true
+    exactContentCheckRequired: true
+
 # Helpers exposing typed input views and caller-owned output views.
 inputViewFuncs:
   - f64Data

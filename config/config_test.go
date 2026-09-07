@@ -41,6 +41,9 @@ func TestToSetAndCompile(t *testing.T) {
 		ReceiverStagingContracts: []ReceiverStagingContract{{
 			Name: "prefill-staging",
 		}},
+		NativeSnapshotStringCopyContracts: []NativeSnapshotStringCopyContract{{
+			Name: "profile-labels",
+		}},
 		ElementCountMethods: nil, // stays nil after compile
 	}
 	sets := c.Compile()
@@ -69,6 +72,9 @@ func TestToSetAndCompile(t *testing.T) {
 	if len(sets.ReceiverStagingContracts) != 1 || sets.ReceiverStagingContracts[0].Name != "prefill-staging" {
 		t.Errorf("Compile lost receiver staging contracts: %+v", sets.ReceiverStagingContracts)
 	}
+	if len(sets.NativeSnapshotStringCopyContracts) != 1 || sets.NativeSnapshotStringCopyContracts[0].Name != "profile-labels" {
+		t.Errorf("Compile lost native snapshot string-copy contracts: %+v", sets.NativeSnapshotStringCopyContracts)
+	}
 	c.TopKOneContracts[0].Name = "mutated"
 	if sets.TopKOneContracts[0].Name != "resident-topk-one" {
 		t.Error("Compile must clone Top-K(k=1) contracts")
@@ -86,6 +92,10 @@ func TestToSetAndCompile(t *testing.T) {
 	c.ReceiverStagingContracts[0].Name = "mutated"
 	if sets.ReceiverStagingContracts[0].Name != "prefill-staging" {
 		t.Error("Compile must clone receiver staging contracts")
+	}
+	c.NativeSnapshotStringCopyContracts[0].Name = "mutated"
+	if sets.NativeSnapshotStringCopyContracts[0].Name != "profile-labels" {
+		t.Error("Compile must clone native snapshot string-copy contracts")
 	}
 	if sets.ElementCountMethods != nil {
 		t.Errorf("empty field must compile to a nil set, got %v", sets.ElementCountMethods)
@@ -234,6 +244,94 @@ func TestReceiverStagingContractValid(t *testing.T) {
 	}
 }
 
+func TestNativeSnapshotStringCopyContractValid(t *testing.T) {
+	t.Parallel()
+	valid := NativeSnapshotStringCopyContract{
+		Name:                                 "labels",
+		CandidateCallable:                    "example.com/project.Recorder.Profile",
+		CandidateKind:                        NativeSnapshotCallMethod,
+		DestinationResultPosition:            1,
+		DestinationSliceField:                "Events",
+		DestinationStringField:               "Label",
+		AcquireCallable:                      "C.profile_snapshot",
+		AcquireKind:                          NativeSnapshotCallCgo,
+		RecordsOutArgumentPosition:           2,
+		CountOutArgumentPosition:             3,
+		AcquireStatusResultPosition:          1,
+		NativeStringField:                    "label",
+		CopyKind:                             NativeSnapshotCopyGoString,
+		CopyPointerArgumentPosition:          1,
+		CopyStringResultPosition:             1,
+		LifecycleCallable:                    "example.com/project.Recorder.Free",
+		LifecycleKind:                        NativeSnapshotCallMethod,
+		SnapshotStableThroughCandidateReturn: true,
+		SnapshotNotMutatedDuringExtraction:   true,
+		ExtractionIsSynchronous:              true,
+		CopyReturnsExactOwnedString:          true,
+		ReturnedStringsOutliveLifecycle:      true,
+		ExactContentCheckRequired:            true,
+	}
+	if !valid.Valid() {
+		t.Fatal("complete native snapshot string-copy contract is invalid")
+	}
+	tests := []struct {
+		name   string
+		mutate func(*NativeSnapshotStringCopyContract)
+	}{
+		{"blank name", func(c *NativeSnapshotStringCopyContract) { c.Name = "" }},
+		{"invalid candidate", func(c *NativeSnapshotStringCopyContract) { c.CandidateCallable = "Profile" }},
+		{"cgo candidate", func(c *NativeSnapshotStringCopyContract) { c.CandidateKind = NativeSnapshotCallCgo }},
+		{"zero destination result", func(c *NativeSnapshotStringCopyContract) { c.DestinationResultPosition = 0 }},
+		{"dotted destination field", func(c *NativeSnapshotStringCopyContract) { c.DestinationSliceField = "Profile.Events" }},
+		{"same acquisition args", func(c *NativeSnapshotStringCopyContract) { c.CountOutArgumentPosition = c.RecordsOutArgumentPosition }},
+		{"fake cgo acquisition", func(c *NativeSnapshotStringCopyContract) { c.AcquireCallable = "profile_snapshot" }},
+		{"zero status result", func(c *NativeSnapshotStringCopyContract) { c.AcquireStatusResultPosition = 0 }},
+		{"GoString length", func(c *NativeSnapshotStringCopyContract) { c.CopyLengthArgumentPosition = 2 }},
+		{"negative copy length", func(c *NativeSnapshotStringCopyContract) {
+			c.CopyKind = NativeSnapshotCallFunction
+			c.CopyCallable = "example.com/project.ownedString"
+			c.NativeLengthField = "length"
+			c.CopyLengthArgumentPosition = -1
+		}},
+		{"GoStringN without length field", func(c *NativeSnapshotStringCopyContract) {
+			c.CopyKind = NativeSnapshotCopyGoStringN
+			c.CopyLengthArgumentPosition = 2
+		}},
+		{"overlapping pointer and length", func(c *NativeSnapshotStringCopyContract) {
+			c.CopyKind = NativeSnapshotCopyGoStringN
+			c.NativeLengthField = "length"
+			c.CopyLengthArgumentPosition = c.CopyPointerArgumentPosition
+		}},
+		{"copy bytes kind", func(c *NativeSnapshotStringCopyContract) { c.CopyKind = NativeSnapshotCallKind("c-go-bytes") }},
+		{"missing lifecycle", func(c *NativeSnapshotStringCopyContract) { c.LifecycleCallable = "" }},
+		{"unstable snapshot", func(c *NativeSnapshotStringCopyContract) { c.SnapshotStableThroughCandidateReturn = false }},
+		{"mutable extraction", func(c *NativeSnapshotStringCopyContract) { c.SnapshotNotMutatedDuringExtraction = false }},
+		{"asynchronous extraction", func(c *NativeSnapshotStringCopyContract) { c.ExtractionIsSynchronous = false }},
+		{"borrowed copy", func(c *NativeSnapshotStringCopyContract) { c.CopyReturnsExactOwnedString = false }},
+		{"lifecycle ownership missing", func(c *NativeSnapshotStringCopyContract) { c.ReturnedStringsOutliveLifecycle = false }},
+		{"collision check missing", func(c *NativeSnapshotStringCopyContract) { c.ExactContentCheckRequired = false }},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			candidate := valid
+			test.mutate(&candidate)
+			if candidate.Valid() {
+				t.Errorf("mutated contract is valid: %+v", candidate)
+			}
+		})
+	}
+	wrapper := valid
+	wrapper.CopyKind = NativeSnapshotCallFunction
+	wrapper.CopyCallable = "example.com/project.ownedStringN"
+	wrapper.NativeLengthField = "length"
+	wrapper.CopyLengthArgumentPosition = 2
+	if !wrapper.Valid() {
+		t.Fatal("complete typed GoStringN wrapper contract is invalid")
+	}
+}
+
 func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 
@@ -372,6 +470,7 @@ func TestGoAICurrentVocabularyCompatibility(t *testing.T) {
   "variadicDispatchWrappers": ["exec", "visExecN"],
   "topKSelectorFuncs": ["topKIndices"],
   "topKOneContracts": [{"name":"resident", "function":"example.com/goai.DeviceBuffer.TopKN", "kind":"method", "kArgPosition":2, "indicesResultPosition":1}],
+  "nativeSnapshotStringCopyContracts": [{"name":"labels", "candidateCallable":"example.com/goai.Recorder.Profile", "candidateKind":"method", "destinationResultPosition":1, "destinationStringField":"Label", "acquireCallable":"C.snapshot", "acquireKind":"cgo", "recordsOutArgumentPosition":1, "countOutArgumentPosition":2, "acquireStatusResultPosition":1, "nativeStringField":"label", "copyKind":"c-go-string", "copyPointerArgumentPosition":1, "copyStringResultPosition":1, "lifecycleCallable":"example.com/goai.Recorder.Free", "lifecycleKind":"method", "snapshotStableThroughCandidateReturn":true, "snapshotNotMutatedDuringExtraction":true, "extractionIsSynchronous":true, "copyReturnsExactOwnedString":true, "returnedStringsOutliveLifecycle":true, "exactContentCheckRequired":true}],
   "inputViewFuncs": ["f64Data", "f32Data"],
   "outputViewFuncs": ["outF64", "outF32"],
   "referenceBackendPkg": "ref",
@@ -392,6 +491,7 @@ func TestGoAICurrentVocabularyCompatibility(t *testing.T) {
 		len(cfg.PureComputeFuncs) != 1 || len(cfg.LayoutOpConstants) != 2 ||
 		len(cfg.PointerTypeNames) != 2 || len(cfg.VariadicDispatchWrappers) != 2 ||
 		len(cfg.TopKSelectorFuncs) != 1 || len(cfg.TopKOneContracts) != 1 ||
+		len(cfg.NativeSnapshotStringCopyContracts) != 1 ||
 		cfg.TopKOneContracts[0].Kind != TopKOneContractMethod || len(cfg.InputViewFuncs) != 2 ||
 		len(cfg.OutputViewFuncs) != 2 || len(cfg.OptimizedBackendPkgs) != 1 ||
 		len(cfg.KernelRegisterFuncs) != 1 {
@@ -401,6 +501,7 @@ func TestGoAICurrentVocabularyCompatibility(t *testing.T) {
 	if sets.CacheLineBytes != 128 || !sets.PureComputeFuncs["forward"] || !sets.LayoutOpConstants["OpSlice"] ||
 		!sets.PointerTypeNames["Tensor"] || !sets.VariadicDispatchWrappers["exec"] ||
 		!sets.TopKSelectorFuncs["topKIndices"] || len(sets.TopKOneContracts) != 1 || !sets.InputViewFuncs["f64Data"] ||
+		len(sets.NativeSnapshotStringCopyContracts) != 1 ||
 		!sets.OutputViewFuncs["outF64"] || sets.ReferenceBackendPkg != "ref" ||
 		!sets.OptimizedBackendPkgs["cpu"] || !sets.KernelRegisterFuncs["add"] {
 		t.Fatalf("Compile lost current GoAI vocabulary: %+v", sets)
@@ -432,8 +533,9 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"PureComputeFuncs": len(c.PureComputeFuncs), "LayoutOpConstants": len(c.LayoutOpConstants),
 		"PointerTypeNames": len(c.PointerTypeNames), "VariadicDispatchWrappers": len(c.VariadicDispatchWrappers),
 		"TopKSelectorFuncs": len(c.TopKSelectorFuncs), "InputViewFuncs": len(c.InputViewFuncs),
-		"TopKOneContracts": len(c.TopKOneContracts),
-		"OutputViewFuncs":  len(c.OutputViewFuncs), "OptimizedBackendPkgs": len(c.OptimizedBackendPkgs),
+		"TopKOneContracts":                  len(c.TopKOneContracts),
+		"NativeSnapshotStringCopyContracts": len(c.NativeSnapshotStringCopyContracts),
+		"OutputViewFuncs":                   len(c.OutputViewFuncs), "OptimizedBackendPkgs": len(c.OptimizedBackendPkgs),
 		"KernelRegisterFuncs":         len(c.KernelRegisterFuncs),
 		"InPlaceFusionContracts":      len(c.InPlaceFusionContracts),
 		"BoundedScratchFlowContracts": len(c.BoundedScratchFlowContracts),
