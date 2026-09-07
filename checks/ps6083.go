@@ -9,6 +9,7 @@ import (
 	"go/types"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/tools/go/analysis"
 
@@ -227,6 +228,14 @@ func ps6083LoopHeader(pass *analysis.Pass, node ast.Node) (ps6083Loop, bool) {
 
 func ps6083MaterialRange(pass *analysis.Pass, expression ast.Expr) bool {
 	if value := pass.TypesInfo.Types[expression].Value; value != nil {
+		if value.Kind() == constant.String {
+			// String range counts decoded runes (including invalid-byte RuneErrors),
+			// not bytes; constant.Int64Val panics for these valid range operands.
+			return utf8.RuneCountInString(constant.StringVal(value)) >= 4
+		}
+		if value.Kind() != constant.Int {
+			return false
+		}
 		bound, ok := constant.Int64Val(value)
 		return ok && bound >= 4
 	}
@@ -249,6 +258,9 @@ func ps6083MaterialBound(pass *analysis.Pass, expression ast.Expr) bool {
 	value := pass.TypesInfo.Types[expression].Value
 	if value == nil {
 		return true
+	}
+	if value.Kind() != constant.Int {
+		return false
 	}
 	bound, ok := constant.Int64Val(value)
 	return ok && bound >= 4
