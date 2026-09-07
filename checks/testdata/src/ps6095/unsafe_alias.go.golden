@@ -1,0 +1,79 @@
+package ps6095
+
+import "unsafe"
+
+// Negative: &source[0] escapes the fresh allocation through an unsafe slice.
+// A later store through source can therefore mutate alias-backed input.
+func unsafeFreshAlias(denominator float64) []float64 {
+	source := make([]float64, 16)
+	alias := unsafe.Slice(&source[0], len(source))
+	output := make([]float64, 16)
+	for index := range output {
+		source[0]++
+		output[index] = alias[0] / denominator
+	}
+	return output
+}
+
+type addressableFloat float64
+
+func (value *addressableFloat) pointer() *addressableFloat {
+	return value
+}
+
+// Negative: invoking a pointer-receiver method on output[0] implicitly takes
+// the element address. The returned pointer creates an unsafe alias of the
+// supposedly fresh destination, so its stores can vary the quotient input.
+func pointerReceiverCallFreshAlias(denominator addressableFloat) []addressableFloat {
+	output := make([]addressableFloat, 16)
+	alias := unsafe.Slice(output[0].pointer(), len(output))
+	for index := range output {
+		output[index] = alias[0] / denominator
+	}
+	return output
+}
+
+// Negative: selecting the same pointer-receiver method as a method value also
+// implicitly takes the indexed element's address.
+func pointerReceiverValueFreshAlias(denominator addressableFloat) []addressableFloat {
+	output := make([]addressableFloat, 16)
+	pointer := output[0].pointer
+	alias := unsafe.Slice(pointer(), len(output))
+	for index := range output {
+		output[index] = alias[0] / denominator
+	}
+	return output
+}
+
+type addressableArray [1]float64
+
+func (value *addressableArray) pointer() *float64 {
+	return &value[0]
+}
+
+// Negative: the implicit address fact follows through an index whose element
+// is an addressable aggregate, not only a named scalar.
+func pointerReceiverArrayFreshAlias(denominator float64) []addressableArray {
+	output := make([]addressableArray, 16)
+	alias := unsafe.Slice(output[0].pointer(), len(output))
+	for index := range output {
+		output[index] = addressableArray{alias[0] / denominator}
+	}
+	return output
+}
+
+type unrelatedCounter int
+
+func (counter *unrelatedCounter) touch() {
+	*counter++
+}
+
+// An unrelated pointer receiver must not suppress a scalar-only candidate.
+func unrelatedPointerReceiver(output []float64, numerator, denominator float64) {
+	var counter unrelatedCounter
+	psQuotient76_19 := numerator / denominator
+	for index := range output {
+		counter.touch()
+		output[index] = psQuotient76_19 // want `this floating-point quotient is invariant in output index index; compute the original division once and reuse its rounded result \(never replace it with reciprocal multiplication, which is not bit-equivalent\)`
+	}
+}
