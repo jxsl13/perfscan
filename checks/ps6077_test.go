@@ -74,7 +74,7 @@ func TestPS6077RelatedIdentityAndShape(t *testing.T) {
 		function := file.Decls[1].(*ast.FuncDecl)
 		shapeSource := &ps6077Source{file: file, filename: importPath + ".go"}
 		pass := &analysis.Pass{Pkg: types.NewPackage("example.test/p", "p")}
-		return ps6077SliceResultShape(pass, shapeSource, function, ps6077Imports(file))
+		return ps6077SliceResultShape(pass, shapeSource, function, ps6077Imports(file), nil)
 	}
 	leftShape := parseFunction("example.test/left", "shared")
 	rightShape := parseFunction("example.test/right", "shared")
@@ -118,6 +118,8 @@ func TestPS6077BindingIdentity(t *testing.T) {
 		analysistest.Run(t, analysistest.TestData(), PS6077.Analyzer,
 			"ps6077round2shape"+architecture,
 			"ps6077round2alias"+architecture,
+			"ps6077round3constraints"+architecture,
+			"ps6077round3shadow"+architecture,
 		)
 		return
 	}

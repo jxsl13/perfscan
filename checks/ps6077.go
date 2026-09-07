@@ -59,6 +59,8 @@ receiver-type identity, and up to three nearby vector leaves only when their
 slice/result shape and semantic name family match the scalar symbol. Shape
 identity comes from go/types for active files; ignored-file fallbacks resolve
 ordinary import paths and keep unresolved or receiver-bound names distinct.
+Generic receiver binders retain canonical constraint identity, and lexical
+binders take precedence when they deliberately shadow a predeclared type.
 Those related locations are discovery evidence: they identify where a shared
 primitive may compound, but do not prove semantic interchangeability.
 
@@ -170,6 +172,7 @@ var ps6077Transcendentals = map[string]bool{
 func runPS6077(pass *analysis.Pass) (any, error) {
 	sources := ps6077PackageSources(pass)
 	receiverAliases := ps6077ReceiverAliases(sources)
+	receiverConstraints := ps6077ReceiverTypeConstraints(sources)
 	groups := make(map[string][]*ps6077Variant)
 	var allVariants []*ps6077Variant
 	for sourceIndex := range sources {
@@ -189,7 +192,7 @@ func runPS6077(pass *analysis.Pass) (any, error) {
 			variant.scalarCalls = ps6077ScalarCalls(pass, source, function, imports)
 			variant.vectorKind, variant.vectorScore = ps6077VectorEvidence(function)
 			variant.specificArch = len(ps6077SatisfiableArchitectures(*source))
-			variant.sliceResultShape = ps6077SliceResultShape(pass, source, function, imports)
+			variant.sliceResultShape = ps6077SliceResultShape(pass, source, function, imports, receiverConstraints)
 			variant.nameFamilies = ps6077SemanticFamilies(function, false)
 			variant.allFamilies = ps6077SemanticFamilies(function, true)
 			variant.directCalls = ps6077DirectCalls(pass, variant)
@@ -508,8 +511,14 @@ func ps6077LimitRelated(variants []*ps6077Variant) []*ps6077Variant {
 // mode-selected SIMD primitive can match its public composite. Requiring the
 // ordered slice parameters and complete result signature keeps unrelated
 // numeric helpers out of the discovery evidence.
-func ps6077SliceResultShape(pass *analysis.Pass, source *ps6077Source, function *ast.FuncDecl, imports map[string]string) ps6077Shape {
-	context := ps6077ShapeIdentityContext(source, function, imports)
+func ps6077SliceResultShape(
+	pass *analysis.Pass,
+	source *ps6077Source,
+	function *ast.FuncDecl,
+	imports map[string]string,
+	receiverConstraints ps6077ReceiverConstraintIndex,
+) ps6077Shape {
+	context := ps6077ShapeIdentityContext(source, function, imports, receiverConstraints)
 	var parameters []string
 	shape := ps6077Shape{}
 	for _, field := range function.Type.Params.List {
@@ -615,17 +624,45 @@ func ps6077TypedTypeBinders(pass *analysis.Pass, function *ast.FuncDecl) map[*ty
 	if signature == nil {
 		return result
 	}
-	if parameters := signature.TypeParams(); parameters != nil {
-		for index := range parameters.Len() {
-			result[parameters.At(index)] = "function-type-parameter(" + strconv.Itoa(index) + ")"
+	type parameterGroup struct {
+		kind       string
+		parameters *types.TypeParamList
+	}
+	groups := []parameterGroup{
+		{kind: "function", parameters: signature.TypeParams()},
+		{kind: "receiver", parameters: signature.RecvTypeParams()},
+	}
+	for _, group := range groups {
+		if group.parameters == nil {
+			continue
+		}
+		for index := range group.parameters.Len() {
+			result[group.parameters.At(index)] = ps6077TypeParameterIdentity(group.kind, index, "")
 		}
 	}
-	if parameters := signature.RecvTypeParams(); parameters != nil {
-		for index := range parameters.Len() {
-			result[parameters.At(index)] = "receiver-type-parameter(" + strconv.Itoa(index) + ")"
+	decorated := make(map[*types.TypeParam]string)
+	for _, group := range groups {
+		if group.parameters == nil {
+			continue
 		}
+		for index := range group.parameters.Len() {
+			parameter := group.parameters.At(index)
+			constraintIdentity := ps6077TypedTypeIdentity(parameter.Constraint(), result)
+			decorated[parameter] = ps6077TypeParameterIdentity(group.kind, index, constraintIdentity)
+		}
+	}
+	for parameter, identity := range decorated {
+		result[parameter] = identity
 	}
 	return result
+}
+
+func ps6077TypeParameterIdentity(kind string, index int, constraintIdentity string) string {
+	prefix := kind + "-type-parameter(" + strconv.Itoa(index)
+	if constraintIdentity == "" {
+		return prefix + ")"
+	}
+	return prefix + ",constraint=" + constraintIdentity + ")"
 }
 
 func ps6077TypedTypeIdentity(value types.Type, binders map[*types.TypeParam]string) string {
@@ -670,6 +707,22 @@ func ps6077TypedTypeIdentity(value types.Type, binders map[*types.TypeParam]stri
 			terms = append(terms, prefix+"("+ps6077TypedTypeIdentity(term.Type(), binders)+")")
 		}
 		return "union(" + strings.Join(terms, "|") + ")"
+	case *types.Interface:
+		typed.Complete()
+		elements := make([]string, 0, typed.NumEmbeddeds()+typed.NumExplicitMethods())
+		for index := range typed.NumEmbeddeds() {
+			elements = append(elements, "embedded="+ps6077TypedTypeIdentity(typed.EmbeddedType(index), binders))
+		}
+		for index := range typed.NumExplicitMethods() {
+			method := typed.ExplicitMethod(index)
+			packagePath := ""
+			if method.Pkg() != nil {
+				packagePath = method.Pkg().Path()
+			}
+			elements = append(elements, "method="+strconv.Quote(packagePath)+"."+method.Name()+":"+types.TypeString(method.Type(), ps6077TypeQualifier))
+		}
+		slices.Sort(elements)
+		return "interface(" + strings.Join(elements, ";") + ")"
 	default:
 		return "typed(" + types.TypeString(value, ps6077TypeQualifier) + ")"
 	}
@@ -688,24 +741,128 @@ type ps6077TypeIdentityContext struct {
 	unqualified string
 }
 
-func ps6077ShapeIdentityContext(source *ps6077Source, function *ast.FuncDecl, imports map[string]string) ps6077TypeIdentityContext {
+type ps6077ReceiverConstraintIndex map[string][]string
+
+func ps6077ShapeIdentityContext(
+	source *ps6077Source,
+	function *ast.FuncDecl,
+	imports map[string]string,
+	receiverConstraints ps6077ReceiverConstraintIndex,
+) ps6077TypeIdentityContext {
 	context := ps6077TypeIdentityContext{
 		imports: imports, binders: make(map[string]string),
 		unqualified: source.filename + "|" + function.Name.Name,
 	}
+	functionParameters := make([]struct {
+		name       string
+		index      int
+		constraint ast.Expr
+	}, 0)
 	parameter := 0
 	if function.Type.TypeParams != nil {
 		for _, field := range function.Type.TypeParams.List {
 			for _, name := range field.Names {
-				context.binders[name.Name] = "function-type-parameter(" + strconv.Itoa(parameter) + ")"
+				context.binders[name.Name] = ps6077TypeParameterIdentity("function", parameter, "")
+				functionParameters = append(functionParameters, struct {
+					name       string
+					index      int
+					constraint ast.Expr
+				}{name: name.Name, index: parameter, constraint: field.Type})
 				parameter++
 			}
 		}
 	}
-	for index, name := range ps6077ReceiverTypeParameters(function.Recv) {
-		context.binders[name] = "receiver-type-parameter(" + strconv.Itoa(index) + ")"
+	receiverParameters := ps6077ReceiverTypeParameters(function.Recv)
+	for index, name := range receiverParameters {
+		context.binders[name] = ps6077TypeParameterIdentity("receiver", index, "")
+	}
+	for _, typeParameter := range functionParameters {
+		constraintIdentity := ps6077TypeIdentity(typeParameter.constraint, context)
+		context.binders[typeParameter.name] = ps6077TypeParameterIdentity("function", typeParameter.index, constraintIdentity)
+	}
+	if len(receiverParameters) != 0 {
+		receiverName := ps6074ReceiverName(function.Recv.List[0].Type)
+		constraints := receiverConstraints[source.filename+"\x00"+receiverName]
+		if len(constraints) == 0 {
+			constraints = receiverConstraints[receiverName]
+		}
+		for index, name := range receiverParameters {
+			constraintIdentity := "unresolved(" + strconv.Quote(source.filename+"|"+receiverName) + ")"
+			if index < len(constraints) {
+				constraintIdentity = constraints[index]
+			}
+			context.binders[name] = ps6077TypeParameterIdentity("receiver", index, constraintIdentity)
+		}
 	}
 	return context
+}
+
+func ps6077ReceiverTypeConstraints(sources []ps6077Source) ps6077ReceiverConstraintIndex {
+	result := make(ps6077ReceiverConstraintIndex)
+	candidates := make(map[string]map[string][]string)
+	for sourceIndex := range sources {
+		source := &sources[sourceIndex]
+		imports := ps6077Imports(source.file)
+		for _, declaration := range source.file.Decls {
+			general, ok := declaration.(*ast.GenDecl)
+			if !ok || general.Tok != token.TYPE {
+				continue
+			}
+			for _, specification := range general.Specs {
+				typeSpecification, ok := specification.(*ast.TypeSpec)
+				if !ok || typeSpecification.TypeParams == nil {
+					continue
+				}
+				constraints := ps6077SyntaxTypeParameterConstraints(
+					typeSpecification.TypeParams,
+					imports,
+					source.filename+"|type|"+typeSpecification.Name.Name,
+				)
+				if len(constraints) == 0 {
+					continue
+				}
+				result[source.filename+"\x00"+typeSpecification.Name.Name] = constraints
+				if candidates[typeSpecification.Name.Name] == nil {
+					candidates[typeSpecification.Name.Name] = make(map[string][]string)
+				}
+				key := strings.Join(constraints, "\x00")
+				candidates[typeSpecification.Name.Name][key] = constraints
+			}
+		}
+	}
+	for name, identities := range candidates {
+		if len(identities) != 1 {
+			continue
+		}
+		for _, constraints := range identities {
+			result[name] = constraints
+		}
+	}
+	return result
+}
+
+func ps6077SyntaxTypeParameterConstraints(
+	fields *ast.FieldList,
+	imports map[string]string,
+	unqualified string,
+) []string {
+	context := ps6077TypeIdentityContext{
+		imports: imports, binders: make(map[string]string), unqualified: unqualified,
+	}
+	var constraints []ast.Expr
+	parameter := 0
+	for _, field := range fields.List {
+		for _, name := range field.Names {
+			context.binders[name.Name] = ps6077TypeParameterIdentity("receiver", parameter, "")
+			constraints = append(constraints, field.Type)
+			parameter++
+		}
+	}
+	identities := make([]string, len(constraints))
+	for index, constraint := range constraints {
+		identities[index] = ps6077TypeIdentity(constraint, context)
+	}
+	return identities
 }
 
 func ps6077ShapeFieldTypes(fields *ast.FieldList, context ps6077TypeIdentityContext) string {
@@ -733,11 +890,11 @@ func ps6077ShapeFieldTypes(fields *ast.FieldList, context ps6077TypeIdentityCont
 func ps6077TypeIdentity(expression ast.Expr, context ps6077TypeIdentityContext) string {
 	switch value := ps2110Unparen(expression).(type) {
 	case *ast.Ident:
-		if ps6077PredeclaredTypes[value.Name] {
-			return "predeclared(" + value.Name + ")"
-		}
 		if binder := context.binders[value.Name]; binder != "" {
 			return binder
+		}
+		if ps6077PredeclaredTypes[value.Name] {
+			return "predeclared(" + value.Name + ")"
 		}
 		return "unresolved(" + strconv.Quote(context.unqualified) + "," + value.Name + ")"
 	case *ast.SelectorExpr:
