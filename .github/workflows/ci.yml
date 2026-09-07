@@ -59,10 +59,12 @@ jobs:
       - name: Set up oldstable Go for staticcheck
         # staticcheck 2026.1 cannot decode Go 1.27 export data yet. Build,
         # race tests, formatting, and vet above still use stable Go.
+        # The first setup already restored the shared module/build caches.
+        # Restoring again collides with read-only module files from that cache.
         uses: actions/setup-go@v7
         with:
           go-version: oldstable
-          cache-dependency-path: go.sum
+          cache: false
       - name: staticcheck
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@latest
