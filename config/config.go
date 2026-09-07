@@ -194,6 +194,101 @@ type Config struct {
 	// recorder/autograd visibility. PS6087 stays silent unless all assertions are
 	// true and the source matches the exact contract.
 	InPlaceFusionContracts []InPlaceFusionContract `json:"inPlaceFusionContracts,omitempty" yaml:"inPlaceFusionContracts"`
+
+	// BoundedScratchFlowContracts are explicit, project-owned API contracts for
+	// PS6106. They describe one allocator, a bounded producer, a capacity-wide
+	// elementwise consumer, and bounded observers on the same concrete provider.
+	// The deliberately separate booleans keep ownership, extent, tail, lifetime,
+	// replacement, error, and fallback promises visible instead of inferring
+	// semantics from accelerator API names.
+	BoundedScratchFlowContracts []BoundedScratchFlowContract `json:"boundedScratchFlowContracts,omitempty" yaml:"boundedScratchFlowContracts"`
+}
+
+// BoundedScratchFlowContract binds one capacity-amplified scratch sequence to
+// exact project methods. Positions are one-based and exclude method receivers.
+// Configured workload sizes supplement dynamic source expressions; they never
+// establish runtime argument identity.
+type BoundedScratchFlowContract struct {
+	Name                 string                           `json:"name" yaml:"name"`
+	Allocator            string                           `json:"allocator" yaml:"allocator"`
+	AllocatorCapacityArg int                              `json:"allocatorCapacityArg" yaml:"allocatorCapacityArg"`
+	Producer             string                           `json:"producer" yaml:"producer"`
+	ProducerBufferArg    int                              `json:"producerBufferArg" yaml:"producerBufferArg"`
+	ProducerActiveArg    int                              `json:"producerActiveArg" yaml:"producerActiveArg"`
+	Consumer             string                           `json:"consumer" yaml:"consumer"`
+	ConsumerBufferArg    int                              `json:"consumerBufferArg" yaml:"consumerBufferArg"`
+	Observers            []BoundedScratchObserverContract `json:"observers" yaml:"observers"`
+
+	ConfiguredCapacityElements int64 `json:"configuredCapacityElements,omitempty" yaml:"configuredCapacityElements,omitempty"`
+	ConfiguredActiveElements   int64 `json:"configuredActiveElements,omitempty" yaml:"configuredActiveElements,omitempty"`
+	ConfiguredRepeatCount      int64 `json:"configuredRepeatCount,omitempty" yaml:"configuredRepeatCount,omitempty"`
+
+	AllocatorReturnsFreshOwned     bool `json:"allocatorReturnsFreshOwned" yaml:"allocatorReturnsFreshOwned"`
+	ProducerWritesOnlyActivePrefix bool `json:"producerWritesOnlyActivePrefix" yaml:"producerWritesOnlyActivePrefix"`
+	ConsumerTraversesFullCapacity  bool `json:"consumerTraversesFullCapacity" yaml:"consumerTraversesFullCapacity"`
+	ObserversReadOnlyActivePrefix  bool `json:"observersReadOnlyActivePrefix" yaml:"observersReadOnlyActivePrefix"`
+	CallsDoNotRetainBuffer         bool `json:"callsDoNotRetainBuffer" yaml:"callsDoNotRetainBuffer"`
+	CallsExecuteSynchronously      bool `json:"callsExecuteSynchronously" yaml:"callsExecuteSynchronously"`
+	InactiveTailNotRequired        bool `json:"inactiveTailNotRequired" yaml:"inactiveTailNotRequired"`
+
+	Replacement                           string `json:"replacement,omitempty" yaml:"replacement,omitempty"`
+	ReplacementMatchesComposition         bool   `json:"replacementMatchesComposition,omitempty" yaml:"replacementMatchesComposition,omitempty"`
+	ReplacementPreservesActivePrefixBits  bool   `json:"replacementPreservesActivePrefixBits,omitempty" yaml:"replacementPreservesActivePrefixBits,omitempty"`
+	ReplacementLeavesInactiveTail         bool   `json:"replacementLeavesInactiveTail,omitempty" yaml:"replacementLeavesInactiveTail,omitempty"`
+	ReplacementPreservesErrorsSideEffects bool   `json:"replacementPreservesErrorsSideEffects,omitempty" yaml:"replacementPreservesErrorsSideEffects,omitempty"`
+	ReplacementPreservesProviderFallback  bool   `json:"replacementPreservesProviderFallback,omitempty" yaml:"replacementPreservesProviderFallback,omitempty"`
+	ReplacementRejectsUnsupported         bool   `json:"replacementRejectsUnsupported,omitempty" yaml:"replacementRejectsUnsupported,omitempty"`
+	ReplacementFailureUnmodified          bool   `json:"replacementFailureUnmodified,omitempty" yaml:"replacementFailureUnmodified,omitempty"`
+}
+
+// BoundedScratchObserverContract identifies one exact bounded downstream
+// observer. Positions are one-based and exclude a method receiver.
+type BoundedScratchObserverContract struct {
+	Function  string `json:"function" yaml:"function"`
+	BufferArg int    `json:"bufferArg" yaml:"bufferArg"`
+	ActiveArg int    `json:"activeArg" yaml:"activeArg"`
+}
+
+// Valid reports whether the contract has a complete conservative semantic
+// promise. Signature arity, argument types, provider identity, and runtime
+// extent identity are checked by PS6106 against source.
+func (c BoundedScratchFlowContract) Valid() bool { //perfscan:ignore PS3106 preserve the public value method set and struct-literal calls
+	if c.Name == "" || strings.TrimSpace(c.Name) != c.Name || !psTopKMethodIDValid(c.Allocator) ||
+		!psTopKMethodIDValid(c.Producer) || !psTopKMethodIDValid(c.Consumer) ||
+		c.AllocatorCapacityArg <= 0 || c.ProducerBufferArg <= 0 ||
+		c.ProducerActiveArg <= 0 || c.ProducerBufferArg == c.ProducerActiveArg ||
+		c.ConsumerBufferArg <= 0 || len(c.Observers) == 0 ||
+		!c.AllocatorReturnsFreshOwned || !c.ProducerWritesOnlyActivePrefix ||
+		!c.ConsumerTraversesFullCapacity || !c.ObserversReadOnlyActivePrefix ||
+		!c.CallsDoNotRetainBuffer || !c.CallsExecuteSynchronously ||
+		!c.InactiveTailNotRequired {
+		return false
+	}
+	if (c.ConfiguredCapacityElements == 0) != (c.ConfiguredActiveElements == 0) ||
+		c.ConfiguredCapacityElements < 0 || c.ConfiguredActiveElements < 0 ||
+		c.ConfiguredRepeatCount < 0 ||
+		c.ConfiguredCapacityElements > 0 && c.ConfiguredCapacityElements <= c.ConfiguredActiveElements {
+		return false
+	}
+	seen := make(map[string]bool, len(c.Observers))
+	for _, observer := range c.Observers {
+		if !psTopKMethodIDValid(observer.Function) || observer.BufferArg <= 0 ||
+			observer.ActiveArg <= 0 || observer.BufferArg == observer.ActiveArg || seen[observer.Function] {
+			return false
+		}
+		seen[observer.Function] = true
+	}
+	replacementPromises := c.ReplacementMatchesComposition || c.ReplacementPreservesActivePrefixBits ||
+		c.ReplacementLeavesInactiveTail || c.ReplacementPreservesErrorsSideEffects ||
+		c.ReplacementPreservesProviderFallback || c.ReplacementRejectsUnsupported ||
+		c.ReplacementFailureUnmodified
+	if c.Replacement == "" {
+		return !replacementPromises
+	}
+	return psTopKMethodIDValid(c.Replacement) && c.ReplacementMatchesComposition &&
+		c.ReplacementPreservesActivePrefixBits && c.ReplacementLeavesInactiveTail &&
+		c.ReplacementPreservesErrorsSideEffects && c.ReplacementPreservesProviderFallback &&
+		c.ReplacementRejectsUnsupported && c.ReplacementFailureUnmodified
 }
 
 // InPlaceFusionContract binds one last-use fusion candidate to exact project
@@ -325,34 +420,35 @@ func psTopKImportPathValid(importPath string) bool {
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
 type Sets struct {
-	CacheLineBytes           int
-	ElementAccessors         map[string]bool
-	FastPathHelpers          map[string]bool
-	SelectorPromotionSymbols map[string]bool
-	ElementCountMethods      map[string]bool
-	ShapeMethods             map[string]bool
-	IndexDecomposeFuncs      map[string]bool
-	AllocatorFuncs           map[string]bool
-	PerElementVisitors       map[string]bool
-	BulkCopyHelpers          map[string]bool
-	VectorizedSiblingFuncs   map[string]bool
-	FanOutHelpers            map[string]bool
-	DtypeMethods             map[string]bool
-	OutputBufferElemTypes    map[string]bool
-	CompiledResourceFuncs    map[string]bool
-	GPUReductionKernels      map[string]bool
-	PureComputeFuncs         map[string]bool
-	LayoutOpConstants        map[string]bool
-	PointerTypeNames         map[string]bool
-	VariadicDispatchWrappers map[string]bool
-	TopKSelectorFuncs        map[string]bool
-	TopKOneContracts         []TopKOneContract
-	InputViewFuncs           map[string]bool
-	OutputViewFuncs          map[string]bool
-	ReferenceBackendPkg      string
-	OptimizedBackendPkgs     map[string]bool
-	KernelRegisterFuncs      map[string]bool
-	InPlaceFusionContracts   []InPlaceFusionContract
+	CacheLineBytes              int
+	ElementAccessors            map[string]bool
+	FastPathHelpers             map[string]bool
+	SelectorPromotionSymbols    map[string]bool
+	ElementCountMethods         map[string]bool
+	ShapeMethods                map[string]bool
+	IndexDecomposeFuncs         map[string]bool
+	AllocatorFuncs              map[string]bool
+	PerElementVisitors          map[string]bool
+	BulkCopyHelpers             map[string]bool
+	VectorizedSiblingFuncs      map[string]bool
+	FanOutHelpers               map[string]bool
+	DtypeMethods                map[string]bool
+	OutputBufferElemTypes       map[string]bool
+	CompiledResourceFuncs       map[string]bool
+	GPUReductionKernels         map[string]bool
+	PureComputeFuncs            map[string]bool
+	LayoutOpConstants           map[string]bool
+	PointerTypeNames            map[string]bool
+	VariadicDispatchWrappers    map[string]bool
+	TopKSelectorFuncs           map[string]bool
+	TopKOneContracts            []TopKOneContract
+	InputViewFuncs              map[string]bool
+	OutputViewFuncs             map[string]bool
+	ReferenceBackendPkg         string
+	OptimizedBackendPkgs        map[string]bool
+	KernelRegisterFuncs         map[string]bool
+	InPlaceFusionContracts      []InPlaceFusionContract
+	BoundedScratchFlowContracts []BoundedScratchFlowContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -369,35 +465,44 @@ func toSet(xs []string) map[string]bool {
 // Compile converts the config into set form.
 func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep the public value API source-compatible
 	return Sets{
-		CacheLineBytes:           c.CacheLineBytes,
-		ElementAccessors:         toSet(c.ElementAccessors),
-		FastPathHelpers:          toSet(c.FastPathHelpers),
-		SelectorPromotionSymbols: toSet(c.SelectorPromotionSymbols),
-		ElementCountMethods:      toSet(c.ElementCountMethods),
-		ShapeMethods:             toSet(c.ShapeMethods),
-		IndexDecomposeFuncs:      toSet(c.IndexDecomposeFuncs),
-		AllocatorFuncs:           toSet(c.AllocatorFuncs),
-		PerElementVisitors:       toSet(c.PerElementVisitors),
-		BulkCopyHelpers:          toSet(c.BulkCopyHelpers),
-		VectorizedSiblingFuncs:   toSet(c.VectorizedSiblingFuncs),
-		FanOutHelpers:            toSet(c.FanOutHelpers),
-		DtypeMethods:             toSet(c.DtypeMethods),
-		OutputBufferElemTypes:    toSet(c.OutputBufferElemTypes),
-		CompiledResourceFuncs:    toSet(c.CompiledResourceFuncs),
-		GPUReductionKernels:      toSet(c.GPUReductionKernels),
-		PureComputeFuncs:         toSet(c.PureComputeFuncs),
-		LayoutOpConstants:        toSet(c.LayoutOpConstants),
-		PointerTypeNames:         toSet(c.PointerTypeNames),
-		VariadicDispatchWrappers: toSet(c.VariadicDispatchWrappers),
-		TopKSelectorFuncs:        toSet(c.TopKSelectorFuncs),
-		TopKOneContracts:         slices.Clone(c.TopKOneContracts),
-		InputViewFuncs:           toSet(c.InputViewFuncs),
-		OutputViewFuncs:          toSet(c.OutputViewFuncs),
-		ReferenceBackendPkg:      c.ReferenceBackendPkg,
-		OptimizedBackendPkgs:     toSet(c.OptimizedBackendPkgs),
-		KernelRegisterFuncs:      toSet(c.KernelRegisterFuncs),
-		InPlaceFusionContracts:   slices.Clone(c.InPlaceFusionContracts),
+		CacheLineBytes:              c.CacheLineBytes,
+		ElementAccessors:            toSet(c.ElementAccessors),
+		FastPathHelpers:             toSet(c.FastPathHelpers),
+		SelectorPromotionSymbols:    toSet(c.SelectorPromotionSymbols),
+		ElementCountMethods:         toSet(c.ElementCountMethods),
+		ShapeMethods:                toSet(c.ShapeMethods),
+		IndexDecomposeFuncs:         toSet(c.IndexDecomposeFuncs),
+		AllocatorFuncs:              toSet(c.AllocatorFuncs),
+		PerElementVisitors:          toSet(c.PerElementVisitors),
+		BulkCopyHelpers:             toSet(c.BulkCopyHelpers),
+		VectorizedSiblingFuncs:      toSet(c.VectorizedSiblingFuncs),
+		FanOutHelpers:               toSet(c.FanOutHelpers),
+		DtypeMethods:                toSet(c.DtypeMethods),
+		OutputBufferElemTypes:       toSet(c.OutputBufferElemTypes),
+		CompiledResourceFuncs:       toSet(c.CompiledResourceFuncs),
+		GPUReductionKernels:         toSet(c.GPUReductionKernels),
+		PureComputeFuncs:            toSet(c.PureComputeFuncs),
+		LayoutOpConstants:           toSet(c.LayoutOpConstants),
+		PointerTypeNames:            toSet(c.PointerTypeNames),
+		VariadicDispatchWrappers:    toSet(c.VariadicDispatchWrappers),
+		TopKSelectorFuncs:           toSet(c.TopKSelectorFuncs),
+		TopKOneContracts:            slices.Clone(c.TopKOneContracts),
+		InputViewFuncs:              toSet(c.InputViewFuncs),
+		OutputViewFuncs:             toSet(c.OutputViewFuncs),
+		ReferenceBackendPkg:         c.ReferenceBackendPkg,
+		OptimizedBackendPkgs:        toSet(c.OptimizedBackendPkgs),
+		KernelRegisterFuncs:         toSet(c.KernelRegisterFuncs),
+		InPlaceFusionContracts:      slices.Clone(c.InPlaceFusionContracts),
+		BoundedScratchFlowContracts: cloneBoundedScratchFlowContracts(c.BoundedScratchFlowContracts),
 	}
+}
+
+func cloneBoundedScratchFlowContracts(contracts []BoundedScratchFlowContract) []BoundedScratchFlowContract {
+	cloned := slices.Clone(contracts)
+	for index := range cloned {
+		cloned[index].Observers = slices.Clone(cloned[index].Observers)
+	}
+	return cloned
 }
 
 // Load reads a config file.
