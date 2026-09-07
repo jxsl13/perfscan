@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -30,6 +31,10 @@ func TestToSetAndCompile(t *testing.T) {
 		InPlaceFusionContracts: []InPlaceFusionContract{{
 			Name: "swiglu",
 		}},
+		BoundedScratchFlowContracts: []BoundedScratchFlowContract{{
+			Name:      "bounded-gelu",
+			Observers: []BoundedScratchObserverContract{{Function: "example.com/p.Device.Use"}},
+		}},
 		TopKOneContracts: []TopKOneContract{{
 			Name: "resident-topk-one",
 		}},
@@ -54,6 +59,10 @@ func TestToSetAndCompile(t *testing.T) {
 	if len(sets.InPlaceFusionContracts) != 1 || sets.InPlaceFusionContracts[0].Name != "swiglu" {
 		t.Errorf("Compile lost in-place fusion contracts: %+v", sets.InPlaceFusionContracts)
 	}
+	if len(sets.BoundedScratchFlowContracts) != 1 || sets.BoundedScratchFlowContracts[0].Name != "bounded-gelu" ||
+		len(sets.BoundedScratchFlowContracts[0].Observers) != 1 {
+		t.Errorf("Compile lost bounded-scratch contracts: %+v", sets.BoundedScratchFlowContracts)
+	}
 	if len(sets.TopKOneContracts) != 1 || sets.TopKOneContracts[0].Name != "resident-topk-one" {
 		t.Errorf("Compile lost Top-K(k=1) contracts: %+v", sets.TopKOneContracts)
 	}
@@ -68,12 +77,73 @@ func TestToSetAndCompile(t *testing.T) {
 	if sets.InPlaceFusionContracts[0].Name != "swiglu" {
 		t.Error("Compile must clone in-place fusion contracts")
 	}
+	c.BoundedScratchFlowContracts[0].Name = "mutated"
+	c.BoundedScratchFlowContracts[0].Observers[0].Function = "mutated"
+	if sets.BoundedScratchFlowContracts[0].Name != "bounded-gelu" ||
+		sets.BoundedScratchFlowContracts[0].Observers[0].Function != "example.com/p.Device.Use" {
+		t.Error("Compile must deeply clone bounded-scratch contracts")
+	}
 	c.ReceiverStagingContracts[0].Name = "mutated"
 	if sets.ReceiverStagingContracts[0].Name != "prefill-staging" {
 		t.Error("Compile must clone receiver staging contracts")
 	}
 	if sets.ElementCountMethods != nil {
 		t.Errorf("empty field must compile to a nil set, got %v", sets.ElementCountMethods)
+	}
+}
+
+func TestBoundedScratchFlowContractValid(t *testing.T) {
+	t.Parallel()
+	valid := BoundedScratchFlowContract{
+		Name:                                  "bounded-gelu",
+		Allocator:                             "example.com/project.Device.Alloc",
+		AllocatorCapacityArg:                  1,
+		Producer:                              "example.com/project.Device.Produce",
+		ProducerBufferArg:                     1,
+		ProducerActiveArg:                     2,
+		Consumer:                              "example.com/project.Device.Activate",
+		ConsumerBufferArg:                     1,
+		Observers:                             []BoundedScratchObserverContract{{Function: "example.com/project.Device.Observe", BufferArg: 1, ActiveArg: 2}},
+		AllocatorReturnsFreshOwned:            true,
+		ProducerWritesOnlyActivePrefix:        true,
+		ConsumerTraversesFullCapacity:         true,
+		ObserversReadOnlyActivePrefix:         true,
+		CallsDoNotRetainBuffer:                true,
+		CallsExecuteSynchronously:             true,
+		InactiveTailNotRequired:               true,
+		Replacement:                           "example.com/project.Device.BiasGELU",
+		ReplacementMatchesComposition:         true,
+		ReplacementPreservesActivePrefixBits:  true,
+		ReplacementLeavesInactiveTail:         true,
+		ReplacementPreservesErrorsSideEffects: true,
+		ReplacementPreservesProviderFallback:  true,
+		ReplacementRejectsUnsupported:         true,
+		ReplacementFailureUnmodified:          true,
+	}
+	if !valid.Valid() {
+		t.Fatal("complete bounded-scratch contract is invalid")
+	}
+	cases := map[string]func(*BoundedScratchFlowContract){
+		"same buffer and extent role": func(contract *BoundedScratchFlowContract) { contract.ProducerActiveArg = contract.ProducerBufferArg },
+		"missing observer":            func(contract *BoundedScratchFlowContract) { contract.Observers = nil },
+		"partial configured values":   func(contract *BoundedScratchFlowContract) { contract.ConfiguredCapacityElements = 1024 },
+		"bad configured ratio": func(contract *BoundedScratchFlowContract) {
+			contract.ConfiguredCapacityElements, contract.ConfiguredActiveElements = 16, 16
+		},
+		"partial replacement promise": func(contract *BoundedScratchFlowContract) { contract.Replacement = "" },
+		"missing base guarantee":      func(contract *BoundedScratchFlowContract) { contract.CallsExecuteSynchronously = false },
+	}
+	for name, mutate := range cases {
+		name, mutate := name, mutate
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			candidate := valid
+			candidate.Observers = slices.Clone(valid.Observers)
+			mutate(&candidate)
+			if candidate.Valid() {
+				t.Errorf("mutated contract unexpectedly valid: %+v", candidate)
+			}
+		})
 	}
 }
 
@@ -364,9 +434,10 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"TopKSelectorFuncs": len(c.TopKSelectorFuncs), "InputViewFuncs": len(c.InputViewFuncs),
 		"TopKOneContracts": len(c.TopKOneContracts),
 		"OutputViewFuncs":  len(c.OutputViewFuncs), "OptimizedBackendPkgs": len(c.OptimizedBackendPkgs),
-		"KernelRegisterFuncs":      len(c.KernelRegisterFuncs),
-		"InPlaceFusionContracts":   len(c.InPlaceFusionContracts),
-		"ReceiverStagingContracts": len(c.ReceiverStagingContracts),
+		"KernelRegisterFuncs":         len(c.KernelRegisterFuncs),
+		"InPlaceFusionContracts":      len(c.InPlaceFusionContracts),
+		"BoundedScratchFlowContracts": len(c.BoundedScratchFlowContracts),
+		"ReceiverStagingContracts":    len(c.ReceiverStagingContracts),
 	}
 	for name, n := range fields {
 		if n == 0 {
@@ -378,5 +449,8 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 	}
 	if c.CacheLineBytes <= 0 {
 		t.Errorf("example config must populate cacheLineBytes")
+	}
+	if len(c.BoundedScratchFlowContracts) != 1 || !c.BoundedScratchFlowContracts[0].Valid() {
+		t.Errorf("example config has invalid bounded-scratch contract: %+v", c.BoundedScratchFlowContracts)
 	}
 }
