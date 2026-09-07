@@ -1,0 +1,19 @@
+package ps6095
+
+// Multiple proven exact helper calls are bundled into one fix. The existing
+// local deliberately collides with the first candidate's generated base name.
+func bundledHelperCalls(output, gradient []float64, numerator1, denominator1, numerator2, denominator2 float64) {
+	psQuotient9_35 := 0.0
+	_ = psQuotient9_35
+	for index := range output {
+		output[index] = gradient[index]*exactQuotient(numerator1, denominator1) + exactQuotient(numerator2, denominator2) // want `this floating-point quotient is invariant in output index index; compute the original division once and reuse its rounded result \(never replace it with reciprocal multiplication, which is not bit-equivalent\)`
+	}
+}
+
+// A proven exact helper call and an inline division are cached as their
+// original expressions in one bundled fix.
+func bundledHelperAndInline(output, gradient []float64, numerator1, denominator1, numerator2, denominator2 float64) {
+	for index := range output {
+		output[index] = exactQuotient(numerator1, denominator1) + gradient[index]*(numerator2/denominator2) // want `this floating-point quotient is invariant in output index index; compute the original division once and reuse its rounded result \(never replace it with reciprocal multiplication, which is not bit-equivalent\)`
+	}
+}
