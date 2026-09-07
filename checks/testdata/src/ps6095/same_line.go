@@ -1,0 +1,3 @@
+package ps6095
+
+func sameLine(outputA, outputB []float64, weight, denominator float64) { for a := range outputA { outputA[a] = weight / denominator }; for b := range outputB { outputB[b] = weight / denominator } } // want `this floating-point quotient is invariant in output index a; compute the original division once and reuse its rounded result \(never replace it with reciprocal multiplication, which is not bit-equivalent\)` `this floating-point quotient is invariant in output index b; compute the original division once and reuse its rounded result \(never replace it with reciprocal multiplication, which is not bit-equivalent\)`

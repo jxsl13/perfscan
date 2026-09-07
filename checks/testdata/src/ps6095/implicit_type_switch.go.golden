@@ -1,0 +1,59 @@
+package ps6095
+
+// Negative: each type-switch case declares its own implicit numerator object.
+// A sibling closure can mutate it outside the kernel closure's local CFG.
+func implicitTypeSwitchSibling(value any, output []float64, denominator float64) {
+	switch numerator := value.(type) {
+	case float64:
+		mutateNumerator := func() {
+			numerator++
+		}
+		kernel := func() {
+			for index := range output {
+				output[index] = numerator / denominator
+			}
+		}
+		mutateNumerator()
+		kernel()
+	}
+}
+
+// Negative: ownership of the implicit case variable must reach through an
+// additional factory closure to the returned kernel closure.
+func implicitTypeSwitchNestedFactory(value any, output []float64, denominator float64) {
+	switch numerator := value.(type) {
+	case float64:
+		mutateNumerator := func() {
+			numerator++
+		}
+		kernelFactory := func() func() {
+			return func() {
+				for index := range output {
+					output[index] = numerator / denominator
+				}
+			}
+		}
+		mutateNumerator()
+		kernelFactory()()
+	}
+}
+
+// A normal explicit local has Defs ownership and stays eligible when sibling
+// closures mutate only the distinct implicit case variable.
+func explicitLocalTypeSwitchEquivalent(value any, output []float64, denominator float64) {
+	switch numerator := value.(type) {
+	case float64:
+		localNumerator := numerator
+		mutateNumerator := func() {
+			numerator++
+		}
+		kernel := func() {
+			psQuotient52_21 := localNumerator / denominator
+			for index := range output {
+				output[index] = psQuotient52_21 // want `this floating-point quotient is invariant in output index index; compute the original division once and reuse its rounded result \(never replace it with reciprocal multiplication, which is not bit-equivalent\)`
+			}
+		}
+		mutateNumerator()
+		kernel()
+	}
+}
