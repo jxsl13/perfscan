@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**390 checks total** — **264 with a bit-identical auto-fix**, 126 advisory. By fix level: **246 L1** (idiomatic), **120 L2** (structured), **24 L3** (aggressive).
+**395 checks total** — **265 with a bit-identical auto-fix**, 130 advisory. By fix level: **246 L1** (idiomatic), **122 L2** (structured), **27 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -120,6 +120,7 @@ checks' fixes.
 | [PS2141](PS2141.md) | alloc | L1 | yes | fmt.Appendf(buf, "%s", s) runs fmt's formatter to append bytes append writes directly |
 | [PS2142](PS2142.md) | alloc | L2 |  | an os.Open file is fully heap-staged by io.ReadAll before decode |
 | [PS2143](PS2143.md) | alloc | L2 |  | a partial ReadAt payload is rebuilt with a synthetic JSON header for a full collection parser, then one item is selected |
+| [PS2144](PS2144.md) | alloc | L2 |  | adjacent same-shape scratch slices remain live together and may share one guarded backing allocation |
 | [PS3001](PS3001.md) | indirect | L1 |  | a reflection-based fmt scan (Sscanf/Sscan/Fscanf) in a loop |
 | [PS3002](PS3002.md) | indirect | L2 | yes | a package sort (sort.Slice/SliceStable) with a comparator closure |
 | [PS3003](PS3003.md) | indirect | L2 |  | a read of an integer-keyed map inside a loop |
@@ -389,6 +390,7 @@ checks' fixes.
 | [PS6078](PS6078.md) | verify | L2 |  | an architecture capability flag constant-folds optimized branches out of public operations |
 | [PS6079](PS6079.md) | verify | L2 |  | a benchmark fixture does not prove that its guarded optimized route is entered |
 | [PS6080](PS6080.md) | verify | L2 |  | a storable, decodable quant variant disappears from layered CPU matmul dispatch |
+| [PS6083](PS6083.md) | arith | L2 | yes | a small masked integer domain is repeatedly converted to float |
 | [PS6086](PS6086.md) | verify | L3 |  | all-goroutine fan-out leaves the caller waiting; caller participation needs a latency benchmark, not an allocation-only rewrite |
 | [PS6087](PS6087.md) | alloc | L2 |  | a contract-proven private single-use tensor chain has a provider-bound in-place fusion capability |
 | [PS6088](PS6088.md) | verify | L3 |  | a repeated fresh fan-out barrier has no caller-attributed lifecycle A/B evidence |
@@ -402,4 +404,7 @@ checks' fixes.
 | [PS6100](PS6100.md) | cpu | L2 |  | iterative full scans repeatedly derive finite per-element membership |
 | [PS6101](PS6101.md) | verify | L2 |  | symmetric random benchmark inputs bypass a gated hot branch |
 | [PS6102](PS6102.md) | verify | L2 |  | a performance pass/fail assertion remains reachable under testing.Short |
+| [PS6103](PS6103.md) | alloc | L3 |  | a fixed-count loop repeatedly creates a short-lived operation result that can use caller-owned output |
+| [PS6104](PS6104.md) | verify | L3 |  | an accelerator block loop repeats a launch-invariant row-tail predicate |
+| [PS6105](PS6105.md) | alloc | L3 |  | constructor-stored projection scratch has no ordinary typed consumer |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |

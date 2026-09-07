@@ -38,7 +38,7 @@ Rules without a pair, and why:
   that the win evaporates on any memory-touching path; its evidence table
   lives in the check text.
 - **PS6004**: a verification-gap advisory; there is nothing to time.
-- **PS6005–PS6059 and PS6062–PS6079** (accelerator and campaign verification advisories): their
+- **PS6005–PS6059, PS6062–PS6079, and PS6104** (accelerator and campaign verification advisories): their
   remedies require real device traces, independent processes, exact workload
   identities, topology/parity evidence, or project-specific kernels. A toy Go
   micro-benchmark cannot reproduce those contracts and would manufacture a
@@ -95,3 +95,9 @@ Rules without a pair, and why:
   lanes. Its remedy is test selection and coverage structure, not a faster code
   shape, so a Before/After micro-benchmark would only recreate the flaky gate
   the check asks users to isolate.
+- **PS6103** (fixed-loop caller-owned-output advisory): the gain depends on a
+  project tensor layout, the routed backend leaf, runtime shape stability, and
+  an optional Into capability with a real allocating fallback. A toy slice
+  operation would measure fixture allocation rather than preservation of the
+  optimized dispatch path. The check documentation records the retained GoAI
+  Muon campaign and requires exact fixed-step plus end-to-end validation.
