@@ -143,27 +143,34 @@ const (
 )
 
 type ps6101Value struct {
-	kind       ps6101Kind
-	sources    map[token.Pos]bool
-	eligible   bool
-	aggregate  bool
-	constant   constant.Value
-	nonempty   bool
-	threshold  bool
-	testing    bool
-	mapAbsent  bool
-	revision   uint64
-	identity   uint64
-	analysis   *ps6101ValueAnalysis
-	reference  *ps6101Location
-	callable   *ps6101Callable
-	length     int64
-	capacity   int64
-	offset     int64
-	elements   map[int64]ps6101Value
-	lengthOK   bool
-	capacityOK bool
-	offsetOK   bool
+	kind      ps6101Kind
+	sources   map[token.Pos]bool
+	eligible  bool
+	aggregate bool
+	// promoteChildren records a role applied to this value's own binding.
+	// Eligibility inherited from one composite child must not classify its
+	// unrelated siblings when the composite is materialized in storage.
+	promoteChildren bool
+	// warnIfFalse preserves the legacy warning for an always-skipped resolved
+	// lookalike Abs gate without discarding the implementation's exact result.
+	warnIfFalse bool
+	constant    constant.Value
+	nonempty    bool
+	threshold   bool
+	testing     bool
+	mapAbsent   bool
+	revision    uint64
+	identity    uint64
+	analysis    *ps6101ValueAnalysis
+	reference   *ps6101Location
+	callable    *ps6101Callable
+	length      int64
+	capacity    int64
+	offset      int64
+	elements    map[int64]ps6101Value
+	lengthOK    bool
+	capacityOK  bool
+	offsetOK    bool
 }
 
 type ps6101ValueAnalysis struct {
@@ -225,6 +232,21 @@ type ps6101StoreTarget struct {
 	dynamicIndex      bool
 	mapIndex          bool
 }
+
+// ps6101ParameterSnapshot is an argument value after its single, ordered
+// evaluation but before any callee parameter object is overwritten. The
+// source is retained only for reference aliasing; fields are carried by value
+// so a nested invocation of the same declaration cannot rewrite the outer
+// frame's already-evaluated arguments.
+type ps6101ParameterSnapshot struct {
+	name       *ast.Ident
+	expression ast.Expr
+	value      ps6101Value
+	source     ps6101Location
+	sourceOK   bool
+}
+
+type ps6101PrefixSnapshot map[string]ps6101Value
 
 type ps6101GateKey struct {
 	sources   string
@@ -519,8 +541,9 @@ func (engine *ps6101Engine) analyzeFunction(function *ast.FuncDecl, call *ast.Ca
 		}
 	}
 	results := engine.mergeReturns(engine.returns)
+	var returnedAggregates []ps6101Value
 	if call != nil {
-		ps6101MarkReturnedBoundaries(results, engine.resultTypes)
+		returnedAggregates = engine.markReturnedBoundaries(results, engine.resultTypes)
 	}
 	localReturnOpaque := engine.returnOpaque
 	engine.mergeExits()
@@ -537,8 +560,8 @@ func (engine *ps6101Engine) analyzeFunction(function *ast.FuncDecl, call *ast.Ca
 		callEscaped = &state
 	}
 	if call != nil {
-		engine.markReturnedReferenceInputs(results, engine.resultTypes)
-		engine.retainFreshReferencedRoots(callerRoots, results)
+		engine.markReturnedReferenceInputs(callerRoots, returnedAggregates)
+		engine.retainReturnedReferencedRoots(callerRoots, results)
 		engine.retainCallerVisibility(callerRoots, callerAliases)
 	}
 	engine.returns = oldReturns
@@ -677,14 +700,25 @@ func (engine *ps6101Engine) clearNodeLocals(root ast.Node) {
 }
 
 func (engine *ps6101Engine) bindCall(function *ast.FuncDecl, call *ast.CallExpr, receiver ast.Expr, callable *ps6101Callable) {
+	var receiverSnapshot *ps6101ParameterSnapshot
 	if function.Recv != nil && len(function.Recv.List) == 1 && len(function.Recv.List[0].Names) == 1 {
+		name := function.Recv.List[0].Names[0]
 		if callable != nil && callable.receiverValue != nil {
-			engine.bindParameterSnapshot(function.Recv.List[0].Names[0], callable)
+			value := ps6101CloneValue(*callable.receiverValue)
+			value.setFields(callable.receiverFields)
+			receiverSnapshot = &ps6101ParameterSnapshot{name: name, value: value}
 		} else {
-			engine.bindParameter(function.Recv.List[0].Names[0], receiver)
+			snapshot := engine.snapshotParameter(name, receiver)
+			receiverSnapshot = &snapshot
 		}
 	}
-	engine.bindParameters(function.Type.Params, call)
+	parameters := engine.snapshotParameters(function.Type.Params, call)
+	if receiverSnapshot != nil {
+		engine.installParameter(receiverSnapshot)
+	}
+	for index := range parameters {
+		engine.installParameter(&parameters[index])
+	}
 }
 
 // bindParameters evaluates call arguments in Go's left-to-right order and
@@ -692,16 +726,24 @@ func (engine *ps6101Engine) bindCall(function *ast.FuncDecl, call *ast.CallExpr,
 // positional variadic call needs an explicit fresh slice: binding only the
 // first trailing expression loses both later side effects and provenance.
 func (engine *ps6101Engine) bindParameters(parameters *ast.FieldList, call *ast.CallExpr) {
-	if parameters == nil || call == nil {
-		return
+	snapshots := engine.snapshotParameters(parameters, call)
+	for index := range snapshots {
+		engine.installParameter(&snapshots[index])
 	}
+}
+
+func (engine *ps6101Engine) snapshotParameters(parameters *ast.FieldList, call *ast.CallExpr) []ps6101ParameterSnapshot {
+	if parameters == nil || call == nil {
+		return nil
+	}
+	var snapshots []ps6101ParameterSnapshot
 	argument := 0
 	for _, field := range parameters.List {
 		if _, variadic := field.Type.(*ast.Ellipsis); variadic {
 			if call.Ellipsis.IsValid() {
 				if argument < len(call.Args) {
 					if len(field.Names) > 0 {
-						engine.bindParameter(field.Names[0], call.Args[argument])
+						snapshots = append(snapshots, engine.snapshotParameter(field.Names[0], call.Args[argument]))
 					} else {
 						engine.eval(call.Args[argument])
 					}
@@ -712,7 +754,9 @@ func (engine *ps6101Engine) bindParameters(parameters *ast.FieldList, call *ast.
 				if len(field.Names) > 0 {
 					name = field.Names[0]
 				}
-				engine.bindVariadicParameter(name, call.Args[argument:])
+				if snapshot, ok := engine.snapshotVariadicParameter(name, call.Args[argument:]); ok {
+					snapshots = append(snapshots, snapshot)
+				}
 				argument = len(call.Args)
 			}
 			break
@@ -726,9 +770,9 @@ func (engine *ps6101Engine) bindParameters(parameters *ast.FieldList, call *ast.
 		}
 		for _, name := range field.Names {
 			if argument >= len(call.Args) {
-				return
+				return snapshots
 			}
-			engine.bindParameter(name, call.Args[argument])
+			snapshots = append(snapshots, engine.snapshotParameter(name, call.Args[argument]))
 			argument++
 		}
 	}
@@ -738,9 +782,10 @@ func (engine *ps6101Engine) bindParameters(parameters *ast.FieldList, call *ast.
 	for ; argument < len(call.Args); argument++ {
 		engine.eval(call.Args[argument])
 	}
+	return snapshots
 }
 
-func (engine *ps6101Engine) bindVariadicParameter(name *ast.Ident, arguments []ast.Expr) {
+func (engine *ps6101Engine) snapshotVariadicParameter(name *ast.Ident, arguments []ast.Expr) (ps6101ParameterSnapshot, bool) {
 	var object types.Object
 	var elementType types.Type
 	if name != nil {
@@ -758,10 +803,10 @@ func (engine *ps6101Engine) bindVariadicParameter(name *ast.Ident, arguments []a
 		values = append(values, value)
 	}
 	if name == nil {
-		return
+		return ps6101ParameterSnapshot{}, false
 	}
 	if object == nil {
-		return
+		return ps6101ParameterSnapshot{}, false
 	}
 	destination := ps6101Location{root: object}
 	result := ps6101ImplicitZeroValue(object.Type())
@@ -771,6 +816,10 @@ func (engine *ps6101Engine) bindVariadicParameter(name *ast.Ident, arguments []a
 		elements[int64(index)] = ps6101CloneValue(value)
 	}
 	result.elements = elements
+	// The variadic slice's top-level [i] entries are the argument values.
+	// Collection summaries copied from an argument describe children of that
+	// argument and would otherwise overwrite [i] itself when stored.
+	result.takeFields()
 	result.length, result.capacity = int64(len(values)), int64(len(values))
 	result.lengthOK, result.capacityOK, result.offsetOK = true, true, true
 	result.nonempty = len(values) > 0
@@ -778,7 +827,45 @@ func (engine *ps6101Engine) bindVariadicParameter(name *ast.Ident, arguments []a
 	// self reference lets nested helpers mutate its elements without aliasing
 	// any scalar caller argument.
 	result.reference = ps6101Reference(destination)
-	engine.store(name, result, token.ASSIGN)
+	return ps6101ParameterSnapshot{name: name, value: result}, true
+}
+
+func (engine *ps6101Engine) snapshotParameter(name *ast.Ident, argument ast.Expr) ps6101ParameterSnapshot {
+	snapshot := ps6101ParameterSnapshot{name: name, expression: argument}
+	object := identObject(engine.pass, name)
+	if object == nil || argument == nil {
+		return snapshot
+	}
+	snapshot.value = engine.assignmentValue(object.Type(), engine.pass.TypesInfo.TypeOf(argument), engine.eval(argument))
+	if source, ok := engine.location(argument, true); ok {
+		snapshot.source, snapshot.sourceOK = source, true
+		snapshot.value = engine.valueWithStoredFields(source, snapshot.value, engine.pass.TypesInfo.TypeOf(argument))
+	}
+	return snapshot
+}
+
+func (engine *ps6101Engine) installParameter(snapshot *ps6101ParameterSnapshot) {
+	if snapshot == nil {
+		return
+	}
+	name, argument := snapshot.name, snapshot.expression
+	object := identObject(engine.pass, name)
+	if object == nil {
+		return
+	}
+	destination := ps6101Location{root: object}
+	value := ps6101CloneValue(snapshot.value)
+	engine.store(name, value, token.ASSIGN)
+	if composite := ps6101CompositeLiteral(argument); composite != nil {
+		engine.finalizeCompositeFields(destination, composite)
+	}
+	if ps6101ReferenceLike(object.Type()) {
+		if value.reference != nil {
+			engine.aliases[object] = *value.reference
+		} else if snapshot.sourceOK {
+			engine.aliases[object] = snapshot.source
+		}
+	}
 }
 
 func (engine *ps6101Engine) bindParameterSnapshot(name *ast.Ident, callable *ps6101Callable) {
@@ -857,35 +944,8 @@ func (engine *ps6101Engine) callableHasPointerReceiver(callable *ps6101Callable)
 }
 
 func (engine *ps6101Engine) bindParameter(name *ast.Ident, argument ast.Expr) {
-	object := identObject(engine.pass, name)
-	if object == nil || argument == nil {
-		return
-	}
-	destination := ps6101Location{root: object}
-	engine.killPrefix(destination)
-	delete(engine.aliases, object)
-	value := engine.assignmentValue(object.Type(), engine.pass.TypesInfo.TypeOf(argument), engine.eval(argument))
-	ps6101ApplyNamedValueSemantics(name.Name, &value)
-	engine.state[destination] = ps6101CloneValue(value)
-	engine.storeValueFields(destination, value.fieldValues())
-	if composite := ps6101CompositeLiteral(argument); composite != nil {
-		engine.finalizeCompositeFields(destination, composite)
-	}
-	if source, ok := engine.location(argument, true); ok {
-		engine.copyPrefix(source, destination)
-		if ps6101ReferenceLike(object.Type()) {
-			// The evaluated value carries the direct pointee of a pointer
-			// value. Prefer it over the transitively followed expression
-			// location: for an asserted **T, location(assertion, true) is the
-			// final T storage, while the parameter must still point at the
-			// intermediate *T object.
-			if value.reference != nil {
-				engine.aliases[object] = *value.reference
-			} else {
-				engine.aliases[object] = source
-			}
-		}
-	}
+	snapshot := engine.snapshotParameter(name, argument)
+	engine.installParameter(&snapshot)
 }
 
 func ps6101InterfaceType(typ types.Type) bool {
@@ -1294,6 +1354,7 @@ func (engine *ps6101Engine) storeResultValues(values []ps6101Value) {
 		engine.killPrefix(location)
 		delete(engine.aliases, object)
 		value := ps6101CloneValue(values[index])
+		ps6101ApplyNamedValueSemantics(object.Name(), &value)
 		engine.state[location] = value
 		engine.storeValueFields(location, value.fieldValues())
 		if ps6101ReferenceLike(object.Type()) && value.reference != nil {
@@ -1315,7 +1376,27 @@ func (engine *ps6101Engine) appendExitResults(start int) {
 		result := values[index*width : (index+1)*width]
 		for resultIndex, object := range engine.resultObjects {
 			location := ps6101Location{root: object}
-			result[resultIndex] = engine.valueWithStoredFields(location, exit.state[location], object.Type())
+			source := location
+			if alias, ok := exit.aliases[object]; ok {
+				source = alias
+			}
+			value := ps6101CloneValue(exit.state[source])
+			fields := value.fieldValues()
+			if fields == nil {
+				fields = make(map[string]ps6101Value)
+			}
+			for child, stored := range exit.state {
+				if child == source || !ps6101HasLocationPrefix(child, source) {
+					continue
+				}
+				suffix := strings.TrimPrefix(child.path, source.path)
+				suffix = strings.TrimPrefix(suffix, ".")
+				if suffix != "" {
+					fields[suffix] = ps6101CloneValue(stored)
+				}
+			}
+			value.setFields(fields)
+			result[resultIndex] = value
 		}
 		engine.returns = append(engine.returns, result)
 	}
@@ -1671,7 +1752,23 @@ func (engine *ps6101Engine) valueWithStoredFields(source ps6101Location, value p
 	for path, field := range value.fieldValues() {
 		fields[path] = ps6101CloneValue(field)
 	}
+	// A value copy snapshots every tracked scalar child as well as reference
+	// fields. This is essential for simultaneous aggregate assignments: child
+	// state must come from the original RHS, not from storage mutated by an
+	// earlier LHS commit.
 	remaining := ps6101ReferenceFieldSnapshotLimit
+	for location, field := range engine.state {
+		if remaining <= 0 || location == source || !ps6101HasLocationPrefix(location, source) {
+			continue
+		}
+		suffix := strings.TrimPrefix(location.path, source.path)
+		suffix = strings.TrimPrefix(suffix, ".")
+		if suffix == "" {
+			continue
+		}
+		fields[suffix] = ps6101CloneValue(field)
+		remaining--
+	}
 	engine.collectReferenceFields(source, source, typ, fields, make(map[types.Type]bool), &remaining)
 	if len(fields) > 0 {
 		value.setFields(fields)
@@ -4527,39 +4624,56 @@ func (engine *ps6101Engine) bindRangeIteration(statement *ast.RangeStmt, ranged 
 	}
 	mapKey, mapValue, exactMapEntry := ps6101SingleMapEntry(ranged)
 	exactMapEntry = exactMapEntry && countOK && count == 1
-	if identifier, ok := statement.Key.(*ast.Ident); ok && identifier.Name != "_" {
-		value := ps6101Value{}
-		if mapType && exactMapEntry {
-			value = ps6101ConstantValue(mapKey)
-		} else if !mapType && exact {
-			value = ps6101ConstantValue(constant.MakeInt64(iteration))
-		} else if !mapType && countOK && iteration >= 0 && iteration < count {
-			basic, integer := types.Unalias(engine.pass.TypesInfo.TypeOf(identifier)).Underlying().(*types.Basic)
+	// Assignment-form range clauses accept every ordinary lvalue. Resolve both
+	// targets before either store so index, selector, and pointer operands obey
+	// the same simultaneous-assignment rule as x, y = y, x.
+	targets := make([]ps6101StoreTarget, 2)
+	if statement.Key != nil {
+		targets[0] = engine.prepareStoreTarget(statement.Key)
+	}
+	if statement.Value != nil {
+		targets[1] = engine.prepareStoreTarget(statement.Value)
+	}
+	key := ps6101Value{}
+	if mapType && exactMapEntry {
+		key = ps6101ConstantValue(mapKey)
+	} else if !mapType && exact {
+		key = ps6101ConstantValue(constant.MakeInt64(iteration))
+	} else if !mapType && countOK && iteration >= 0 && iteration < count && statement.Key != nil {
+		if typ := engine.pass.TypesInfo.TypeOf(statement.Key); typ != nil {
+			basic, integer := types.Unalias(typ).Underlying().(*types.Basic)
 			if integer && basic.Info()&types.IsInteger != 0 {
-				value.kind = ps6101Nonnegative
-				analysis := value.mutableAnalysis()
+				key.kind = ps6101Nonnegative
+				analysis := key.mutableAnalysis()
 				analysis.lower = constant.MakeInt64(iteration)
 				analysis.upper = constant.MakeInt64(count - 1)
 			}
 		}
-		engine.store(identifier, value, token.ASSIGN)
 	}
-	if identifier, ok := statement.Value.(*ast.Ident); ok && identifier.Name != "_" {
-		value := ranged
-		if mapType {
-			value = ps6101Value{}
-			if exactMapEntry {
-				value = ps6101CloneValue(mapValue)
-			}
-		} else if location, ok := engine.location(statement.X, true); ok && exact {
-			element := location
-			element.path += ps6101IntegerIndexSegment(iteration)
-			if stored, present := engine.state[element]; present {
-				value = stored
-			}
+	value := ranged
+	if mapType {
+		value = ps6101Value{}
+		if exactMapEntry {
+			value = ps6101CloneValue(mapValue)
 		}
-		engine.store(identifier, value, token.ASSIGN)
+	} else if location, ok := engine.location(statement.X, true); ok && exact {
+		element := location
+		element.path += ps6101IntegerIndexSegment(iteration)
+		if stored, present := engine.state[element]; present {
+			value = engine.valueWithStoredFields(element, stored, engine.pass.TypesInfo.TypeOf(statement.Value))
+		}
 	}
+	if statement.Key != nil && !ps6101BlankIdentifier(statement.Key) {
+		engine.storeTarget(statement.Key, targets[0], key, token.ASSIGN)
+	}
+	if statement.Value != nil && !ps6101BlankIdentifier(statement.Value) {
+		engine.storeTarget(statement.Value, targets[1], value, token.ASSIGN)
+	}
+}
+
+func ps6101BlankIdentifier(expression ast.Expr) bool {
+	identifier, ok := ps6101Unparen(expression).(*ast.Ident)
+	return ok && identifier.Name == "_"
 }
 
 // ps6101SingleMapEntry resolves a map range only when the abstract map has one
@@ -4617,14 +4731,6 @@ func ps6101MapPathHead(path string) (constant.Value, string, string, bool) {
 		return nil, "", "", false
 	}
 	return key, head, remainder, true
-}
-
-func ps6101MapPathConstant(path string) constant.Value {
-	literal, _, remainder, ok := ps6101SplitIndexPath(path)
-	if !ok || remainder != "" {
-		return nil
-	}
-	return ps6101ConstantFromPathLiteral(literal)
 }
 
 func ps6101ConstantFromPathLiteral(literal string) constant.Value {
@@ -4878,7 +4984,15 @@ func (engine *ps6101Engine) callerVisibility() (map[types.Object]bool, map[types
 	return roots, aliases
 }
 
+func (engine *ps6101Engine) retainReturnedReferencedRoots(roots map[types.Object]bool, values []ps6101Value) {
+	engine.retainReferencedRoots(roots, values, false)
+}
+
 func (engine *ps6101Engine) retainFreshReferencedRoots(roots map[types.Object]bool, values []ps6101Value) {
+	engine.retainReferencedRoots(roots, values, true)
+}
+
+func (engine *ps6101Engine) retainReferencedRoots(roots map[types.Object]bool, values []ps6101Value, freshOnly bool) {
 	if roots == nil {
 		return
 	}
@@ -4888,7 +5002,13 @@ func (engine *ps6101Engine) retainFreshReferencedRoots(roots map[types.Object]bo
 		seenCallables := make(map[*ps6101Callable]bool)
 		var retainValue func(ps6101Value)
 		retainLocation := func(location ps6101Location) {
-			if location.root != nil && engine.fresh[location.root] && !roots[location.root] {
+			retain := location.root != nil && engine.fresh[location.root]
+			if !freshOnly && location.root != nil {
+				stored := engine.state[location]
+				retain = retain || ps6101NumericType(location.root.Type()) ||
+					(location.path != "" && stored.eligible && len(stored.sources) > 0)
+			}
+			if retain && !roots[location.root] {
 				roots[location.root] = true
 				changed = true
 			}
@@ -4953,13 +5073,12 @@ func (engine *ps6101Engine) retainFreshReferencedRoots(roots map[types.Object]bo
 	}
 }
 
-// markFreshReturnedAggregateInputs records that random data in fresh storage
-// nested below a returned map or slice is caller-visible benchmark input. This
-// structural provenance must not be generalized to a directly returned pointer
-// or to plain scalar, tuple, struct, interface, or identity-function returns.
-func (engine *ps6101Engine) markFreshReturnedAggregateInputs(roots map[types.Object]bool) {
+// markReturnedAggregateInputs records random data in callee-owned storage
+// reachable below a returned map or slice. Caller-owned roots are deliberately
+// excluded so an identity helper does not invent a benchmark role.
+func (engine *ps6101Engine) markReturnedAggregateInputs(roots, callerRoots map[types.Object]bool) {
 	for location, value := range engine.state {
-		if !roots[location.root] || !engine.fresh[location.root] || len(value.sources) == 0 {
+		if !roots[location.root] || callerRoots[location.root] || len(value.sources) == 0 {
 			continue
 		}
 		value.eligible = true
@@ -4967,14 +5086,25 @@ func (engine *ps6101Engine) markFreshReturnedAggregateInputs(roots map[types.Obj
 	}
 }
 
-func (engine *ps6101Engine) markReturnedReferenceInputs(values []ps6101Value, resultTypes []types.Type) {
-	for index, value := range values {
-		if index >= len(resultTypes) || !ps6101BackingReference(resultTypes[index]) {
+func (engine *ps6101Engine) markReturnedReferenceInputs(callerRoots map[types.Object]bool, values []ps6101Value) {
+	roots := maps.Clone(callerRoots)
+	engine.retainFreshReferencedRoots(roots, values)
+	engine.markReturnedAggregateInputs(roots, callerRoots)
+	// A returned local map/slice descriptor may point at non-synthetic local
+	// storage. Promote only its exact tracked children; promoting the collection
+	// summary itself would turn an unresolvable dynamic map key into a false
+	// positive.
+	for _, value := range values {
+		if value.reference == nil || callerRoots[value.reference.root] {
 			continue
 		}
-		roots := make(map[types.Object]bool)
-		engine.retainFreshReferencedRoots(roots, []ps6101Value{value})
-		engine.markFreshReturnedAggregateInputs(roots)
+		for location, stored := range engine.state {
+			if location == *value.reference || !ps6101HasLocationPrefix(location, *value.reference) || len(stored.sources) == 0 {
+				continue
+			}
+			stored.eligible = true
+			engine.state[location] = stored
+		}
 	}
 }
 
@@ -5017,6 +5147,13 @@ func (engine *ps6101Engine) assign(statement *ast.AssignStmt) {
 		targets[index] = engine.prepareStoreTarget(left)
 	}
 	values := engine.evalAssignmentRHS(statement.Rhs, len(statement.Lhs))
+	prefixes := make([]ps6101PrefixSnapshot, len(statement.Lhs))
+	for index := range statement.Lhs {
+		right := statement.Rhs[min(index, len(statement.Rhs)-1)]
+		if source, ok := engine.location(right, true); ok {
+			prefixes[index] = engine.snapshotPrefix(source)
+		}
+	}
 	for index, left := range statement.Lhs {
 		if index >= len(values) {
 			break
@@ -5051,6 +5188,9 @@ func (engine *ps6101Engine) assign(statement *ast.AssignStmt) {
 			engine.recordCounterIncrement(left, prior)
 		}
 		if statement.Tok == token.ASSIGN || statement.Tok == token.DEFINE {
+			if destination, ok := engine.location(left, false); ok {
+				engine.restorePrefix(prefixes[index], destination)
+			}
 			if composite := ps6101CompositeLiteral(right); composite != nil {
 				if destination, ok := engine.location(left, false); ok {
 					engine.finalizeCompositeFields(destination, composite)
@@ -5059,7 +5199,6 @@ func (engine *ps6101Engine) assign(statement *ast.AssignStmt) {
 			}
 			if source, ok := engine.location(right, true); ok {
 				if destination, ok := engine.location(left, false); ok {
-					engine.copyPrefix(source, destination)
 					if ps6101PackageObject(destination.root) && ps6101ContainsReference(engine.pass.TypesInfo.TypeOf(right)) {
 						engine.invalidateLocationAndReferences(source)
 					}
@@ -5101,8 +5240,10 @@ func (engine *ps6101Engine) finalizeCompositeFields(destination ps6101Location, 
 				value.reference = ps6101Reference(location)
 			}
 		}
-		value.eligible = value.eligible || parent.eligible
-		value.aggregate = value.aggregate || parent.aggregate
+		if parent.promoteChildren {
+			value.eligible = value.eligible || parent.eligible
+			value.aggregate = value.aggregate || parent.aggregate
+		}
 		ps6101ApplyNamedValueSemantics(name, &value)
 		engine.state[location] = ps6101CloneValue(value)
 		if nested := ps6101CompositeLiteral(expression); nested != nil {
@@ -5249,6 +5390,16 @@ func (engine *ps6101Engine) assignValues(names []*ast.Ident, expressions []ast.E
 		return
 	}
 	values := engine.evalAssignmentRHS(expressions, len(names))
+	prefixes := make([]ps6101PrefixSnapshot, len(names))
+	for index := range names {
+		var expression ast.Expr
+		if len(expressions) != 1 || len(names) == 1 {
+			expression = expressions[min(index, len(expressions)-1)]
+		}
+		if source, ok := engine.location(expression, true); ok {
+			prefixes[index] = engine.snapshotPrefix(source)
+		}
+	}
 	for index, name := range names {
 		if index < len(values) {
 			var expression ast.Expr
@@ -5266,6 +5417,9 @@ func (engine *ps6101Engine) assignValues(names []*ast.Ident, expressions []ast.E
 				}
 			}
 			engine.store(name, values[index], token.ASSIGN)
+			if destination, ok := engine.location(name, false); ok {
+				engine.restorePrefix(prefixes[index], destination)
+			}
 			if composite := ps6101CompositeLiteral(expression); composite != nil {
 				if destination, ok := engine.location(name, false); ok {
 					engine.finalizeCompositeFields(destination, composite)
@@ -5274,7 +5428,6 @@ func (engine *ps6101Engine) assignValues(names []*ast.Ident, expressions []ast.E
 			}
 			if source, ok := engine.location(expression, true); ok {
 				if destination, ok := engine.location(name, false); ok {
-					engine.copyPrefix(source, destination)
 					if ps6101PackageObject(destination.root) && ps6101ContainsReference(engine.pass.TypesInfo.TypeOf(expression)) {
 						engine.invalidateLocationAndReferences(source)
 					}
@@ -5435,6 +5588,11 @@ func (engine *ps6101Engine) storeTarget(expression ast.Expr, target ps6101StoreT
 		}
 	}
 	ps6101ApplyNamedValueSemantics(ps6101ExpressionName(expression), &value)
+	// Indirect lvalues such as *p retain the semantic role of their resolved
+	// storage object even when the pointer expression itself has a generic name.
+	if location.root != nil && ps6101NumericType(location.root.Type()) {
+		ps6101ApplyNamedValueSemantics(location.root.Name(), &value)
+	}
 	if target.mapIndex {
 		if indexed, ok := ps6101Unparen(expression).(*ast.IndexExpr); ok {
 			if key := engine.indexConstant(indexed.Index); key != nil && key.Kind() == constant.String {
@@ -5510,6 +5668,7 @@ func ps6101ApplyNamedValueSemantics(name string, value *ps6101Value) {
 	if ps6101BenchmarkInputName(name) && len(value.sources) > 0 {
 		value.eligible = true
 		value.aggregate = true
+		value.promoteChildren = true
 	} else if ps6101AggregateName(name) && value.eligible && len(value.sources) > 0 {
 		value.aggregate = true
 	}
@@ -5533,8 +5692,10 @@ func (engine *ps6101Engine) storeValueFields(destination ps6101Location, fields 
 			location.path += "." + strings.TrimPrefix(suffix, ".")
 		}
 		field.takeFields()
-		field.eligible = field.eligible || parent.eligible
-		field.aggregate = field.aggregate || parent.aggregate
+		if parent.promoteChildren {
+			field.eligible = field.eligible || parent.eligible
+			field.aggregate = field.aggregate || parent.aggregate
+		}
 		engine.nextRevision++
 		field.revision = engine.nextRevision
 		if field.identity == 0 {
@@ -6481,9 +6642,10 @@ func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 		value.identity = 0
 		return []ps6101Value{value}
 	}
-	if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "Abs" && len(call.Args) == 1 {
+	if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "Abs" && len(call.Args) == 1 && target.callable == nil {
 		// A lookalike Abs is not a positivity proof. Preserve the argument's
-		// signed provenance rather than granting math.Abs semantics.
+		// signed provenance only when no local implementation was resolved.
+		// Resolved methods must run through their actual body below.
 		value := engine.eval(call.Args[0])
 		value.identity = 0
 		return []ps6101Value{value}
@@ -6623,6 +6785,28 @@ func (engine *ps6101Engine) evalCall(call *ast.CallExpr) []ps6101Value {
 				adjusted := *call
 				adjusted.Args = call.Args[1:]
 				return engine.analyzeFunction(target.callable.function, &adjusted, call.Args[0], target.callable)
+			}
+			if selector, ok := ps6101Unparen(call.Fun).(*ast.SelectorExpr); ok && selector.Sel.Name == "Abs" && len(call.Args) == 1 {
+				// Preserve the established warning for a lookalike whose known
+				// implementation is non-positive, while allowing a resolved
+				// positive implementation to prove the gate safe. The temporary
+				// cache ensures the argument is evaluated exactly once.
+				restore := engine.beginSingleEvaluation()
+				argument := engine.eval(call.Args[0])
+				results := engine.analyzeFunction(target.callable.function, call, target.callable.receiver, target.callable)
+				restore()
+				if len(results) > 0 && len(results[0].sources) == 0 && results[0].kind != ps6101Positive {
+					// Keep the resolved result's exact sign and constant so an
+					// always-entered gate remains provable. Only attach the legacy
+					// signed-input provenance used to warn on an always-skipped gate.
+					results[0].sources = ps6101JoinSources(results[0].sources, argument.sources)
+					results[0].eligible = results[0].eligible || argument.eligible
+					results[0].aggregate = results[0].aggregate || argument.aggregate
+					results[0].kind = argument.kind
+					results[0].warnIfFalse = true
+					results[0].identity = 0
+				}
+				return results
 			}
 			return engine.analyzeFunction(target.callable.function, call, target.callable.receiver, target.callable)
 		}
@@ -6770,15 +6954,105 @@ func ps6101TestingCompatibleInterfaceCall(pass *analysis.Pass, call *ast.CallExp
 	return false
 }
 
-// ps6101MarkReturnedBoundaries carries an already-derived input role through a
-// local return. A map or slice result additionally provides structural evidence
-// that its random contents are caller-visible benchmark inputs; ordinary value
-// returns never gain eligibility merely by crossing the boundary.
-func ps6101MarkReturnedBoundaries(values []ps6101Value, resultTypes []types.Type) {
+// markReturnedBoundaries follows statically known wrappers around map/slice
+// results. Interface dynamic types and bound type parameters are precise here;
+// ordinary scalar and struct siblings remain unpromoted.
+func (engine *ps6101Engine) markReturnedBoundaries(values []ps6101Value, resultTypes []types.Type) []ps6101Value {
+	var aggregates []ps6101Value
 	for index := range values {
-		aggregate := index < len(resultTypes) && ps6101BackingReference(resultTypes[index])
-		ps6101MarkReturnedBoundary(&values[index], aggregate)
+		if index < len(resultTypes) {
+			engine.markReturnedValue(&values[index], resultTypes[index], &aggregates)
+		}
 	}
+	return aggregates
+}
+
+func (engine *ps6101Engine) markReturnedValue(value *ps6101Value, typ types.Type, aggregates *[]ps6101Value) {
+	if value == nil || typ == nil {
+		return
+	}
+	typ = engine.resolveTypeArgument(typ)
+	if ps6101InterfaceType(typ) {
+		if dynamic := value.analysisValue().dynamic; dynamic != nil {
+			typ = engine.resolveTypeArgument(dynamic)
+		} else {
+			return
+		}
+	}
+	underlying := types.Unalias(typ).Underlying()
+	switch current := underlying.(type) {
+	case *types.Slice, *types.Map:
+		ps6101MarkReturnedBoundary(value, true)
+		*aggregates = append(*aggregates, ps6101CloneValue(*value))
+		return
+	case *types.Struct:
+		for index := 0; index < current.NumFields(); index++ {
+			field := current.Field(index)
+			name := ps6101FieldName(field)
+			child, ok := ps6101ValueField(*value, name)
+			if !ok {
+				continue
+			}
+			engine.markReturnedValue(&child, field.Type(), aggregates)
+			ps6101SetValueField(value, name, child)
+		}
+	case *types.Array:
+		limit := min(current.Len(), int64(ps6101ReferenceFieldSnapshotLimit))
+		for index := int64(0); index < limit; index++ {
+			name := ps6101IntegerIndexSegment(index)
+			child, ok := ps6101ValueField(*value, name)
+			if !ok {
+				continue
+			}
+			engine.markReturnedValue(&child, current.Elem(), aggregates)
+			ps6101SetValueField(value, name, child)
+		}
+	}
+}
+
+func ps6101ValueField(value ps6101Value, name string) (ps6101Value, bool) {
+	fields := value.fieldValues()
+	child, found := fields[name]
+	children := make(map[string]ps6101Value)
+	for path, field := range fields {
+		if !strings.HasPrefix(path, name) || len(path) == len(name) || path[len(name)] != '.' && path[len(name)] != '[' {
+			continue
+		}
+		suffix := strings.TrimPrefix(path[len(name):], ".")
+		if suffix != "" {
+			children[suffix] = ps6101CloneValue(field)
+			found = true
+		}
+	}
+	if !found {
+		return ps6101Value{}, false
+	}
+	child.setFields(children)
+	return ps6101CloneValue(child), true
+}
+
+func ps6101SetValueField(value *ps6101Value, name string, child ps6101Value) {
+	if value == nil {
+		return
+	}
+	existing := value.fieldValues()
+	children := child.takeFields()
+	fields := make(map[string]ps6101Value, len(existing)+len(children)+1)
+	for path, field := range existing {
+		if path == name || strings.HasPrefix(path, name+".") || strings.HasPrefix(path, name+"[") {
+			continue
+		}
+		fields[path] = ps6101CloneValue(field)
+	}
+	fields[name] = ps6101CloneValue(child)
+	for suffix, field := range children {
+		separator := "."
+		if strings.HasPrefix(suffix, "[") {
+			separator = ""
+		}
+		fields[name+separator+strings.TrimPrefix(suffix, ".")] = ps6101CloneValue(field)
+	}
+	value.setFields(fields)
 }
 
 func ps6101MarkReturnedBoundary(value *ps6101Value, returnedAggregate bool) {
@@ -7217,7 +7491,7 @@ func (engine *ps6101Engine) analyzeLiteral(literal *ast.FuncLit, call *ast.CallE
 		}
 	}
 	results := engine.mergeReturns(engine.returns)
-	ps6101MarkReturnedBoundaries(results, engine.resultTypes)
+	returnedAggregates := engine.markReturnedBoundaries(results, engine.resultTypes)
 	localReturnOpaque := engine.returnOpaque
 	engine.mergeExits()
 	callExits := slices.Clone(engine.exits)
@@ -7233,8 +7507,8 @@ func (engine *ps6101Engine) analyzeLiteral(literal *ast.FuncLit, call *ast.CallE
 		callEscaped = &state
 	}
 	engine.refreshLiteralCaptures(callable)
-	engine.markReturnedReferenceInputs(results, engine.resultTypes)
-	engine.retainFreshReferencedRoots(callerRoots, results)
+	engine.markReturnedReferenceInputs(callerRoots, returnedAggregates)
+	engine.retainReturnedReferencedRoots(callerRoots, results)
 	engine.retainCallerVisibility(callerRoots, callerAliases)
 	engine.returns, engine.exits = oldReturns, oldExits
 	engine.jumps = oldJumps
@@ -7978,6 +8252,7 @@ func ps6101Divide(left, right ps6101Value) ps6101Value {
 func ps6101CollectionMerge(left, right ps6101Value) ps6101Value {
 	if len(left.sources) == 0 {
 		result := ps6101CloneValue(right)
+		result.promoteChildren = false
 		result.reference, result.callable = nil, nil
 		if result.analysis != nil {
 			result.analysis.dynamic = nil
@@ -7988,6 +8263,7 @@ func ps6101CollectionMerge(left, right ps6101Value) ps6101Value {
 	}
 	if len(right.sources) == 0 {
 		result := ps6101CloneValue(left)
+		result.promoteChildren = false
 		result.reference, result.callable = nil, nil
 		if result.analysis != nil {
 			result.analysis.dynamic = nil
@@ -8034,7 +8310,7 @@ func ps6101JoinedValue(left, right ps6101Value) ps6101Value {
 	return ps6101Value{
 		sources: ps6101JoinSources(left.sources, right.sources), eligible: left.eligible || right.eligible,
 		aggregate: left.aggregate || right.aggregate, threshold: left.threshold || right.threshold,
-		testing: left.testing || right.testing,
+		testing: left.testing || right.testing, warnIfFalse: left.warnIfFalse || right.warnIfFalse,
 	}
 }
 
@@ -8327,7 +8603,7 @@ func (engine *ps6101Engine) comparison(binary *ast.BinaryExpr) (ps6101GateKey, b
 
 func (engine *ps6101Engine) comparisonSides(aggregateExpression, thresholdExpression ast.Expr, operation token.Token) (ps6101GateKey, bool) {
 	value := engine.eval(aggregateExpression)
-	if value.kind != ps6101Symmetric || !value.eligible || !value.aggregate || len(value.sources) == 0 {
+	if value.kind != ps6101Symmetric && !value.warnIfFalse || !value.eligible || !value.aggregate || len(value.sources) == 0 {
 		return ps6101GateKey{}, false
 	}
 	threshold, ok := engine.threshold(thresholdExpression)
@@ -8763,9 +9039,15 @@ func (engine *ps6101Engine) boolConstantUncached(expression ast.Expr) int {
 				return 1
 			}
 			if left != nil && right != nil {
+				if leftValue.warnIfFalse || rightValue.warnIfFalse {
+					return 0
+				}
 				return -1
 			}
 			if result := ps6101CompareBounds(leftValue, value.Op, rightValue); result != 0 {
+				if result < 0 && (leftValue.warnIfFalse || rightValue.warnIfFalse) {
+					return 0
+				}
 				return result
 			}
 		}
@@ -9202,12 +9484,11 @@ func (engine *ps6101Engine) killPrefix(prefix ps6101Location) {
 }
 
 func (engine *ps6101Engine) copyPrefix(source, destination ps6101Location) {
-	type entry struct {
-		location ps6101Location
-		value    ps6101Value
-	}
-	var copied []entry
-	parent := engine.state[destination]
+	engine.restorePrefix(engine.snapshotPrefix(source), destination)
+}
+
+func (engine *ps6101Engine) snapshotPrefix(source ps6101Location) ps6101PrefixSnapshot {
+	snapshot := make(ps6101PrefixSnapshot)
 	for location, value := range engine.state {
 		if !ps6101HasLocationPrefix(location, source) {
 			continue
@@ -9215,10 +9496,16 @@ func (engine *ps6101Engine) copyPrefix(source, destination ps6101Location) {
 		suffix := strings.TrimPrefix(location.path, source.path)
 		suffix = strings.TrimPrefix(suffix, ".")
 		if suffix == "" {
-			// The direct destination value was already assigned with its own
-			// eligibility/aggregate classification. Only copy nested fields.
 			continue
 		}
+		snapshot[suffix] = ps6101CloneValue(value)
+	}
+	return snapshot
+}
+
+func (engine *ps6101Engine) restorePrefix(snapshot ps6101PrefixSnapshot, destination ps6101Location) {
+	parent := engine.state[destination]
+	for suffix, value := range snapshot {
 		path := suffix
 		if destination.path != "" {
 			separator := "."
@@ -9228,15 +9515,13 @@ func (engine *ps6101Engine) copyPrefix(source, destination ps6101Location) {
 			path = destination.path + separator + suffix
 		}
 		value = ps6101CloneValue(value)
-		value.eligible = value.eligible || parent.eligible
-		value.aggregate = value.aggregate || parent.aggregate
-		copied = append(copied, entry{location: ps6101Location{root: destination.root, path: path}, value: value})
-	}
-	for index := range copied {
-		item := &copied[index]
+		if parent.promoteChildren {
+			value.eligible = value.eligible || parent.eligible
+			value.aggregate = value.aggregate || parent.aggregate
+		}
 		engine.nextRevision++
-		item.value.revision = engine.nextRevision
-		engine.state[item.location] = item.value
+		value.revision = engine.nextRevision
+		engine.state[ps6101Location{root: destination.root, path: path}] = value
 	}
 }
 
