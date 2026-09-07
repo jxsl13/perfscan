@@ -162,6 +162,11 @@ func TestPS4101(t *testing.T) {
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS4101.Analyzer, "ps4101_copyshadow")
 }
 
+func TestPS4102(t *testing.T) {
+	t.Parallel()
+	analysistest.Run(t, analysistest.TestData(), PS4102.Analyzer, "ps4102")
+}
+
 func TestPS2004(t *testing.T) {
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS2004.Analyzer, "ps2004", "ps2004cgo")
 }

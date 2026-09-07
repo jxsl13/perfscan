@@ -28,3 +28,23 @@ func withBulkPath(out []float64, buf []byte, hostLE bool) {
 func header(buf []byte) uint32 {
 	return binary.LittleEndian.Uint32(buf)
 }
+
+// PS4102 owns final-required-byte subfields; PS4001 must not recommend an
+// unsafe bulk alias for these heterogeneous-record loops.
+func finalByteSubfields(out []uint32, buf []byte) {
+	for i := range out {
+		out[i] = binary.LittleEndian.Uint32(buf[i*4:]) >> 28
+	}
+	for i := range out {
+		word := binary.BigEndian.Uint32(buf[i*4:])
+		out[i] = word & 15
+	}
+}
+
+// A field from an earlier byte is outside PS4102's panic-preserving subset,
+// so PS4001 retains its existing coverage.
+func earlierByteSubfield(out []uint32, buf []byte) {
+	for i := range out {
+		out[i] = (binary.LittleEndian.Uint32(buf[i*4:]) >> 16) & 0xff // want `binary\.LittleEndian\.Uint32 decodes one scalar per iteration; on a little-endian host a same-layout bulk copy moves the whole buffer once — keep this loop as the big-endian/strided fallback`
+	}
+}
