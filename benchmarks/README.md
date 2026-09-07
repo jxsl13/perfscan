@@ -95,3 +95,9 @@ Rules without a pair, and why:
   lanes. Its remedy is test selection and coverage structure, not a faster code
   shape, so a Before/After micro-benchmark would only recreate the flaky gate
   the check asks users to isolate.
+- **PS6103** (fixed-loop caller-owned-output advisory): the gain depends on a
+  project tensor layout, the routed backend leaf, runtime shape stability, and
+  an optional Into capability with a real allocating fallback. A toy slice
+  operation would measure fixture allocation rather than preservation of the
+  optimized dispatch path. The check documentation records the retained GoAI
+  Muon campaign and requires exact fixed-step plus end-to-end validation.

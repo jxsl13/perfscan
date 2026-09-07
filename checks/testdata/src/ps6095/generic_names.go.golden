@@ -1,0 +1,47 @@
+package ps6095
+
+func genericFunctionTypeParameter[psQuotient5_30 any](output []float64, numerator, denominator float64) {
+	psQuotient5_30_2 := numerator / denominator
+	for index := range output {
+		output[index] = [1]float64{psQuotient5_30_2}[0] // want `this floating-point quotient is invariant in output index index; compute the original division once and reuse its rounded result \(never replace it with reciprocal multiplication, which is not bit-equivalent\)`
+	}
+}
+
+type genericPair[first, second any] struct{}
+
+func (genericPair[psQuotient13_19, second]) genericMethod(output []float64, numerator, denominator float64) {
+	psQuotient13_19_2 := numerator / denominator
+	for index := range output {
+		output[index] = psQuotient13_19_2 // want `this floating-point quotient is invariant in output index index; compute the original division once and reuse its rounded result \(never replace it with reciprocal multiplication, which is not bit-equivalent\)`
+	}
+}
+
+func (*genericPair[psQuotient19_19, second]) genericPointerMethod(output []float64, numerator, denominator float64) {
+	psQuotient19_19_2 := numerator / denominator
+	for index := range output {
+		output[index] = psQuotient19_19_2 // want `this floating-point quotient is invariant in output index index; compute the original division once and reuse its rounded result \(never replace it with reciprocal multiplication, which is not bit-equivalent\)`
+	}
+}
+
+func deterministicGenericFallback[psQuotient25_19, psQuotient25_19_2 any](output []float64, numerator, denominator float64) {
+	psQuotient25_19_3 := numerator / denominator
+	for index := range output {
+		output[index] = psQuotient25_19_3 // want `this floating-point quotient is invariant in output index index; compute the original division once and reuse its rounded result \(never replace it with reciprocal multiplication, which is not bit-equivalent\)`
+	}
+}
+
+func unrelatedGenericName[element any](output []float64, numerator, denominator float64) {
+	psQuotient31_19 := numerator / denominator
+	for index := range output {
+		output[index] = psQuotient31_19 // want `this floating-point quotient is invariant in output index index; compute the original division once and reuse its rounded result \(never replace it with reciprocal multiplication, which is not bit-equivalent\)`
+	}
+}
+
+func genericLiteralScope[psQuotient38_20 any](output []float64, numerator, denominator float64) func() {
+	return func() {
+		psQuotient38_20 := numerator / denominator
+		for index := range output {
+			output[index] = psQuotient38_20 // want `this floating-point quotient is invariant in output index index; compute the original division once and reuse its rounded result \(never replace it with reciprocal multiplication, which is not bit-equivalent\)`
+		}
+	}
+}

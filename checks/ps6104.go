@@ -180,13 +180,13 @@ func ps6104DirectInvariantTailGuards(source string) []ps6104Finding {
 				continue
 			}
 			assignments := ps6104Assignments(body, kernel.start)
-			mutations := ps6104Mutations(loop.body)
+			mutations, directCallRoots := ps6104MutationFacts(loop.body)
 			for _, condition := range ps6104Conditions(loop.body) {
 				loopBodyStart := loop.end - len(loop.body)
 				conditionOffset := kernel.start + loopBodyStart + condition.offset
 				loopStart := kernel.start + loop.start
 				loopEnd := kernel.start + loop.end
-				if ps6104InsideNestedLoop(loop.body, condition.offset) || !ps6104TailPredicate(condition.expression, assignments, conditionOffset, loopStart, loopEnd, loop.index, loopIndexes, functionConstants, mutations) {
+				if ps6104InsideNestedLoop(loop.body, condition.offset) || !ps6104TailPredicate(condition.expression, assignments, conditionOffset, loopStart, loopEnd, loop.index, loopIndexes, functionConstants, mutations, directCallRoots) {
 					continue
 				}
 				findings = append(findings, ps6104Finding{
@@ -283,9 +283,10 @@ func ps6104InsideNestedLoop(body string, offset int) bool {
 	return false
 }
 
-func ps6104Mutations(body string) map[string]bool {
+func ps6104MutationFacts(body string) (map[string]bool, map[string]bool) {
 	roots := ps6104NativeMutationRoots(body)
-	result := make(map[string]bool, len(roots))
+	exposedRoots, directCallRoots := ps6104NativeCallRoots(body)
+	result := make(map[string]bool, len(roots)+len(exposedRoots))
 	for _, root := range roots {
 		// Mutating an indexed element, field, or dereference can change a
 		// predicate that reads through the same aggregate root. Treat the
@@ -293,7 +294,12 @@ func ps6104Mutations(body string) map[string]bool {
 		// identifiers write.
 		result[root] = true
 	}
-	return result
+	for root := range exposedRoots {
+		// A call can mutate a native lvalue whose address is exposed even
+		// when the loop contains no source-visible assignment to that root.
+		result[root] = true
+	}
+	return result, directCallRoots
 }
 
 func ps6104NativeMutationRoots(source string) []string {
@@ -322,6 +328,98 @@ func ps6104NativeMutationRoots(source string) []string {
 		}
 	}
 	return roots
+}
+
+func ps6104NativeCallRoots(source string) (map[string]bool, map[string]bool) {
+	tokens := ps6104NativeTokens(source)
+	exposed := make(map[string]bool)
+	direct := make(map[string]bool)
+	for open := 1; open < len(tokens); open++ {
+		if tokens[open] != "(" || !ps6104NativeCallName(tokens[open-1]) {
+			continue
+		}
+		close := ps6104MatchingNativeToken(tokens, open, "(", ")")
+		if close < 0 {
+			continue
+		}
+		for _, argument := range ps6104NativeArgumentRanges(tokens, open+1, close) {
+			start, end := argument[0], argument[1]
+			if root, ok := ps6104NativeDirectRoot(tokens, start, end); ok {
+				direct[root] = true
+			}
+			for index := start; index < end; index++ {
+				if tokens[index] != "&" || !ps6104NativeUnaryOperator(tokens, index, start) {
+					continue
+				}
+				next, root, ok := ps6104ParseNativeLValue(tokens, index+1)
+				if ok && next <= end {
+					exposed[root] = true
+				}
+			}
+		}
+	}
+	return exposed, direct
+}
+
+func ps6104NativeCallName(token string) bool {
+	if !ps6104NativeIdentifier(token) || ps6104TypeCast(token) {
+		return false
+	}
+	switch token {
+	case "if", "for", "while", "switch", "sizeof", "alignof", "return":
+		return false
+	}
+	return true
+}
+
+func ps6104NativeArgumentRanges(tokens []string, start, end int) [][2]int {
+	if start >= end {
+		return nil
+	}
+	var result [][2]int
+	argumentStart := start
+	parentheses, brackets, braces := 0, 0, 0
+	for index := start; index < end; index++ {
+		switch tokens[index] {
+		case "(":
+			parentheses++
+		case ")":
+			parentheses--
+		case "[":
+			brackets++
+		case "]":
+			brackets--
+		case "{":
+			braces++
+		case "}":
+			braces--
+		case ",":
+			if parentheses == 0 && brackets == 0 && braces == 0 {
+				result = append(result, [2]int{argumentStart, index})
+				argumentStart = index + 1
+			}
+		}
+	}
+	return append(result, [2]int{argumentStart, end})
+}
+
+func ps6104NativeDirectRoot(tokens []string, start, end int) (string, bool) {
+	next, root, ok := ps6104ParseNativeLValue(tokens, start)
+	if !ok || next != end {
+		return "", false
+	}
+	return root, true
+}
+
+func ps6104NativeUnaryOperator(tokens []string, index, expressionStart int) bool {
+	if index == expressionStart {
+		return true
+	}
+	switch tokens[index-1] {
+	case "(", "[", "{", ",", "?", ":", "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "+", "-", "*", "/", "%", "!", "~", "&&", "||", "==", "!=", "<", ">", "<=", ">=":
+		return true
+	}
+	return false
 }
 
 func ps6104NativeLValueBefore(tokens []string, end int) (string, bool) {
@@ -507,8 +605,9 @@ func ps6104FunctionConstants(body string) map[string]bool {
 	return result
 }
 
-func ps6104TailPredicate(expression string, assignments map[string][]ps6104Assignment, before, loopStart, loopEnd int, loopIndex string, loopIndexes, functionConstants, mutations map[string]bool) bool {
-	expression, before = ps6104ResolvePredicate(expression, assignments, before, make(map[string]bool))
+func ps6104TailPredicate(expression string, assignments map[string][]ps6104Assignment, before, loopStart, loopEnd int, loopIndex string, loopIndexes, functionConstants, mutations, directCallRoots map[string]bool) bool {
+	resolvedAliases := make(map[string]bool)
+	expression, before = ps6104ResolvePredicate(expression, assignments, before, resolvedAliases)
 	if !ps6104Comparison.MatchString(expression) || ps6007ContainsAny(strings.ToLower(expression), "atomic", "volatile", "barrier") {
 		return false
 	}
@@ -528,11 +627,42 @@ func ps6104TailPredicate(expression string, assignments map[string][]ps6104Assig
 	for name := range mutations {
 		forbidden[name] = true
 	}
+	for name := range resolvedAliases {
+		if forbidden[name] {
+			return false
+		}
+	}
+	for name := range ps6104NativeIndirectRoots(expression) {
+		if directCallRoots[name] {
+			return false
+		}
+	}
 	if ps6104DependsOn(expression, assignments, before, loopStart, loopEnd, loopIndex, forbidden, active) {
 		return false
 	}
 	return ps6104RowSignal(expression, assignments, before, make(map[string]bool)) &&
 		ps6104BoundarySignal(expression, assignments, before, make(map[string]bool))
+}
+
+func ps6104NativeIndirectRoots(expression string) map[string]bool {
+	tokens := ps6104NativeTokens(expression)
+	result := make(map[string]bool)
+	for start := range tokens {
+		if tokens[start] == "*" && !ps6104NativeUnaryOperator(tokens, start, 0) {
+			continue
+		}
+		next, root, ok := ps6104ParseNativeLValue(tokens, start)
+		if !ok || next <= start {
+			continue
+		}
+		for _, token := range tokens[start:next] {
+			switch token {
+			case "*", "[", ".", "->":
+				result[root] = true
+			}
+		}
+	}
+	return result
 }
 
 func ps6104ResolvePredicate(expression string, assignments map[string][]ps6104Assignment, before int, active map[string]bool) (string, int) {

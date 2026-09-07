@@ -82,6 +82,28 @@ kernel void q6k(uint row [[thread_position_in_grid]], uint nrows [[buffer(0)]]) 
 			want: 1,
 		},
 		{
+			name: "resolved boolean compound mutation",
+			source: `#include <metal_stdlib>
+kernel void resolved_boolean_change(uint row [[thread_position_in_grid]], uint outputRows [[buffer(0)]]) {
+  bool validRow = row < outputRows;
+  for (uint block = 0; block < blocks; ++block) {
+    validRow ^= true;
+    if (validRow) consume(block);
+  }
+}`,
+		},
+		{
+			name: "resolved boolean address exposure",
+			source: `#include <metal_stdlib>
+kernel void resolved_boolean_address(uint row [[thread_position_in_grid]], uint outputRows [[buffer(0)]]) {
+  bool validRow = row < outputRows;
+  for (uint block = 0; block < blocks; ++block) {
+    mutate(&validRow);
+    if (validRow) consume(block);
+  }
+}`,
+		},
+		{
 			name: "loop-dependent predicate",
 			source: `#include <metal_stdlib>
 kernel void changing(uint row [[thread_position_in_grid]], uint outputRows [[buffer(0)]]) {
@@ -119,6 +141,129 @@ kernel void row_changes_later(uint row [[thread_position_in_grid]], uint outputR
     row = row + 1;
   }
 }`,
+		},
+		{
+			name: "direct row address exposure",
+			source: `#include <metal_stdlib>
+kernel void direct_address(uint row [[thread_position_in_grid]], uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    advance(&row);
+    if (row < outputRows) consume(row, block);
+  }
+}`,
+		},
+		{
+			name: "parenthesized row address exposure",
+			source: `#include <metal_stdlib>
+kernel void parenthesized_address(uint row [[thread_position_in_grid]], uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    advance(&(row));
+    if (row < outputRows) consume(row, block);
+  }
+}`,
+		},
+		{
+			name: "aggregate field address exposure",
+			source: `#include <metal_stdlib>
+kernel void aggregate_address(RowState state, uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    advance(&state.row);
+    if (state.row < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "indexed address exposure",
+			source: `#include <metal_stdlib>
+kernel void indexed_address(uint outputRows [[buffer(0)]]) {
+  uint rows[2] = {0, 1};
+  for (uint block = 0; block < blocks; ++block) {
+    advance(&rows[0]);
+    if (rows[0] < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "pointer field address exposure",
+			source: `#include <metal_stdlib>
+kernel void pointer_field_address(device RowState* state, uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    advance(&state->row);
+    if (state->row < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "dereferenced address exposure",
+			source: `#include <metal_stdlib>
+kernel void dereferenced_address(device uint* row, uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    advance(&(*row));
+    if (*row < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "row address exposure after guard",
+			source: `#include <metal_stdlib>
+kernel void address_after_guard(uint row [[thread_position_in_grid]], uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    if (row < outputRows) consume(row, block);
+    advance(&row);
+  }
+}`,
+		},
+		{
+			name: "boundary address exposure",
+			source: `#include <metal_stdlib>
+kernel void boundary_address(uint row [[thread_position_in_grid]], uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    advance(&outputRows);
+    if (row < outputRows) consume(row, block);
+  }
+}`,
+		},
+		{
+			name: "direct mutable pointer root call",
+			source: `#include <metal_stdlib>
+kernel void pointer_argument(device uint* row, uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    advance(row);
+    if (*row < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "scalar multiplication is not pointer indirection",
+			source: `#include <metal_stdlib>
+kernel void scalar_product(uint row [[thread_position_in_grid]], uint outputRows [[buffer(0)]], uint factor) {
+  for (uint block = 0; block < blocks; ++block) {
+    if (row * factor < outputRows) consume(factor, block);
+  }
+}`,
+			want: 1,
+		},
+		{
+			name: "direct pointer-valued field call",
+			source: `#include <metal_stdlib>
+kernel void pointer_field_argument(RowState state, uint outputRows [[buffer(0)]]) {
+  for (uint block = 0; block < blocks; ++block) {
+    advance(state.rows);
+    if (state.rows[0] < outputRows) consume(block);
+  }
+}`,
+		},
+		{
+			name: "unrelated address exposure remains invariant",
+			source: `#include <metal_stdlib>
+kernel void unrelated_address(uint row [[thread_position_in_grid]], uint outputRows [[buffer(0)]]) {
+  uint scratch = 0;
+  for (uint block = 0; block < blocks; ++block) {
+    advance(&scratch);
+    if (row < outputRows) consume(row, block);
+  }
+}`,
+			want: 1,
 		},
 		{
 			name: "indexed row mutation",
