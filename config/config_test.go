@@ -33,6 +33,9 @@ func TestToSetAndCompile(t *testing.T) {
 		TopKOneContracts: []TopKOneContract{{
 			Name: "resident-topk-one",
 		}},
+		ReceiverStagingContracts: []ReceiverStagingContract{{
+			Name: "prefill-staging",
+		}},
 		ElementCountMethods: nil, // stays nil after compile
 	}
 	sets := c.Compile()
@@ -54,6 +57,9 @@ func TestToSetAndCompile(t *testing.T) {
 	if len(sets.TopKOneContracts) != 1 || sets.TopKOneContracts[0].Name != "resident-topk-one" {
 		t.Errorf("Compile lost Top-K(k=1) contracts: %+v", sets.TopKOneContracts)
 	}
+	if len(sets.ReceiverStagingContracts) != 1 || sets.ReceiverStagingContracts[0].Name != "prefill-staging" {
+		t.Errorf("Compile lost receiver staging contracts: %+v", sets.ReceiverStagingContracts)
+	}
 	c.TopKOneContracts[0].Name = "mutated"
 	if sets.TopKOneContracts[0].Name != "resident-topk-one" {
 		t.Error("Compile must clone Top-K(k=1) contracts")
@@ -62,8 +68,99 @@ func TestToSetAndCompile(t *testing.T) {
 	if sets.InPlaceFusionContracts[0].Name != "swiglu" {
 		t.Error("Compile must clone in-place fusion contracts")
 	}
+	c.ReceiverStagingContracts[0].Name = "mutated"
+	if sets.ReceiverStagingContracts[0].Name != "prefill-staging" {
+		t.Error("Compile must clone receiver staging contracts")
+	}
 	if sets.ElementCountMethods != nil {
 		t.Errorf("empty field must compile to a nil set, got %v", sets.ElementCountMethods)
+	}
+}
+
+func TestReceiverStagingContractValid(t *testing.T) {
+	t.Parallel()
+	valid := ReceiverStagingContract{
+		Name:                                 "prefill",
+		CandidateMethod:                      "example.com/project.Decoder.StepN",
+		Overwrite:                            "example.com/project.Decoder.GatherInto",
+		OverwriteKind:                        ReceiverStagingCallMethod,
+		OverwriteArg:                         0,
+		Consumer:                             "example.com/project.Device.Upload",
+		ConsumerKind:                         ReceiverStagingCallMethod,
+		ConsumerArg:                          0,
+		LifecycleMethod:                      "example.com/project.Decoder.Release",
+		MaxRetainedBytes:                     64 << 10,
+		ReceiverCallsSequential:              true,
+		OverwriteWritesAllBeforeRead:         true,
+		OverwriteCompletesBeforeReturn:       true,
+		OverwriteDoesNotRetainArgument:       true,
+		OverwriteAccessesOnlyArgumentLength:  true,
+		OverwriteIgnoresCapacityAndIdentity:  true,
+		OverwritePreservesExtentInputs:       true,
+		ExtentIsNonNegativeAndNonOverflowing: true,
+		ConsumerCompletesBeforeReturn:        true,
+		ConsumerDoesNotRetainArgument:        true,
+		LifecycleEndsReceiverUse:             true,
+		ContentsMayPersistUntilLifecycle:     true,
+	}
+	if !valid.Valid() {
+		t.Fatal("complete receiver staging contract is invalid")
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*ReceiverStagingContract)
+	}{
+		{"blank name", func(c *ReceiverStagingContract) { c.Name = "" }},
+		{"invalid candidate", func(c *ReceiverStagingContract) { c.CandidateMethod = "StepN" }},
+		{"invalid overwrite", func(c *ReceiverStagingContract) { c.Overwrite = "GatherInto" }},
+		{"missing overwrite kind", func(c *ReceiverStagingContract) { c.OverwriteKind = "" }},
+		{"negative overwrite arg", func(c *ReceiverStagingContract) { c.OverwriteArg = -1 }},
+		{"invalid consumer", func(c *ReceiverStagingContract) { c.Consumer = "Upload" }},
+		{"missing consumer kind", func(c *ReceiverStagingContract) { c.ConsumerKind = "" }},
+		{"negative consumer arg", func(c *ReceiverStagingContract) { c.ConsumerArg = -1 }},
+		{"invalid lifecycle", func(c *ReceiverStagingContract) { c.LifecycleMethod = "Release" }},
+		{"missing cap", func(c *ReceiverStagingContract) { c.MaxRetainedBytes = 0 }},
+		{"negative cap", func(c *ReceiverStagingContract) { c.MaxRetainedBytes = -1 }},
+		{"unreasonable cap", func(c *ReceiverStagingContract) { c.MaxRetainedBytes = MaxReceiverStagingBytes + 1 }},
+		{"concurrent receiver", func(c *ReceiverStagingContract) { c.ReceiverCallsSequential = false }},
+		{"overwriter reads first", func(c *ReceiverStagingContract) { c.OverwriteWritesAllBeforeRead = false }},
+		{"overwriter incomplete on return", func(c *ReceiverStagingContract) { c.OverwriteCompletesBeforeReturn = false }},
+		{"overwriter retains", func(c *ReceiverStagingContract) { c.OverwriteDoesNotRetainArgument = false }},
+		{"overwriter accesses capacity", func(c *ReceiverStagingContract) { c.OverwriteAccessesOnlyArgumentLength = false }},
+		{"overwriter observes identity", func(c *ReceiverStagingContract) { c.OverwriteIgnoresCapacityAndIdentity = false }},
+		{"overwriter mutates extent inputs", func(c *ReceiverStagingContract) { c.OverwritePreservesExtentInputs = false }},
+		{"unchecked extent", func(c *ReceiverStagingContract) { c.ExtentIsNonNegativeAndNonOverflowing = false }},
+		{"asynchronous consumer", func(c *ReceiverStagingContract) { c.ConsumerCompletesBeforeReturn = false }},
+		{"retaining consumer", func(c *ReceiverStagingContract) { c.ConsumerDoesNotRetainArgument = false }},
+		{"missing lifecycle ownership", func(c *ReceiverStagingContract) { c.LifecycleEndsReceiverUse = false }},
+		{"sensitive eager-clear contents", func(c *ReceiverStagingContract) { c.ContentsMayPersistUntilLifecycle = false }},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			candidate := valid
+			test.mutate(&candidate)
+			if candidate.Valid() {
+				t.Error("incomplete/unsafe receiver staging contract is valid")
+			}
+		})
+	}
+
+	direct := valid
+	direct.Overwrite = ""
+	direct.OverwriteKind = ""
+	direct.OverwriteArg = 0
+	direct.OverwriteWritesAllBeforeRead = false
+	direct.OverwriteCompletesBeforeReturn = false
+	direct.OverwriteDoesNotRetainArgument = false
+	direct.OverwriteAccessesOnlyArgumentLength = false
+	direct.OverwriteIgnoresCapacityAndIdentity = false
+	direct.OverwritePreservesExtentInputs = false
+	direct.ExtentIsNonNegativeAndNonOverflowing = false
+	if !direct.Valid() {
+		t.Error("inline source-proven overwrite contract is invalid")
 	}
 }
 
@@ -267,8 +364,9 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"TopKSelectorFuncs": len(c.TopKSelectorFuncs), "InputViewFuncs": len(c.InputViewFuncs),
 		"TopKOneContracts": len(c.TopKOneContracts),
 		"OutputViewFuncs":  len(c.OutputViewFuncs), "OptimizedBackendPkgs": len(c.OptimizedBackendPkgs),
-		"KernelRegisterFuncs":    len(c.KernelRegisterFuncs),
-		"InPlaceFusionContracts": len(c.InPlaceFusionContracts),
+		"KernelRegisterFuncs":      len(c.KernelRegisterFuncs),
+		"InPlaceFusionContracts":   len(c.InPlaceFusionContracts),
+		"ReceiverStagingContracts": len(c.ReceiverStagingContracts),
 	}
 	for name, n := range fields {
 		if n == 0 {

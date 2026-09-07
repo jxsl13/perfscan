@@ -36,6 +36,35 @@ func TestMissingVocabInPlaceFusionContracts(t *testing.T) {
 	}
 }
 
+func TestMissingVocabReceiverStagingContracts(t *testing.T) {
+	t.Parallel()
+	check := &lint.Check{NeedsConfig: true, Vocab: []string{"receiverStagingContracts"}}
+	if got := missingVocab(check, &config.Config{}); len(got) != 1 || got[0] != "receiverStagingContracts" {
+		t.Fatalf("missingVocab(empty) = %v, want receiverStagingContracts", got)
+	}
+	invalid := config.Config{ReceiverStagingContracts: []config.ReceiverStagingContract{{Name: "incomplete"}}}
+	if got := missingVocab(check, &invalid); len(got) != 1 || got[0] != "receiverStagingContracts" {
+		t.Fatalf("missingVocab(invalid-only) = %v, want receiverStagingContracts", got)
+	}
+	valid := config.ReceiverStagingContract{
+		Name:                             "inline",
+		CandidateMethod:                  "example.com/project.Decoder.StepN",
+		Consumer:                         "example.com/project.upload",
+		ConsumerKind:                     config.ReceiverStagingCallFunction,
+		LifecycleMethod:                  "example.com/project.Decoder.Release",
+		MaxRetainedBytes:                 64 << 10,
+		ReceiverCallsSequential:          true,
+		ConsumerCompletesBeforeReturn:    true,
+		ConsumerDoesNotRetainArgument:    true,
+		LifecycleEndsReceiverUse:         true,
+		ContentsMayPersistUntilLifecycle: true,
+	}
+	configured := config.Config{ReceiverStagingContracts: []config.ReceiverStagingContract{valid}}
+	if got := missingVocab(check, &configured); len(got) != 0 {
+		t.Fatalf("missingVocab(valid) = %v, want none", got)
+	}
+}
+
 func TestMissingVocabTopKOneContracts(t *testing.T) {
 	t.Parallel()
 	check := &lint.Check{NeedsConfig: true, Vocab: []string{"topKOneContracts"}}
