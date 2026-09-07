@@ -57,9 +57,15 @@ perfscan -baseline perfscan-baseline.yaml -write-baseline ./...  # accept today'
 perfscan -baseline perfscan-baseline.yaml ./...                  # exit 1 only on NEW findings
 ```
 
-Baseline identity is line-independent (`{file, check, message}` with
+Baseline identity is line-independent (`{module, file, check, message}` with
 counts), so unrelated edits that shift line numbers do not resurrect
-accepted findings. Re-run `-write-baseline` after fixing a batch to ratchet
+accepted findings. New baselines store files relative to their discovered Go
+module, so they remain portable across checkout/worktree directory names even
+when the baseline is stored outside the repository. Module paths keep files in
+different workspace modules distinct. Sources without module metadata retain
+baseline-file-relative paths. Version-1 baselines remain readable with their
+original path convention; regenerate them once with `-write-baseline` to adopt
+portable paths. Re-run `-write-baseline` after fixing a batch to ratchet
 the accepted set down. Baselines also record the Go toolchain and target that
 created them. If the compiler generation changes, regenerate performance
 baselines, or explicitly carry them forward only after validating the new

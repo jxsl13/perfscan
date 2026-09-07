@@ -202,7 +202,7 @@ func Run(checks []*lint.Check, opts Options) int {
 			return 2
 		}
 		emitEvidenceWarnings(metadata.Warnings, opts.Stderr)
-		if err := writeBaseline(opts.Baseline, findings, metadata); err != nil {
+		if err := writeBaseline(opts.Baseline, findings, metadata, pkgs...); err != nil {
 			fmt.Fprintln(opts.Stderr, "perfscan: baseline:", err)
 			return 2
 		}
@@ -210,7 +210,7 @@ func Run(checks []*lint.Check, opts Options) int {
 		return 0
 	}
 	if opts.Baseline != "" {
-		filtered, suppressed, warnings, err := applyBaseline(opts.Baseline, findings, metadata)
+		filtered, suppressed, warnings, err := applyBaseline(opts.Baseline, findings, metadata, pkgs...)
 		if err != nil {
 			fmt.Fprintln(opts.Stderr, "perfscan: baseline:", err)
 			return 2
