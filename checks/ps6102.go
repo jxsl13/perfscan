@@ -398,25 +398,32 @@ func (runner *ps6102Runner) expressionStatements(expressions []ast.Expr, context
 
 func (runner *ps6102Runner) ifStatement(statement *ast.IfStmt, context ps6102Context, report bool) ps6102Outcome {
 	condition := runner.boolean(statement.Cond, context, map[types.Object]bool{})
-	trueOutcome := ps6102Outcome{}
-	falseOutcome := ps6102Outcome{continues: true}
-	if condition.mask&ps6102True != 0 {
-		trueOutcome = runner.block(statement.Body.List, ps6102CloneContext(context), false)
-	}
-	if condition.mask&ps6102False != 0 && statement.Else != nil {
-		falseOutcome = runner.statement(statement.Else, ps6102CloneContext(context), false)
-	}
-	if report && (condition.mask&ps6102True != 0 && trueOutcome.failed ||
-		condition.mask&ps6102False != 0 && falseOutcome.failed) {
-		for _, comparison := range condition.thresholds {
-			falseCondition := runner.booleanOverride(statement.Cond, context, comparison, ps6102False)
-			trueCondition := runner.booleanOverride(statement.Cond, context, comparison, ps6102True)
-			if falseCondition.mask != trueCondition.mask && trueOutcome.failed != falseOutcome.failed {
-				runner.report(comparison, context.testName)
+	// Failure probes exist only to attribute a threshold in this condition to
+	// a failing branch. A non-reporting probe must traverse each feasible
+	// branch once; recursively probing it again makes nested ifs exponential.
+	if report && len(condition.thresholds) != 0 {
+		trueProbe := ps6102Outcome{}
+		falseProbe := ps6102Outcome{continues: true}
+		if condition.mask&ps6102True != 0 {
+			trueProbe = runner.block(statement.Body.List, ps6102CloneContext(context), false)
+		}
+		if condition.mask&ps6102False != 0 && statement.Else != nil {
+			falseProbe = runner.statement(statement.Else, ps6102CloneContext(context), false)
+		}
+		if condition.mask&ps6102True != 0 && trueProbe.failed ||
+			condition.mask&ps6102False != 0 && falseProbe.failed {
+			for _, comparison := range condition.thresholds {
+				falseCondition := runner.booleanOverride(statement.Cond, context, comparison, ps6102False)
+				trueCondition := runner.booleanOverride(statement.Cond, context, comparison, ps6102True)
+				if falseCondition.mask != trueCondition.mask && trueProbe.failed != falseProbe.failed {
+					runner.report(comparison, context.testName)
+				}
 			}
 		}
 	}
 
+	trueOutcome := ps6102Outcome{}
+	falseOutcome := ps6102Outcome{continues: true}
 	var continuing []ps6102State
 	if condition.mask&ps6102True != 0 {
 		trueContext := ps6102CloneContext(context)
