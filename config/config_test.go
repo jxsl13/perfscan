@@ -35,6 +35,11 @@ func TestToSetAndCompile(t *testing.T) {
 			Name:      "bounded-gelu",
 			Observers: []BoundedScratchObserverContract{{Function: "example.com/p.Device.Use"}},
 		}},
+		ReusableOneShotWrapperContracts: []ReusableOneShotWrapperContract{{
+			Name:                   "recorder-shell",
+			MutableStateFields:     []string{"example.com/p.Recorder.encoder"},
+			AllowedSynchronousUses: []ReusableOneShotMethod{{Static: "example.com/p.Recorder.Encode"}},
+		}},
 		TopKOneContracts: []TopKOneContract{{
 			Name: "resident-topk-one",
 		}},
@@ -66,6 +71,9 @@ func TestToSetAndCompile(t *testing.T) {
 		len(sets.BoundedScratchFlowContracts[0].Observers) != 1 {
 		t.Errorf("Compile lost bounded-scratch contracts: %+v", sets.BoundedScratchFlowContracts)
 	}
+	if len(sets.ReusableOneShotWrapperContracts) != 1 || sets.ReusableOneShotWrapperContracts[0].Name != "recorder-shell" {
+		t.Errorf("Compile lost reusable one-shot wrapper contracts: %+v", sets.ReusableOneShotWrapperContracts)
+	}
 	if len(sets.TopKOneContracts) != 1 || sets.TopKOneContracts[0].Name != "resident-topk-one" {
 		t.Errorf("Compile lost Top-K(k=1) contracts: %+v", sets.TopKOneContracts)
 	}
@@ -96,6 +104,14 @@ func TestToSetAndCompile(t *testing.T) {
 	c.NativeSnapshotStringCopyContracts[0].Name = "mutated"
 	if sets.NativeSnapshotStringCopyContracts[0].Name != "profile-labels" {
 		t.Error("Compile must clone native snapshot string-copy contracts")
+	}
+	c.ReusableOneShotWrapperContracts[0].Name = "mutated"
+	c.ReusableOneShotWrapperContracts[0].MutableStateFields[0] = "mutated"
+	c.ReusableOneShotWrapperContracts[0].AllowedSynchronousUses[0].Static = "mutated"
+	if sets.ReusableOneShotWrapperContracts[0].Name != "recorder-shell" ||
+		sets.ReusableOneShotWrapperContracts[0].MutableStateFields[0] != "example.com/p.Recorder.encoder" ||
+		sets.ReusableOneShotWrapperContracts[0].AllowedSynchronousUses[0].Static != "example.com/p.Recorder.Encode" {
+		t.Error("Compile must deeply clone reusable one-shot wrapper contracts")
 	}
 	if sets.ElementCountMethods != nil {
 		t.Errorf("empty field must compile to a nil set, got %v", sets.ElementCountMethods)
@@ -332,6 +348,117 @@ func TestNativeSnapshotStringCopyContractValid(t *testing.T) {
 	}
 }
 
+func TestReusableOneShotWrapperContractValid(t *testing.T) {
+	t.Parallel()
+	valid := ReusableOneShotWrapperContract{
+		Name:                              "recorder-shell",
+		WrapperType:                       "example.com/backend.Recorder",
+		ProviderType:                      "example.com/backend.Device",
+		Acquisition:                       "example.com/model.CommandFactory.NewRecorder",
+		ConcreteAcquisition:               "example.com/backend.Device.NewRecorder",
+		WrapperConstructor:                "example.com/backend.NewRecorder",
+		Terminal:                          ReusableOneShotMethod{Static: "example.com/model.CommandRecorder.Free", Concrete: "example.com/backend.Recorder.Free"},
+		Reset:                             ReusableOneShotMethod{Static: "example.com/model.CommandRecorder.Reset", Concrete: "example.com/backend.Recorder.Reset"},
+		FreshNativeHandleFactory:          "example.com/backend.Device.NewCommandBuffer",
+		NativeHandleField:                 "example.com/backend.Recorder.commandBuffer",
+		MutableStateFields:                []string{"example.com/backend.Recorder.encoder", "example.com/backend.Recorder.committed"},
+		AllowedSynchronousUses:            []ReusableOneShotMethod{{Static: "example.com/model.CommandRecorder.Encode", Concrete: "example.com/backend.Recorder.Encode"}},
+		AcquisitionWrapperResult:          1,
+		AcquisitionStatusResult:           2,
+		ConstructorWrapperResult:          1,
+		ResetStatusResult:                 2,
+		AcquisitionFailureMode:            ReusableOneShotAcquisitionNilError,
+		ResetFailureState:                 ReusableOneShotResetErrorEmptySafe,
+		SlotBound:                         1,
+		AcquisitionCreatesFreshGoWrapper:  true,
+		AcquisitionHasExactDynamicWrapper: true,
+		FailedAcquisitionHasNoGeneration:  true,
+		NativeHandleIsOneShot:             true,
+		ResetAlwaysCreatesFreshHandle:     true,
+		TerminalSynchronouslyReleases:     true,
+		TerminalClearsHandle:              true,
+		TerminalIsIdempotent:              true,
+		ResetClearsMutableState:           true,
+		UsesExecuteSynchronously:          true,
+		UsesDoNotRetainGeneration:         true,
+		NoStaleGenerationReferences:       true,
+		OwnerAccessIsNonConcurrent:        true,
+		ProviderFallbackIsPreserved:       true,
+		FailuresAndPanicsArePreserved:     true,
+	}
+	if !valid.Valid() {
+		t.Fatal("complete reusable one-shot wrapper contract is invalid")
+	}
+	tests := []struct {
+		name   string
+		mutate func(*ReusableOneShotWrapperContract)
+	}{
+		{"blank name", func(c *ReusableOneShotWrapperContract) { c.Name = "" }},
+		{"padded name", func(c *ReusableOneShotWrapperContract) { c.Name = " recorder-shell" }},
+		{"bad wrapper type", func(c *ReusableOneShotWrapperContract) { c.WrapperType = "Recorder" }},
+		{"bad provider type", func(c *ReusableOneShotWrapperContract) { c.ProviderType = "Device" }},
+		{"bad acquisition", func(c *ReusableOneShotWrapperContract) { c.Acquisition = "NewRecorder" }},
+		{"bad concrete acquisition", func(c *ReusableOneShotWrapperContract) { c.ConcreteAcquisition = "NewRecorder" }},
+		{"bad constructor", func(c *ReusableOneShotWrapperContract) { c.WrapperConstructor = "NewRecorder" }},
+		{"bad native factory", func(c *ReusableOneShotWrapperContract) { c.FreshNativeHandleFactory = "NewHandle" }},
+		{"bad native field", func(c *ReusableOneShotWrapperContract) { c.NativeHandleField = "handle" }},
+		{"same result roles", func(c *ReusableOneShotWrapperContract) { c.AcquisitionStatusResult = 1 }},
+		{"missing mutable state", func(c *ReusableOneShotWrapperContract) { c.MutableStateFields = nil }},
+		{"duplicate mutable state", func(c *ReusableOneShotWrapperContract) { c.MutableStateFields[1] = c.MutableStateFields[0] }},
+		{"handle repeated as mutable state", func(c *ReusableOneShotWrapperContract) { c.MutableStateFields[0] = c.NativeHandleField }},
+		{"missing use", func(c *ReusableOneShotWrapperContract) { c.AllowedSynchronousUses = nil }},
+		{"terminal reused as use", func(c *ReusableOneShotWrapperContract) { c.AllowedSynchronousUses[0] = c.Terminal }},
+		{"reset equals terminal", func(c *ReusableOneShotWrapperContract) { c.Reset = c.Terminal }},
+		{"acquisition reused as terminal", func(c *ReusableOneShotWrapperContract) { c.Terminal.Static = c.Acquisition }},
+		{"factory reused as reset", func(c *ReusableOneShotWrapperContract) { c.Reset.Concrete = c.FreshNativeHandleFactory }},
+		{"use roles overlap", func(c *ReusableOneShotWrapperContract) {
+			c.AllowedSynchronousUses = append(c.AllowedSynchronousUses, c.AllowedSynchronousUses[0])
+		}},
+		{"bad slot bound", func(c *ReusableOneShotWrapperContract) { c.SlotBound = 3 }},
+		{"fallible two-slot", func(c *ReusableOneShotWrapperContract) { c.SlotBound = 2 }},
+		{"unknown acquisition mode", func(c *ReusableOneShotWrapperContract) { c.AcquisitionFailureMode = "boolean" }},
+		{"unknown reset state", func(c *ReusableOneShotWrapperContract) { c.ResetFailureState = "live-on-error" }},
+		{"missing fresh wrapper promise", func(c *ReusableOneShotWrapperContract) { c.AcquisitionCreatesFreshGoWrapper = false }},
+		{"missing exact dynamic type", func(c *ReusableOneShotWrapperContract) { c.AcquisitionHasExactDynamicWrapper = false }},
+		{"failed acquisition retains generation", func(c *ReusableOneShotWrapperContract) { c.FailedAcquisitionHasNoGeneration = false }},
+		{"native handle reusable", func(c *ReusableOneShotWrapperContract) { c.NativeHandleIsOneShot = false }},
+		{"reset reuses native handle", func(c *ReusableOneShotWrapperContract) { c.ResetAlwaysCreatesFreshHandle = false }},
+		{"terminal asynchronous", func(c *ReusableOneShotWrapperContract) { c.TerminalSynchronouslyReleases = false }},
+		{"terminal retains handle", func(c *ReusableOneShotWrapperContract) { c.TerminalClearsHandle = false }},
+		{"terminal non-idempotent", func(c *ReusableOneShotWrapperContract) { c.TerminalIsIdempotent = false }},
+		{"reset retains mutable state", func(c *ReusableOneShotWrapperContract) { c.ResetClearsMutableState = false }},
+		{"asynchronous use", func(c *ReusableOneShotWrapperContract) { c.UsesExecuteSynchronously = false }},
+		{"use retains generation", func(c *ReusableOneShotWrapperContract) { c.UsesDoNotRetainGeneration = false }},
+		{"stale references", func(c *ReusableOneShotWrapperContract) { c.NoStaleGenerationReferences = false }},
+		{"concurrent owner", func(c *ReusableOneShotWrapperContract) { c.OwnerAccessIsNonConcurrent = false }},
+		{"fallback not preserved", func(c *ReusableOneShotWrapperContract) { c.ProviderFallbackIsPreserved = false }},
+		{"panic behavior changed", func(c *ReusableOneShotWrapperContract) { c.FailuresAndPanicsArePreserved = false }},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			candidate := valid
+			candidate.MutableStateFields = slices.Clone(valid.MutableStateFields)
+			candidate.AllowedSynchronousUses = slices.Clone(valid.AllowedSynchronousUses)
+			test.mutate(&candidate)
+			if candidate.Valid() {
+				t.Error("incomplete reusable one-shot wrapper contract is valid")
+			}
+		})
+	}
+
+	infallible := valid
+	infallible.AcquisitionFailureMode = ReusableOneShotAcquisitionInfallible
+	infallible.AcquisitionStatusResult = 0
+	infallible.ResetFailureState = ReusableOneShotResetInfallibleEmpty
+	infallible.ResetStatusResult = 0
+	infallible.SlotBound = 2
+	if !infallible.Valid() {
+		t.Error("complete infallible two-slot contract is invalid")
+	}
+}
+
 func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 
@@ -536,10 +663,11 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"TopKOneContracts":                  len(c.TopKOneContracts),
 		"NativeSnapshotStringCopyContracts": len(c.NativeSnapshotStringCopyContracts),
 		"OutputViewFuncs":                   len(c.OutputViewFuncs), "OptimizedBackendPkgs": len(c.OptimizedBackendPkgs),
-		"KernelRegisterFuncs":         len(c.KernelRegisterFuncs),
-		"InPlaceFusionContracts":      len(c.InPlaceFusionContracts),
-		"BoundedScratchFlowContracts": len(c.BoundedScratchFlowContracts),
-		"ReceiverStagingContracts":    len(c.ReceiverStagingContracts),
+		"KernelRegisterFuncs":             len(c.KernelRegisterFuncs),
+		"InPlaceFusionContracts":          len(c.InPlaceFusionContracts),
+		"BoundedScratchFlowContracts":     len(c.BoundedScratchFlowContracts),
+		"ReceiverStagingContracts":        len(c.ReceiverStagingContracts),
+		"ReusableOneShotWrapperContracts": len(c.ReusableOneShotWrapperContracts),
 	}
 	for name, n := range fields {
 		if n == 0 {
@@ -554,5 +682,8 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 	}
 	if len(c.BoundedScratchFlowContracts) != 1 || !c.BoundedScratchFlowContracts[0].Valid() {
 		t.Errorf("example config has invalid bounded-scratch contract: %+v", c.BoundedScratchFlowContracts)
+	}
+	if len(c.ReusableOneShotWrapperContracts) != 1 || !c.ReusableOneShotWrapperContracts[0].Valid() {
+		t.Errorf("example config has invalid reusable one-shot wrapper contract: %+v", c.ReusableOneShotWrapperContracts)
 	}
 }

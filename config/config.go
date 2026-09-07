@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -217,6 +218,12 @@ type Config struct {
 	// those ownership and concurrency guarantees; PS6107 stays silent unless a
 	// complete valid contract supplies them.
 	ReceiverStagingContracts []ReceiverStagingContract `json:"receiverStagingContracts,omitempty" yaml:"receiverStagingContracts"`
+
+	// ReusableOneShotWrapperContracts are explicit project-owned lifecycle
+	// contracts for PS6109. They separate a reusable Go wrapper shell from the
+	// always-fresh one-shot native handle installed by Reset. Names alone never
+	// establish these ownership, failure, synchronization, or generation facts.
+	ReusableOneShotWrapperContracts []ReusableOneShotWrapperContract `json:"reusableOneShotWrapperContracts,omitempty" yaml:"reusableOneShotWrapperContracts"`
 }
 
 // BoundedScratchFlowContract binds one capacity-amplified scratch sequence to
@@ -484,6 +491,155 @@ func nativeSnapshotFieldValid(field string, optional bool) bool {
 	return optional && field == "" || psTopKIdentifierValid(field)
 }
 
+const (
+	ReusableOneShotAcquisitionInfallible = "infallible"
+	ReusableOneShotAcquisitionNilError   = "nil-error"
+
+	ReusableOneShotResetInfallibleEmpty = "infallible-empty-before-reset"
+	ReusableOneShotResetErrorEmptySafe  = "error-leaves-empty-terminal-safe"
+)
+
+// ReusableOneShotMethod binds the method selected by source to the exact
+// concrete *WrapperType implementation promised by a PS6109 contract.
+type ReusableOneShotMethod struct {
+	Static   string `json:"static" yaml:"static"`
+	Concrete string `json:"concrete" yaml:"concrete"`
+}
+
+// ReusableOneShotWrapperContract describes one bounded fresh-wrapper
+// lifecycle. Result positions are one-based; zero denotes an absent status
+// only where the selected failure mode permits it.
+type ReusableOneShotWrapperContract struct {
+	Name                     string                  `json:"name" yaml:"name"`
+	WrapperType              string                  `json:"wrapperType" yaml:"wrapperType"`
+	ProviderType             string                  `json:"providerType" yaml:"providerType"`
+	Acquisition              string                  `json:"acquisition" yaml:"acquisition"`
+	ConcreteAcquisition      string                  `json:"concreteAcquisition" yaml:"concreteAcquisition"`
+	WrapperConstructor       string                  `json:"wrapperConstructor" yaml:"wrapperConstructor"`
+	Terminal                 ReusableOneShotMethod   `json:"terminal" yaml:"terminal"`
+	Reset                    ReusableOneShotMethod   `json:"reset" yaml:"reset"`
+	FreshNativeHandleFactory string                  `json:"freshNativeHandleFactory" yaml:"freshNativeHandleFactory"`
+	NativeHandleField        string                  `json:"nativeHandleField" yaml:"nativeHandleField"`
+	MutableStateFields       []string                `json:"mutableStateFields" yaml:"mutableStateFields"`
+	AllowedSynchronousUses   []ReusableOneShotMethod `json:"allowedSynchronousUses" yaml:"allowedSynchronousUses"`
+
+	AcquisitionWrapperResult int `json:"acquisitionWrapperResult" yaml:"acquisitionWrapperResult"`
+	AcquisitionStatusResult  int `json:"acquisitionStatusResult" yaml:"acquisitionStatusResult"`
+	ConstructorWrapperResult int `json:"constructorWrapperResult" yaml:"constructorWrapperResult"`
+	ResetStatusResult        int `json:"resetStatusResult" yaml:"resetStatusResult"`
+
+	AcquisitionFailureMode string `json:"acquisitionFailureMode" yaml:"acquisitionFailureMode"`
+	ResetFailureState      string `json:"resetFailureState" yaml:"resetFailureState"`
+	SlotBound              int    `json:"slotBound" yaml:"slotBound"`
+
+	AcquisitionCreatesFreshGoWrapper  bool `json:"acquisitionCreatesFreshGoWrapper" yaml:"acquisitionCreatesFreshGoWrapper"`
+	AcquisitionHasExactDynamicWrapper bool `json:"acquisitionHasExactDynamicWrapper" yaml:"acquisitionHasExactDynamicWrapper"`
+	FailedAcquisitionHasNoGeneration  bool `json:"failedAcquisitionHasNoGeneration" yaml:"failedAcquisitionHasNoGeneration"`
+	NativeHandleIsOneShot             bool `json:"nativeHandleIsOneShot" yaml:"nativeHandleIsOneShot"`
+	ResetAlwaysCreatesFreshHandle     bool `json:"resetAlwaysCreatesFreshHandle" yaml:"resetAlwaysCreatesFreshHandle"`
+	TerminalSynchronouslyReleases     bool `json:"terminalSynchronouslyReleases" yaml:"terminalSynchronouslyReleases"`
+	TerminalClearsHandle              bool `json:"terminalClearsHandle" yaml:"terminalClearsHandle"`
+	TerminalIsIdempotent              bool `json:"terminalIsIdempotent" yaml:"terminalIsIdempotent"`
+	ResetClearsMutableState           bool `json:"resetClearsMutableState" yaml:"resetClearsMutableState"`
+	UsesExecuteSynchronously          bool `json:"usesExecuteSynchronously" yaml:"usesExecuteSynchronously"`
+	UsesDoNotRetainGeneration         bool `json:"usesDoNotRetainGeneration" yaml:"usesDoNotRetainGeneration"`
+	NoStaleGenerationReferences       bool `json:"noStaleGenerationReferences" yaml:"noStaleGenerationReferences"`
+	OwnerAccessIsNonConcurrent        bool `json:"ownerAccessIsNonConcurrent" yaml:"ownerAccessIsNonConcurrent"`
+	ProviderFallbackIsPreserved       bool `json:"providerFallbackIsPreserved" yaml:"providerFallbackIsPreserved"`
+	FailuresAndPanicsArePreserved     bool `json:"failuresAndPanicsArePreserved" yaml:"failuresAndPanicsArePreserved"`
+}
+
+// Valid reports whether every semantic promise required by PS6109 is present.
+// Exact source types, signatures, result roles, and concrete bindings are
+// checked by the analyzer rather than inferred from these names.
+func (c *ReusableOneShotWrapperContract) Valid() bool {
+	if c == nil || c.Name == "" || strings.TrimSpace(c.Name) != c.Name ||
+		!ps6109TypeIDValid(c.WrapperType) || !ps6109TypeIDValid(c.ProviderType) ||
+		!psTopKMethodIDValid(c.Acquisition) || !psTopKMethodIDValid(c.ConcreteAcquisition) ||
+		!psTopKFunctionIDValid(c.WrapperConstructor) || !ps6109MethodValid(c.Terminal) ||
+		!ps6109MethodValid(c.Reset) || !ps6109CallableIDValid(c.FreshNativeHandleFactory) ||
+		!psTopKMethodIDValid(c.NativeHandleField) || len(c.MutableStateFields) == 0 ||
+		len(c.AllowedSynchronousUses) == 0 || c.AcquisitionWrapperResult <= 0 ||
+		c.ConstructorWrapperResult <= 0 || c.SlotBound < 1 || c.SlotBound > 2 ||
+		!c.AcquisitionCreatesFreshGoWrapper || !c.AcquisitionHasExactDynamicWrapper ||
+		!c.FailedAcquisitionHasNoGeneration || !c.NativeHandleIsOneShot ||
+		!c.ResetAlwaysCreatesFreshHandle || !c.TerminalSynchronouslyReleases ||
+		!c.TerminalClearsHandle || !c.TerminalIsIdempotent || !c.ResetClearsMutableState ||
+		!c.UsesExecuteSynchronously || !c.UsesDoNotRetainGeneration ||
+		!c.NoStaleGenerationReferences || !c.OwnerAccessIsNonConcurrent ||
+		!c.ProviderFallbackIsPreserved || !c.FailuresAndPanicsArePreserved {
+		return false
+	}
+	if c.Terminal == c.Reset || c.AcquisitionWrapperResult == c.AcquisitionStatusResult && c.AcquisitionStatusResult != 0 {
+		return false
+	}
+	switch c.AcquisitionFailureMode {
+	case ReusableOneShotAcquisitionInfallible:
+		if c.AcquisitionStatusResult != 0 {
+			return false
+		}
+	case ReusableOneShotAcquisitionNilError:
+		if c.AcquisitionStatusResult <= 0 || c.SlotBound != 1 {
+			return false
+		}
+	default:
+		return false
+	}
+	switch c.ResetFailureState {
+	case ReusableOneShotResetInfallibleEmpty:
+		if c.ResetStatusResult != 0 {
+			return false
+		}
+	case ReusableOneShotResetErrorEmptySafe:
+		if c.ResetStatusResult <= 0 || c.SlotBound != 1 {
+			return false
+		}
+	default:
+		return false
+	}
+	seenFields := map[string]bool{c.NativeHandleField: true}
+	for _, field := range c.MutableStateFields {
+		if !psTopKMethodIDValid(field) || seenFields[field] {
+			return false
+		}
+		seenFields[field] = true
+	}
+	seenMethods := make(map[string]string)
+	addRole := func(role string, ids ...string) bool {
+		for _, id := range ids {
+			if previous := seenMethods[id]; previous != "" && previous != role {
+				return false
+			}
+			seenMethods[id] = role
+		}
+		return true
+	}
+	if !addRole("acquisition", c.Acquisition, c.ConcreteAcquisition) ||
+		!addRole("constructor", c.WrapperConstructor) || !addRole("terminal", c.Terminal.Static, c.Terminal.Concrete) ||
+		!addRole("reset", c.Reset.Static, c.Reset.Concrete) || !addRole("factory", c.FreshNativeHandleFactory) {
+		return false
+	}
+	for index, method := range c.AllowedSynchronousUses {
+		if !ps6109MethodValid(method) || !addRole("use:"+strconv.Itoa(index), method.Static, method.Concrete) {
+			return false
+		}
+	}
+	return true
+}
+
+func ps6109MethodValid(method ReusableOneShotMethod) bool {
+	return psTopKMethodIDValid(method.Static) && psTopKMethodIDValid(method.Concrete)
+}
+
+func ps6109CallableIDValid(id string) bool {
+	return psTopKFunctionIDValid(id) || psTopKMethodIDValid(id)
+}
+
+func ps6109TypeIDValid(id string) bool {
+	separator := strings.LastIndexByte(id, '.')
+	return separator > 0 && psTopKIdentifierValid(id[separator+1:]) && psTopKImportPathValid(id[:separator])
+}
+
 // InPlaceFusionContract binds one last-use fusion candidate to exact project
 // APIs. Function identifiers use "import/path.Type.Method" for methods and
 // "import/path.Function" for package functions. PS6087 currently accepts
@@ -644,6 +800,7 @@ type Sets struct {
 	InPlaceFusionContracts            []InPlaceFusionContract
 	BoundedScratchFlowContracts       []BoundedScratchFlowContract
 	ReceiverStagingContracts          []ReceiverStagingContract
+	ReusableOneShotWrapperContracts   []ReusableOneShotWrapperContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -691,6 +848,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		InPlaceFusionContracts:            slices.Clone(c.InPlaceFusionContracts),
 		BoundedScratchFlowContracts:       cloneBoundedScratchFlowContracts(c.BoundedScratchFlowContracts),
 		ReceiverStagingContracts:          slices.Clone(c.ReceiverStagingContracts),
+		ReusableOneShotWrapperContracts:   cloneReusableOneShotWrapperContracts(c.ReusableOneShotWrapperContracts),
 	}
 }
 
@@ -698,6 +856,15 @@ func cloneBoundedScratchFlowContracts(contracts []BoundedScratchFlowContract) []
 	cloned := slices.Clone(contracts)
 	for index := range cloned {
 		cloned[index].Observers = slices.Clone(cloned[index].Observers)
+	}
+	return cloned
+}
+
+func cloneReusableOneShotWrapperContracts(contracts []ReusableOneShotWrapperContract) []ReusableOneShotWrapperContract {
+	cloned := slices.Clone(contracts)
+	for index := range cloned {
+		cloned[index].MutableStateFields = slices.Clone(cloned[index].MutableStateFields)
+		cloned[index].AllowedSynchronousUses = slices.Clone(cloned[index].AllowedSynchronousUses)
 	}
 	return cloned
 }
