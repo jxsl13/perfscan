@@ -194,6 +194,92 @@ type Config struct {
 	// recorder/autograd visibility. PS6087 stays silent unless all assertions are
 	// true and the source matches the exact contract.
 	InPlaceFusionContracts []InPlaceFusionContract `json:"inPlaceFusionContracts,omitempty" yaml:"inPlaceFusionContracts"`
+
+	// ReceiverStagingContracts are explicit, project-owned ownership contracts
+	// for PS6107. They bind one exact pointer-receiver method to an optional
+	// full-overwrite helper, one synchronous non-retaining consumer, a lifecycle
+	// boundary, and a bounded retained-byte policy. Local Go syntax cannot prove
+	// those ownership and concurrency guarantees; PS6107 stays silent unless a
+	// complete valid contract supplies them.
+	ReceiverStagingContracts []ReceiverStagingContract `json:"receiverStagingContracts,omitempty" yaml:"receiverStagingContracts"`
+}
+
+// ReceiverStagingContract describes one receiver-owned staging candidate.
+// Function identifiers use "import/path.Type.Method" for methods and
+// "import/path.Function" for package functions. Argument indexes are
+// zero-based and exclude a method receiver.
+type ReceiverStagingContract struct {
+	Name                                 string                  `json:"name" yaml:"name"`
+	CandidateMethod                      string                  `json:"candidateMethod" yaml:"candidateMethod"`
+	Overwrite                            string                  `json:"overwrite,omitempty" yaml:"overwrite,omitempty"`
+	OverwriteKind                        ReceiverStagingCallKind `json:"overwriteKind,omitempty" yaml:"overwriteKind,omitempty"`
+	OverwriteArg                         int                     `json:"overwriteArg" yaml:"overwriteArg"`
+	Consumer                             string                  `json:"consumer" yaml:"consumer"`
+	ConsumerKind                         ReceiverStagingCallKind `json:"consumerKind" yaml:"consumerKind"`
+	ConsumerArg                          int                     `json:"consumerArg" yaml:"consumerArg"`
+	LifecycleMethod                      string                  `json:"lifecycleMethod" yaml:"lifecycleMethod"`
+	MaxRetainedBytes                     int64                   `json:"maxRetainedBytes" yaml:"maxRetainedBytes"`
+	ReceiverCallsSequential              bool                    `json:"receiverCallsSequential" yaml:"receiverCallsSequential"`
+	OverwriteWritesAllBeforeRead         bool                    `json:"overwriteWritesAllBeforeRead" yaml:"overwriteWritesAllBeforeRead"`
+	OverwriteCompletesBeforeReturn       bool                    `json:"overwriteCompletesBeforeReturn" yaml:"overwriteCompletesBeforeReturn"`
+	OverwriteDoesNotRetainArgument       bool                    `json:"overwriteDoesNotRetainArgument" yaml:"overwriteDoesNotRetainArgument"`
+	OverwriteAccessesOnlyArgumentLength  bool                    `json:"overwriteAccessesOnlyArgumentLength" yaml:"overwriteAccessesOnlyArgumentLength"`
+	OverwriteIgnoresCapacityAndIdentity  bool                    `json:"overwriteIgnoresCapacityAndIdentity" yaml:"overwriteIgnoresCapacityAndIdentity"`
+	OverwritePreservesExtentInputs       bool                    `json:"overwritePreservesExtentInputs" yaml:"overwritePreservesExtentInputs"`
+	ExtentIsNonNegativeAndNonOverflowing bool                    `json:"extentIsNonNegativeAndNonOverflowing" yaml:"extentIsNonNegativeAndNonOverflowing"`
+	ConsumerCompletesBeforeReturn        bool                    `json:"consumerCompletesBeforeReturn" yaml:"consumerCompletesBeforeReturn"`
+	ConsumerDoesNotRetainArgument        bool                    `json:"consumerDoesNotRetainArgument" yaml:"consumerDoesNotRetainArgument"`
+	LifecycleEndsReceiverUse             bool                    `json:"lifecycleEndsReceiverUse" yaml:"lifecycleEndsReceiverUse"`
+	ContentsMayPersistUntilLifecycle     bool                    `json:"contentsMayPersistUntilLifecycle" yaml:"contentsMayPersistUntilLifecycle"`
+}
+
+// ReceiverStagingCallKind distinguishes package functions from methods in an
+// exact receiver-staging call contract.
+type ReceiverStagingCallKind string
+
+const (
+	ReceiverStagingCallFunction ReceiverStagingCallKind = "function"
+	ReceiverStagingCallMethod   ReceiverStagingCallKind = "method"
+)
+
+const MaxReceiverStagingBytes int64 = 64 << 20
+
+// Valid reports whether the contract contains every semantic assertion PS6107
+// needs. The 64 MiB limit is an intentionally conservative analyzer-policy
+// ceiling, not a claim that retaining that much is safe for every application.
+func (c *ReceiverStagingContract) Valid() bool {
+	if c.Name == "" || !psTopKMethodIDValid(c.CandidateMethod) ||
+		!psTopKMethodIDValid(c.LifecycleMethod) || c.ConsumerArg < 0 ||
+		!psTypedFunctionIDValid(c.Consumer, c.ConsumerKind) ||
+		c.MaxRetainedBytes <= 0 || c.MaxRetainedBytes > MaxReceiverStagingBytes ||
+		!c.ReceiverCallsSequential || !c.ConsumerCompletesBeforeReturn ||
+		!c.ConsumerDoesNotRetainArgument || !c.LifecycleEndsReceiverUse ||
+		!c.ContentsMayPersistUntilLifecycle {
+		return false
+	}
+	if c.Overwrite == "" {
+		return c.OverwriteKind == "" && c.OverwriteArg == 0 &&
+			!c.OverwriteWritesAllBeforeRead && !c.OverwriteCompletesBeforeReturn &&
+			!c.OverwriteDoesNotRetainArgument && !c.OverwriteAccessesOnlyArgumentLength &&
+			!c.OverwriteIgnoresCapacityAndIdentity && !c.OverwritePreservesExtentInputs &&
+			!c.ExtentIsNonNegativeAndNonOverflowing
+	}
+	return c.OverwriteArg >= 0 && psTypedFunctionIDValid(c.Overwrite, c.OverwriteKind) &&
+		c.OverwriteWritesAllBeforeRead && c.OverwriteCompletesBeforeReturn &&
+		c.OverwriteDoesNotRetainArgument && c.OverwriteAccessesOnlyArgumentLength &&
+		c.OverwriteIgnoresCapacityAndIdentity && c.OverwritePreservesExtentInputs &&
+		c.ExtentIsNonNegativeAndNonOverflowing
+}
+
+func psTypedFunctionIDValid(id string, kind ReceiverStagingCallKind) bool {
+	switch kind {
+	case ReceiverStagingCallFunction:
+		return psTopKFunctionIDValid(id)
+	case ReceiverStagingCallMethod:
+		return psTopKMethodIDValid(id)
+	default:
+		return false
+	}
 }
 
 // InPlaceFusionContract binds one last-use fusion candidate to exact project
@@ -353,6 +439,7 @@ type Sets struct {
 	OptimizedBackendPkgs     map[string]bool
 	KernelRegisterFuncs      map[string]bool
 	InPlaceFusionContracts   []InPlaceFusionContract
+	ReceiverStagingContracts []ReceiverStagingContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -397,6 +484,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		OptimizedBackendPkgs:     toSet(c.OptimizedBackendPkgs),
 		KernelRegisterFuncs:      toSet(c.KernelRegisterFuncs),
 		InPlaceFusionContracts:   slices.Clone(c.InPlaceFusionContracts),
+		ReceiverStagingContracts: slices.Clone(c.ReceiverStagingContracts),
 	}
 }
 

@@ -51,6 +51,17 @@ these facts are source-auditable:
     and documents perfscan:full-overwrite, a full/every-byte overwrite, or both
     zero-padding and NUL termination.
 
+For this confirmed cgo producer shape, the diagnostic also warns that the
+scratch hoist leaves C.<producer> inside the record loop. Removing allocations
+does not remove those native calls or establish a proportional latency gain.
+After measuring the reused-scratch control, evaluate a bulk ABI or immutable
+snapshot that preserves record order, labels, ownership, synchronization,
+errors, and compatibility. Inspect the foreign implementation separately for
+boxed scalar-index collections that a contiguous representation could avoid;
+PS2004 does not infer native collection layout from Go source. The additional
+message is limited to the proven autofix shape, not every advisory scratch
+finding, and bulk extraction is not an automatic rewrite.
+
 The explicit contract is essential: cgo signatures do not reveal whether C
 writes the complete readable region. Add such a comment only after checking
 the foreign implementation. Without every proof, PS2004 remains advisory.
@@ -85,7 +96,19 @@ before versus 2.72 us, 5,456 B/op, 87 allocs/op after: 127 fewer allocations,
 adjacent shrinking/growing labels, empty and embedded-NUL labels, and the exact
 95-byte truncation boundary. Conversely, issue #898 measured two receiver-owned
 scratch variants at 1.2465x and 1.3379x slower despite reaching 0 B/op and 0
-allocs/op, consistent with losing fresh-allocation no-alias optimization.`,
+allocs/op, consistent with losing fresh-allocation no-alias optimization.
+
+Issue #853 isolated 96-byte scratch reuse in a completed 340-event Metal
+profile on Apple M2 Pro: count-seven one-second medians moved from 100,173
+ns/op, 60,608 B/op, 1,363 allocs/op to 92,469 ns/op, 28,064 B/op, 1,024
+allocs/op. That removed 339 allocations and 32,544 bytes but achieved only
+1.083x speedup, below the project's frozen 1.10x gate, so the change was
+reverted. A one-event control remained neutral (447.3 versus 445.3 ns/op).
+The later combined bulk-snapshot and unboxed-native-index change measured
+17.91-18.23x warm 340-event speedups, versus 2.55-2.59x for first extraction,
+across three order-alternated count-seven campaigns. Its 19,816 B/op and 344
+allocs/op are a separate combined result, not scratch-only or cgo-only
+attribution and not a universal native-call speedup.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS2004",
@@ -140,6 +163,7 @@ func runPS2004(pass *analysis.Pass) (any, error) {
 						if fix, size, producer, ok := ps2004CgoReuseFix(pass, f, fn, loop, as, call, id, stack); ok {
 							fixedLoops[loop] = true
 							diag.Message = id.Name + ": fixed " + size + "-byte cgo output buffer is allocated once per record despite an explicit full-overwrite contract for C." + producer + "; reuse one backing buffer across the loop (autofix preserves the local method-call lifetime)"
+							diag.Message += "; this leaves C." + producer + " inside the record loop: fewer allocations do not imply proportional latency gains; measure the reused-scratch control, then evaluate a semantics-preserving bulk ABI or immutable snapshot (separate advisory, no bulk autofix)"
 							diag.SuggestedFixes = []analysis.SuggestedFix{fix}
 						}
 					}
