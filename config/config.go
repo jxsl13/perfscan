@@ -179,6 +179,12 @@ type Config struct {
 	// ownership, so PS6110 stays silent unless every assertion is present.
 	NativeSnapshotStringCopyContracts []NativeSnapshotStringCopyContract `json:"nativeSnapshotStringCopyContracts,omitempty" yaml:"nativeSnapshotStringCopyContracts"`
 
+	// SchedulerTileGrainContracts bind one exact scheduler/band/kernel chain to
+	// source-resolved target variants for PS6112. The explicit target, tile,
+	// tiled-kernel, and scalar-tail promises keep architecture policy out of
+	// identifier spelling. With no complete contract PS6112 stays silent.
+	SchedulerTileGrainContracts []SchedulerTileGrainContract `json:"schedulerTileGrainContracts,omitempty" yaml:"schedulerTileGrainContracts"`
+
 	// InputViewFuncs and OutputViewFuncs expose repository-specific typed views
 	// over input and destination storage respectively.
 	InputViewFuncs  []string `json:"inputViewFuncs,omitempty" yaml:"inputViewFuncs"`
@@ -499,6 +505,139 @@ type NativeSnapshotStringCopyContract struct {
 	CopyReturnsExactOwnedString          bool                   `json:"copyReturnsExactOwnedString" yaml:"copyReturnsExactOwnedString"`
 	ReturnedStringsOutliveLifecycle      bool                   `json:"returnedStringsOutliveLifecycle" yaml:"returnedStringsOutliveLifecycle"`
 	ExactContentCheckRequired            bool                   `json:"exactContentCheckRequired" yaml:"exactContentCheckRequired"`
+}
+
+// SchedulerTileGrainContract identifies one package-function scheduling
+// chain. Argument positions are one-based. Version one intentionally accepts
+// package functions and direct row forwarding only; methods and alias chains
+// wait for concrete owner shapes and separate proof coverage.
+type SchedulerTileGrainContract struct {
+	Name               string `json:"name" yaml:"name"`
+	Scheduler          string `json:"scheduler" yaml:"scheduler"`
+	GrainConstant      string `json:"grainConstant" yaml:"grainConstant"`
+	Band               string `json:"band" yaml:"band"`
+	BandRowsArgument   int    `json:"bandRowsArgument" yaml:"bandRowsArgument"`
+	KernelEntry        string `json:"kernelEntry" yaml:"kernelEntry"`
+	KernelRowsArgument int    `json:"kernelRowsArgument" yaml:"kernelRowsArgument"`
+	RepeatedFullTasks  bool   `json:"repeatedFullTasks" yaml:"repeatedFullTasks"`
+	// SynchronousRunner is optional. When the scheduler loop is inside a
+	// callback literal, all three fields make the exact typed callback slot and
+	// reviewed executes-before-return property explicit.
+	SynchronousRunner                     string                      `json:"synchronousRunner,omitempty" yaml:"synchronousRunner,omitempty"`
+	SynchronousRunnerWorkArgument         int                         `json:"synchronousRunnerWorkArgument,omitempty" yaml:"synchronousRunnerWorkArgument,omitempty"`
+	SynchronousRunnerExecutesBeforeReturn bool                        `json:"synchronousRunnerExecutesBeforeReturn,omitempty" yaml:"synchronousRunnerExecutesBeforeReturn,omitempty"`
+	Variants                              []SchedulerTileGrainVariant `json:"variants" yaml:"variants"`
+}
+
+// SchedulerTileGrainVariant describes one exact build regime. GOOS is
+// required so build selection is deterministic even when repositories carry
+// OS-specific implementations beside architecture-specific ones.
+type SchedulerTileGrainVariant struct {
+	Name                               string   `json:"name" yaml:"name"`
+	GOOS                               string   `json:"goos" yaml:"goos"`
+	GOARCH                             string   `json:"goarch" yaml:"goarch"`
+	BuildTags                          []string `json:"buildTags,omitempty" yaml:"buildTags,omitempty"`
+	TileHeight                         int      `json:"tileHeight" yaml:"tileHeight"`
+	TileRouter                         string   `json:"tileRouter" yaml:"tileRouter"`
+	TileRouterRowsArgument             int      `json:"tileRouterRowsArgument" yaml:"tileRouterRowsArgument"`
+	TiledKernel                        string   `json:"tiledKernel" yaml:"tiledKernel"`
+	ScalarFallback                     string   `json:"scalarFallback" yaml:"scalarFallback"`
+	ScalarFallbackRowsArgument         int      `json:"scalarFallbackRowsArgument" yaml:"scalarFallbackRowsArgument"`
+	KernelEntryRoutesFullTiles         bool     `json:"kernelEntryRoutesFullTiles" yaml:"kernelEntryRoutesFullTiles"`
+	ScalarFallbackHandlesTileRemainder bool     `json:"scalarFallbackHandlesTileRemainder" yaml:"scalarFallbackHandlesTileRemainder"`
+}
+
+// Valid reports whether the target facts needed by PS6112 are explicit.
+// Exact declarations, build selection, integer grain values, signatures, and
+// source flow are checked by the analyzer rather than trusted from the names.
+func (c SchedulerTileGrainContract) Valid() bool { //perfscan:ignore PS3106 preserve the public value receiver used by other config contracts
+	if c.Name == "" || strings.TrimSpace(c.Name) != c.Name ||
+		!psTopKFunctionIDValid(c.Scheduler) || !psTopKFunctionIDValid(c.GrainConstant) ||
+		!psTopKFunctionIDValid(c.Band) || !psTopKFunctionIDValid(c.KernelEntry) ||
+		c.BandRowsArgument <= 0 || c.KernelRowsArgument <= 0 || !c.RepeatedFullTasks ||
+		len(c.Variants) < 2 {
+		return false
+	}
+	packagePath := schedulerTileCallablePackage(c.Scheduler)
+	runnerConfigured := c.SynchronousRunner != "" || c.SynchronousRunnerWorkArgument != 0 ||
+		c.SynchronousRunnerExecutesBeforeReturn
+	if packagePath == "" || schedulerTileCallablePackage(c.GrainConstant) != packagePath ||
+		schedulerTileCallablePackage(c.Band) != packagePath ||
+		schedulerTileCallablePackage(c.KernelEntry) != packagePath || c.Scheduler == c.Band ||
+		c.Scheduler == c.KernelEntry || c.Band == c.KernelEntry ||
+		runnerConfigured && (!psTopKFunctionIDValid(c.SynchronousRunner) ||
+			c.SynchronousRunnerWorkArgument <= 0 || !c.SynchronousRunnerExecutesBeforeReturn ||
+			schedulerTileCallablePackage(c.SynchronousRunner) != packagePath) {
+		return false
+	}
+	seenNames := make(map[string]bool, len(c.Variants))
+	seenTargets := make(map[string]bool, len(c.Variants))
+	architectures := make(map[string]bool, len(c.Variants))
+	for index := range c.Variants {
+		variant := &c.Variants[index]
+		tags := slices.Clone(variant.BuildTags)
+		slices.Sort(tags)
+		target := variant.GOOS + "/" + variant.GOARCH + "/" + strings.Join(tags, ",")
+		if variant.Name == "" || strings.TrimSpace(variant.Name) != variant.Name ||
+			seenNames[variant.Name] || seenTargets[target] || !schedulerTileGOOSValid(variant.GOOS) ||
+			!schedulerTileGOARCHValid(variant.GOARCH) || variant.TileHeight <= 1 || variant.TileHeight > 1024 ||
+			!psTopKFunctionIDValid(variant.TileRouter) || variant.TileRouterRowsArgument <= 0 ||
+			!psTopKFunctionIDValid(variant.TiledKernel) || !psTopKFunctionIDValid(variant.ScalarFallback) ||
+			variant.ScalarFallbackRowsArgument <= 0 ||
+			schedulerTileCallablePackage(variant.TileRouter) != packagePath ||
+			schedulerTileCallablePackage(variant.TiledKernel) != packagePath ||
+			schedulerTileCallablePackage(variant.ScalarFallback) != packagePath ||
+			variant.TiledKernel == variant.ScalarFallback || variant.TileRouter == variant.TiledKernel ||
+			variant.TileRouter == variant.ScalarFallback || !variant.KernelEntryRoutesFullTiles ||
+			!variant.ScalarFallbackHandlesTileRemainder || !schedulerTileBuildTagsValid(variant.BuildTags) {
+			return false
+		}
+		seenNames[variant.Name] = true
+		seenTargets[target] = true
+		architectures[variant.GOARCH] = true
+	}
+	return len(architectures) >= 2
+}
+
+func schedulerTileCallablePackage(id string) string {
+	index := strings.LastIndexByte(id, '.')
+	if index <= 0 {
+		return ""
+	}
+	return id[:index]
+}
+
+func schedulerTileBuildTagsValid(tags []string) bool {
+	seen := make(map[string]bool, len(tags))
+	for _, tag := range tags {
+		if tag == "" || seen[tag] {
+			return false
+		}
+		for _, character := range tag {
+			if character != '_' && character != '.' &&
+				(character < '0' || character > '9') &&
+				(character < 'A' || character > 'Z') &&
+				(character < 'a' || character > 'z') {
+				return false
+			}
+		}
+		seen[tag] = true
+	}
+	return true
+}
+
+func schedulerTileGOOSValid(value string) bool {
+	return slices.Contains([]string{
+		"aix", "android", "darwin", "dragonfly", "freebsd", "illumos", "ios", "js",
+		"linux", "netbsd", "openbsd", "plan9", "solaris", "wasip1", "windows",
+	}, value)
+}
+
+func schedulerTileGOARCHValid(value string) bool {
+	return slices.Contains([]string{
+		"386", "amd64", "arm", "arm64", "loong64", "mips", "mips64", "mips64le",
+		"mipsle", "ppc64", "ppc64le", "riscv64", "s390x", "wasm",
+	}, value)
 }
 
 // Valid reports whether every foreign-lifetime assertion and source role
@@ -855,6 +994,7 @@ type Sets struct {
 	TopKSelectorFuncs                 map[string]bool
 	TopKOneContracts                  []TopKOneContract
 	NativeSnapshotStringCopyContracts []NativeSnapshotStringCopyContract
+	SchedulerTileGrainContracts       []SchedulerTileGrainContract
 	InputViewFuncs                    map[string]bool
 	OutputViewFuncs                   map[string]bool
 	ReferenceBackendPkg               string
@@ -904,6 +1044,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		TopKSelectorFuncs:                 toSet(c.TopKSelectorFuncs),
 		TopKOneContracts:                  slices.Clone(c.TopKOneContracts),
 		NativeSnapshotStringCopyContracts: slices.Clone(c.NativeSnapshotStringCopyContracts),
+		SchedulerTileGrainContracts:       cloneSchedulerTileGrainContracts(c.SchedulerTileGrainContracts),
 		InputViewFuncs:                    toSet(c.InputViewFuncs),
 		OutputViewFuncs:                   toSet(c.OutputViewFuncs),
 		ReferenceBackendPkg:               c.ReferenceBackendPkg,
@@ -921,6 +1062,17 @@ func cloneBoundedScratchFlowContracts(contracts []BoundedScratchFlowContract) []
 	cloned := slices.Clone(contracts)
 	for index := range cloned {
 		cloned[index].Observers = slices.Clone(cloned[index].Observers)
+	}
+	return cloned
+}
+
+func cloneSchedulerTileGrainContracts(contracts []SchedulerTileGrainContract) []SchedulerTileGrainContract {
+	cloned := slices.Clone(contracts)
+	for index := range cloned {
+		cloned[index].Variants = slices.Clone(cloned[index].Variants)
+		for variant := range cloned[index].Variants {
+			cloned[index].Variants[variant].BuildTags = slices.Clone(cloned[index].Variants[variant].BuildTags)
+		}
 	}
 	return cloned
 }
