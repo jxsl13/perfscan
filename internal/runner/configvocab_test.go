@@ -135,3 +135,35 @@ func TestMissingVocabNativeSnapshotStringCopyContracts(t *testing.T) {
 		t.Fatalf("missingVocab(configured) = %v, want none", got)
 	}
 }
+
+func TestMissingVocabReusableResultLoopContracts(t *testing.T) {
+	t.Parallel()
+	check := &lint.Check{NeedsConfig: true, Vocab: []string{"reusableResultLoopContracts"}}
+	if got := missingVocab(check, &config.Config{}); len(got) != 1 || got[0] != "reusableResultLoopContracts" {
+		t.Fatalf("missingVocab(empty) = %v, want reusableResultLoopContracts", got)
+	}
+	invalid := config.Config{ReusableResultLoopContracts: []config.ReusableResultLoopContract{{Name: "incomplete"}}}
+	if got := missingVocab(check, &invalid); len(got) != 1 || got[0] != "reusableResultLoopContracts" {
+		t.Fatalf("missingVocab(invalid) = %v, want reusableResultLoopContracts", got)
+	}
+	valid := config.ReusableResultLoopContract{
+		Name:                     "decode",
+		Wrapper:                  "example.com/project.Decoder.Step",
+		Into:                     "example.com/project.Decoder.StepInto",
+		ResultPosition:           1,
+		DestinationArgument:      3,
+		WrapperReturnsFreshOwned: true,
+		ResultLengthStableForReceiverAndListedArgs:     true,
+		IntoOverwritesDestinationOnSuccess:             true,
+		IntoDoesNotReadDestinationBeforeOverwrite:      true,
+		IntoIgnoresDestinationIdentityAndExtraCapacity: true,
+		IntoDoesNotRetainDestination:                   true,
+		IntoExecutesSynchronously:                      true,
+		WrapperAndIntoHaveIdenticalStateEffects:        true,
+		WrapperAndIntoHaveIdenticalErrorsAndPanics:     true,
+	}
+	configured := config.Config{ReusableResultLoopContracts: []config.ReusableResultLoopContract{valid}}
+	if got := missingVocab(check, &configured); len(got) != 0 {
+		t.Fatalf("missingVocab(valid) = %v, want none", got)
+	}
+}

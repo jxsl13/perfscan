@@ -357,6 +357,31 @@ reusableOneShotWrapperContracts:
     providerFallbackIsPreserved: true
     failuresAndPanicsArePreserved: true
 
+# Exact allocation-wrapper/caller-owned-output contracts for PS6111 dynamic
+# reusable-result loops. Positions are one-based and exclude the receiver.
+# shapeArgumentPositions must list every wrapper argument that may change the
+# result length; an empty list means length depends only on the same concrete
+# receiver. The configured workload pair labels an evidence model only and
+# never proves source loop bounds or runtime shape.
+reusableResultLoopContracts:
+  - name: decoder-step-logits
+    wrapper: example.com/project/decoder.Decoder.Step
+    into: example.com/project/decoder.Decoder.StepInto
+    resultPosition: 1
+    destinationArgument: 3
+    shapeArgumentPositions: []
+    configuredResultElements: 50257
+    configuredLoopIterations: 8
+    wrapperReturnsFreshOwned: true
+    resultLengthStableForReceiverAndListedArgs: true
+    intoOverwritesDestinationOnSuccess: true
+    intoDoesNotReadDestinationBeforeOverwrite: true
+    intoIgnoresDestinationIdentityAndExtraCapacity: true
+    intoDoesNotRetainDestination: true
+    intoExecutesSynchronously: true
+    wrapperAndIntoHaveIdenticalStateEffects: true
+    wrapperAndIntoHaveIdenticalErrorsAndPanics: true
+
 # ---------------------------------------------------------------------------
 # Concrete instance — a tensor / numerical library (e.g. goai). The SAME 29
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the
@@ -398,4 +423,6 @@ reusableOneShotWrapperContracts:
 #     - {name: decoder-prefill-upload, candidateMethod: example.com/decoder.Decoder.prefill, overwrite: example.com/decoder.Decoder.gatherInto, overwriteKind: method, overwriteArg: 0, consumer: example.com/device.Buffer.UploadF32, consumerKind: method, consumerArg: 0, lifecycleMethod: example.com/decoder.Decoder.Release, maxRetainedBytes: 65536, receiverCallsSequential: true, overwriteWritesAllBeforeRead: true, overwriteCompletesBeforeReturn: true, overwriteDoesNotRetainArgument: true, overwriteAccessesOnlyArgumentLength: true, overwriteIgnoresCapacityAndIdentity: true, overwritePreservesExtentInputs: true, extentIsNonNegativeAndNonOverflowing: true, consumerCompletesBeforeReturn: true, consumerDoesNotRetainArgument: true, lifecycleEndsReceiverUse: true, contentsMayPersistUntilLifecycle: true}
 #   reusableOneShotWrapperContracts:
 #     - {name: recorder-shell, wrapperType: example.com/backend.Recorder, providerType: example.com/backend.Device, acquisition: example.com/model.CommandFactory.NewRecorder, concreteAcquisition: example.com/backend.Device.NewRecorder, wrapperConstructor: example.com/backend.NewRecorder, terminal: {static: example.com/model.CommandRecorder.Free, concrete: example.com/backend.Recorder.Free}, reset: {static: example.com/model.CommandRecorder.Reset, concrete: example.com/backend.Recorder.Reset}, freshNativeHandleFactory: example.com/backend.Device.NewCommandBuffer, nativeHandleField: example.com/backend.Recorder.commandBuffer, mutableStateFields: [example.com/backend.Recorder.encoder], allowedSynchronousUses: [{static: example.com/model.CommandRecorder.Encode, concrete: example.com/backend.Recorder.Encode}], acquisitionWrapperResult: 1, acquisitionStatusResult: 2, constructorWrapperResult: 1, resetStatusResult: 1, acquisitionFailureMode: nil-error, resetFailureState: error-leaves-empty-terminal-safe, slotBound: 1, acquisitionCreatesFreshGoWrapper: true, acquisitionHasExactDynamicWrapper: true, failedAcquisitionHasNoGeneration: true, nativeHandleIsOneShot: true, resetAlwaysCreatesFreshHandle: true, terminalSynchronouslyReleases: true, terminalClearsHandle: true, terminalIsIdempotent: true, resetClearsMutableState: true, usesExecuteSynchronously: true, usesDoNotRetainGeneration: true, noStaleGenerationReferences: true, ownerAccessIsNonConcurrent: true, providerFallbackIsPreserved: true, failuresAndPanicsArePreserved: true}
+#   reusableResultLoopContracts:
+#     - {name: decoder-step-logits, wrapper: example.com/decoder.Decoder.Step, into: example.com/decoder.Decoder.StepInto, resultPosition: 1, destinationArgument: 3, shapeArgumentPositions: [], configuredResultElements: 50257, configuredLoopIterations: 8, wrapperReturnsFreshOwned: true, resultLengthStableForReceiverAndListedArgs: true, intoOverwritesDestinationOnSuccess: true, intoDoesNotReadDestinationBeforeOverwrite: true, intoIgnoresDestinationIdentityAndExtraCapacity: true, intoDoesNotRetainDestination: true, intoExecutesSynchronously: true, wrapperAndIntoHaveIdenticalStateEffects: true, wrapperAndIntoHaveIdenticalErrorsAndPanics: true}
 # ---------------------------------------------------------------------------

@@ -365,6 +365,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"kernelRegisterFuncs":               len(cfg.KernelRegisterFuncs),
 		"inPlaceFusionContracts":            len(cfg.InPlaceFusionContracts),
 		"receiverStagingContracts":          validReceiverStagingContracts(cfg.ReceiverStagingContracts),
+		"reusableResultLoopContracts":       validReusableResultLoopContracts(cfg.ReusableResultLoopContracts),
 	}
 	missing := make([]string, 0, len(c.Vocab))
 	for _, v := range c.Vocab {
@@ -373,6 +374,16 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		}
 	}
 	return missing
+}
+
+func validReusableResultLoopContracts(contracts []config.ReusableResultLoopContract) int {
+	valid := 0
+	for _, contract := range contracts {
+		if contract.Valid() {
+			valid++
+		}
+	}
+	return valid
 }
 
 func validReceiverStagingContracts(contracts []config.ReceiverStagingContract) int {

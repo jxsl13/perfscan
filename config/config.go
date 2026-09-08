@@ -224,6 +224,69 @@ type Config struct {
 	// always-fresh one-shot native handle installed by Reset. Names alone never
 	// establish these ownership, failure, synchronization, or generation facts.
 	ReusableOneShotWrapperContracts []ReusableOneShotWrapperContract `json:"reusableOneShotWrapperContracts,omitempty" yaml:"reusableOneShotWrapperContracts"`
+
+	// ReusableResultLoopContracts bind an exact allocation-returning method to
+	// an exact caller-owned-output method for PS6111. The contract states the
+	// semantic facts that signatures and call-site syntax cannot establish:
+	// complete overwrite, non-retention, synchronous execution, stable result
+	// shape, and wrapper/Into state, error, and panic parity.
+	ReusableResultLoopContracts []ReusableResultLoopContract `json:"reusableResultLoopContracts,omitempty" yaml:"reusableResultLoopContracts"`
+}
+
+// ReusableResultLoopContract describes one allocation-returning numeric-slice
+// method and its exact caller-owned-output equivalent. Argument positions are
+// one-based and exclude method receivers. ShapeArgumentPositions is the
+// complete set of wrapper arguments whose values may affect result length;
+// an empty list means the stable concrete receiver alone determines length.
+// ResultLengthStableForReceiverAndListedArgs affirms that length remains
+// constant across calls even when the method mutates other receiver state.
+type ReusableResultLoopContract struct {
+	Name                     string `json:"name" yaml:"name"`
+	Wrapper                  string `json:"wrapper" yaml:"wrapper"`
+	Into                     string `json:"into" yaml:"into"`
+	ResultPosition           int    `json:"resultPosition" yaml:"resultPosition"`
+	DestinationArgument      int    `json:"destinationArgument" yaml:"destinationArgument"`
+	ShapeArgumentPositions   []int  `json:"shapeArgumentPositions,omitempty" yaml:"shapeArgumentPositions,omitempty"`
+	ConfiguredResultElements int64  `json:"configuredResultElements,omitempty" yaml:"configuredResultElements,omitempty"`
+	ConfiguredLoopIterations int64  `json:"configuredLoopIterations,omitempty" yaml:"configuredLoopIterations,omitempty"`
+
+	WrapperReturnsFreshOwned                       bool `json:"wrapperReturnsFreshOwned" yaml:"wrapperReturnsFreshOwned"`
+	ResultLengthStableForReceiverAndListedArgs     bool `json:"resultLengthStableForReceiverAndListedArgs" yaml:"resultLengthStableForReceiverAndListedArgs"`
+	IntoOverwritesDestinationOnSuccess             bool `json:"intoOverwritesDestinationOnSuccess" yaml:"intoOverwritesDestinationOnSuccess"`
+	IntoDoesNotReadDestinationBeforeOverwrite      bool `json:"intoDoesNotReadDestinationBeforeOverwrite" yaml:"intoDoesNotReadDestinationBeforeOverwrite"`
+	IntoIgnoresDestinationIdentityAndExtraCapacity bool `json:"intoIgnoresDestinationIdentityAndExtraCapacity" yaml:"intoIgnoresDestinationIdentityAndExtraCapacity"`
+	IntoDoesNotRetainDestination                   bool `json:"intoDoesNotRetainDestination" yaml:"intoDoesNotRetainDestination"`
+	IntoExecutesSynchronously                      bool `json:"intoExecutesSynchronously" yaml:"intoExecutesSynchronously"`
+	WrapperAndIntoHaveIdenticalStateEffects        bool `json:"wrapperAndIntoHaveIdenticalStateEffects" yaml:"wrapperAndIntoHaveIdenticalStateEffects"`
+	WrapperAndIntoHaveIdenticalErrorsAndPanics     bool `json:"wrapperAndIntoHaveIdenticalErrorsAndPanics" yaml:"wrapperAndIntoHaveIdenticalErrorsAndPanics"`
+}
+
+// Valid reports whether PS6111's complete conservative semantic contract is
+// present. Exact receiver types, signatures, result roles, and argument types
+// are checked by the analyzer at the call site.
+func (c ReusableResultLoopContract) Valid() bool {
+	if c.Name == "" || strings.TrimSpace(c.Name) != c.Name ||
+		!psTopKMethodIDValid(c.Wrapper) || !psTopKMethodIDValid(c.Into) || c.Wrapper == c.Into ||
+		c.ResultPosition <= 0 || c.DestinationArgument <= 0 ||
+		!c.WrapperReturnsFreshOwned || !c.ResultLengthStableForReceiverAndListedArgs ||
+		!c.IntoOverwritesDestinationOnSuccess || !c.IntoDoesNotReadDestinationBeforeOverwrite ||
+		!c.IntoIgnoresDestinationIdentityAndExtraCapacity ||
+		!c.IntoDoesNotRetainDestination || !c.IntoExecutesSynchronously ||
+		!c.WrapperAndIntoHaveIdenticalStateEffects || !c.WrapperAndIntoHaveIdenticalErrorsAndPanics {
+		return false
+	}
+	if (c.ConfiguredResultElements == 0) != (c.ConfiguredLoopIterations == 0) ||
+		c.ConfiguredResultElements < 0 || c.ConfiguredLoopIterations < 0 {
+		return false
+	}
+	positions := slices.Clone(c.ShapeArgumentPositions)
+	slices.Sort(positions)
+	for index, position := range positions {
+		if position <= 0 || index > 0 && position == positions[index-1] {
+			return false
+		}
+	}
+	return true
 }
 
 // BoundedScratchFlowContract binds one capacity-amplified scratch sequence to
@@ -801,6 +864,7 @@ type Sets struct {
 	BoundedScratchFlowContracts       []BoundedScratchFlowContract
 	ReceiverStagingContracts          []ReceiverStagingContract
 	ReusableOneShotWrapperContracts   []ReusableOneShotWrapperContract
+	ReusableResultLoopContracts       []ReusableResultLoopContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -849,6 +913,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		BoundedScratchFlowContracts:       cloneBoundedScratchFlowContracts(c.BoundedScratchFlowContracts),
 		ReceiverStagingContracts:          slices.Clone(c.ReceiverStagingContracts),
 		ReusableOneShotWrapperContracts:   cloneReusableOneShotWrapperContracts(c.ReusableOneShotWrapperContracts),
+		ReusableResultLoopContracts:       cloneReusableResultLoopContracts(c.ReusableResultLoopContracts),
 	}
 }
 
@@ -865,6 +930,14 @@ func cloneReusableOneShotWrapperContracts(contracts []ReusableOneShotWrapperCont
 	for index := range cloned {
 		cloned[index].MutableStateFields = slices.Clone(cloned[index].MutableStateFields)
 		cloned[index].AllowedSynchronousUses = slices.Clone(cloned[index].AllowedSynchronousUses)
+	}
+	return cloned
+}
+
+func cloneReusableResultLoopContracts(contracts []ReusableResultLoopContract) []ReusableResultLoopContract {
+	cloned := slices.Clone(contracts)
+	for index := range cloned {
+		cloned[index].ShapeArgumentPositions = slices.Clone(cloned[index].ShapeArgumentPositions)
 	}
 	return cloned
 }
