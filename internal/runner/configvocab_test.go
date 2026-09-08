@@ -227,6 +227,45 @@ func TestMissingVocabTinySynchronousAcceleratorScreenContracts(t *testing.T) {
 	}
 }
 
+func TestMissingVocabForwardLossBackwardGraphContracts(t *testing.T) {
+	t.Parallel()
+	check := &lint.Check{NeedsConfig: true, Vocab: []string{"forwardLossBackwardGraphContracts"}}
+	if got := missingVocab(check, &config.Config{}); len(got) != 1 || got[0] != "forwardLossBackwardGraphContracts" {
+		t.Fatalf("missingVocab(empty) = %v, want forwardLossBackwardGraphContracts", got)
+	}
+	invalid := config.Config{ForwardLossBackwardGraphContracts: []config.ForwardLossBackwardGraphContract{{Name: "incomplete"}}}
+	if got := missingVocab(check, &invalid); len(got) != 1 {
+		t.Fatalf("missingVocab(invalid) = %v, want forwardLossBackwardGraphContracts", got)
+	}
+	configured := config.Config{ForwardLossBackwardGraphContracts: []config.ForwardLossBackwardGraphContract{forwardLossBackwardGraphContractForRunnerTest()}}
+	if got := missingVocab(check, &configured); len(got) != 0 {
+		t.Fatalf("missingVocab(valid) = %v, want none", got)
+	}
+}
+
+func forwardLossBackwardGraphContractForRunnerTest() config.ForwardLossBackwardGraphContract {
+	return config.ForwardLossBackwardGraphContract{
+		Name: "vit", ObjectiveSite: "example.com/vision.ViT.LossAndGrad",
+		RecorderFactoryCallable: "example.com/autograd.NewTape", RecorderBindingCallable: "example.com/backend.Context.WithRecorder",
+		ForwardCallable: "example.com/vision.ViT.Forward", LossCallable: "example.com/nn.CrossEntropy",
+		BackwardCallable: "example.com/autograd.Tape.Backward", ParameterOrderCallable: "example.com/vision.ViT.Params",
+		GradientCallable: "example.com/autograd.Tape.Grad", RecorderFactoryBackendArgument: 1,
+		RecorderBindingArgument: 1, ForwardRecorderArgument: 1,
+		LossRecorderArgument: 1, LossForwardArgument: 2, BackwardLossArgument: 1, GradientParameterArgument: 1,
+		ConfiguredGeometry: "B=8,S=65,D=128", ConfiguredGradientCount: 56,
+		ConfiguredCurrentSubmissionCount: 3, ConfiguredCandidateSubmissions: 1, MaxCacheEntries: 4,
+		ConfiguredEvidence:   "paired-owner-campaign",
+		RecreatesForwardWork: true, StableGeometry: true, ExactScalarLossReduction: true,
+		StableCompleteGradientOrder: true, PrivateRecorderOwnership: true, CustomHooksExcluded: true,
+		MutationExcluded: true, DTypeLayoutBackendConstrained: true, CacheKeyCoversGeometry: true,
+		CacheKeyCoversDTypeLayoutObjective: true, BoundedCache: true, PortableFallbackPreserved: true,
+		ForwardParity: true, ScalarLossParity: true, AllGradientParity: true, InputAndParameterImmutability: true,
+		ErrorAndPanicParity: true, RecorderIsolation: true, PerOperationAndLayerRoutesExcluded: true,
+		PrivateTapePreservesBackendRoutes: true, BackendSelectionParity: true, PairedNumericalValidationRequired: true,
+		PairedEndToEndValidationRequired: true,
+	}
+}
+
 func tinySynchronousAcceleratorScreenContractForRunnerTest() config.TinySynchronousAcceleratorScreenContract {
 	return config.TinySynchronousAcceleratorScreenContract{
 		Name: "tiny-loss",

@@ -591,6 +591,62 @@ tinySynchronousAcceleratorScreenContracts:
     backendSelectionParity: true
     pairedEndToEndValidationRequired: true
 
+# Exact private-recorder forward -> scalar loss -> backward -> ordered-gradient
+# objective contract for PS6116. The source chain and typed call identities are
+# checked; geometry, cache, submission, hook, fallback, and parity facts remain
+# explicit project-owned assertions. An omitted reduction constant represents
+# an exact loss callable whose documented reduction is intrinsic (for example,
+# an always-mean CrossEntropy helper). A reviewed whole-objective capability or
+# intentionally retained multi-submission route suppresses the advisory. The
+# recorder factory backend argument must be a direct field on the same context
+# object that receives the recorder binding.
+forwardLossBackwardGraphContracts:
+  - name: m2-vit-objective-screen
+    objectiveSite: example.com/project/vision.ViT.LossAndGrad
+    recorderFactoryCallable: example.com/project/autograd.NewTapeOn
+    recorderBindingCallable: example.com/project/backend.Context.WithRecorder
+    forwardCallable: example.com/project/vision.ViT.Forward
+    lossCallable: example.com/project/nn.CrossEntropy
+    backwardCallable: example.com/project/autograd.Tape.Backward
+    parameterOrderCallable: example.com/project/vision.ViT.Params
+    gradientCallable: example.com/project/autograd.Tape.Grad
+    recorderFactoryBackendArgument: 1
+    recorderBindingArgument: 1
+    forwardRecorderArgument: 1
+    lossRecorderArgument: 1
+    lossForwardArgument: 2
+    backwardLossArgument: 1
+    gradientParameterArgument: 1
+    configuredGeometry: B=8,S=65,D=128,H=4,FFN=512,depth=4,C=10,F32
+    configuredGradientCount: 56
+    configuredCurrentSubmissionCount: 3
+    configuredCandidateSubmissions: 1
+    maxCacheEntries: 4
+    configuredEvidence: goai-pr1199-head-d99bc4b5-merged-686f27f
+    recreatesForwardWork: true
+    stableGeometry: true
+    exactScalarLossReduction: true
+    stableCompleteGradientOrder: true
+    privateRecorderOwnership: true
+    customHooksExcluded: true
+    mutationExcluded: true
+    dtypeLayoutBackendConstrained: true
+    cacheKeyCoversGeometry: true
+    cacheKeyCoversDtypeLayoutObjective: true
+    boundedCache: true
+    portableFallbackPreserved: true
+    forwardParity: true
+    scalarLossParity: true
+    allGradientParity: true
+    inputAndParameterImmutability: true
+    errorAndPanicParity: true
+    recorderIsolation: true
+    perOperationAndLayerRoutesExcluded: true
+    privateTapePreservesBackendRoutes: true
+    backendSelectionParity: true
+    pairedNumericalValidationRequired: true
+    pairedEndToEndValidationRequired: true
+
 # ---------------------------------------------------------------------------
 # Concrete instance — a tensor / numerical library (e.g. goai). The same
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the
