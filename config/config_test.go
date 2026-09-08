@@ -44,6 +44,12 @@ func TestToSetAndCompile(t *testing.T) {
 			Name:                   "decode-logits",
 			ShapeArgumentPositions: []int{2},
 		}},
+		RecorderResidualAddContracts: []RecorderResidualAddContract{{
+			Name:                      "projection-residual",
+			ProjectionExtentArguments: []int{4},
+			AccumulateExtentArguments: []int{5},
+			Implementations:           []RecorderResidualAddImplementation{{Projection: "example.com/p.Linear.record"}},
+		}},
 		TopKOneContracts: []TopKOneContract{{
 			Name: "resident-topk-one",
 		}},
@@ -87,6 +93,9 @@ func TestToSetAndCompile(t *testing.T) {
 	}
 	if len(sets.ReusableResultLoopContracts) != 1 || sets.ReusableResultLoopContracts[0].Name != "decode-logits" {
 		t.Errorf("Compile lost reusable-result loop contracts: %+v", sets.ReusableResultLoopContracts)
+	}
+	if len(sets.RecorderResidualAddContracts) != 1 || sets.RecorderResidualAddContracts[0].Name != "projection-residual" {
+		t.Errorf("Compile lost recorder residual-add contracts: %+v", sets.RecorderResidualAddContracts)
 	}
 	if len(sets.TopKOneContracts) != 1 || sets.TopKOneContracts[0].Name != "resident-topk-one" {
 		t.Errorf("Compile lost Top-K(k=1) contracts: %+v", sets.TopKOneContracts)
@@ -142,8 +151,107 @@ func TestToSetAndCompile(t *testing.T) {
 	if sets.ReusableResultLoopContracts[0].Name != "decode-logits" || sets.ReusableResultLoopContracts[0].ShapeArgumentPositions[0] != 2 {
 		t.Error("Compile must deeply clone reusable-result loop contracts")
 	}
+	c.RecorderResidualAddContracts[0].Name = "mutated"
+	c.RecorderResidualAddContracts[0].ProjectionExtentArguments[0] = 9
+	c.RecorderResidualAddContracts[0].Implementations[0].Projection = "mutated"
+	if sets.RecorderResidualAddContracts[0].Name != "projection-residual" ||
+		sets.RecorderResidualAddContracts[0].ProjectionExtentArguments[0] != 4 ||
+		sets.RecorderResidualAddContracts[0].Implementations[0].Projection != "example.com/p.Linear.record" {
+		t.Error("Compile must deeply clone recorder residual-add contracts")
+	}
 	if sets.ElementCountMethods != nil {
 		t.Errorf("empty field must compile to a nil set, got %v", sets.ElementCountMethods)
+	}
+}
+
+func TestRecorderResidualAddContractValid(t *testing.T) {
+	t.Parallel()
+	valid := recorderResidualAddContractForTest()
+	if !valid.Valid() {
+		t.Fatal("complete recorder residual-add contract is invalid")
+	}
+	tests := []struct {
+		name   string
+		mutate func(*RecorderResidualAddContract)
+	}{
+		{"blank name", func(c *RecorderResidualAddContract) { c.Name = "" }},
+		{"unqualified projection", func(c *RecorderResidualAddContract) { c.Projection = "record" }},
+		{"same sibling", func(c *RecorderResidualAddContract) { c.Accumulate = c.Projection }},
+		{"unqualified binary", func(c *RecorderResidualAddContract) { c.RecorderBinary = "Binary" }},
+		{"missing add value", func(c *RecorderResidualAddContract) { c.AddOperationValue = "" }},
+		{"invalid eager helper", func(c *RecorderResidualAddContract) { c.EagerSequence = "firstErr" }},
+		{"missing first-error promise", func(c *RecorderResidualAddContract) { c.EagerSequenceReturnsFirstError = false }},
+		{"duplicate projection role", func(c *RecorderResidualAddContract) { c.ProjectionSourceArgument = c.ProjectionRecorderArgument }},
+		{"projection extent overlaps role", func(c *RecorderResidualAddContract) { c.ProjectionExtentArguments[0] = c.ProjectionSourceArgument }},
+		{"extent count mismatch", func(c *RecorderResidualAddContract) { c.AccumulateExtentArguments = nil }},
+		{"accumulate length overlaps role", func(c *RecorderResidualAddContract) {
+			c.AccumulateDestinationLengthArgument = c.AccumulateDestinationArgument
+		}},
+		{"negative destination length role", func(c *RecorderResidualAddContract) { c.AccumulateDestinationLengthArgument = -1 }},
+		{"missing overwrite", func(c *RecorderResidualAddContract) { c.ProjectionOverwritesTemporary = false }},
+		{"missing runtime nonalias", func(c *RecorderResidualAddContract) { c.MatchedBuffersDoNotAlias = false }},
+		{"missing recorder order", func(c *RecorderResidualAddContract) { c.RecorderOrderPreserved = false }},
+		{"missing numerical policy", func(c *RecorderResidualAddContract) { c.AccumulatePreservesArithmeticPolicy = false }},
+		{"interface list without site", func(c *RecorderResidualAddContract) { c.ConfiguredSite = "" }},
+		{"interface list without coverage", func(c *RecorderResidualAddContract) { c.AllDynamicProjectionTypesCovered = false }},
+		{"duplicate implementation", func(c *RecorderResidualAddContract) {
+			c.Implementations = append(c.Implementations, c.Implementations[0])
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			candidate := cloneRecorderResidualAddContracts([]RecorderResidualAddContract{valid})[0]
+			test.mutate(&candidate)
+			if candidate.Valid() {
+				t.Errorf("mutated contract unexpectedly valid: %+v", candidate)
+			}
+		})
+	}
+}
+
+func recorderResidualAddContractForTest() RecorderResidualAddContract {
+	return RecorderResidualAddContract{
+		Name:                                "projection-residual",
+		Projection:                          "example.com/model.Linear.record",
+		Accumulate:                          "example.com/model.Linear.recordAdd",
+		RecorderBinary:                      "example.com/model.Recorder.Binary",
+		EagerSequence:                       "example.com/model.firstErr",
+		AddOperation:                        "example.com/model.binaryAdd",
+		AddOperationValue:                   "1",
+		ConfiguredSite:                      "example.com/model.Decoder.Step",
+		ProjectionRecorderArgument:          1,
+		ProjectionSourceArgument:            2,
+		ProjectionTemporaryArgument:         3,
+		ProjectionExtentArguments:           []int{4},
+		BinaryDestinationArgument:           1,
+		BinaryTemporaryArgument:             2,
+		BinaryOutputArgument:                3,
+		BinaryOperationArgument:             4,
+		AccumulateRecorderArgument:          1,
+		AccumulateSourceArgument:            2,
+		AccumulateTemporaryArgument:         3,
+		AccumulateDestinationArgument:       4,
+		AccumulateExtentArguments:           []int{5},
+		AccumulateDestinationLengthArgument: 6,
+		Implementations: []RecorderResidualAddImplementation{{
+			Projection: "example.com/model.F32Linear.record",
+			Accumulate: "example.com/model.F32Linear.recordAdd",
+		}},
+		ProjectionOverwritesTemporary:                     true,
+		TemporaryMayServeAsAccumulateScratch:              true,
+		MatchedBuffersDoNotAlias:                          true,
+		TemporaryUnobservedOutsideMatchedCalls:            true,
+		CallsDoNotRetainArguments:                         true,
+		CallsExecuteSynchronously:                         true,
+		RecorderOrderPreserved:                            true,
+		AccumulateMatchesProjectionAndResidualAdd:         true,
+		AccumulatePreservesErrorsAndPanics:                true,
+		AccumulatePreservesPartialOutput:                  true,
+		AccumulatePreservesArithmeticPolicy:               true,
+		AccumulateSupportsConfiguredDTypesLayoutsBackends: true,
+		AllDynamicProjectionTypesCovered:                  true,
+		EagerSequenceReturnsFirstError:                    true,
 	}
 }
 
@@ -832,6 +940,7 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"ReceiverStagingContracts":        len(c.ReceiverStagingContracts),
 		"ReusableOneShotWrapperContracts": len(c.ReusableOneShotWrapperContracts),
 		"ReusableResultLoopContracts":     len(c.ReusableResultLoopContracts),
+		"RecorderResidualAddContracts":    len(c.RecorderResidualAddContracts),
 	}
 	for name, n := range fields {
 		if n == 0 {
@@ -852,6 +961,9 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 	}
 	if len(c.ReusableResultLoopContracts) != 1 || !c.ReusableResultLoopContracts[0].Valid() {
 		t.Errorf("example config has invalid reusable-result loop contract: %+v", c.ReusableResultLoopContracts)
+	}
+	if len(c.RecorderResidualAddContracts) != 1 || !c.RecorderResidualAddContracts[0].Valid() {
+		t.Errorf("example config has invalid recorder residual-add contract: %+v", c.RecorderResidualAddContracts)
 	}
 	if len(c.SchedulerTileGrainContracts) != 1 || !c.SchedulerTileGrainContracts[0].Valid() {
 		t.Errorf("example config has invalid scheduler tile-grain contract: %+v", c.SchedulerTileGrainContracts)
