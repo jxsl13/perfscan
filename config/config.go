@@ -262,6 +262,13 @@ type Config struct {
 	// explicit contract supplies geometry, cache, submission, fallback, and
 	// semantic facts that Go syntax cannot establish.
 	ForwardLossBackwardGraphContracts []ForwardLossBackwardGraphContract `json:"forwardLossBackwardGraphContracts,omitempty" yaml:"forwardLossBackwardGraphContracts"`
+
+	// FragmentedAcceleratorObjectiveContracts bind a complete scalar-objective
+	// and parameter-gradient boundary to every exact eager accelerator call
+	// site it reaches for PS6117. The configuration supplies semantic facts
+	// that local Go syntax cannot prove, including graph-cache suitability,
+	// synchronization, residency, and validation obligations.
+	FragmentedAcceleratorObjectiveContracts []FragmentedAcceleratorObjectiveContract `json:"fragmentedAcceleratorObjectiveContracts,omitempty" yaml:"fragmentedAcceleratorObjectiveContracts"`
 }
 
 // ForwardLossBackwardGraphContract describes one complete eager objective and
@@ -359,6 +366,104 @@ func (c *ForwardLossBackwardGraphContract) Valid() bool {
 		c.ErrorAndPanicParity && c.RecorderIsolation && c.PerOperationAndLayerRoutesExcluded &&
 		c.PrivateTapePreservesBackendRoutes && c.BackendSelectionParity && c.PairedNumericalValidationRequired &&
 		c.PairedEndToEndValidationRequired
+}
+
+// FragmentedAcceleratorObjectiveCall identifies one exact direct accelerator
+// call shape inside a configured objective. ConfiguredSite and callable IDs are
+// fully qualified. OperationConstant is optional; its three fields are all-or-
+// nothing. ExpectedOccurrences is exact, not a minimum.
+type FragmentedAcceleratorObjectiveCall struct {
+	ConfiguredSite         string `json:"configuredSite" yaml:"configuredSite"`
+	AcceleratorCallable    string `json:"acceleratorCallable" yaml:"acceleratorCallable"`
+	OperationArgument      int    `json:"operationArgument,omitempty" yaml:"operationArgument,omitempty"`
+	OperationConstant      string `json:"operationConstant,omitempty" yaml:"operationConstant,omitempty"`
+	OperationConstantValue string `json:"operationConstantValue,omitempty" yaml:"operationConstantValue,omitempty"`
+	ExpectedOccurrences    int    `json:"expectedOccurrences" yaml:"expectedOccurrences"`
+}
+
+// FragmentedAcceleratorObjectiveContract is the fail-closed owner contract for
+// PS6117. Result positions are one-based and exclude the receiver. The verbose
+// assertions deliberately keep profitability and semantic policy out of names.
+type FragmentedAcceleratorObjectiveContract struct {
+	Name                               string                               `json:"name" yaml:"name"`
+	ObjectiveSite                      string                               `json:"objectiveSite" yaml:"objectiveSite"`
+	Calls                              []FragmentedAcceleratorObjectiveCall `json:"calls" yaml:"calls"`
+	ConfiguredAcceleratorCallCount     int                                  `json:"configuredAcceleratorCallCount" yaml:"configuredAcceleratorCallCount"`
+	ConfiguredSynchronousBoundaryCount int                                  `json:"configuredSynchronousBoundaryCount" yaml:"configuredSynchronousBoundaryCount"`
+	CandidateSubmissionCount           int                                  `json:"candidateSubmissionCount" yaml:"candidateSubmissionCount"`
+	ScalarObjectiveResult              int                                  `json:"scalarObjectiveResult" yaml:"scalarObjectiveResult"`
+	ParameterGradientsResult           int                                  `json:"parameterGradientsResult" yaml:"parameterGradientsResult"`
+	ErrorResult                        int                                  `json:"errorResult" yaml:"errorResult"`
+	GeometryCacheKey                   string                               `json:"geometryCacheKey" yaml:"geometryCacheKey"`
+	ConfiguredEvidence                 string                               `json:"configuredEvidence" yaml:"configuredEvidence"`
+	ExistingWholeObjectiveRoute        bool                                 `json:"existingWholeObjectiveRoute,omitempty" yaml:"existingWholeObjectiveRoute,omitempty"`
+	IntentionalRetainedFragmentedRoute bool                                 `json:"intentionalRetainedFragmentedRoute,omitempty" yaml:"intentionalRetainedFragmentedRoute,omitempty"`
+
+	CompleteForwardLossReverseMode                 bool `json:"completeForwardLossReverseMode" yaml:"completeForwardLossReverseMode"`
+	StableObjectiveGeometry                        bool `json:"stableObjectiveGeometry" yaml:"stableObjectiveGeometry"`
+	GeometryCacheKeyComplete                       bool `json:"geometryCacheKeyComplete" yaml:"geometryCacheKeyComplete"`
+	CacheReusedAcrossObjectives                    bool `json:"cacheReusedAcrossObjectives" yaml:"cacheReusedAcrossObjectives"`
+	EachAcceleratorCallSubmits                     bool `json:"eachAcceleratorCallSubmits" yaml:"eachAcceleratorCallSubmits"`
+	EachAcceleratorCallSynchronizesBeforeReturn    bool `json:"eachAcceleratorCallSynchronizesBeforeReturn" yaml:"eachAcceleratorCallSynchronizesBeforeReturn"`
+	CandidateReturnsScalarAndAllParameterGradients bool `json:"candidateReturnsScalarAndAllParameterGradients" yaml:"candidateReturnsScalarAndAllParameterGradients"`
+	NoOtherMaterializedResults                     bool `json:"noOtherMaterializedResults" yaml:"noOtherMaterializedResults"`
+	NoDynamicDispatch                              bool `json:"noDynamicDispatch" yaml:"noDynamicDispatch"`
+	NoCustomHooks                                  bool `json:"noCustomHooks" yaml:"noCustomHooks"`
+	InputsAndParametersImmutable                   bool `json:"inputsAndParametersImmutable" yaml:"inputsAndParametersImmutable"`
+	OutputsDoNotAliasInputs                        bool `json:"outputsDoNotAliasInputs" yaml:"outputsDoNotAliasInputs"`
+	NoPreexistingDeviceResidency                   bool `json:"noPreexistingDeviceResidency" yaml:"noPreexistingDeviceResidency"`
+	NoPostObjectiveDeviceResidency                 bool `json:"noPostObjectiveDeviceResidency" yaml:"noPostObjectiveDeviceResidency"`
+	ExactDTypeLayoutAttributesReduction            bool `json:"exactDTypeLayoutAttributesReduction" yaml:"exactDTypeLayoutAttributesReduction"`
+	FloatingPointParityRequired                    bool `json:"floatingPointParityRequired" yaml:"floatingPointParityRequired"`
+	ErrorPanicParityRequired                       bool `json:"errorPanicParityRequired" yaml:"errorPanicParityRequired"`
+	RecorderAutogradBackendParityRequired          bool `json:"recorderAutogradBackendParityRequired" yaml:"recorderAutogradBackendParityRequired"`
+	PerOperationBackendRoutePreservationRequired   bool `json:"perOperationBackendRoutePreservationRequired" yaml:"perOperationBackendRoutePreservationRequired"`
+	TrueCausalMaskSemanticsRequired                bool `json:"trueCausalMaskSemanticsRequired" yaml:"trueCausalMaskSemanticsRequired"`
+	PairedApplicationBenchmarkRequired             bool `json:"pairedApplicationBenchmarkRequired" yaml:"pairedApplicationBenchmarkRequired"`
+	NumericalValidationRequired                    bool `json:"numericalValidationRequired" yaml:"numericalValidationRequired"`
+	ShapeAwareEmbeddingGradientValidationRequired  bool `json:"shapeAwareEmbeddingGradientValidationRequired" yaml:"shapeAwareEmbeddingGradientValidationRequired"`
+	RepeatedIndexGradientParityRequired            bool `json:"repeatedIndexGradientParityRequired" yaml:"repeatedIndexGradientParityRequired"`
+	ScatterNDNotAssumedFaster                      bool `json:"scatterNDNotAssumedFaster" yaml:"scatterNDNotAssumedFaster"`
+}
+
+// Valid reports whether PS6117 has a complete and internally consistent owner
+// contract. It intentionally accepts no best-effort or partially specified form.
+func (c *FragmentedAcceleratorObjectiveContract) Valid() bool {
+	if c.Name == "" || strings.TrimSpace(c.Name) != c.Name || !ps6109CallableIDValid(c.ObjectiveSite) ||
+		len(c.Calls) < 2 || c.ConfiguredAcceleratorCallCount < 4 ||
+		c.ConfiguredSynchronousBoundaryCount != c.ConfiguredAcceleratorCallCount || c.CandidateSubmissionCount != 1 ||
+		c.ScalarObjectiveResult <= 0 || c.ParameterGradientsResult <= 0 || c.ErrorResult <= 0 ||
+		c.ScalarObjectiveResult == c.ParameterGradientsResult || c.ScalarObjectiveResult == c.ErrorResult ||
+		c.ParameterGradientsResult == c.ErrorResult || c.GeometryCacheKey == "" || strings.TrimSpace(c.GeometryCacheKey) != c.GeometryCacheKey ||
+		c.ConfiguredEvidence == "" || strings.TrimSpace(c.ConfiguredEvidence) != c.ConfiguredEvidence {
+		return false
+	}
+	total := 0
+	seen := make(map[string]bool, len(c.Calls))
+	for _, call := range c.Calls {
+		operationAbsent := call.OperationArgument == 0 && call.OperationConstant == "" && call.OperationConstantValue == ""
+		operationPresent := call.OperationArgument > 0 && psTopKFunctionIDValid(call.OperationConstant) &&
+			call.OperationConstantValue != "" && strings.TrimSpace(call.OperationConstantValue) == call.OperationConstantValue
+		key := call.ConfiguredSite + "\x00" + call.AcceleratorCallable + "\x00" + call.OperationConstant
+		if !ps6109CallableIDValid(call.ConfiguredSite) || !ps6109CallableIDValid(call.AcceleratorCallable) ||
+			call.ExpectedOccurrences <= 0 || (!operationAbsent && !operationPresent) || seen[key] {
+			return false
+		}
+		seen[key] = true
+		total += call.ExpectedOccurrences
+	}
+	if total != c.ConfiguredAcceleratorCallCount {
+		return false
+	}
+	return c.CompleteForwardLossReverseMode && c.StableObjectiveGeometry && c.GeometryCacheKeyComplete &&
+		c.CacheReusedAcrossObjectives && c.EachAcceleratorCallSubmits && c.EachAcceleratorCallSynchronizesBeforeReturn &&
+		c.CandidateReturnsScalarAndAllParameterGradients && c.NoOtherMaterializedResults && c.NoDynamicDispatch &&
+		c.NoCustomHooks && c.InputsAndParametersImmutable && c.OutputsDoNotAliasInputs &&
+		c.NoPreexistingDeviceResidency && c.NoPostObjectiveDeviceResidency && c.ExactDTypeLayoutAttributesReduction &&
+		c.FloatingPointParityRequired && c.ErrorPanicParityRequired && c.RecorderAutogradBackendParityRequired &&
+		c.PerOperationBackendRoutePreservationRequired && c.TrueCausalMaskSemanticsRequired &&
+		c.PairedApplicationBenchmarkRequired && c.NumericalValidationRequired &&
+		c.ShapeAwareEmbeddingGradientValidationRequired && c.RepeatedIndexGradientParityRequired && c.ScatterNDNotAssumedFaster
 }
 
 // TinySynchronousAcceleratorScreenCall identifies one direct accelerator
@@ -1461,6 +1566,7 @@ type Sets struct {
 
 	TinySynchronousAcceleratorScreenContracts []TinySynchronousAcceleratorScreenContract
 	ForwardLossBackwardGraphContracts         []ForwardLossBackwardGraphContract
+	FragmentedAcceleratorObjectiveContracts   []FragmentedAcceleratorObjectiveContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -1516,7 +1622,16 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 
 		TinySynchronousAcceleratorScreenContracts: cloneTinySynchronousAcceleratorScreenContracts(c.TinySynchronousAcceleratorScreenContracts),
 		ForwardLossBackwardGraphContracts:         slices.Clone(c.ForwardLossBackwardGraphContracts),
+		FragmentedAcceleratorObjectiveContracts:   cloneFragmentedAcceleratorObjectiveContracts(c.FragmentedAcceleratorObjectiveContracts),
 	}
+}
+
+func cloneFragmentedAcceleratorObjectiveContracts(contracts []FragmentedAcceleratorObjectiveContract) []FragmentedAcceleratorObjectiveContract {
+	cloned := slices.Clone(contracts)
+	for index := range cloned {
+		cloned[index].Calls = slices.Clone(cloned[index].Calls)
+	}
+	return cloned
 }
 
 func cloneTinySynchronousAcceleratorScreenContracts(contracts []TinySynchronousAcceleratorScreenContract) []TinySynchronousAcceleratorScreenContract {

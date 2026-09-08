@@ -55,6 +55,10 @@ func TestToSetAndCompile(t *testing.T) {
 			Name: "tiny-loss", Calls: []TinySynchronousAcceleratorScreenCall{{ConfiguredSite: "example.com/p.loss"}},
 		}},
 		ForwardLossBackwardGraphContracts: []ForwardLossBackwardGraphContract{{Name: "vit-objective"}},
+		FragmentedAcceleratorObjectiveContracts: []FragmentedAcceleratorObjectiveContract{{
+			Name: "gpt-objective", Calls: []FragmentedAcceleratorObjectiveCall{{ConfiguredSite: "example.com/p.lossAndGrad"}},
+			PerOperationBackendRoutePreservationRequired: true, TrueCausalMaskSemanticsRequired: true,
+		}},
 		TopKOneContracts: []TopKOneContract{{
 			Name: "resident-topk-one",
 		}},
@@ -111,6 +115,12 @@ func TestToSetAndCompile(t *testing.T) {
 	}
 	if len(sets.ForwardLossBackwardGraphContracts) != 1 || sets.ForwardLossBackwardGraphContracts[0].Name != "vit-objective" {
 		t.Errorf("Compile lost forward-loss-backward graph contracts: %+v", sets.ForwardLossBackwardGraphContracts)
+	}
+	if len(sets.FragmentedAcceleratorObjectiveContracts) != 1 || sets.FragmentedAcceleratorObjectiveContracts[0].Name != "gpt-objective" ||
+		len(sets.FragmentedAcceleratorObjectiveContracts[0].Calls) != 1 ||
+		!sets.FragmentedAcceleratorObjectiveContracts[0].PerOperationBackendRoutePreservationRequired ||
+		!sets.FragmentedAcceleratorObjectiveContracts[0].TrueCausalMaskSemanticsRequired {
+		t.Errorf("Compile lost fragmented accelerator-objective contracts: %+v", sets.FragmentedAcceleratorObjectiveContracts)
 	}
 	if len(sets.TopKOneContracts) != 1 || sets.TopKOneContracts[0].Name != "resident-topk-one" {
 		t.Errorf("Compile lost Top-K(k=1) contracts: %+v", sets.TopKOneContracts)
@@ -187,6 +197,16 @@ func TestToSetAndCompile(t *testing.T) {
 	if sets.TinySynchronousAcceleratorScreenContracts[0].Name != "tiny-loss" ||
 		sets.TinySynchronousAcceleratorScreenContracts[0].Calls[0].ConfiguredSite != "example.com/p.loss" {
 		t.Error("Compile must deeply clone tiny synchronous accelerator-screen contracts")
+	}
+	c.FragmentedAcceleratorObjectiveContracts[0].Name = "mutated"
+	c.FragmentedAcceleratorObjectiveContracts[0].Calls[0].ConfiguredSite = "mutated"
+	c.FragmentedAcceleratorObjectiveContracts[0].PerOperationBackendRoutePreservationRequired = false
+	c.FragmentedAcceleratorObjectiveContracts[0].TrueCausalMaskSemanticsRequired = false
+	if sets.FragmentedAcceleratorObjectiveContracts[0].Name != "gpt-objective" ||
+		sets.FragmentedAcceleratorObjectiveContracts[0].Calls[0].ConfiguredSite != "example.com/p.lossAndGrad" ||
+		!sets.FragmentedAcceleratorObjectiveContracts[0].PerOperationBackendRoutePreservationRequired ||
+		!sets.FragmentedAcceleratorObjectiveContracts[0].TrueCausalMaskSemanticsRequired {
+		t.Error("Compile must deeply clone fragmented accelerator-objective contracts")
 	}
 	if sets.ElementCountMethods != nil {
 		t.Errorf("empty field must compile to a nil set, got %v", sets.ElementCountMethods)
@@ -1251,6 +1271,7 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 
 		"TinySynchronousAcceleratorScreenContracts": len(c.TinySynchronousAcceleratorScreenContracts),
 		"ForwardLossBackwardGraphContracts":         len(c.ForwardLossBackwardGraphContracts),
+		"FragmentedAcceleratorObjectiveContracts":   len(c.FragmentedAcceleratorObjectiveContracts),
 	}
 	for name, n := range fields {
 		if n == 0 {
@@ -1283,6 +1304,9 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 	}
 	if len(c.ForwardLossBackwardGraphContracts) != 1 || !c.ForwardLossBackwardGraphContracts[0].Valid() {
 		t.Errorf("example config has invalid forward-loss-backward graph contract: %+v", c.ForwardLossBackwardGraphContracts)
+	}
+	if len(c.FragmentedAcceleratorObjectiveContracts) != 1 || !c.FragmentedAcceleratorObjectiveContracts[0].Valid() {
+		t.Errorf("example config has invalid fragmented accelerator-objective contract: %+v", c.FragmentedAcceleratorObjectiveContracts)
 	}
 	if len(c.SchedulerTileGrainContracts) != 1 || !c.SchedulerTileGrainContracts[0].Valid() {
 		t.Errorf("example config has invalid scheduler tile-grain contract: %+v", c.SchedulerTileGrainContracts)

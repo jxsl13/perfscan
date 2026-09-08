@@ -647,6 +647,77 @@ forwardLossBackwardGraphContracts:
     pairedNumericalValidationRequired: true
     pairedEndToEndValidationRequired: true
 
+# Exact complete-objective boundary contract for PS6117. Every record is an
+# exact typed callable/operation at an exact configured function site, and
+# expectedOccurrences is exact. This is a graph-screening obligation, not a
+# fusion, profitability, or scatter-lowering claim.
+fragmentedAcceleratorObjectiveContracts:
+  - name: m2-causal-gpt-objective-screen
+    objectiveSite: example.com/project/model.GPT.lossAndGradFallback
+    calls:
+      - configuredSite: example.com/project/model.GPT.lossAndGradFallback
+        acceleratorCallable: example.com/project/backend.Engine.Execute
+        operationArgument: 1
+        operationConstant: example.com/project/backend.OpEmbed
+        operationConstantValue: "4"
+        expectedOccurrences: 2
+      - configuredSite: example.com/project/model.GPT.forwardLayers
+        acceleratorCallable: example.com/project/backend.Engine.Execute
+        operationArgument: 1
+        operationConstant: example.com/project/backend.OpMatMul
+        operationConstantValue: "7"
+        expectedOccurrences: 72
+      - configuredSite: example.com/project/model.GPT.lossAndGradFallback
+        acceleratorCallable: example.com/project/backend.Engine.Execute
+        operationArgument: 1
+        operationConstant: example.com/project/backend.OpCrossEntropy
+        operationConstantValue: "17"
+        expectedOccurrences: 1
+      - configuredSite: example.com/project/model.GPT.lossAndGradFallback
+        acceleratorCallable: example.com/project/backend.Engine.Execute
+        operationArgument: 1
+        operationConstant: example.com/project/backend.OpBackward
+        operationConstantValue: "18"
+        expectedOccurrences: 77
+    configuredAcceleratorCallCount: 152
+    configuredSynchronousBoundaryCount: 152
+    candidateSubmissionCount: 1
+    scalarObjectiveResult: 1
+    parameterGradientsResult: 2
+    errorResult: 3
+    geometryCacheKey: batch,sequence,context,vocabulary,width,heads,ffn,depth,dtype,layout,objective
+    configuredEvidence: goai-ba513def-fab7e6e5-m2-metal-gpt-loss-grad-20260824
+    existingWholeObjectiveRoute: false
+    intentionalRetainedFragmentedRoute: false
+    completeForwardLossReverseMode: true
+    stableObjectiveGeometry: true
+    geometryCacheKeyComplete: true
+    cacheReusedAcrossObjectives: true
+    eachAcceleratorCallSubmits: true
+    eachAcceleratorCallSynchronizesBeforeReturn: true
+    candidateReturnsScalarAndAllParameterGradients: true
+    noOtherMaterializedResults: true
+    noDynamicDispatch: true
+    noCustomHooks: true
+    inputsAndParametersImmutable: true
+    outputsDoNotAliasInputs: true
+    noPreexistingDeviceResidency: true
+    noPostObjectiveDeviceResidency: true
+    exactDTypeLayoutAttributesReduction: true
+    floatingPointParityRequired: true
+    errorPanicParityRequired: true
+    recorderAutogradBackendParityRequired: true
+    # Mandatory unresolved-review gates: do not bypass per-operation routing
+    # (including spill/override routes), and do not approximate causal exclusion
+    # with a finite sentinel such as -1e30.
+    perOperationBackendRoutePreservationRequired: true
+    trueCausalMaskSemanticsRequired: true
+    pairedApplicationBenchmarkRequired: true
+    numericalValidationRequired: true
+    shapeAwareEmbeddingGradientValidationRequired: true
+    repeatedIndexGradientParityRequired: true
+    scatterNDNotAssumedFaster: true
+
 # ---------------------------------------------------------------------------
 # Concrete instance — a tensor / numerical library (e.g. goai). The same
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the

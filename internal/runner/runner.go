@@ -372,6 +372,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 
 		"tinySynchronousAcceleratorScreenContracts": validTinySynchronousAcceleratorScreenContracts(cfg.TinySynchronousAcceleratorScreenContracts),
 		"forwardLossBackwardGraphContracts":         validForwardLossBackwardGraphContracts(cfg.ForwardLossBackwardGraphContracts),
+		"fragmentedAcceleratorObjectiveContracts":   validFragmentedAcceleratorObjectiveContracts(cfg.FragmentedAcceleratorObjectiveContracts),
 	}
 	missing := make([]string, 0, len(c.Vocab))
 	for _, v := range c.Vocab {
@@ -383,6 +384,16 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 }
 
 func validForwardLossBackwardGraphContracts(contracts []config.ForwardLossBackwardGraphContract) int {
+	valid := 0
+	for index := range contracts {
+		if contracts[index].Valid() {
+			valid++
+		}
+	}
+	return valid
+}
+
+func validFragmentedAcceleratorObjectiveContracts(contracts []config.FragmentedAcceleratorObjectiveContract) int {
 	valid := 0
 	for index := range contracts {
 		if contracts[index].Valid() {

@@ -112,3 +112,14 @@ Rules without a pair, and why:
   and gradient parity, floating-point/error/panic/mutation/alias/ownership and
   recorder/autograd/backend-selection behavior, then use paired end-to-end
   application measurements on the configured target.
+- **PS6117** (fragmented accelerator-objective advisory): a portable toy cannot
+  reproduce a backend's eager command lifecycle, reusable graph compilation,
+  device placement, or dense parameter-gradient materialization. GoAI's pinned
+  causal GPT campaign collapsed many synchronized operations into one cached
+  MPSGraph submission and measured a 3.689x median application gain, but that is
+  exact-shape evidence rather than a promised transformation. Its scatterND
+  embedding-gradient prototype also lost to dense one-hot transpose GEMM, so a
+  synthetic benchmark would actively erase the shape-sensitive negative result.
+  Validate the scalar and every parameter gradient, repeated-index accumulation,
+  immutability, fallback/recorder/backend behavior, cache reuse, and paired
+  same-binary application performance at the configured geometry.
