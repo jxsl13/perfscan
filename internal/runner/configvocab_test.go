@@ -266,6 +266,63 @@ func forwardLossBackwardGraphContractForRunnerTest() config.ForwardLossBackwardG
 	}
 }
 
+func TestMissingVocabFragmentedAcceleratorObjectiveContracts(t *testing.T) {
+	t.Parallel()
+	check := &lint.Check{NeedsConfig: true, Vocab: []string{"fragmentedAcceleratorObjectiveContracts"}}
+	if got := missingVocab(check, &config.Config{}); len(got) != 1 || got[0] != "fragmentedAcceleratorObjectiveContracts" {
+		t.Fatalf("missingVocab(empty) = %v, want fragmentedAcceleratorObjectiveContracts", got)
+	}
+	invalid := config.Config{FragmentedAcceleratorObjectiveContracts: []config.FragmentedAcceleratorObjectiveContract{{Name: "incomplete"}}}
+	if got := missingVocab(check, &invalid); len(got) != 1 {
+		t.Fatalf("missingVocab(invalid) = %v, want fragmentedAcceleratorObjectiveContracts", got)
+	}
+	configured := config.Config{FragmentedAcceleratorObjectiveContracts: []config.FragmentedAcceleratorObjectiveContract{fragmentedAcceleratorObjectiveContractForRunnerTest()}}
+	if got := missingVocab(check, &configured); len(got) != 0 {
+		t.Fatalf("missingVocab(valid) = %v, want none", got)
+	}
+	for _, test := range []struct {
+		name string
+		edit func(*config.FragmentedAcceleratorObjectiveContract)
+	}{
+		{"per-operation route preservation", func(c *config.FragmentedAcceleratorObjectiveContract) {
+			c.PerOperationBackendRoutePreservationRequired = false
+		}},
+		{"true causal mask", func(c *config.FragmentedAcceleratorObjectiveContract) { c.TrueCausalMaskSemanticsRequired = false }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			contract := fragmentedAcceleratorObjectiveContractForRunnerTest()
+			test.edit(&contract)
+			candidate := config.Config{FragmentedAcceleratorObjectiveContracts: []config.FragmentedAcceleratorObjectiveContract{contract}}
+			if got := missingVocab(check, &candidate); len(got) != 1 || got[0] != "fragmentedAcceleratorObjectiveContracts" {
+				t.Fatalf("missingVocab(incomplete gate) = %v, want fragmentedAcceleratorObjectiveContracts", got)
+			}
+		})
+	}
+}
+
+func fragmentedAcceleratorObjectiveContractForRunnerTest() config.FragmentedAcceleratorObjectiveContract {
+	return config.FragmentedAcceleratorObjectiveContract{
+		Name: "gpt-objective", ObjectiveSite: "example.com/model.lossAndGrad",
+		Calls: []config.FragmentedAcceleratorObjectiveCall{
+			{ConfiguredSite: "example.com/model.lossAndGrad", AcceleratorCallable: "example.com/backend.Execute", OperationArgument: 1, OperationConstant: "example.com/backend.OpForward", OperationConstantValue: "1", ExpectedOccurrences: 3},
+			{ConfiguredSite: "example.com/model.lossAndGrad", AcceleratorCallable: "example.com/backend.Execute", OperationArgument: 1, OperationConstant: "example.com/backend.OpBackward", OperationConstantValue: "2", ExpectedOccurrences: 2},
+		},
+		ConfiguredAcceleratorCallCount: 5, ConfiguredSynchronousBoundaryCount: 5, CandidateSubmissionCount: 1,
+		ScalarObjectiveResult: 1, ParameterGradientsResult: 2, ErrorResult: 3,
+		GeometryCacheKey: "batch,sequence,width,depth,dtype,layout", ConfiguredEvidence: "paired-owner-campaign",
+		CompleteForwardLossReverseMode: true, StableObjectiveGeometry: true, GeometryCacheKeyComplete: true,
+		CacheReusedAcrossObjectives: true, EachAcceleratorCallSubmits: true, EachAcceleratorCallSynchronizesBeforeReturn: true,
+		CandidateReturnsScalarAndAllParameterGradients: true, NoOtherMaterializedResults: true,
+		NoDynamicDispatch: true, NoCustomHooks: true, InputsAndParametersImmutable: true, OutputsDoNotAliasInputs: true,
+		NoPreexistingDeviceResidency: true, NoPostObjectiveDeviceResidency: true, ExactDTypeLayoutAttributesReduction: true,
+		FloatingPointParityRequired: true, ErrorPanicParityRequired: true, RecorderAutogradBackendParityRequired: true,
+		PerOperationBackendRoutePreservationRequired: true, TrueCausalMaskSemanticsRequired: true,
+		PairedApplicationBenchmarkRequired: true, NumericalValidationRequired: true,
+		ShapeAwareEmbeddingGradientValidationRequired: true, RepeatedIndexGradientParityRequired: true, ScatterNDNotAssumedFaster: true,
+	}
+}
+
 func tinySynchronousAcceleratorScreenContractForRunnerTest() config.TinySynchronousAcceleratorScreenContract {
 	return config.TinySynchronousAcceleratorScreenContract{
 		Name: "tiny-loss",
