@@ -237,6 +237,128 @@ type Config struct {
 	// complete overwrite, non-retention, synchronous execution, stable result
 	// shape, and wrapper/Into state, error, and panic parity.
 	ReusableResultLoopContracts []ReusableResultLoopContract `json:"reusableResultLoopContracts,omitempty" yaml:"reusableResultLoopContracts"`
+
+	// RecorderResidualAddContracts bind an exact projection, recorder add, and
+	// accumulate sibling for PS6113. Every entry supplies the ownership,
+	// synchronization, error, arithmetic, backend, and dynamic-dispatch facts
+	// that method names and Go interfaces cannot establish.
+	RecorderResidualAddContracts []RecorderResidualAddContract `json:"recorderResidualAddContracts,omitempty" yaml:"recorderResidualAddContracts"`
+}
+
+// RecorderResidualAddImplementation identifies one concrete projection and
+// accumulate method pair behind a configured interface. The methods must have
+// the same concrete receiver and signatures compatible with the static pair.
+type RecorderResidualAddImplementation struct {
+	Projection string `json:"projection" yaml:"projection"`
+	Accumulate string `json:"accumulate" yaml:"accumulate"`
+}
+
+// RecorderResidualAddContract describes one recorder projection followed by
+// an in-place residual add. Positions are one-based and exclude receivers.
+// ProjectionExtentArguments and AccumulateExtentArguments are parallel lists.
+// AccumulateDestinationLengthArgument may identify one additional integer
+// argument derived from len(destination); zero means there is no such role.
+type RecorderResidualAddContract struct {
+	Name                                string                              `json:"name" yaml:"name"`
+	Projection                          string                              `json:"projection" yaml:"projection"`
+	Accumulate                          string                              `json:"accumulate" yaml:"accumulate"`
+	RecorderBinary                      string                              `json:"recorderBinary" yaml:"recorderBinary"`
+	EagerSequence                       string                              `json:"eagerSequence,omitempty" yaml:"eagerSequence,omitempty"`
+	AddOperation                        string                              `json:"addOperation" yaml:"addOperation"`
+	AddOperationValue                   string                              `json:"addOperationValue" yaml:"addOperationValue"`
+	ConfiguredSite                      string                              `json:"configuredSite,omitempty" yaml:"configuredSite,omitempty"`
+	ProjectionRecorderArgument          int                                 `json:"projectionRecorderArgument" yaml:"projectionRecorderArgument"`
+	ProjectionSourceArgument            int                                 `json:"projectionSourceArgument" yaml:"projectionSourceArgument"`
+	ProjectionTemporaryArgument         int                                 `json:"projectionTemporaryArgument" yaml:"projectionTemporaryArgument"`
+	BinaryDestinationArgument           int                                 `json:"binaryDestinationArgument" yaml:"binaryDestinationArgument"`
+	BinaryTemporaryArgument             int                                 `json:"binaryTemporaryArgument" yaml:"binaryTemporaryArgument"`
+	BinaryOutputArgument                int                                 `json:"binaryOutputArgument" yaml:"binaryOutputArgument"`
+	BinaryOperationArgument             int                                 `json:"binaryOperationArgument" yaml:"binaryOperationArgument"`
+	AccumulateRecorderArgument          int                                 `json:"accumulateRecorderArgument" yaml:"accumulateRecorderArgument"`
+	AccumulateSourceArgument            int                                 `json:"accumulateSourceArgument" yaml:"accumulateSourceArgument"`
+	AccumulateTemporaryArgument         int                                 `json:"accumulateTemporaryArgument" yaml:"accumulateTemporaryArgument"`
+	AccumulateDestinationArgument       int                                 `json:"accumulateDestinationArgument" yaml:"accumulateDestinationArgument"`
+	AccumulateDestinationLengthArgument int                                 `json:"accumulateDestinationLengthArgument,omitempty" yaml:"accumulateDestinationLengthArgument,omitempty"`
+	ProjectionExtentArguments           []int                               `json:"projectionExtentArguments,omitempty" yaml:"projectionExtentArguments,omitempty"`
+	AccumulateExtentArguments           []int                               `json:"accumulateExtentArguments,omitempty" yaml:"accumulateExtentArguments,omitempty"`
+	Implementations                     []RecorderResidualAddImplementation `json:"implementations,omitempty" yaml:"implementations,omitempty"`
+
+	ProjectionOverwritesTemporary                     bool `json:"projectionOverwritesTemporary" yaml:"projectionOverwritesTemporary"`
+	TemporaryMayServeAsAccumulateScratch              bool `json:"temporaryMayServeAsAccumulateScratch" yaml:"temporaryMayServeAsAccumulateScratch"`
+	MatchedBuffersDoNotAlias                          bool `json:"matchedBuffersDoNotAlias" yaml:"matchedBuffersDoNotAlias"`
+	TemporaryUnobservedOutsideMatchedCalls            bool `json:"temporaryUnobservedOutsideMatchedCalls" yaml:"temporaryUnobservedOutsideMatchedCalls"`
+	CallsDoNotRetainArguments                         bool `json:"callsDoNotRetainArguments" yaml:"callsDoNotRetainArguments"`
+	CallsExecuteSynchronously                         bool `json:"callsExecuteSynchronously" yaml:"callsExecuteSynchronously"`
+	RecorderOrderPreserved                            bool `json:"recorderOrderPreserved" yaml:"recorderOrderPreserved"`
+	AccumulateMatchesProjectionAndResidualAdd         bool `json:"accumulateMatchesProjectionAndResidualAdd" yaml:"accumulateMatchesProjectionAndResidualAdd"`
+	AccumulatePreservesErrorsAndPanics                bool `json:"accumulatePreservesErrorsAndPanics" yaml:"accumulatePreservesErrorsAndPanics"`
+	AccumulatePreservesPartialOutput                  bool `json:"accumulatePreservesPartialOutput" yaml:"accumulatePreservesPartialOutput"`
+	AccumulatePreservesArithmeticPolicy               bool `json:"accumulatePreservesArithmeticPolicy" yaml:"accumulatePreservesArithmeticPolicy"`
+	AccumulateSupportsConfiguredDTypesLayoutsBackends bool `json:"accumulateSupportsConfiguredDTypesLayoutsBackends" yaml:"accumulateSupportsConfiguredDTypesLayoutsBackends"`
+	AllDynamicProjectionTypesCovered                  bool `json:"allDynamicProjectionTypesCovered,omitempty" yaml:"allDynamicProjectionTypesCovered,omitempty"`
+	EagerSequenceReturnsFirstError                    bool `json:"eagerSequenceReturnsFirstError,omitempty" yaml:"eagerSequenceReturnsFirstError,omitempty"`
+}
+
+// Valid reports whether PS6113's project-owned semantic promises and argument
+// roles are complete. The analyzer separately resolves types, signatures,
+// interface implementations, constants, and the configured site.
+func (c *RecorderResidualAddContract) Valid() bool {
+	if c.Name == "" || strings.TrimSpace(c.Name) != c.Name ||
+		!psTopKMethodIDValid(c.Projection) || !psTopKMethodIDValid(c.Accumulate) ||
+		c.Projection == c.Accumulate || !psTopKMethodIDValid(c.RecorderBinary) ||
+		!psTopKFunctionIDValid(c.AddOperation) || c.AddOperationValue == "" || strings.TrimSpace(c.AddOperationValue) != c.AddOperationValue ||
+		c.EagerSequence != "" && !psTopKFunctionIDValid(c.EagerSequence) ||
+		c.ConfiguredSite != "" && !ps6109CallableIDValid(c.ConfiguredSite) ||
+		!c.ProjectionOverwritesTemporary || !c.TemporaryMayServeAsAccumulateScratch ||
+		!c.MatchedBuffersDoNotAlias || !c.TemporaryUnobservedOutsideMatchedCalls ||
+		!c.CallsDoNotRetainArguments || !c.CallsExecuteSynchronously || !c.RecorderOrderPreserved ||
+		!c.AccumulateMatchesProjectionAndResidualAdd || !c.AccumulatePreservesErrorsAndPanics ||
+		!c.AccumulatePreservesPartialOutput || !c.AccumulatePreservesArithmeticPolicy ||
+		!c.AccumulateSupportsConfiguredDTypesLayoutsBackends ||
+		(c.EagerSequence == "") == c.EagerSequenceReturnsFirstError {
+		return false
+	}
+	uniquePositive := func(positions []int) bool {
+		ordered := slices.Clone(positions)
+		slices.Sort(ordered)
+		for index, position := range ordered {
+			if position <= 0 || index > 0 && position == ordered[index-1] {
+				return false
+			}
+		}
+		return true
+	}
+	if len(c.ProjectionExtentArguments) != len(c.AccumulateExtentArguments) {
+		return false
+	}
+	if c.AccumulateDestinationLengthArgument < 0 {
+		return false
+	}
+	projectionPositions := append([]int{c.ProjectionRecorderArgument, c.ProjectionSourceArgument, c.ProjectionTemporaryArgument}, c.ProjectionExtentArguments...)
+	accumulatePositions := append([]int{c.AccumulateRecorderArgument, c.AccumulateSourceArgument, c.AccumulateTemporaryArgument, c.AccumulateDestinationArgument}, c.AccumulateExtentArguments...)
+	if c.AccumulateDestinationLengthArgument > 0 {
+		accumulatePositions = append(accumulatePositions, c.AccumulateDestinationLengthArgument)
+	}
+	if !uniquePositive(projectionPositions) ||
+		!uniquePositive([]int{c.BinaryDestinationArgument, c.BinaryTemporaryArgument, c.BinaryOutputArgument, c.BinaryOperationArgument}) ||
+		!uniquePositive(accumulatePositions) {
+		return false
+	}
+	if len(c.Implementations) == 0 {
+		return !c.AllDynamicProjectionTypesCovered
+	}
+	if !c.AllDynamicProjectionTypesCovered || c.ConfiguredSite == "" {
+		return false
+	}
+	seen := make(map[string]bool, len(c.Implementations))
+	for _, implementation := range c.Implementations {
+		if !psTopKMethodIDValid(implementation.Projection) || !psTopKMethodIDValid(implementation.Accumulate) ||
+			implementation.Projection == implementation.Accumulate || seen[implementation.Projection] {
+			return false
+		}
+		seen[implementation.Projection] = true
+	}
+	return true
 }
 
 // ReusableResultLoopContract describes one allocation-returning numeric-slice
@@ -1005,6 +1127,7 @@ type Sets struct {
 	ReceiverStagingContracts          []ReceiverStagingContract
 	ReusableOneShotWrapperContracts   []ReusableOneShotWrapperContract
 	ReusableResultLoopContracts       []ReusableResultLoopContract
+	RecorderResidualAddContracts      []RecorderResidualAddContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -1055,6 +1178,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		ReceiverStagingContracts:          slices.Clone(c.ReceiverStagingContracts),
 		ReusableOneShotWrapperContracts:   cloneReusableOneShotWrapperContracts(c.ReusableOneShotWrapperContracts),
 		ReusableResultLoopContracts:       cloneReusableResultLoopContracts(c.ReusableResultLoopContracts),
+		RecorderResidualAddContracts:      cloneRecorderResidualAddContracts(c.RecorderResidualAddContracts),
 	}
 }
 
@@ -1090,6 +1214,16 @@ func cloneReusableResultLoopContracts(contracts []ReusableResultLoopContract) []
 	cloned := slices.Clone(contracts)
 	for index := range cloned {
 		cloned[index].ShapeArgumentPositions = slices.Clone(cloned[index].ShapeArgumentPositions)
+	}
+	return cloned
+}
+
+func cloneRecorderResidualAddContracts(contracts []RecorderResidualAddContract) []RecorderResidualAddContract {
+	cloned := slices.Clone(contracts)
+	for index := range cloned {
+		cloned[index].ProjectionExtentArguments = slices.Clone(cloned[index].ProjectionExtentArguments)
+		cloned[index].AccumulateExtentArguments = slices.Clone(cloned[index].AccumulateExtentArguments)
+		cloned[index].Implementations = slices.Clone(cloned[index].Implementations)
 	}
 	return cloned
 }

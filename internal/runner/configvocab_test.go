@@ -168,6 +168,33 @@ func TestMissingVocabReusableResultLoopContracts(t *testing.T) {
 	}
 }
 
+func TestMissingVocabRecorderResidualAddContracts(t *testing.T) {
+	t.Parallel()
+	check := &lint.Check{NeedsConfig: true, Vocab: []string{"recorderResidualAddContracts"}}
+	if got := missingVocab(check, &config.Config{}); len(got) != 1 || got[0] != "recorderResidualAddContracts" {
+		t.Fatalf("missingVocab(empty) = %v, want recorderResidualAddContracts", got)
+	}
+	invalid := config.Config{RecorderResidualAddContracts: []config.RecorderResidualAddContract{{Name: "incomplete"}}}
+	if got := missingVocab(check, &invalid); len(got) != 1 || got[0] != "recorderResidualAddContracts" {
+		t.Fatalf("missingVocab(invalid) = %v, want recorderResidualAddContracts", got)
+	}
+	valid := config.RecorderResidualAddContract{
+		Name: "residual", Projection: "example.com/p.Linear.record", Accumulate: "example.com/p.Linear.recordAdd",
+		RecorderBinary: "example.com/p.Recorder.Binary", AddOperation: "example.com/p.binaryAdd", AddOperationValue: "1",
+		ProjectionRecorderArgument: 1, ProjectionSourceArgument: 2, ProjectionTemporaryArgument: 3,
+		BinaryDestinationArgument: 1, BinaryTemporaryArgument: 2, BinaryOutputArgument: 3, BinaryOperationArgument: 4,
+		AccumulateRecorderArgument: 1, AccumulateSourceArgument: 2, AccumulateTemporaryArgument: 3, AccumulateDestinationArgument: 4,
+		ProjectionOverwritesTemporary: true, TemporaryMayServeAsAccumulateScratch: true, MatchedBuffersDoNotAlias: true,
+		TemporaryUnobservedOutsideMatchedCalls: true, CallsDoNotRetainArguments: true, CallsExecuteSynchronously: true,
+		RecorderOrderPreserved: true, AccumulateMatchesProjectionAndResidualAdd: true, AccumulatePreservesErrorsAndPanics: true,
+		AccumulatePreservesPartialOutput: true, AccumulatePreservesArithmeticPolicy: true, AccumulateSupportsConfiguredDTypesLayoutsBackends: true,
+	}
+	configured := config.Config{RecorderResidualAddContracts: []config.RecorderResidualAddContract{valid}}
+	if got := missingVocab(check, &configured); len(got) != 0 {
+		t.Fatalf("missingVocab(configured) = %v, want none", got)
+	}
+}
+
 func TestMissingVocabSchedulerTileGrainContracts(t *testing.T) {
 	t.Parallel()
 	check := &lint.Check{NeedsConfig: true, Vocab: []string{"schedulerTileGrainContracts"}}

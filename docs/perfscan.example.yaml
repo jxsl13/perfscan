@@ -429,8 +429,59 @@ reusableResultLoopContracts:
     wrapperAndIntoHaveIdenticalStateEffects: true
     wrapperAndIntoHaveIdenticalErrorsAndPanics: true
 
+# Exact projection/recorder contracts for PS6113 direct residual-add fusion
+# candidates. Positions are one-based and exclude method receivers. This
+# example models record(r, src, scratch, rows), Binary(dst, scratch, dst, add),
+# and recordAdd(r, src, scratch, dst, rows, len(dst)). Interface dispatch is
+# accepted only at configuredSite and only when implementations enumerates the
+# complete runtime set for that site. These are strong project-owned promises;
+# identifier spelling proves none of them. Bias-bearing three-operation chains
+# are outside PS6113 v1.
+recorderResidualAddContracts:
+  - name: decoder-attention-output-residual
+    projection: example.com/project/model.Linear.record
+    accumulate: example.com/project/model.Linear.recordAdd
+    recorderBinary: example.com/project/backend.Recorder.Binary
+    eagerSequence: example.com/project/model.firstErr
+    addOperation: example.com/project/backend.BinaryAdd
+    addOperationValue: "1"
+    configuredSite: example.com/project/model.Decoder.Step
+    projectionRecorderArgument: 1
+    projectionSourceArgument: 2
+    projectionTemporaryArgument: 3
+    projectionExtentArguments: [4]
+    binaryDestinationArgument: 1
+    binaryTemporaryArgument: 2
+    binaryOutputArgument: 3
+    binaryOperationArgument: 4
+    accumulateRecorderArgument: 1
+    accumulateSourceArgument: 2
+    accumulateTemporaryArgument: 3
+    accumulateDestinationArgument: 4
+    accumulateExtentArguments: [5]
+    accumulateDestinationLengthArgument: 6
+    implementations:
+      - projection: example.com/project/model.F32Linear.record
+        accumulate: example.com/project/model.F32Linear.recordAdd
+      - projection: example.com/project/model.QuantLinear.record
+        accumulate: example.com/project/model.QuantLinear.recordAdd
+    projectionOverwritesTemporary: true
+    temporaryMayServeAsAccumulateScratch: true
+    matchedBuffersDoNotAlias: true
+    temporaryUnobservedOutsideMatchedCalls: true
+    callsDoNotRetainArguments: true
+    callsExecuteSynchronously: true
+    recorderOrderPreserved: true
+    accumulateMatchesProjectionAndResidualAdd: true
+    accumulatePreservesErrorsAndPanics: true
+    accumulatePreservesPartialOutput: true
+    accumulatePreservesArithmeticPolicy: true
+    accumulateSupportsConfiguredDTypesLayoutsBackends: true
+    allDynamicProjectionTypesCovered: true
+    eagerSequenceReturnsFirstError: true
+
 # ---------------------------------------------------------------------------
-# Concrete instance — a tensor / numerical library (e.g. goai). The SAME 29
+# Concrete instance — a tensor / numerical library (e.g. goai). The same
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the
 # names:
 #
@@ -472,4 +523,6 @@ reusableResultLoopContracts:
 #     - {name: recorder-shell, wrapperType: example.com/backend.Recorder, providerType: example.com/backend.Device, acquisition: example.com/model.CommandFactory.NewRecorder, concreteAcquisition: example.com/backend.Device.NewRecorder, wrapperConstructor: example.com/backend.NewRecorder, terminal: {static: example.com/model.CommandRecorder.Free, concrete: example.com/backend.Recorder.Free}, reset: {static: example.com/model.CommandRecorder.Reset, concrete: example.com/backend.Recorder.Reset}, freshNativeHandleFactory: example.com/backend.Device.NewCommandBuffer, nativeHandleField: example.com/backend.Recorder.commandBuffer, mutableStateFields: [example.com/backend.Recorder.encoder], allowedSynchronousUses: [{static: example.com/model.CommandRecorder.Encode, concrete: example.com/backend.Recorder.Encode}], acquisitionWrapperResult: 1, acquisitionStatusResult: 2, constructorWrapperResult: 1, resetStatusResult: 1, acquisitionFailureMode: nil-error, resetFailureState: error-leaves-empty-terminal-safe, slotBound: 1, acquisitionCreatesFreshGoWrapper: true, acquisitionHasExactDynamicWrapper: true, failedAcquisitionHasNoGeneration: true, nativeHandleIsOneShot: true, resetAlwaysCreatesFreshHandle: true, terminalSynchronouslyReleases: true, terminalClearsHandle: true, terminalIsIdempotent: true, resetClearsMutableState: true, usesExecuteSynchronously: true, usesDoNotRetainGeneration: true, noStaleGenerationReferences: true, ownerAccessIsNonConcurrent: true, providerFallbackIsPreserved: true, failuresAndPanicsArePreserved: true}
 #   reusableResultLoopContracts:
 #     - {name: decoder-step-logits, wrapper: example.com/decoder.Decoder.Step, into: example.com/decoder.Decoder.StepInto, resultPosition: 1, destinationArgument: 3, shapeArgumentPositions: [], configuredResultElements: 50257, configuredLoopIterations: 8, wrapperReturnsFreshOwned: true, resultLengthStableForReceiverAndListedArgs: true, intoOverwritesDestinationOnSuccess: true, intoDoesNotReadDestinationBeforeOverwrite: true, intoIgnoresDestinationIdentityAndExtraCapacity: true, intoDoesNotRetainDestination: true, intoExecutesSynchronously: true, wrapperAndIntoHaveIdenticalStateEffects: true, wrapperAndIntoHaveIdenticalErrorsAndPanics: true}
+#   recorderResidualAddContracts:
+#     - {name: attention-residual, projection: example.com/model.Linear.record, accumulate: example.com/model.Linear.recordAdd, recorderBinary: example.com/backend.Recorder.Binary, eagerSequence: example.com/model.firstErr, addOperation: example.com/backend.BinaryAdd, addOperationValue: "1", configuredSite: example.com/model.Decoder.Step, projectionRecorderArgument: 1, projectionSourceArgument: 2, projectionTemporaryArgument: 3, projectionExtentArguments: [4], binaryDestinationArgument: 1, binaryTemporaryArgument: 2, binaryOutputArgument: 3, binaryOperationArgument: 4, accumulateRecorderArgument: 1, accumulateSourceArgument: 2, accumulateTemporaryArgument: 3, accumulateDestinationArgument: 4, accumulateExtentArguments: [5], accumulateDestinationLengthArgument: 6, implementations: [{projection: example.com/model.F32Linear.record, accumulate: example.com/model.F32Linear.recordAdd}], projectionOverwritesTemporary: true, temporaryMayServeAsAccumulateScratch: true, matchedBuffersDoNotAlias: true, temporaryUnobservedOutsideMatchedCalls: true, callsDoNotRetainArguments: true, callsExecuteSynchronously: true, recorderOrderPreserved: true, accumulateMatchesProjectionAndResidualAdd: true, accumulatePreservesErrorsAndPanics: true, accumulatePreservesPartialOutput: true, accumulatePreservesArithmeticPolicy: true, accumulateSupportsConfiguredDTypesLayoutsBackends: true, allDynamicProjectionTypesCovered: true, eagerSequenceReturnsFirstError: true}
 # ---------------------------------------------------------------------------
