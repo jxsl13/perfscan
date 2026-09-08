@@ -480,6 +480,60 @@ recorderResidualAddContracts:
     allDynamicProjectionTypesCovered: true
     eagerSequenceReturnsFirstError: true
 
+# Exact row-local-transform / regular sparse-gather contract for PS6114.
+# Positions are one-based and exclude receivers. The contract, not names,
+# supplies ownership, row-locality, differentiation, arithmetic, and backend
+# fallback semantics. existingFusedCapabilityFallback: true deliberately
+# suppresses a site that already has the reviewed forward+backward capability
+# branch and equivalent fallback.
+rowLocalSparseGatherContracts:
+  - name: vit-selected-first-classifier
+    configuredSite: example.com/project/vision.ViT.Forward
+    transform: example.com/project/nn.LayerNorm.Forward
+    gather: example.com/project/vision.sliceOne
+    concat: example.com/project/backend.Execute
+    sliceOperation: example.com/project/backend.OpSlice
+    sliceOperationValue: "1"
+    concatOperation: example.com/project/backend.OpConcat
+    concatOperationValue: "2"
+    sliceAttrsType: example.com/project/backend.SliceAttrs
+    sliceAxisField: example.com/project/backend.SliceAttrs.Axis
+    sliceStartField: example.com/project/backend.SliceAttrs.Start
+    sliceEndField: example.com/project/backend.SliceAttrs.End
+    concatAttrsType: example.com/project/backend.ConcatAttrs
+    concatAxisField: example.com/project/backend.ConcatAttrs.Axis
+    transformInputArgument: 2
+    gatherOperationArgument: 2
+    gatherAttrsArgument: 3
+    gatherInputArgument: 4
+    concatOperationArgument: 2
+    concatCollectionArgument: 3
+    concatAttrsArgument: 4
+    configuredEvidence: apple-m2-pro-b8-s65-d128-c10
+    packedRowsEqualBatchTimesStride: true
+    batchPositive: true
+    strideGreaterThanOne: true
+    nativeIntArithmeticNoOverflow: true
+    transformRowsIndependent: true
+    transformPreservesRowOrderAndWidth: true
+    transformParametersImmutable: true
+    transformDoesNotMutateInput: true
+    transformInputOutputDoNotAlias: true
+    transformDoesNotRetainArguments: true
+    callsExecuteSynchronously: true
+    discardedRowsHaveNoEffectsStateOrRNG: true
+    gatherDeterministicAndValueIndependent: true
+    gatherAndConcatDoNotMutateOrRetain: true
+    selectedFirstEquivalent: true
+    fusedForwardParity: true
+    floatingPointPolicyPreserved: true
+    errorAndPanicParity: true
+    partialOutputParity: true
+    recorderOrderParity: true
+    vjpAllInputGradientsParity: true
+    supportedDTypesLayoutsBackends: true
+    equivalentFallbackUnlessForwardAndBackwardAvailable: true
+
 # ---------------------------------------------------------------------------
 # Concrete instance — a tensor / numerical library (e.g. goai). The same
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the

@@ -243,6 +243,108 @@ type Config struct {
 	// synchronization, error, arithmetic, backend, and dynamic-dispatch facts
 	// that method names and Go interfaces cannot establish.
 	RecorderResidualAddContracts []RecorderResidualAddContract `json:"recorderResidualAddContracts,omitempty" yaml:"recorderResidualAddContracts"`
+
+	// RowLocalSparseGatherContracts bind an exact row-local transform, sparse
+	// gather, concat, attribute schema, and semantic replacement contract for
+	// PS6114. Callable names alone never establish row independence, ownership,
+	// autograd, arithmetic, or backend fallback parity.
+	RowLocalSparseGatherContracts []RowLocalSparseGatherContract `json:"rowLocalSparseGatherContracts,omitempty" yaml:"rowLocalSparseGatherContracts"`
+}
+
+// RowLocalSparseGatherContract describes one full packed-row transform whose
+// only successful-path consumers gather the first row of each fixed-width
+// group and concatenate those rows. Argument positions are one-based and
+// exclude method receivers. Attribute fields use exact package.Type.Field IDs.
+type RowLocalSparseGatherContract struct {
+	Name                            string `json:"name" yaml:"name"`
+	ConfiguredSite                  string `json:"configuredSite" yaml:"configuredSite"`
+	Transform                       string `json:"transform" yaml:"transform"`
+	Gather                          string `json:"gather" yaml:"gather"`
+	Concat                          string `json:"concat" yaml:"concat"`
+	SliceOperation                  string `json:"sliceOperation" yaml:"sliceOperation"`
+	SliceOperationValue             string `json:"sliceOperationValue" yaml:"sliceOperationValue"`
+	ConcatOperation                 string `json:"concatOperation" yaml:"concatOperation"`
+	ConcatOperationValue            string `json:"concatOperationValue" yaml:"concatOperationValue"`
+	SliceAttrsType                  string `json:"sliceAttrsType" yaml:"sliceAttrsType"`
+	SliceAxisField                  string `json:"sliceAxisField" yaml:"sliceAxisField"`
+	SliceStartField                 string `json:"sliceStartField" yaml:"sliceStartField"`
+	SliceEndField                   string `json:"sliceEndField" yaml:"sliceEndField"`
+	ConcatAttrsType                 string `json:"concatAttrsType" yaml:"concatAttrsType"`
+	ConcatAxisField                 string `json:"concatAxisField" yaml:"concatAxisField"`
+	TransformInputArgument          int    `json:"transformInputArgument" yaml:"transformInputArgument"`
+	GatherOperationArgument         int    `json:"gatherOperationArgument" yaml:"gatherOperationArgument"`
+	GatherAttrsArgument             int    `json:"gatherAttrsArgument" yaml:"gatherAttrsArgument"`
+	GatherInputArgument             int    `json:"gatherInputArgument" yaml:"gatherInputArgument"`
+	ConcatOperationArgument         int    `json:"concatOperationArgument" yaml:"concatOperationArgument"`
+	ConcatCollectionArgument        int    `json:"concatCollectionArgument" yaml:"concatCollectionArgument"`
+	ConcatAttrsArgument             int    `json:"concatAttrsArgument" yaml:"concatAttrsArgument"`
+	ExistingFusedCapabilityFallback bool   `json:"existingFusedCapabilityFallback,omitempty" yaml:"existingFusedCapabilityFallback,omitempty"`
+	ConfiguredEvidence              string `json:"configuredEvidence,omitempty" yaml:"configuredEvidence,omitempty"`
+
+	PackedRowsEqualBatchTimesStride                     bool `json:"packedRowsEqualBatchTimesStride" yaml:"packedRowsEqualBatchTimesStride"`
+	BatchPositive                                       bool `json:"batchPositive" yaml:"batchPositive"`
+	StrideGreaterThanOne                                bool `json:"strideGreaterThanOne" yaml:"strideGreaterThanOne"`
+	NativeIntArithmeticNoOverflow                       bool `json:"nativeIntArithmeticNoOverflow" yaml:"nativeIntArithmeticNoOverflow"`
+	TransformRowsIndependent                            bool `json:"transformRowsIndependent" yaml:"transformRowsIndependent"`
+	TransformPreservesRowOrderAndWidth                  bool `json:"transformPreservesRowOrderAndWidth" yaml:"transformPreservesRowOrderAndWidth"`
+	TransformParametersImmutable                        bool `json:"transformParametersImmutable" yaml:"transformParametersImmutable"`
+	TransformDoesNotMutateInput                         bool `json:"transformDoesNotMutateInput" yaml:"transformDoesNotMutateInput"`
+	TransformInputOutputDoNotAlias                      bool `json:"transformInputOutputDoNotAlias" yaml:"transformInputOutputDoNotAlias"`
+	TransformDoesNotRetainArguments                     bool `json:"transformDoesNotRetainArguments" yaml:"transformDoesNotRetainArguments"`
+	CallsExecuteSynchronously                           bool `json:"callsExecuteSynchronously" yaml:"callsExecuteSynchronously"`
+	DiscardedRowsHaveNoEffectsStateOrRNG                bool `json:"discardedRowsHaveNoEffectsStateOrRNG" yaml:"discardedRowsHaveNoEffectsStateOrRNG"`
+	GatherDeterministicAndValueIndependent              bool `json:"gatherDeterministicAndValueIndependent" yaml:"gatherDeterministicAndValueIndependent"`
+	GatherAndConcatDoNotMutateOrRetain                  bool `json:"gatherAndConcatDoNotMutateOrRetain" yaml:"gatherAndConcatDoNotMutateOrRetain"`
+	SelectedFirstEquivalent                             bool `json:"selectedFirstEquivalent" yaml:"selectedFirstEquivalent"`
+	FusedForwardParity                                  bool `json:"fusedForwardParity" yaml:"fusedForwardParity"`
+	FloatingPointPolicyPreserved                        bool `json:"floatingPointPolicyPreserved" yaml:"floatingPointPolicyPreserved"`
+	ErrorAndPanicParity                                 bool `json:"errorAndPanicParity" yaml:"errorAndPanicParity"`
+	PartialOutputParity                                 bool `json:"partialOutputParity" yaml:"partialOutputParity"`
+	RecorderOrderParity                                 bool `json:"recorderOrderParity" yaml:"recorderOrderParity"`
+	VJPAllInputGradientsParity                          bool `json:"vjpAllInputGradientsParity" yaml:"vjpAllInputGradientsParity"`
+	SupportedDTypesLayoutsBackends                      bool `json:"supportedDTypesLayoutsBackends" yaml:"supportedDTypesLayoutsBackends"`
+	EquivalentFallbackUnlessForwardAndBackwardAvailable bool `json:"equivalentFallbackUnlessForwardAndBackwardAvailable" yaml:"equivalentFallbackUnlessForwardAndBackwardAvailable"`
+}
+
+// Valid reports whether PS6114 has every project-owned source and semantic
+// fact. The analyzer separately proves exact typed calls, attributes, storage,
+// control flow, error guards, and stable geometry objects.
+func (c *RowLocalSparseGatherContract) Valid() bool {
+	if c.Name == "" || strings.TrimSpace(c.Name) != c.Name ||
+		!ps6109CallableIDValid(c.ConfiguredSite) || !psTopKMethodIDValid(c.Transform) ||
+		!psTopKFunctionIDValid(c.Gather) || !psTopKFunctionIDValid(c.Concat) ||
+		c.Gather == c.Concat ||
+		!psTopKFunctionIDValid(c.SliceOperation) || !psTopKFunctionIDValid(c.ConcatOperation) ||
+		c.SliceOperation == c.ConcatOperation ||
+		c.SliceOperationValue == "" || c.ConcatOperationValue == "" ||
+		!psTopKFunctionIDValid(c.SliceAttrsType) || !psTopKMethodIDValid(c.SliceAxisField) ||
+		!psTopKMethodIDValid(c.SliceStartField) || !psTopKMethodIDValid(c.SliceEndField) ||
+		c.SliceAxisField == c.SliceStartField || c.SliceAxisField == c.SliceEndField || c.SliceStartField == c.SliceEndField ||
+		!psTopKFunctionIDValid(c.ConcatAttrsType) || !psTopKMethodIDValid(c.ConcatAxisField) {
+		return false
+	}
+	positionsPositiveDistinct := func(positions ...int) bool {
+		ordered := slices.Clone(positions)
+		slices.Sort(ordered)
+		for index, position := range ordered {
+			if position <= 0 || index > 0 && position == ordered[index-1] {
+				return false
+			}
+		}
+		return true
+	}
+	return positionsPositiveDistinct(c.GatherOperationArgument, c.GatherAttrsArgument, c.GatherInputArgument) &&
+		positionsPositiveDistinct(c.ConcatOperationArgument, c.ConcatCollectionArgument, c.ConcatAttrsArgument) &&
+		c.TransformInputArgument > 0 && c.PackedRowsEqualBatchTimesStride && c.BatchPositive &&
+		c.StrideGreaterThanOne && c.NativeIntArithmeticNoOverflow && c.TransformRowsIndependent &&
+		c.TransformPreservesRowOrderAndWidth && c.TransformParametersImmutable &&
+		c.TransformDoesNotMutateInput && c.TransformInputOutputDoNotAlias &&
+		c.TransformDoesNotRetainArguments && c.CallsExecuteSynchronously &&
+		c.DiscardedRowsHaveNoEffectsStateOrRNG && c.GatherDeterministicAndValueIndependent &&
+		c.GatherAndConcatDoNotMutateOrRetain && c.SelectedFirstEquivalent && c.FusedForwardParity &&
+		c.FloatingPointPolicyPreserved && c.ErrorAndPanicParity && c.PartialOutputParity &&
+		c.RecorderOrderParity && c.VJPAllInputGradientsParity && c.SupportedDTypesLayoutsBackends &&
+		c.EquivalentFallbackUnlessForwardAndBackwardAvailable
 }
 
 // RecorderResidualAddImplementation identifies one concrete projection and
@@ -1128,6 +1230,7 @@ type Sets struct {
 	ReusableOneShotWrapperContracts   []ReusableOneShotWrapperContract
 	ReusableResultLoopContracts       []ReusableResultLoopContract
 	RecorderResidualAddContracts      []RecorderResidualAddContract
+	RowLocalSparseGatherContracts     []RowLocalSparseGatherContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -1179,6 +1282,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		ReusableOneShotWrapperContracts:   cloneReusableOneShotWrapperContracts(c.ReusableOneShotWrapperContracts),
 		ReusableResultLoopContracts:       cloneReusableResultLoopContracts(c.ReusableResultLoopContracts),
 		RecorderResidualAddContracts:      cloneRecorderResidualAddContracts(c.RecorderResidualAddContracts),
+		RowLocalSparseGatherContracts:     slices.Clone(c.RowLocalSparseGatherContracts),
 	}
 }
 

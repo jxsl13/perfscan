@@ -368,6 +368,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"receiverStagingContracts":          validReceiverStagingContracts(cfg.ReceiverStagingContracts),
 		"reusableResultLoopContracts":       validReusableResultLoopContracts(cfg.ReusableResultLoopContracts),
 		"recorderResidualAddContracts":      validRecorderResidualAddContracts(cfg.RecorderResidualAddContracts),
+		"rowLocalSparseGatherContracts":     validRowLocalSparseGatherContracts(cfg.RowLocalSparseGatherContracts),
 	}
 	missing := make([]string, 0, len(c.Vocab))
 	for _, v := range c.Vocab {
@@ -379,6 +380,16 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 }
 
 func validRecorderResidualAddContracts(contracts []config.RecorderResidualAddContract) int {
+	valid := 0
+	for index := range contracts {
+		if contracts[index].Valid() {
+			valid++
+		}
+	}
+	return valid
+}
+
+func validRowLocalSparseGatherContracts(contracts []config.RowLocalSparseGatherContract) int {
 	valid := 0
 	for index := range contracts {
 		if contracts[index].Valid() {

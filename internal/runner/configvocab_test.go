@@ -195,6 +195,42 @@ func TestMissingVocabRecorderResidualAddContracts(t *testing.T) {
 	}
 }
 
+func TestMissingVocabRowLocalSparseGatherContracts(t *testing.T) {
+	t.Parallel()
+	check := &lint.Check{NeedsConfig: true, Vocab: []string{"rowLocalSparseGatherContracts"}}
+	if got := missingVocab(check, &config.Config{}); len(got) != 1 || got[0] != "rowLocalSparseGatherContracts" {
+		t.Fatalf("missingVocab(empty) = %v, want rowLocalSparseGatherContracts", got)
+	}
+	invalid := config.Config{RowLocalSparseGatherContracts: []config.RowLocalSparseGatherContract{{Name: "incomplete"}}}
+	if got := missingVocab(check, &invalid); len(got) != 1 {
+		t.Fatalf("missingVocab(invalid) = %v, want rowLocalSparseGatherContracts", got)
+	}
+	configured := config.Config{RowLocalSparseGatherContracts: []config.RowLocalSparseGatherContract{rowLocalSparseGatherContractForRunnerTest()}}
+	if got := missingVocab(check, &configured); len(got) != 0 {
+		t.Fatalf("missingVocab(valid) = %v, want none", got)
+	}
+}
+
+func rowLocalSparseGatherContractForRunnerTest() config.RowLocalSparseGatherContract {
+	return config.RowLocalSparseGatherContract{
+		Name: "vit", ConfiguredSite: "example.com/vision.ViT.Forward", Transform: "example.com/nn.LayerNorm.Forward",
+		Gather: "example.com/vision.gather", Concat: "example.com/backend.Execute",
+		SliceOperation: "example.com/backend.OpSlice", SliceOperationValue: "1", ConcatOperation: "example.com/backend.OpConcat", ConcatOperationValue: "2",
+		SliceAttrsType: "example.com/backend.SliceAttrs", SliceAxisField: "example.com/backend.SliceAttrs.Axis",
+		SliceStartField: "example.com/backend.SliceAttrs.Start", SliceEndField: "example.com/backend.SliceAttrs.End",
+		ConcatAttrsType: "example.com/backend.ConcatAttrs", ConcatAxisField: "example.com/backend.ConcatAttrs.Axis",
+		TransformInputArgument: 2, GatherOperationArgument: 2, GatherAttrsArgument: 3, GatherInputArgument: 4,
+		ConcatOperationArgument: 2, ConcatCollectionArgument: 3, ConcatAttrsArgument: 4,
+		PackedRowsEqualBatchTimesStride: true, BatchPositive: true, StrideGreaterThanOne: true, NativeIntArithmeticNoOverflow: true,
+		TransformRowsIndependent: true, TransformPreservesRowOrderAndWidth: true, TransformParametersImmutable: true,
+		TransformDoesNotMutateInput: true, TransformInputOutputDoNotAlias: true, TransformDoesNotRetainArguments: true,
+		CallsExecuteSynchronously: true, DiscardedRowsHaveNoEffectsStateOrRNG: true, GatherDeterministicAndValueIndependent: true,
+		GatherAndConcatDoNotMutateOrRetain: true, SelectedFirstEquivalent: true, FusedForwardParity: true,
+		FloatingPointPolicyPreserved: true, ErrorAndPanicParity: true, PartialOutputParity: true, RecorderOrderParity: true,
+		VJPAllInputGradientsParity: true, SupportedDTypesLayoutsBackends: true, EquivalentFallbackUnlessForwardAndBackwardAvailable: true,
+	}
+}
+
 func TestMissingVocabSchedulerTileGrainContracts(t *testing.T) {
 	t.Parallel()
 	check := &lint.Check{NeedsConfig: true, Vocab: []string{"schedulerTileGrainContracts"}}
