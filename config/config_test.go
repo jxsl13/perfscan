@@ -54,6 +54,7 @@ func TestToSetAndCompile(t *testing.T) {
 		TinySynchronousAcceleratorScreenContracts: []TinySynchronousAcceleratorScreenContract{{
 			Name: "tiny-loss", Calls: []TinySynchronousAcceleratorScreenCall{{ConfiguredSite: "example.com/p.loss"}},
 		}},
+		ForwardLossBackwardGraphContracts: []ForwardLossBackwardGraphContract{{Name: "vit-objective"}},
 		TopKOneContracts: []TopKOneContract{{
 			Name: "resident-topk-one",
 		}},
@@ -108,6 +109,9 @@ func TestToSetAndCompile(t *testing.T) {
 		len(sets.TinySynchronousAcceleratorScreenContracts[0].Calls) != 1 {
 		t.Errorf("Compile lost tiny synchronous accelerator-screen contracts: %+v", sets.TinySynchronousAcceleratorScreenContracts)
 	}
+	if len(sets.ForwardLossBackwardGraphContracts) != 1 || sets.ForwardLossBackwardGraphContracts[0].Name != "vit-objective" {
+		t.Errorf("Compile lost forward-loss-backward graph contracts: %+v", sets.ForwardLossBackwardGraphContracts)
+	}
 	if len(sets.TopKOneContracts) != 1 || sets.TopKOneContracts[0].Name != "resident-topk-one" {
 		t.Errorf("Compile lost Top-K(k=1) contracts: %+v", sets.TopKOneContracts)
 	}
@@ -148,6 +152,10 @@ func TestToSetAndCompile(t *testing.T) {
 	c.NativeSnapshotStringCopyContracts[0].Name = "mutated"
 	if sets.NativeSnapshotStringCopyContracts[0].Name != "profile-labels" {
 		t.Error("Compile must clone native snapshot string-copy contracts")
+	}
+	c.ForwardLossBackwardGraphContracts[0].Name = "mutated"
+	if sets.ForwardLossBackwardGraphContracts[0].Name != "vit-objective" {
+		t.Error("Compile must clone forward-loss-backward graph contracts")
 	}
 	c.ReusableOneShotWrapperContracts[0].Name = "mutated"
 	c.ReusableOneShotWrapperContracts[0].MutableStateFields[0] = "mutated"
@@ -296,6 +304,95 @@ func tinySynchronousAcceleratorScreenContractForTest() TinySynchronousAccelerato
 		ExactReductionCoverage: true, ForwardParity: true, GradientParity: true, FloatingPointParity: true, ErrorParity: true,
 		PanicParity: true, MutationParity: true, AliasParity: true, OwnershipParity: true, RecorderParity: true,
 		AutogradParity: true, BackendSelectionParity: true, PairedEndToEndValidationRequired: true,
+	}
+}
+
+func TestForwardLossBackwardGraphContractValid(t *testing.T) {
+	t.Parallel()
+	valid := forwardLossBackwardGraphContractForTest()
+	if !valid.Valid() {
+		t.Fatal("complete forward-loss-backward graph contract is invalid")
+	}
+	tests := []struct {
+		name   string
+		mutate func(*ForwardLossBackwardGraphContract)
+	}{
+		{"missing name", func(c *ForwardLossBackwardGraphContract) { c.Name = "" }},
+		{"bad site", func(c *ForwardLossBackwardGraphContract) { c.ObjectiveSite = "objective" }},
+		{"duplicate callable", func(c *ForwardLossBackwardGraphContract) { c.LossCallable = c.ForwardCallable }},
+		{"bad factory backend role", func(c *ForwardLossBackwardGraphContract) { c.RecorderFactoryBackendArgument = 0 }},
+		{"bad recorder role", func(c *ForwardLossBackwardGraphContract) { c.RecorderBindingArgument = 0 }},
+		{"partial reduction", func(c *ForwardLossBackwardGraphContract) { c.LossReductionConstantValue = "" }},
+		{"missing geometry", func(c *ForwardLossBackwardGraphContract) { c.ConfiguredGeometry = "" }},
+		{"missing evidence", func(c *ForwardLossBackwardGraphContract) { c.ConfiguredEvidence = "" }},
+		{"missing gradients", func(c *ForwardLossBackwardGraphContract) { c.ConfiguredGradientCount = 0 }},
+		{"one current submission", func(c *ForwardLossBackwardGraphContract) { c.ConfiguredCurrentSubmissionCount = 1 }},
+		{"two candidate submissions", func(c *ForwardLossBackwardGraphContract) { c.ConfiguredCandidateSubmissions = 2 }},
+		{"unbounded cache", func(c *ForwardLossBackwardGraphContract) { c.MaxCacheEntries = 0 }},
+		{"no recreation", func(c *ForwardLossBackwardGraphContract) { c.RecreatesForwardWork = false }},
+		{"unstable geometry", func(c *ForwardLossBackwardGraphContract) { c.StableGeometry = false }},
+		{"loss gap", func(c *ForwardLossBackwardGraphContract) { c.ExactScalarLossReduction = false }},
+		{"gradient order gap", func(c *ForwardLossBackwardGraphContract) { c.StableCompleteGradientOrder = false }},
+		{"recorder ownership gap", func(c *ForwardLossBackwardGraphContract) { c.PrivateRecorderOwnership = false }},
+		{"hook gap", func(c *ForwardLossBackwardGraphContract) { c.CustomHooksExcluded = false }},
+		{"mutation gap", func(c *ForwardLossBackwardGraphContract) { c.MutationExcluded = false }},
+		{"eligibility gap", func(c *ForwardLossBackwardGraphContract) { c.DTypeLayoutBackendConstrained = false }},
+		{"geometry key gap", func(c *ForwardLossBackwardGraphContract) { c.CacheKeyCoversGeometry = false }},
+		{"semantic key gap", func(c *ForwardLossBackwardGraphContract) { c.CacheKeyCoversDTypeLayoutObjective = false }},
+		{"cache bound gap", func(c *ForwardLossBackwardGraphContract) { c.BoundedCache = false }},
+		{"fallback gap", func(c *ForwardLossBackwardGraphContract) { c.PortableFallbackPreserved = false }},
+		{"forward parity gap", func(c *ForwardLossBackwardGraphContract) { c.ForwardParity = false }},
+		{"loss parity gap", func(c *ForwardLossBackwardGraphContract) { c.ScalarLossParity = false }},
+		{"gradient parity gap", func(c *ForwardLossBackwardGraphContract) { c.AllGradientParity = false }},
+		{"immutability gap", func(c *ForwardLossBackwardGraphContract) { c.InputAndParameterImmutability = false }},
+		{"failure parity gap", func(c *ForwardLossBackwardGraphContract) { c.ErrorAndPanicParity = false }},
+		{"recorder isolation gap", func(c *ForwardLossBackwardGraphContract) { c.RecorderIsolation = false }},
+		{"per-operation route gap", func(c *ForwardLossBackwardGraphContract) { c.PerOperationAndLayerRoutesExcluded = false }},
+		{"private-tape route gap", func(c *ForwardLossBackwardGraphContract) { c.PrivateTapePreservesBackendRoutes = false }},
+		{"backend-selection gap", func(c *ForwardLossBackwardGraphContract) { c.BackendSelectionParity = false }},
+		{"numerical gate gap", func(c *ForwardLossBackwardGraphContract) { c.PairedNumericalValidationRequired = false }},
+		{"end-to-end gate gap", func(c *ForwardLossBackwardGraphContract) { c.PairedEndToEndValidationRequired = false }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			candidate := valid
+			test.mutate(&candidate)
+			if candidate.Valid() {
+				t.Error("incomplete contract is valid")
+			}
+		})
+	}
+	implicitMean := valid
+	implicitMean.LossReductionArgument = 0
+	implicitMean.LossReductionConstant = ""
+	implicitMean.LossReductionConstantValue = ""
+	if !implicitMean.Valid() {
+		t.Error("an exact contract for an implicitly mean loss must be valid")
+	}
+}
+
+func forwardLossBackwardGraphContractForTest() ForwardLossBackwardGraphContract {
+	return ForwardLossBackwardGraphContract{
+		Name: "vit", ObjectiveSite: "example.com/vision.ViT.LossAndGrad",
+		RecorderFactoryCallable: "example.com/autograd.NewTape", RecorderBindingCallable: "example.com/backend.Context.WithRecorder",
+		ForwardCallable: "example.com/vision.ViT.Forward", LossCallable: "example.com/nn.CrossEntropy",
+		BackwardCallable: "example.com/autograd.Tape.Backward", ParameterOrderCallable: "example.com/vision.ViT.Params",
+		GradientCallable: "example.com/autograd.Tape.Grad", RecorderFactoryBackendArgument: 1,
+		RecorderBindingArgument: 1, ForwardRecorderArgument: 1,
+		LossRecorderArgument: 1, LossForwardArgument: 2, BackwardLossArgument: 1, GradientParameterArgument: 1,
+		LossReductionArgument: 4, LossReductionConstant: "example.com/nn.Mean", LossReductionConstantValue: "1",
+		ConfiguredGeometry: "B=8,S=65,D=128,H=4,FFN=512,depth=4,C=10", ConfiguredGradientCount: 56,
+		ConfiguredCurrentSubmissionCount: 3, ConfiguredCandidateSubmissions: 1, MaxCacheEntries: 4,
+		ConfiguredEvidence:   "paired-owner-campaign",
+		RecreatesForwardWork: true, StableGeometry: true, ExactScalarLossReduction: true,
+		StableCompleteGradientOrder: true, PrivateRecorderOwnership: true, CustomHooksExcluded: true,
+		MutationExcluded: true, DTypeLayoutBackendConstrained: true, CacheKeyCoversGeometry: true,
+		CacheKeyCoversDTypeLayoutObjective: true, BoundedCache: true, PortableFallbackPreserved: true,
+		ForwardParity: true, ScalarLossParity: true, AllGradientParity: true, InputAndParameterImmutability: true,
+		ErrorAndPanicParity: true, RecorderIsolation: true, PerOperationAndLayerRoutesExcluded: true,
+		PrivateTapePreservesBackendRoutes: true, BackendSelectionParity: true, PairedNumericalValidationRequired: true,
+		PairedEndToEndValidationRequired: true,
 	}
 }
 
@@ -1153,6 +1250,7 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"RowLocalSparseGatherContracts":   len(c.RowLocalSparseGatherContracts),
 
 		"TinySynchronousAcceleratorScreenContracts": len(c.TinySynchronousAcceleratorScreenContracts),
+		"ForwardLossBackwardGraphContracts":         len(c.ForwardLossBackwardGraphContracts),
 	}
 	for name, n := range fields {
 		if n == 0 {
@@ -1182,6 +1280,9 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 	}
 	if len(c.TinySynchronousAcceleratorScreenContracts) != 1 || !c.TinySynchronousAcceleratorScreenContracts[0].Valid() {
 		t.Errorf("example config has invalid tiny synchronous accelerator-screen contract: %+v", c.TinySynchronousAcceleratorScreenContracts)
+	}
+	if len(c.ForwardLossBackwardGraphContracts) != 1 || !c.ForwardLossBackwardGraphContracts[0].Valid() {
+		t.Errorf("example config has invalid forward-loss-backward graph contract: %+v", c.ForwardLossBackwardGraphContracts)
 	}
 	if len(c.SchedulerTileGrainContracts) != 1 || !c.SchedulerTileGrainContracts[0].Valid() {
 		t.Errorf("example config has invalid scheduler tile-grain contract: %+v", c.SchedulerTileGrainContracts)

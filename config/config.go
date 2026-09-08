@@ -255,6 +255,110 @@ type Config struct {
 	// alternative for PS6115. The values are owner-supplied screening evidence;
 	// they are not runtime shape, placement, transfer, or profitability proof.
 	TinySynchronousAcceleratorScreenContracts []TinySynchronousAcceleratorScreenContract `json:"tinySynchronousAcceleratorScreenContracts,omitempty" yaml:"tinySynchronousAcceleratorScreenContracts"`
+
+	// ForwardLossBackwardGraphContracts bind one exact private-recorder objective
+	// from forward through scalar loss, backward, and parameter-ordered gradient
+	// extraction for PS6116. Source structure proves the chain; the deliberately
+	// explicit contract supplies geometry, cache, submission, fallback, and
+	// semantic facts that Go syntax cannot establish.
+	ForwardLossBackwardGraphContracts []ForwardLossBackwardGraphContract `json:"forwardLossBackwardGraphContracts,omitempty" yaml:"forwardLossBackwardGraphContracts"`
+}
+
+// ForwardLossBackwardGraphContract describes one complete eager objective and
+// the proof obligations for screening a cached one-submission backend
+// capability. Argument positions are one-based and exclude method receivers.
+type ForwardLossBackwardGraphContract struct {
+	Name                    string `json:"name" yaml:"name"`
+	ObjectiveSite           string `json:"objectiveSite" yaml:"objectiveSite"`
+	RecorderFactoryCallable string `json:"recorderFactoryCallable" yaml:"recorderFactoryCallable"`
+	RecorderBindingCallable string `json:"recorderBindingCallable" yaml:"recorderBindingCallable"`
+	ForwardCallable         string `json:"forwardCallable" yaml:"forwardCallable"`
+	LossCallable            string `json:"lossCallable" yaml:"lossCallable"`
+	BackwardCallable        string `json:"backwardCallable" yaml:"backwardCallable"`
+	ParameterOrderCallable  string `json:"parameterOrderCallable" yaml:"parameterOrderCallable"`
+	GradientCallable        string `json:"gradientCallable" yaml:"gradientCallable"`
+	// RecorderFactoryBackendArgument identifies the direct context backend field
+	// that must share its context object with RecorderBindingCallable's receiver.
+	RecorderFactoryBackendArgument int    `json:"recorderFactoryBackendArgument" yaml:"recorderFactoryBackendArgument"`
+	RecorderBindingArgument        int    `json:"recorderBindingArgument" yaml:"recorderBindingArgument"`
+	ForwardRecorderArgument        int    `json:"forwardRecorderArgument" yaml:"forwardRecorderArgument"`
+	LossRecorderArgument           int    `json:"lossRecorderArgument" yaml:"lossRecorderArgument"`
+	LossForwardArgument            int    `json:"lossForwardArgument" yaml:"lossForwardArgument"`
+	BackwardLossArgument           int    `json:"backwardLossArgument" yaml:"backwardLossArgument"`
+	GradientParameterArgument      int    `json:"gradientParameterArgument" yaml:"gradientParameterArgument"`
+	LossReductionArgument          int    `json:"lossReductionArgument,omitempty" yaml:"lossReductionArgument,omitempty"`
+	LossReductionConstant          string `json:"lossReductionConstant,omitempty" yaml:"lossReductionConstant,omitempty"`
+	LossReductionConstantValue     string `json:"lossReductionConstantValue,omitempty" yaml:"lossReductionConstantValue,omitempty"`
+
+	ConfiguredGeometry               string `json:"configuredGeometry" yaml:"configuredGeometry"`
+	ConfiguredGradientCount          int    `json:"configuredGradientCount" yaml:"configuredGradientCount"`
+	ConfiguredCurrentSubmissionCount int    `json:"configuredCurrentSubmissionCount" yaml:"configuredCurrentSubmissionCount"`
+	ConfiguredCandidateSubmissions   int    `json:"configuredCandidateSubmissions" yaml:"configuredCandidateSubmissions"`
+	MaxCacheEntries                  int    `json:"maxCacheEntries" yaml:"maxCacheEntries"`
+	ConfiguredEvidence               string `json:"configuredEvidence,omitempty" yaml:"configuredEvidence,omitempty"`
+	ExistingWholeObjectiveCapability bool   `json:"existingWholeObjectiveCapability,omitempty" yaml:"existingWholeObjectiveCapability,omitempty"`
+	IntentionalMultiSubmissionRoute  bool   `json:"intentionalMultiSubmissionRoute,omitempty" yaml:"intentionalMultiSubmissionRoute,omitempty"`
+
+	RecreatesForwardWork               bool `json:"recreatesForwardWork" yaml:"recreatesForwardWork"`
+	StableGeometry                     bool `json:"stableGeometry" yaml:"stableGeometry"`
+	ExactScalarLossReduction           bool `json:"exactScalarLossReduction" yaml:"exactScalarLossReduction"`
+	StableCompleteGradientOrder        bool `json:"stableCompleteGradientOrder" yaml:"stableCompleteGradientOrder"`
+	PrivateRecorderOwnership           bool `json:"privateRecorderOwnership" yaml:"privateRecorderOwnership"`
+	CustomHooksExcluded                bool `json:"customHooksExcluded" yaml:"customHooksExcluded"`
+	MutationExcluded                   bool `json:"mutationExcluded" yaml:"mutationExcluded"`
+	DTypeLayoutBackendConstrained      bool `json:"dtypeLayoutBackendConstrained" yaml:"dtypeLayoutBackendConstrained"`
+	CacheKeyCoversGeometry             bool `json:"cacheKeyCoversGeometry" yaml:"cacheKeyCoversGeometry"`
+	CacheKeyCoversDTypeLayoutObjective bool `json:"cacheKeyCoversDtypeLayoutObjective" yaml:"cacheKeyCoversDtypeLayoutObjective"`
+	BoundedCache                       bool `json:"boundedCache" yaml:"boundedCache"`
+	PortableFallbackPreserved          bool `json:"portableFallbackPreserved" yaml:"portableFallbackPreserved"`
+	ForwardParity                      bool `json:"forwardParity" yaml:"forwardParity"`
+	ScalarLossParity                   bool `json:"scalarLossParity" yaml:"scalarLossParity"`
+	AllGradientParity                  bool `json:"allGradientParity" yaml:"allGradientParity"`
+	InputAndParameterImmutability      bool `json:"inputAndParameterImmutability" yaml:"inputAndParameterImmutability"`
+	ErrorAndPanicParity                bool `json:"errorAndPanicParity" yaml:"errorAndPanicParity"`
+	RecorderIsolation                  bool `json:"recorderIsolation" yaml:"recorderIsolation"`
+	PerOperationAndLayerRoutesExcluded bool `json:"perOperationAndLayerRoutesExcluded" yaml:"perOperationAndLayerRoutesExcluded"`
+	PrivateTapePreservesBackendRoutes  bool `json:"privateTapePreservesBackendRoutes" yaml:"privateTapePreservesBackendRoutes"`
+	BackendSelectionParity             bool `json:"backendSelectionParity" yaml:"backendSelectionParity"`
+	PairedNumericalValidationRequired  bool `json:"pairedNumericalValidationRequired" yaml:"pairedNumericalValidationRequired"`
+	PairedEndToEndValidationRequired   bool `json:"pairedEndToEndValidationRequired" yaml:"pairedEndToEndValidationRequired"`
+}
+
+// Valid reports whether PS6116 has a complete, bounded owner contract.
+func (c *ForwardLossBackwardGraphContract) Valid() bool {
+	callables := []string{
+		c.ObjectiveSite, c.RecorderFactoryCallable, c.RecorderBindingCallable,
+		c.ForwardCallable, c.LossCallable, c.BackwardCallable,
+		c.ParameterOrderCallable, c.GradientCallable,
+	}
+	seen := make(map[string]bool, len(callables))
+	for _, callable := range callables {
+		if !ps6109CallableIDValid(callable) || seen[callable] {
+			return false
+		}
+		seen[callable] = true
+	}
+	reductionAbsent := c.LossReductionArgument == 0 && c.LossReductionConstant == "" && c.LossReductionConstantValue == ""
+	reductionPresent := c.LossReductionArgument > 0 && psTopKFunctionIDValid(c.LossReductionConstant) &&
+		c.LossReductionConstantValue != "" && strings.TrimSpace(c.LossReductionConstantValue) == c.LossReductionConstantValue
+	if c.Name == "" || strings.TrimSpace(c.Name) != c.Name || c.ConfiguredGeometry == "" ||
+		strings.TrimSpace(c.ConfiguredGeometry) != c.ConfiguredGeometry || c.ConfiguredEvidence == "" ||
+		strings.TrimSpace(c.ConfiguredEvidence) != c.ConfiguredEvidence || c.RecorderFactoryBackendArgument <= 0 ||
+		c.RecorderBindingArgument <= 0 ||
+		c.ForwardRecorderArgument <= 0 || c.LossRecorderArgument <= 0 || c.LossForwardArgument <= 0 ||
+		c.BackwardLossArgument <= 0 || c.GradientParameterArgument <= 0 || (!reductionAbsent && !reductionPresent) ||
+		c.ConfiguredGradientCount <= 0 || c.ConfiguredCurrentSubmissionCount < 2 ||
+		c.ConfiguredCandidateSubmissions != 1 || c.MaxCacheEntries <= 0 {
+		return false
+	}
+	return c.RecreatesForwardWork && c.StableGeometry && c.ExactScalarLossReduction &&
+		c.StableCompleteGradientOrder && c.PrivateRecorderOwnership && c.CustomHooksExcluded &&
+		c.MutationExcluded && c.DTypeLayoutBackendConstrained && c.CacheKeyCoversGeometry &&
+		c.CacheKeyCoversDTypeLayoutObjective && c.BoundedCache && c.PortableFallbackPreserved &&
+		c.ForwardParity && c.ScalarLossParity && c.AllGradientParity && c.InputAndParameterImmutability &&
+		c.ErrorAndPanicParity && c.RecorderIsolation && c.PerOperationAndLayerRoutesExcluded &&
+		c.PrivateTapePreservesBackendRoutes && c.BackendSelectionParity && c.PairedNumericalValidationRequired &&
+		c.PairedEndToEndValidationRequired
 }
 
 // TinySynchronousAcceleratorScreenCall identifies one direct accelerator
@@ -1356,6 +1460,7 @@ type Sets struct {
 	RowLocalSparseGatherContracts     []RowLocalSparseGatherContract
 
 	TinySynchronousAcceleratorScreenContracts []TinySynchronousAcceleratorScreenContract
+	ForwardLossBackwardGraphContracts         []ForwardLossBackwardGraphContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -1410,6 +1515,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		RowLocalSparseGatherContracts:     slices.Clone(c.RowLocalSparseGatherContracts),
 
 		TinySynchronousAcceleratorScreenContracts: cloneTinySynchronousAcceleratorScreenContracts(c.TinySynchronousAcceleratorScreenContracts),
+		ForwardLossBackwardGraphContracts:         slices.Clone(c.ForwardLossBackwardGraphContracts),
 	}
 }
 
