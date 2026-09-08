@@ -101,3 +101,14 @@ Rules without a pair, and why:
   operation would measure fixture allocation rather than preservation of the
   optimized dispatch path. The check documentation records the retained GoAI
   Muon campaign and requires exact fixed-step plus end-to-end validation.
+- **PS6115** (tiny synchronous accelerator-screen advisory): a portable toy
+  cannot reproduce a real accelerator submission/completion boundary, unified
+  memory placement, exact host fallback, or paired application routing. GoAI's
+  rejected B8/C10 CrossEntropy candidate improved the isolated boundary about
+  120x, yet the same-binary interleaved full-step screen measured only about
+  1.041x median and failed the frozen 1.05x median / 1.03x every-pair gates.
+  Adding a synthetic benchmark would turn that warning into a false routing
+  claim. Validate exact dtype/layout/attributes/reduction semantics, forward
+  and gradient parity, floating-point/error/panic/mutation/alias/ownership and
+  recorder/autograd/backend-selection behavior, then use paired end-to-end
+  application measurements on the configured target.

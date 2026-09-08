@@ -369,6 +369,8 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"reusableResultLoopContracts":       validReusableResultLoopContracts(cfg.ReusableResultLoopContracts),
 		"recorderResidualAddContracts":      validRecorderResidualAddContracts(cfg.RecorderResidualAddContracts),
 		"rowLocalSparseGatherContracts":     validRowLocalSparseGatherContracts(cfg.RowLocalSparseGatherContracts),
+
+		"tinySynchronousAcceleratorScreenContracts": validTinySynchronousAcceleratorScreenContracts(cfg.TinySynchronousAcceleratorScreenContracts),
 	}
 	missing := make([]string, 0, len(c.Vocab))
 	for _, v := range c.Vocab {
@@ -377,6 +379,16 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		}
 	}
 	return missing
+}
+
+func validTinySynchronousAcceleratorScreenContracts(contracts []config.TinySynchronousAcceleratorScreenContract) int {
+	valid := 0
+	for index := range contracts {
+		if contracts[index].Valid() {
+			valid++
+		}
+	}
+	return valid
 }
 
 func validRecorderResidualAddContracts(contracts []config.RecorderResidualAddContract) int {
