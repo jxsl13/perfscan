@@ -208,6 +208,53 @@ nativeSnapshotStringCopyContracts:
     returnedStringsOutliveLifecycle: true
     exactContentCheckRequired: true
 
+# Exact scheduler-to-microkernel tile contracts for PS6112. Version one uses
+# package functions, one-based row arguments, and one explicit GOOS/GOARCH/tag
+# regime per variant. The grain must resolve to exactly one positive integer
+# constant in every regime. Each variant's exact tile router is either the
+# kernel entry or one direct hop below it; the scalar row role is one-based.
+# The booleans are reviewed project facts: names do not prove that the tiled
+# kernel handles complete row tiles or that the scalar helper handles the
+# remainder. At least two architectures are required. A final partial band
+# remains valid and is not itself a finding. If the exact scheduling loop is
+# inside a callback, also set synchronousRunner, its one-based work argument,
+# and synchronousRunnerExecutesBeforeReturn; otherwise callback literals are
+# ignored.
+schedulerTileGrainContracts:
+  - name: attention-forward-bands
+    scheduler: example.com/project/backend.scheduleAttention
+    grainConstant: example.com/project/backend.attentionBandRows
+    band: example.com/project/backend.attentionBand
+    bandRowsArgument: 3
+    kernelEntry: example.com/project/backend.gemmRows
+    kernelRowsArgument: 5
+    repeatedFullTasks: true
+    variants:
+      - name: amd64-avx2
+        goos: linux
+        goarch: amd64
+        tileHeight: 6
+        tileRouter: example.com/project/backend.gemmRows
+        tileRouterRowsArgument: 5
+        tiledKernel: example.com/project/backend.gemmTile6x16AVX2
+        scalarFallback: example.com/project/backend.gemmRowsScalar
+        scalarFallbackRowsArgument: 5
+        kernelEntryRoutesFullTiles: true
+        scalarFallbackHandlesTileRemainder: true
+      - name: apple-arm64-simd
+        goos: darwin
+        goarch: arm64
+        buildTags:
+          - goexperiment.simd
+        tileHeight: 4
+        tileRouter: example.com/project/backend.gemmRowsNeon
+        tileRouterRowsArgument: 6
+        tiledKernel: example.com/project/backend.gemmTile4x16Neon
+        scalarFallback: example.com/project/backend.gemmRowsScalar
+        scalarFallbackRowsArgument: 5
+        kernelEntryRoutesFullTiles: true
+        scalarFallbackHandlesTileRemainder: true
+
 # Helpers exposing typed input views and caller-owned output views.
 inputViewFuncs:
   - f64Data

@@ -167,3 +167,36 @@ func TestMissingVocabReusableResultLoopContracts(t *testing.T) {
 		t.Fatalf("missingVocab(valid) = %v, want none", got)
 	}
 }
+
+func TestMissingVocabSchedulerTileGrainContracts(t *testing.T) {
+	t.Parallel()
+	check := &lint.Check{NeedsConfig: true, Vocab: []string{"schedulerTileGrainContracts"}}
+	if got := missingVocab(check, &config.Config{}); len(got) != 1 || got[0] != "schedulerTileGrainContracts" {
+		t.Fatalf("missingVocab(empty) = %v, want schedulerTileGrainContracts", got)
+	}
+	invalid := config.Config{SchedulerTileGrainContracts: []config.SchedulerTileGrainContract{{Name: "incomplete"}}}
+	if got := missingVocab(check, &invalid); len(got) != 1 || got[0] != "schedulerTileGrainContracts" {
+		t.Fatalf("missingVocab(invalid) = %v, want schedulerTileGrainContracts", got)
+	}
+	configured := config.Config{SchedulerTileGrainContracts: []config.SchedulerTileGrainContract{schedulerTileGrainContractForTest()}}
+	if got := missingVocab(check, &configured); len(got) != 0 {
+		t.Fatalf("missingVocab(configured) = %v, want none", got)
+	}
+}
+
+func schedulerTileGrainContractForTest() config.SchedulerTileGrainContract {
+	return config.SchedulerTileGrainContract{
+		Name:               "attention-bands",
+		Scheduler:          "example.com/project.schedule",
+		GrainConstant:      "example.com/project.bandRows",
+		Band:               "example.com/project.band",
+		BandRowsArgument:   2,
+		KernelEntry:        "example.com/project.kernelRows",
+		KernelRowsArgument: 2,
+		RepeatedFullTasks:  true,
+		Variants: []config.SchedulerTileGrainVariant{
+			{Name: "amd64", GOOS: "linux", GOARCH: "amd64", TileHeight: 6, TileRouter: "example.com/project.kernelRows", TileRouterRowsArgument: 2, TiledKernel: "example.com/project.tile6", ScalarFallback: "example.com/project.scalar", ScalarFallbackRowsArgument: 2, KernelEntryRoutesFullTiles: true, ScalarFallbackHandlesTileRemainder: true},
+			{Name: "arm64", GOOS: "darwin", GOARCH: "arm64", BuildTags: []string{"goexperiment.simd"}, TileHeight: 4, TileRouter: "example.com/project.kernelRows", TileRouterRowsArgument: 2, TiledKernel: "example.com/project.tile4", ScalarFallback: "example.com/project.scalar", ScalarFallbackRowsArgument: 2, KernelEntryRoutesFullTiles: true, ScalarFallbackHandlesTileRemainder: true},
+		},
+	}
+}

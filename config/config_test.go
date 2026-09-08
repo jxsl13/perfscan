@@ -53,6 +53,13 @@ func TestToSetAndCompile(t *testing.T) {
 		NativeSnapshotStringCopyContracts: []NativeSnapshotStringCopyContract{{
 			Name: "profile-labels",
 		}},
+		SchedulerTileGrainContracts: []SchedulerTileGrainContract{{
+			Name:                                  "attention-bands",
+			SynchronousRunner:                     "example.com/project.parallelWork",
+			SynchronousRunnerWorkArgument:         3,
+			SynchronousRunnerExecutesBeforeReturn: true,
+			Variants:                              []SchedulerTileGrainVariant{{Name: "arm64", BuildTags: []string{"goexperiment.simd"}}},
+		}},
 		ElementCountMethods: nil, // stays nil after compile
 	}
 	sets := c.Compile()
@@ -90,11 +97,21 @@ func TestToSetAndCompile(t *testing.T) {
 	if len(sets.NativeSnapshotStringCopyContracts) != 1 || sets.NativeSnapshotStringCopyContracts[0].Name != "profile-labels" {
 		t.Errorf("Compile lost native snapshot string-copy contracts: %+v", sets.NativeSnapshotStringCopyContracts)
 	}
+	if len(sets.SchedulerTileGrainContracts) != 1 || sets.SchedulerTileGrainContracts[0].Name != "attention-bands" ||
+		sets.SchedulerTileGrainContracts[0].SynchronousRunnerWorkArgument != 3 ||
+		!sets.SchedulerTileGrainContracts[0].SynchronousRunnerExecutesBeforeReturn ||
+		len(sets.SchedulerTileGrainContracts[0].Variants) != 1 {
+		t.Errorf("Compile lost scheduler tile-grain contracts: %+v", sets.SchedulerTileGrainContracts)
+	}
 	c.TopKOneContracts[0].Name = "mutated"
 	if sets.TopKOneContracts[0].Name != "resident-topk-one" {
 		t.Error("Compile must clone Top-K(k=1) contracts")
 	}
 	c.InPlaceFusionContracts[0].Name = "mutated"
+	c.SchedulerTileGrainContracts[0].Variants[0].BuildTags[0] = "mutated"
+	if sets.SchedulerTileGrainContracts[0].Variants[0].BuildTags[0] != "goexperiment.simd" {
+		t.Error("Compile must deeply clone scheduler tile-grain contracts")
+	}
 	if sets.InPlaceFusionContracts[0].Name != "swiglu" {
 		t.Error("Compile must clone in-place fusion contracts")
 	}
@@ -241,6 +258,78 @@ func TestBoundedScratchFlowContractValid(t *testing.T) {
 			mutate(&candidate)
 			if candidate.Valid() {
 				t.Errorf("mutated contract unexpectedly valid: %+v", candidate)
+			}
+		})
+	}
+}
+
+func TestSchedulerTileGrainContractValid(t *testing.T) {
+	t.Parallel()
+	valid := SchedulerTileGrainContract{
+		Name:               "attention-bands",
+		Scheduler:          "example.com/project.schedule",
+		GrainConstant:      "example.com/project.bandRows",
+		Band:               "example.com/project.band",
+		BandRowsArgument:   2,
+		KernelEntry:        "example.com/project.kernelRows",
+		KernelRowsArgument: 3,
+		RepeatedFullTasks:  true,
+		Variants: []SchedulerTileGrainVariant{
+			{Name: "amd64", GOOS: "linux", GOARCH: "amd64", TileHeight: 6, TileRouter: "example.com/project.kernelRows", TileRouterRowsArgument: 3, TiledKernel: "example.com/project.tile6", ScalarFallback: "example.com/project.scalar", ScalarFallbackRowsArgument: 3, KernelEntryRoutesFullTiles: true, ScalarFallbackHandlesTileRemainder: true},
+			{Name: "arm64", GOOS: "darwin", GOARCH: "arm64", BuildTags: []string{"goexperiment.simd"}, TileHeight: 4, TileRouter: "example.com/project.kernelRows", TileRouterRowsArgument: 3, TiledKernel: "example.com/project.tile4", ScalarFallback: "example.com/project.scalar", ScalarFallbackRowsArgument: 3, KernelEntryRoutesFullTiles: true, ScalarFallbackHandlesTileRemainder: true},
+		},
+	}
+	if !valid.Valid() {
+		t.Fatal("complete scheduler tile-grain contract is invalid")
+	}
+	synchronous := valid
+	synchronous.SynchronousRunner = "example.com/project.parallelWork"
+	synchronous.SynchronousRunnerWorkArgument = 3
+	synchronous.SynchronousRunnerExecutesBeforeReturn = true
+	if !synchronous.Valid() {
+		t.Fatal("complete synchronous-runner scheduler tile-grain contract is invalid")
+	}
+	tests := map[string]func(*SchedulerTileGrainContract){
+		"single architecture": func(contract *SchedulerTileGrainContract) { contract.Variants = contract.Variants[:1] },
+		"same architecture":   func(contract *SchedulerTileGrainContract) { contract.Variants[1].GOARCH = "amd64" },
+		"missing os":          func(contract *SchedulerTileGrainContract) { contract.Variants[1].GOOS = "" },
+		"invalid build tag":   func(contract *SchedulerTileGrainContract) { contract.Variants[1].BuildTags = []string{"bad tag"} },
+		"duplicate build tag": func(contract *SchedulerTileGrainContract) { contract.Variants[1].BuildTags = []string{"simd", "simd"} },
+		"one-row tile":        func(contract *SchedulerTileGrainContract) { contract.Variants[1].TileHeight = 1 },
+		"missing scalar promise": func(contract *SchedulerTileGrainContract) {
+			contract.Variants[1].ScalarFallbackHandlesTileRemainder = false
+		},
+		"missing scalar row role": func(contract *SchedulerTileGrainContract) {
+			contract.Variants[1].ScalarFallbackRowsArgument = 0
+		},
+		"not repeated": func(contract *SchedulerTileGrainContract) { contract.RepeatedFullTasks = false },
+		"different package": func(contract *SchedulerTileGrainContract) {
+			contract.Variants[1].TiledKernel = "other.example/project.tile4"
+		},
+		"method id": func(contract *SchedulerTileGrainContract) { contract.Scheduler = "example.com/project.Device.schedule" },
+		"runner without role": func(contract *SchedulerTileGrainContract) {
+			contract.SynchronousRunner = "example.com/project.parallelWork"
+			contract.SynchronousRunnerExecutesBeforeReturn = true
+		},
+		"runner without synchronous promise": func(contract *SchedulerTileGrainContract) {
+			contract.SynchronousRunner = "example.com/project.parallelWork"
+			contract.SynchronousRunnerWorkArgument = 3
+		},
+		"runner in different package": func(contract *SchedulerTileGrainContract) {
+			contract.SynchronousRunner = "other.example/project.parallelWork"
+			contract.SynchronousRunnerWorkArgument = 3
+			contract.SynchronousRunnerExecutesBeforeReturn = true
+		},
+	}
+	for name, mutate := range tests {
+		name, mutate := name, mutate
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			candidate := valid
+			candidate.Variants = cloneSchedulerTileGrainContracts([]SchedulerTileGrainContract{valid})[0].Variants
+			mutate(&candidate)
+			if candidate.Valid() {
+				t.Fatal("incomplete scheduler tile-grain contract is valid")
 			}
 		})
 	}
@@ -735,6 +824,7 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"TopKSelectorFuncs": len(c.TopKSelectorFuncs), "InputViewFuncs": len(c.InputViewFuncs),
 		"TopKOneContracts":                  len(c.TopKOneContracts),
 		"NativeSnapshotStringCopyContracts": len(c.NativeSnapshotStringCopyContracts),
+		"SchedulerTileGrainContracts":       len(c.SchedulerTileGrainContracts),
 		"OutputViewFuncs":                   len(c.OutputViewFuncs), "OptimizedBackendPkgs": len(c.OptimizedBackendPkgs),
 		"KernelRegisterFuncs":             len(c.KernelRegisterFuncs),
 		"InPlaceFusionContracts":          len(c.InPlaceFusionContracts),
@@ -762,5 +852,8 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 	}
 	if len(c.ReusableResultLoopContracts) != 1 || !c.ReusableResultLoopContracts[0].Valid() {
 		t.Errorf("example config has invalid reusable-result loop contract: %+v", c.ReusableResultLoopContracts)
+	}
+	if len(c.SchedulerTileGrainContracts) != 1 || !c.SchedulerTileGrainContracts[0].Valid() {
+		t.Errorf("example config has invalid scheduler tile-grain contract: %+v", c.SchedulerTileGrainContracts)
 	}
 }

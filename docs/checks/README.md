@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**402 checks total** — **265 with a bit-identical auto-fix**, 137 advisory. By fix level: **246 L1** (idiomatic), **122 L2** (structured), **34 L3** (aggressive).
+**403 checks total** — **265 with a bit-identical auto-fix**, 138 advisory. By fix level: **246 L1** (idiomatic), **122 L2** (structured), **35 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -414,4 +414,5 @@ checks' fixes.
 | [PS6109](PS6109.md) | alloc | L3 |  | a fixed repeated path creates fresh Go shells around one-shot native handles |
 | [PS6110](PS6110.md) | alloc | L3 |  | bulk native snapshot clones an owned Go string once per record |
 | [PS6111](PS6111.md) | alloc | L3 |  | a reusable-result loop calls an allocating compatibility wrapper |
+| [PS6112](PS6112.md) | vector | L3 |  | a repeated scheduler grain is not a multiple of one target's microkernel tile height |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |

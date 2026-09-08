@@ -358,6 +358,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"topKSelectorFuncs":                 len(cfg.TopKSelectorFuncs),
 		"topKOneContracts":                  validTopKOneContracts(cfg.TopKOneContracts),
 		"nativeSnapshotStringCopyContracts": validNativeSnapshotStringCopyContracts(cfg.NativeSnapshotStringCopyContracts),
+		"schedulerTileGrainContracts":       validSchedulerTileGrainContracts(cfg.SchedulerTileGrainContracts),
 		"inputViewFuncs":                    len(cfg.InputViewFuncs),
 		"outputViewFuncs":                   len(cfg.OutputViewFuncs),
 		"referenceBackendPkg":               len(cfg.ReferenceBackendPkg),
@@ -380,6 +381,16 @@ func validReusableResultLoopContracts(contracts []config.ReusableResultLoopContr
 	valid := 0
 	for _, contract := range contracts {
 		if contract.Valid() {
+			valid++
+		}
+	}
+	return valid
+}
+
+func validSchedulerTileGrainContracts(contracts []config.SchedulerTileGrainContract) int {
+	valid := 0
+	for index := range contracts {
+		if contracts[index].Valid() {
 			valid++
 		}
 	}
