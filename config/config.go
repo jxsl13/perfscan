@@ -249,6 +249,129 @@ type Config struct {
 	// PS6114. Callable names alone never establish row independence, ownership,
 	// autograd, arithmetic, or backend fallback parity.
 	RowLocalSparseGatherContracts []RowLocalSparseGatherContract `json:"rowLocalSparseGatherContracts,omitempty" yaml:"rowLocalSparseGatherContracts"`
+
+	// TinySynchronousAcceleratorScreenContracts bind one or two exact direct
+	// accelerator calls to representative small geometry and a typed host
+	// alternative for PS6115. The values are owner-supplied screening evidence;
+	// they are not runtime shape, placement, transfer, or profitability proof.
+	TinySynchronousAcceleratorScreenContracts []TinySynchronousAcceleratorScreenContract `json:"tinySynchronousAcceleratorScreenContracts,omitempty" yaml:"tinySynchronousAcceleratorScreenContracts"`
+}
+
+// TinySynchronousAcceleratorScreenCall identifies one direct accelerator
+// submission in a PS6115 contract group. Argument positions are one-based and
+// exclude method receivers. OperationConstant is optional, but when present
+// its argument and exact typed value are mandatory.
+type TinySynchronousAcceleratorScreenCall struct {
+	ConfiguredSite          string `json:"configuredSite" yaml:"configuredSite"`
+	AcceleratorCallable     string `json:"acceleratorCallable" yaml:"acceleratorCallable"`
+	HostAlternativeCallable string `json:"hostAlternativeCallable" yaml:"hostAlternativeCallable"`
+	RowsArgument            int    `json:"rowsArgument" yaml:"rowsArgument"`
+	ColumnsArgument         int    `json:"columnsArgument" yaml:"columnsArgument"`
+	OperationArgument       int    `json:"operationArgument,omitempty" yaml:"operationArgument,omitempty"`
+	OperationConstant       string `json:"operationConstant,omitempty" yaml:"operationConstant,omitempty"`
+	OperationConstantValue  string `json:"operationConstantValue,omitempty" yaml:"operationConstantValue,omitempty"`
+}
+
+// TinySynchronousAcceleratorScreenContract is a representative screening
+// contract for one forward call or a forward/backward pair. Its deliberately
+// verbose booleans keep semantic and placement claims out of identifier names.
+type TinySynchronousAcceleratorScreenContract struct {
+	Name                                string                                 `json:"name" yaml:"name"`
+	Calls                               []TinySynchronousAcceleratorScreenCall `json:"calls" yaml:"calls"`
+	ConfiguredRows                      int64                                  `json:"configuredRows" yaml:"configuredRows"`
+	ConfiguredColumns                   int64                                  `json:"configuredColumns" yaml:"configuredColumns"`
+	ConfiguredWorkingSetBytes           int64                                  `json:"configuredWorkingSetBytes" yaml:"configuredWorkingSetBytes"`
+	MaxElements                         int64                                  `json:"maxElements,omitempty" yaml:"maxElements,omitempty"`
+	MaxWorkingSetBytes                  int64                                  `json:"maxWorkingSetBytes,omitempty" yaml:"maxWorkingSetBytes,omitempty"`
+	ConfiguredSubmissionCount           int                                    `json:"configuredSubmissionCount" yaml:"configuredSubmissionCount"`
+	TargetGOOS                          string                                 `json:"targetGOOS" yaml:"targetGOOS"`
+	TargetGOARCH                        string                                 `json:"targetGOARCH" yaml:"targetGOARCH"`
+	MemoryModel                         string                                 `json:"memoryModel" yaml:"memoryModel"`
+	ConfiguredEvidence                  string                                 `json:"configuredEvidence,omitempty" yaml:"configuredEvidence,omitempty"`
+	ExistingMeasuredHostSelector        bool                                   `json:"existingMeasuredHostSelector,omitempty" yaml:"existingMeasuredHostSelector,omitempty"`
+	IntentionalRetainedAcceleratorRoute bool                                   `json:"intentionalRetainedAcceleratorRoute,omitempty" yaml:"intentionalRetainedAcceleratorRoute,omitempty"`
+
+	BlockingCompletion               bool `json:"blockingCompletion" yaml:"blockingCompletion"`
+	HostAccessibleInputs             bool `json:"hostAccessibleInputs" yaml:"hostAccessibleInputs"`
+	HostAccessibleOutput             bool `json:"hostAccessibleOutput" yaml:"hostAccessibleOutput"`
+	NoTransferRequired               bool `json:"noTransferRequired" yaml:"noTransferRequired"`
+	NoPreexistingDeviceResidency     bool `json:"noPreexistingDeviceResidency" yaml:"noPreexistingDeviceResidency"`
+	NoPostDeviceResidency            bool `json:"noPostDeviceResidency" yaml:"noPostDeviceResidency"`
+	NoGraphContext                   bool `json:"noGraphContext" yaml:"noGraphContext"`
+	NoRecorderContext                bool `json:"noRecorderContext" yaml:"noRecorderContext"`
+	NoCommandBufferContext           bool `json:"noCommandBufferContext" yaml:"noCommandBufferContext"`
+	ExactDTypeCoverage               bool `json:"exactDTypeCoverage" yaml:"exactDTypeCoverage"`
+	ExactLayoutCoverage              bool `json:"exactLayoutCoverage" yaml:"exactLayoutCoverage"`
+	ExactAttributesCoverage          bool `json:"exactAttributesCoverage" yaml:"exactAttributesCoverage"`
+	ExactReductionCoverage           bool `json:"exactReductionCoverage" yaml:"exactReductionCoverage"`
+	ForwardParity                    bool `json:"forwardParity" yaml:"forwardParity"`
+	GradientParity                   bool `json:"gradientParity" yaml:"gradientParity"`
+	FloatingPointParity              bool `json:"floatingPointParity" yaml:"floatingPointParity"`
+	ErrorParity                      bool `json:"errorParity" yaml:"errorParity"`
+	PanicParity                      bool `json:"panicParity" yaml:"panicParity"`
+	MutationParity                   bool `json:"mutationParity" yaml:"mutationParity"`
+	AliasParity                      bool `json:"aliasParity" yaml:"aliasParity"`
+	OwnershipParity                  bool `json:"ownershipParity" yaml:"ownershipParity"`
+	RecorderParity                   bool `json:"recorderParity" yaml:"recorderParity"`
+	AutogradParity                   bool `json:"autogradParity" yaml:"autogradParity"`
+	BackendSelectionParity           bool `json:"backendSelectionParity" yaml:"backendSelectionParity"`
+	PairedEndToEndValidationRequired bool `json:"pairedEndToEndValidationRequired" yaml:"pairedEndToEndValidationRequired"`
+}
+
+// Valid reports whether PS6115 has a complete, bounded owner contract.
+func (c *TinySynchronousAcceleratorScreenContract) Valid() bool {
+	if c.Name == "" || strings.TrimSpace(c.Name) != c.Name || len(c.Calls) < 1 || len(c.Calls) > 2 ||
+		c.ConfiguredRows <= 0 || c.ConfiguredColumns <= 0 || c.ConfiguredRows > (1<<63-1)/c.ConfiguredColumns ||
+		c.ConfiguredWorkingSetBytes <= 0 || c.MaxElements < 0 || c.MaxWorkingSetBytes < 0 ||
+		c.MaxElements == 0 && c.MaxWorkingSetBytes == 0 ||
+		c.MaxElements > 0 && c.ConfiguredRows*c.ConfiguredColumns > c.MaxElements ||
+		c.MaxWorkingSetBytes > 0 && c.ConfiguredWorkingSetBytes > c.MaxWorkingSetBytes ||
+		c.ConfiguredSubmissionCount != len(c.Calls) || !psTinyGOOS(c.TargetGOOS) || !psTinyGOARCH(c.TargetGOARCH) ||
+		(c.MemoryModel != "unified" && c.MemoryModel != "shared") {
+		return false
+	}
+	seen := make(map[string]bool, len(c.Calls))
+	for _, call := range c.Calls {
+		acceleratorValid := ps6109CallableIDValid(call.AcceleratorCallable) || psTinyCgoIDValid(call.AcceleratorCallable)
+		operationAbsent := call.OperationArgument == 0 && call.OperationConstant == "" && call.OperationConstantValue == ""
+		operationPresent := call.OperationArgument > 0 && psTopKFunctionIDValid(call.OperationConstant) &&
+			call.OperationConstantValue != "" && strings.TrimSpace(call.OperationConstantValue) == call.OperationConstantValue
+		key := call.ConfiguredSite + "\x00" + call.AcceleratorCallable + "\x00" + call.OperationConstant
+		if !ps6109CallableIDValid(call.ConfiguredSite) || !acceleratorValid ||
+			!ps6109CallableIDValid(call.HostAlternativeCallable) || call.AcceleratorCallable == call.HostAlternativeCallable ||
+			call.RowsArgument <= 0 || call.ColumnsArgument <= 0 || call.RowsArgument == call.ColumnsArgument ||
+			(!operationAbsent && !operationPresent) || operationPresent &&
+			(call.OperationArgument == call.RowsArgument || call.OperationArgument == call.ColumnsArgument) || seen[key] {
+			return false
+		}
+		seen[key] = true
+	}
+	return c.BlockingCompletion && c.HostAccessibleInputs && c.HostAccessibleOutput && c.NoTransferRequired &&
+		c.NoPreexistingDeviceResidency && c.NoPostDeviceResidency && c.NoGraphContext && c.NoRecorderContext &&
+		c.NoCommandBufferContext && c.ExactDTypeCoverage && c.ExactLayoutCoverage && c.ExactAttributesCoverage &&
+		c.ExactReductionCoverage && c.ForwardParity && c.GradientParity && c.FloatingPointParity && c.ErrorParity &&
+		c.PanicParity && c.MutationParity && c.AliasParity && c.OwnershipParity && c.RecorderParity &&
+		c.AutogradParity && c.BackendSelectionParity && c.PairedEndToEndValidationRequired
+}
+
+func psTinyCgoIDValid(id string) bool {
+	return strings.HasPrefix(id, "C.") && psTopKIdentifierValid(strings.TrimPrefix(id, "C."))
+}
+
+func psTinyGOOS(value string) bool {
+	switch value {
+	case "aix", "android", "darwin", "dragonfly", "freebsd", "illumos", "ios", "js", "linux", "netbsd", "openbsd", "plan9", "solaris", "wasip1", "windows":
+		return true
+	}
+	return false
+}
+
+func psTinyGOARCH(value string) bool {
+	switch value {
+	case "386", "amd64", "arm", "arm64", "loong64", "mips", "mips64", "mips64le", "mipsle", "ppc64", "ppc64le", "riscv64", "s390x", "wasm":
+		return true
+	}
+	return false
 }
 
 // RowLocalSparseGatherContract describes one full packed-row transform whose
@@ -1231,6 +1354,8 @@ type Sets struct {
 	ReusableResultLoopContracts       []ReusableResultLoopContract
 	RecorderResidualAddContracts      []RecorderResidualAddContract
 	RowLocalSparseGatherContracts     []RowLocalSparseGatherContract
+
+	TinySynchronousAcceleratorScreenContracts []TinySynchronousAcceleratorScreenContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -1283,7 +1408,17 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		ReusableResultLoopContracts:       cloneReusableResultLoopContracts(c.ReusableResultLoopContracts),
 		RecorderResidualAddContracts:      cloneRecorderResidualAddContracts(c.RecorderResidualAddContracts),
 		RowLocalSparseGatherContracts:     slices.Clone(c.RowLocalSparseGatherContracts),
+
+		TinySynchronousAcceleratorScreenContracts: cloneTinySynchronousAcceleratorScreenContracts(c.TinySynchronousAcceleratorScreenContracts),
 	}
+}
+
+func cloneTinySynchronousAcceleratorScreenContracts(contracts []TinySynchronousAcceleratorScreenContract) []TinySynchronousAcceleratorScreenContract {
+	cloned := slices.Clone(contracts)
+	for index := range cloned {
+		cloned[index].Calls = slices.Clone(cloned[index].Calls)
+	}
+	return cloned
 }
 
 func cloneBoundedScratchFlowContracts(contracts []BoundedScratchFlowContract) []BoundedScratchFlowContract {

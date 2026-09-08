@@ -211,6 +211,41 @@ func TestMissingVocabRowLocalSparseGatherContracts(t *testing.T) {
 	}
 }
 
+func TestMissingVocabTinySynchronousAcceleratorScreenContracts(t *testing.T) {
+	t.Parallel()
+	check := &lint.Check{NeedsConfig: true, Vocab: []string{"tinySynchronousAcceleratorScreenContracts"}}
+	if got := missingVocab(check, &config.Config{}); len(got) != 1 || got[0] != "tinySynchronousAcceleratorScreenContracts" {
+		t.Fatalf("missingVocab(empty) = %v, want tinySynchronousAcceleratorScreenContracts", got)
+	}
+	invalid := config.Config{TinySynchronousAcceleratorScreenContracts: []config.TinySynchronousAcceleratorScreenContract{{Name: "incomplete"}}}
+	if got := missingVocab(check, &invalid); len(got) != 1 {
+		t.Fatalf("missingVocab(invalid) = %v, want tinySynchronousAcceleratorScreenContracts", got)
+	}
+	configured := config.Config{TinySynchronousAcceleratorScreenContracts: []config.TinySynchronousAcceleratorScreenContract{tinySynchronousAcceleratorScreenContractForRunnerTest()}}
+	if got := missingVocab(check, &configured); len(got) != 0 {
+		t.Fatalf("missingVocab(valid) = %v, want none", got)
+	}
+}
+
+func tinySynchronousAcceleratorScreenContractForRunnerTest() config.TinySynchronousAcceleratorScreenContract {
+	return config.TinySynchronousAcceleratorScreenContract{
+		Name: "tiny-loss",
+		Calls: []config.TinySynchronousAcceleratorScreenCall{{
+			ConfiguredSite: "example.com/model.loss", AcceleratorCallable: "example.com/backend.Metal.CrossEntropy",
+			HostAlternativeCallable: "example.com/backend.hostCrossEntropy", RowsArgument: 1, ColumnsArgument: 2,
+		}},
+		ConfiguredRows: 8, ConfiguredColumns: 10, ConfiguredWorkingSetBytes: 640,
+		MaxElements: 80, MaxWorkingSetBytes: 640, ConfiguredSubmissionCount: 1,
+		TargetGOOS: "darwin", TargetGOARCH: "arm64", MemoryModel: "unified",
+		BlockingCompletion: true, HostAccessibleInputs: true, HostAccessibleOutput: true, NoTransferRequired: true,
+		NoPreexistingDeviceResidency: true, NoPostDeviceResidency: true, NoGraphContext: true, NoRecorderContext: true,
+		NoCommandBufferContext: true, ExactDTypeCoverage: true, ExactLayoutCoverage: true, ExactAttributesCoverage: true,
+		ExactReductionCoverage: true, ForwardParity: true, GradientParity: true, FloatingPointParity: true, ErrorParity: true,
+		PanicParity: true, MutationParity: true, AliasParity: true, OwnershipParity: true, RecorderParity: true,
+		AutogradParity: true, BackendSelectionParity: true, PairedEndToEndValidationRequired: true,
+	}
+}
+
 func rowLocalSparseGatherContractForRunnerTest() config.RowLocalSparseGatherContract {
 	return config.RowLocalSparseGatherContract{
 		Name: "vit", ConfiguredSite: "example.com/vision.ViT.Forward", Transform: "example.com/nn.LayerNorm.Forward",

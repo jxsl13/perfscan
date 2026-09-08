@@ -534,6 +534,63 @@ rowLocalSparseGatherContracts:
     supportedDTypesLayoutsBackends: true
     equivalentFallbackUnlessForwardAndBackwardAvailable: true
 
+# Exact representative tiny synchronous accelerator screening contract for
+# PS6115. Values describe a measured candidate cell, never runtime shape or
+# speed proof. Each call must resolve directly at its configured site. Set an
+# existing measured selector or intentional retained route flag to keep a
+# reviewed site silent. Both configured limits below must pass.
+tinySynchronousAcceleratorScreenContracts:
+  - name: m2-tiny-cross-entropy-screen
+    calls:
+      - configuredSite: example.com/project/model.lossForward
+        acceleratorCallable: example.com/project/metal.Backend.CrossEntropy
+        hostAlternativeCallable: example.com/project/ref.crossEntropy
+        rowsArgument: 2
+        columnsArgument: 3
+        operationArgument: 1
+        operationConstant: example.com/project/backend.OpCrossEntropy
+        operationConstantValue: "17"
+      - configuredSite: example.com/project/model.lossBackward
+        acceleratorCallable: example.com/project/metal.Backend.CrossEntropyGradient
+        hostAlternativeCallable: example.com/project/ref.crossEntropyGradient
+        rowsArgument: 2
+        columnsArgument: 3
+    configuredRows: 8
+    configuredColumns: 10
+    configuredWorkingSetBytes: 640
+    maxElements: 80
+    maxWorkingSetBytes: 640
+    configuredSubmissionCount: 2
+    targetGOOS: darwin
+    targetGOARCH: arm64
+    memoryModel: unified
+    configuredEvidence: goai-pr1198-a0e7a529-removed-921abe97-rejected-fc44e371
+    blockingCompletion: true
+    hostAccessibleInputs: true
+    hostAccessibleOutput: true
+    noTransferRequired: true
+    noPreexistingDeviceResidency: true
+    noPostDeviceResidency: true
+    noGraphContext: true
+    noRecorderContext: true
+    noCommandBufferContext: true
+    exactDTypeCoverage: true
+    exactLayoutCoverage: true
+    exactAttributesCoverage: true
+    exactReductionCoverage: true
+    forwardParity: true
+    gradientParity: true
+    floatingPointParity: true
+    errorParity: true
+    panicParity: true
+    mutationParity: true
+    aliasParity: true
+    ownershipParity: true
+    recorderParity: true
+    autogradParity: true
+    backendSelectionParity: true
+    pairedEndToEndValidationRequired: true
+
 # ---------------------------------------------------------------------------
 # Concrete instance — a tensor / numerical library (e.g. goai). The same
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the

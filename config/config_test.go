@@ -51,6 +51,9 @@ func TestToSetAndCompile(t *testing.T) {
 			Implementations:           []RecorderResidualAddImplementation{{Projection: "example.com/p.Linear.record"}},
 		}},
 		RowLocalSparseGatherContracts: []RowLocalSparseGatherContract{{Name: "vit-classifier"}},
+		TinySynchronousAcceleratorScreenContracts: []TinySynchronousAcceleratorScreenContract{{
+			Name: "tiny-loss", Calls: []TinySynchronousAcceleratorScreenCall{{ConfiguredSite: "example.com/p.loss"}},
+		}},
 		TopKOneContracts: []TopKOneContract{{
 			Name: "resident-topk-one",
 		}},
@@ -100,6 +103,10 @@ func TestToSetAndCompile(t *testing.T) {
 	}
 	if len(sets.RowLocalSparseGatherContracts) != 1 || sets.RowLocalSparseGatherContracts[0].Name != "vit-classifier" {
 		t.Errorf("Compile lost row-local sparse-gather contracts: %+v", sets.RowLocalSparseGatherContracts)
+	}
+	if len(sets.TinySynchronousAcceleratorScreenContracts) != 1 || sets.TinySynchronousAcceleratorScreenContracts[0].Name != "tiny-loss" ||
+		len(sets.TinySynchronousAcceleratorScreenContracts[0].Calls) != 1 {
+		t.Errorf("Compile lost tiny synchronous accelerator-screen contracts: %+v", sets.TinySynchronousAcceleratorScreenContracts)
 	}
 	if len(sets.TopKOneContracts) != 1 || sets.TopKOneContracts[0].Name != "resident-topk-one" {
 		t.Errorf("Compile lost Top-K(k=1) contracts: %+v", sets.TopKOneContracts)
@@ -167,8 +174,128 @@ func TestToSetAndCompile(t *testing.T) {
 	if sets.RowLocalSparseGatherContracts[0].Name != "vit-classifier" {
 		t.Error("Compile must clone row-local sparse-gather contracts")
 	}
+	c.TinySynchronousAcceleratorScreenContracts[0].Name = "mutated"
+	c.TinySynchronousAcceleratorScreenContracts[0].Calls[0].ConfiguredSite = "mutated"
+	if sets.TinySynchronousAcceleratorScreenContracts[0].Name != "tiny-loss" ||
+		sets.TinySynchronousAcceleratorScreenContracts[0].Calls[0].ConfiguredSite != "example.com/p.loss" {
+		t.Error("Compile must deeply clone tiny synchronous accelerator-screen contracts")
+	}
 	if sets.ElementCountMethods != nil {
 		t.Errorf("empty field must compile to a nil set, got %v", sets.ElementCountMethods)
+	}
+}
+
+func TestTinySynchronousAcceleratorScreenContractValid(t *testing.T) {
+	t.Parallel()
+	valid := tinySynchronousAcceleratorScreenContractForTest()
+	if !valid.Valid() {
+		t.Fatal("complete tiny synchronous accelerator-screen contract is invalid")
+	}
+	tests := []struct {
+		name   string
+		mutate func(*TinySynchronousAcceleratorScreenContract)
+	}{
+		{"missing name", func(c *TinySynchronousAcceleratorScreenContract) { c.Name = "" }},
+		{"no calls", func(c *TinySynchronousAcceleratorScreenContract) { c.Calls = nil }},
+		{"too many calls", func(c *TinySynchronousAcceleratorScreenContract) { c.Calls = append(c.Calls, c.Calls[0]) }},
+		{"duplicate call", func(c *TinySynchronousAcceleratorScreenContract) { c.Calls[1] = c.Calls[0] }},
+		{"bad site", func(c *TinySynchronousAcceleratorScreenContract) { c.Calls[0].ConfiguredSite = "loss" }},
+		{"bad accelerator", func(c *TinySynchronousAcceleratorScreenContract) { c.Calls[0].AcceleratorCallable = "run" }},
+		{"bad host", func(c *TinySynchronousAcceleratorScreenContract) { c.Calls[0].HostAlternativeCallable = "host" }},
+		{"same host", func(c *TinySynchronousAcceleratorScreenContract) {
+			c.Calls[0].HostAlternativeCallable = c.Calls[0].AcceleratorCallable
+		}},
+		{"duplicate geometry roles", func(c *TinySynchronousAcceleratorScreenContract) {
+			c.Calls[0].ColumnsArgument = c.Calls[0].RowsArgument
+		}},
+		{"partial operation", func(c *TinySynchronousAcceleratorScreenContract) { c.Calls[0].OperationConstantValue = "" }},
+		{"operation role collision", func(c *TinySynchronousAcceleratorScreenContract) {
+			c.Calls[0].OperationArgument = c.Calls[0].RowsArgument
+		}},
+		{"zero rows", func(c *TinySynchronousAcceleratorScreenContract) { c.ConfiguredRows = 0 }},
+		{"overflow elements", func(c *TinySynchronousAcceleratorScreenContract) { c.ConfiguredRows = 1 << 62; c.ConfiguredColumns = 8 }},
+		{"zero bytes", func(c *TinySynchronousAcceleratorScreenContract) { c.ConfiguredWorkingSetBytes = 0 }},
+		{"no limits", func(c *TinySynchronousAcceleratorScreenContract) { c.MaxElements = 0; c.MaxWorkingSetBytes = 0 }},
+		{"element limit", func(c *TinySynchronousAcceleratorScreenContract) { c.MaxElements = 79 }},
+		{"byte limit", func(c *TinySynchronousAcceleratorScreenContract) { c.MaxWorkingSetBytes = 639 }},
+		{"submission mismatch", func(c *TinySynchronousAcceleratorScreenContract) { c.ConfiguredSubmissionCount = 1 }},
+		{"bad target", func(c *TinySynchronousAcceleratorScreenContract) { c.TargetGOOS = "Darwin" }},
+		{"unsupported GOOS", func(c *TinySynchronousAcceleratorScreenContract) { c.TargetGOOS = "beos" }},
+		{"unsupported GOARCH", func(c *TinySynchronousAcceleratorScreenContract) { c.TargetGOARCH = "alpha" }},
+		{"bad memory", func(c *TinySynchronousAcceleratorScreenContract) { c.MemoryModel = "discrete" }},
+		{"blocking gap", func(c *TinySynchronousAcceleratorScreenContract) { c.BlockingCompletion = false }},
+		{"input host-access gap", func(c *TinySynchronousAcceleratorScreenContract) { c.HostAccessibleInputs = false }},
+		{"output host-access gap", func(c *TinySynchronousAcceleratorScreenContract) { c.HostAccessibleOutput = false }},
+		{"transfer gap", func(c *TinySynchronousAcceleratorScreenContract) { c.NoTransferRequired = false }},
+		{"pre-residency gap", func(c *TinySynchronousAcceleratorScreenContract) { c.NoPreexistingDeviceResidency = false }},
+		{"post-residency gap", func(c *TinySynchronousAcceleratorScreenContract) { c.NoPostDeviceResidency = false }},
+		{"graph gap", func(c *TinySynchronousAcceleratorScreenContract) { c.NoGraphContext = false }},
+		{"recorder gap", func(c *TinySynchronousAcceleratorScreenContract) { c.NoRecorderContext = false }},
+		{"command-buffer gap", func(c *TinySynchronousAcceleratorScreenContract) { c.NoCommandBufferContext = false }},
+		{"dtype gap", func(c *TinySynchronousAcceleratorScreenContract) { c.ExactDTypeCoverage = false }},
+		{"layout gap", func(c *TinySynchronousAcceleratorScreenContract) { c.ExactLayoutCoverage = false }},
+		{"attrs gap", func(c *TinySynchronousAcceleratorScreenContract) { c.ExactAttributesCoverage = false }},
+		{"reduction gap", func(c *TinySynchronousAcceleratorScreenContract) { c.ExactReductionCoverage = false }},
+		{"forward gap", func(c *TinySynchronousAcceleratorScreenContract) { c.ForwardParity = false }},
+		{"gradient gap", func(c *TinySynchronousAcceleratorScreenContract) { c.GradientParity = false }},
+		{"floating-point gap", func(c *TinySynchronousAcceleratorScreenContract) { c.FloatingPointParity = false }},
+		{"error gap", func(c *TinySynchronousAcceleratorScreenContract) { c.ErrorParity = false }},
+		{"panic gap", func(c *TinySynchronousAcceleratorScreenContract) { c.PanicParity = false }},
+		{"mutation gap", func(c *TinySynchronousAcceleratorScreenContract) { c.MutationParity = false }},
+		{"alias gap", func(c *TinySynchronousAcceleratorScreenContract) { c.AliasParity = false }},
+		{"ownership gap", func(c *TinySynchronousAcceleratorScreenContract) { c.OwnershipParity = false }},
+		{"recorder parity gap", func(c *TinySynchronousAcceleratorScreenContract) { c.RecorderParity = false }},
+		{"autograd gap", func(c *TinySynchronousAcceleratorScreenContract) { c.AutogradParity = false }},
+		{"backend-selection gap", func(c *TinySynchronousAcceleratorScreenContract) { c.BackendSelectionParity = false }},
+		{"paired validation gap", func(c *TinySynchronousAcceleratorScreenContract) { c.PairedEndToEndValidationRequired = false }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			candidate := valid
+			candidate.Calls = slices.Clone(valid.Calls)
+			test.mutate(&candidate)
+			if candidate.Valid() {
+				t.Error("incomplete contract is valid")
+			}
+		})
+	}
+	cgo := valid
+	cgo.Calls = slices.Clone(valid.Calls[:1])
+	cgo.Calls[0].AcceleratorCallable = "C.cross_entropy"
+	cgo.ConfiguredSubmissionCount = 1
+	if !cgo.Valid() {
+		t.Error("real-cgo callable identity must be accepted by configuration validation")
+	}
+	elementsOnly := valid
+	elementsOnly.MaxWorkingSetBytes = 0
+	if !elementsOnly.Valid() {
+		t.Error("an element-only inclusive limit must be valid")
+	}
+	bytesOnly := valid
+	bytesOnly.MaxElements = 0
+	bytesOnly.MemoryModel = "shared"
+	if !bytesOnly.Valid() {
+		t.Error("a byte-only inclusive limit on shared memory must be valid")
+	}
+}
+
+func tinySynchronousAcceleratorScreenContractForTest() TinySynchronousAcceleratorScreenContract {
+	return TinySynchronousAcceleratorScreenContract{
+		Name: "tiny-cross-entropy",
+		Calls: []TinySynchronousAcceleratorScreenCall{
+			{ConfiguredSite: "example.com/model.forward", AcceleratorCallable: "example.com/backend.Metal.Forward", HostAlternativeCallable: "example.com/backend.hostForward", RowsArgument: 2, ColumnsArgument: 3, OperationArgument: 1, OperationConstant: "example.com/backend.crossEntropy", OperationConstantValue: "7"},
+			{ConfiguredSite: "example.com/model.backward", AcceleratorCallable: "example.com/backend.Metal.Backward", HostAlternativeCallable: "example.com/backend.hostBackward", RowsArgument: 2, ColumnsArgument: 3},
+		},
+		ConfiguredRows: 8, ConfiguredColumns: 10, ConfiguredWorkingSetBytes: 640,
+		MaxElements: 80, MaxWorkingSetBytes: 640, ConfiguredSubmissionCount: 2,
+		TargetGOOS: "darwin", TargetGOARCH: "arm64", MemoryModel: "unified",
+		BlockingCompletion: true, HostAccessibleInputs: true, HostAccessibleOutput: true, NoTransferRequired: true,
+		NoPreexistingDeviceResidency: true, NoPostDeviceResidency: true, NoGraphContext: true, NoRecorderContext: true,
+		NoCommandBufferContext: true, ExactDTypeCoverage: true, ExactLayoutCoverage: true, ExactAttributesCoverage: true,
+		ExactReductionCoverage: true, ForwardParity: true, GradientParity: true, FloatingPointParity: true, ErrorParity: true,
+		PanicParity: true, MutationParity: true, AliasParity: true, OwnershipParity: true, RecorderParity: true,
+		AutogradParity: true, BackendSelectionParity: true, PairedEndToEndValidationRequired: true,
 	}
 }
 
@@ -1024,6 +1151,8 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"ReusableResultLoopContracts":     len(c.ReusableResultLoopContracts),
 		"RecorderResidualAddContracts":    len(c.RecorderResidualAddContracts),
 		"RowLocalSparseGatherContracts":   len(c.RowLocalSparseGatherContracts),
+
+		"TinySynchronousAcceleratorScreenContracts": len(c.TinySynchronousAcceleratorScreenContracts),
 	}
 	for name, n := range fields {
 		if n == 0 {
@@ -1050,6 +1179,9 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 	}
 	if len(c.RowLocalSparseGatherContracts) != 1 || !c.RowLocalSparseGatherContracts[0].Valid() {
 		t.Errorf("example config has invalid row-local sparse-gather contract: %+v", c.RowLocalSparseGatherContracts)
+	}
+	if len(c.TinySynchronousAcceleratorScreenContracts) != 1 || !c.TinySynchronousAcceleratorScreenContracts[0].Valid() {
+		t.Errorf("example config has invalid tiny synchronous accelerator-screen contract: %+v", c.TinySynchronousAcceleratorScreenContracts)
 	}
 	if len(c.SchedulerTileGrainContracts) != 1 || !c.SchedulerTileGrainContracts[0].Valid() {
 		t.Errorf("example config has invalid scheduler tile-grain contract: %+v", c.SchedulerTileGrainContracts)
