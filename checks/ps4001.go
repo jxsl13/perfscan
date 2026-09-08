@@ -32,17 +32,89 @@ The presence of a configured bulk-copy helper (bulkCopyHelpers) in the
 same function silences this check: the per-element loop is then the
 intended fallback path, not a candidate. KEEP THAT LIST COMPLETE — a
 helper missing from the config makes this check report the very fallback
-the bulk path exists to guard.`,
-		Before: `for i := range out {
-	out[i] = math.Float64frombits(binary.LittleEndian.Uint64(buf[i*8:]))
-}`,
-		After: `if hostIsLE {
-	rawCopyLE(out, buf) // one bulk copy
-} else {
-	for i := range out { // genuine-decode fallback
-		out[i] = math.Float64frombits(binary.LittleEndian.Uint64(buf[i*8:]))
+the bulk path exists to guard.
+
+Owner issue #811 adds the narrower nested-record shape where a constant-count
+LittleEndian field plane is contiguous even though the surrounding records
+are strided. For that shape PS4001 emits a more precise architecture-keyed
+view diagnostic: the inner loop must have 2 through 64 compile-time
+iterations, start at zero, advance by one, and index bytes with coefficient
+exactly 2 for Uint16. The byte offset must retain native int type so a narrow
+integer cannot wrap across the plane. The source/base must depend
+non-trivially on an induction variable used by the surrounding loop's
+condition and post. The inner body must be one direct same-order decode into a
+fixed local uint16 array, followed immediately by a complete local range
+reduction that neither calls helpers nor exposes the array. The backing byte
+slice, including immutable initializer aliases, must be independent of the
+inner field induction so every word belongs to one plane.
+Uint32/Uint64, dynamic bounds, wrong strides, BigEndian, sibling statements or
+callbacks, source rebindings, constant or reversed destinations, externally
+visible or partially consumed output, invariant outer initializers,
+conditional calls, and mutable induction variables retain the generic PS4001
+diagnostic.
+
+There is no automatic view rewrite. A zero-copy typed view relies on byte
+order, unaligned-access behavior, unsafe pointer lifetime, and exact bounds.
+Put it behind architecture-keyed files for validated little-endian targets
+such as amd64 and arm64, hoist the capability decision outside the record
+loop, and retain binary.LittleEndian as the endian/alignment-safe fallback.
+Validate the whole record before forming the view so short-input error and
+partial-output behavior do not change. Keep the view read-only and reject
+source/output aliasing or callbacks that can mutate the bytes while it is live.
+Keep bit-exact arbitrary-raw-field and complete-consumer benchmarks.`,
+		Before: `for block := 0; block < blocks; block++ {
+	recordBase := block * recordBytes
+	scale := binary.LittleEndian.Uint16(src[recordBase:]) // remains strided
+	result += uint64(scale)
+	base := recordBase + planeOffset
+	var qh [8]uint16
+	for field := 0; field < 8; field++ {
+		qh[field] = binary.LittleEndian.Uint16(src[base+field*2:])
+	}
+	for _, raw := range qh {
+		result += uint64(raw)
 	}
 }`,
+		After: `if nativeLittleEndianView {
+	for block := 0; block < blocks; block++ {
+		recordBase := block * recordBytes
+		scale := binary.LittleEndian.Uint16(src[recordBase:]) // still strided
+		result += uint64(scale)
+		plane := src[recordBase+planeOffset : recordBase+planeOffset+16]
+		for _, raw := range uint16ViewLE(plane) { // architecture-keyed helper
+			result += uint64(raw)
+		}
+	}
+} else {
+	for block := 0; block < blocks; block++ {
+		recordBase := block * recordBytes
+		scale := binary.LittleEndian.Uint16(src[recordBase:])
+		result += uint64(scale)
+		base := recordBase + planeOffset
+		var qh [8]uint16
+		for field := 0; field < 8; field++ { // portable fallback
+			qh[field] = binary.LittleEndian.Uint16(src[base+field*2:])
+		}
+		for _, raw := range qh {
+			result += uint64(raw)
+		}
+	}
+}`,
+		MeasuredWin: `Owner issue #811 arose from GoAI IQ1_S records whose eight
+uint16 qh words occupy one contiguous 16-byte plane inside each 50-byte block.
+The direct ARM64 fused leaf removed those scalar decodes and measured a 7.75x
+leaf speedup, but that result includes the complete fused leaf rather than
+isolating a typed view.
+
+The separate frozen PS4001 pair retained one strided uint16 scale decode and
+the complete packed-field consumer in both arms, changing only eight scalar
+LittleEndian decodes through a temporary array to the architecture-keyed view.
+Across six alternating fresh-process pairs on Apple M2 Pro with Go 1.27, the
+separate medians were 2767.5 ns/op before and 1853.5 ns/op after: a 33.026%
+reduction, or 1.493x. The median of the six paired reductions was 32.482%; all
+six pairs favored the view, and both arms reported 0 B/op and 0 allocs/op.
+These isolated results do not inherit or restate the historical fused-leaf
+7.75x result, and other targets/layouts still require their own benchmark.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS4001",
@@ -61,16 +133,16 @@ var binaryDecodeMethods = map[string]bool{
 // an object named "binary" (even a package-level one declared in another
 // file, where Ident.Obj stays nil) does not match.
 func isBinaryEndianCall(info *types.Info, call *ast.CallExpr) (string, bool) {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
+	sel, ok := ps2110Unparen(call.Fun).(*ast.SelectorExpr)
 	if !ok || !binaryDecodeMethods[sel.Sel.Name] {
 		return "", false
 	}
-	inner, ok := sel.X.(*ast.SelectorExpr)
+	inner, ok := ps2110Unparen(sel.X).(*ast.SelectorExpr)
 	if !ok {
 		return "", false
 	}
-	id, ok := inner.X.(*ast.Ident)
-	if !ok || id.Name != "binary" {
+	id, ok := ps2110Unparen(inner.X).(*ast.Ident)
+	if !ok {
 		return "", false
 	}
 	pn, ok := info.Uses[id].(*types.PkgName)
@@ -97,6 +169,7 @@ func runPS4001(pass *analysis.Pass) (any, error) {
 			if len(bulk) > 0 && callsFanOut(fn.Body, bulk) {
 				continue
 			}
+			var state *ps4001PlaneState
 			reportedLoop := map[ast.Node]bool{}
 			astutil.WithStack(fn.Body, func(n ast.Node, stack []ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
@@ -112,6 +185,15 @@ func runPS4001(pass *analysis.Pass) (any, error) {
 				}
 				loop, inLoop := astutil.InLoop(stack)
 				if !inLoop || reportedLoop[loop] {
+					return true
+				}
+				if state == nil {
+					collected := ps4001PlaneCollectState(pass, fn)
+					state = &collected
+				}
+				if finding, specialized := ps4001PlaneFixedPlane(pass, call, loop, stack, *state); specialized {
+					reportedLoop[loop] = true
+					ps4001PlaneReport(pass, call, finding)
 					return true
 				}
 				reportedLoop[loop] = true
