@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**404 checks total** — **265 with a bit-identical auto-fix**, 139 advisory. By fix level: **246 L1** (idiomatic), **122 L2** (structured), **36 L3** (aggressive).
+**405 checks total** — **265 with a bit-identical auto-fix**, 140 advisory. By fix level: **246 L1** (idiomatic), **122 L2** (structured), **37 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -416,4 +416,5 @@ checks' fixes.
 | [PS6111](PS6111.md) | alloc | L3 |  | a reusable-result loop calls an allocating compatibility wrapper |
 | [PS6112](PS6112.md) | vector | L3 |  | a repeated scheduler grain is not a multiple of one target's microkernel tile height |
 | [PS6113](PS6113.md) | verify | L3 |  | a recorder projection writes scratch immediately consumed by an in-place residual add |
+| [PS6114](PS6114.md) | verify | L3 |  | a row-local transform computes packed rows discarded by a regular gather |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |

@@ -50,6 +50,7 @@ func TestToSetAndCompile(t *testing.T) {
 			AccumulateExtentArguments: []int{5},
 			Implementations:           []RecorderResidualAddImplementation{{Projection: "example.com/p.Linear.record"}},
 		}},
+		RowLocalSparseGatherContracts: []RowLocalSparseGatherContract{{Name: "vit-classifier"}},
 		TopKOneContracts: []TopKOneContract{{
 			Name: "resident-topk-one",
 		}},
@@ -96,6 +97,9 @@ func TestToSetAndCompile(t *testing.T) {
 	}
 	if len(sets.RecorderResidualAddContracts) != 1 || sets.RecorderResidualAddContracts[0].Name != "projection-residual" {
 		t.Errorf("Compile lost recorder residual-add contracts: %+v", sets.RecorderResidualAddContracts)
+	}
+	if len(sets.RowLocalSparseGatherContracts) != 1 || sets.RowLocalSparseGatherContracts[0].Name != "vit-classifier" {
+		t.Errorf("Compile lost row-local sparse-gather contracts: %+v", sets.RowLocalSparseGatherContracts)
 	}
 	if len(sets.TopKOneContracts) != 1 || sets.TopKOneContracts[0].Name != "resident-topk-one" {
 		t.Errorf("Compile lost Top-K(k=1) contracts: %+v", sets.TopKOneContracts)
@@ -159,8 +163,86 @@ func TestToSetAndCompile(t *testing.T) {
 		sets.RecorderResidualAddContracts[0].Implementations[0].Projection != "example.com/p.Linear.record" {
 		t.Error("Compile must deeply clone recorder residual-add contracts")
 	}
+	c.RowLocalSparseGatherContracts[0].Name = "mutated"
+	if sets.RowLocalSparseGatherContracts[0].Name != "vit-classifier" {
+		t.Error("Compile must clone row-local sparse-gather contracts")
+	}
 	if sets.ElementCountMethods != nil {
 		t.Errorf("empty field must compile to a nil set, got %v", sets.ElementCountMethods)
+	}
+}
+
+func TestRowLocalSparseGatherContractValid(t *testing.T) {
+	t.Parallel()
+	valid := rowLocalSparseGatherContractForTest()
+	if !valid.Valid() {
+		t.Fatal("complete row-local sparse-gather contract is invalid")
+	}
+	tests := []struct {
+		name   string
+		mutate func(*RowLocalSparseGatherContract)
+	}{
+		{"missing site", func(c *RowLocalSparseGatherContract) { c.ConfiguredSite = "" }},
+		{"interface-shaped transform id", func(c *RowLocalSparseGatherContract) { c.Transform = "Forward" }},
+		{"same gather and concat", func(c *RowLocalSparseGatherContract) { c.Concat = c.Gather }},
+		{"same operation constants", func(c *RowLocalSparseGatherContract) { c.ConcatOperation = c.SliceOperation }},
+		{"duplicate slice fields", func(c *RowLocalSparseGatherContract) { c.SliceEndField = c.SliceStartField }},
+		{"duplicate gather roles", func(c *RowLocalSparseGatherContract) { c.GatherInputArgument = c.GatherAttrsArgument }},
+		{"duplicate concat roles", func(c *RowLocalSparseGatherContract) { c.ConcatAttrsArgument = c.ConcatCollectionArgument }},
+		{"missing packed geometry", func(c *RowLocalSparseGatherContract) { c.PackedRowsEqualBatchTimesStride = false }},
+		{"missing positive batch", func(c *RowLocalSparseGatherContract) { c.BatchPositive = false }},
+		{"missing nontrivial stride", func(c *RowLocalSparseGatherContract) { c.StrideGreaterThanOne = false }},
+		{"missing overflow proof", func(c *RowLocalSparseGatherContract) { c.NativeIntArithmeticNoOverflow = false }},
+		{"missing row locality", func(c *RowLocalSparseGatherContract) { c.TransformRowsIndependent = false }},
+		{"missing row order and width", func(c *RowLocalSparseGatherContract) { c.TransformPreservesRowOrderAndWidth = false }},
+		{"missing immutable parameters", func(c *RowLocalSparseGatherContract) { c.TransformParametersImmutable = false }},
+		{"missing input ownership", func(c *RowLocalSparseGatherContract) { c.TransformDoesNotMutateInput = false }},
+		{"missing input output nonalias", func(c *RowLocalSparseGatherContract) { c.TransformInputOutputDoNotAlias = false }},
+		{"missing transform retention", func(c *RowLocalSparseGatherContract) { c.TransformDoesNotRetainArguments = false }},
+		{"missing synchronous calls", func(c *RowLocalSparseGatherContract) { c.CallsExecuteSynchronously = false }},
+		{"missing discarded row effects", func(c *RowLocalSparseGatherContract) { c.DiscardedRowsHaveNoEffectsStateOrRNG = false }},
+		{"missing deterministic gather", func(c *RowLocalSparseGatherContract) { c.GatherDeterministicAndValueIndependent = false }},
+		{"missing gather concat ownership", func(c *RowLocalSparseGatherContract) { c.GatherAndConcatDoNotMutateOrRetain = false }},
+		{"missing selected-first equivalence", func(c *RowLocalSparseGatherContract) { c.SelectedFirstEquivalent = false }},
+		{"missing fused forward parity", func(c *RowLocalSparseGatherContract) { c.FusedForwardParity = false }},
+		{"missing float parity", func(c *RowLocalSparseGatherContract) { c.FloatingPointPolicyPreserved = false }},
+		{"missing error panic parity", func(c *RowLocalSparseGatherContract) { c.ErrorAndPanicParity = false }},
+		{"missing partial output parity", func(c *RowLocalSparseGatherContract) { c.PartialOutputParity = false }},
+		{"missing recorder order", func(c *RowLocalSparseGatherContract) { c.RecorderOrderParity = false }},
+		{"missing vjp parity", func(c *RowLocalSparseGatherContract) { c.VJPAllInputGradientsParity = false }},
+		{"missing backend coverage", func(c *RowLocalSparseGatherContract) { c.SupportedDTypesLayoutsBackends = false }},
+		{"missing fallback", func(c *RowLocalSparseGatherContract) { c.EquivalentFallbackUnlessForwardAndBackwardAvailable = false }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			candidate := valid
+			test.mutate(&candidate)
+			if candidate.Valid() {
+				t.Errorf("mutated contract unexpectedly valid: %+v", candidate)
+			}
+		})
+	}
+}
+
+func rowLocalSparseGatherContractForTest() RowLocalSparseGatherContract {
+	return RowLocalSparseGatherContract{
+		Name: "vit-classifier", ConfiguredSite: "example.com/vision.ViT.Forward",
+		Transform: "example.com/nn.LayerNorm.Forward", Gather: "example.com/vision.visExec1", Concat: "example.com/backend.Execute",
+		SliceOperation: "example.com/backend.OpSlice", SliceOperationValue: "1", ConcatOperation: "example.com/backend.OpConcat", ConcatOperationValue: "2",
+		SliceAttrsType: "example.com/backend.SliceAttrs", SliceAxisField: "example.com/backend.SliceAttrs.Axis",
+		SliceStartField: "example.com/backend.SliceAttrs.Start", SliceEndField: "example.com/backend.SliceAttrs.End",
+		ConcatAttrsType: "example.com/backend.ConcatAttrs", ConcatAxisField: "example.com/backend.ConcatAttrs.Axis",
+		TransformInputArgument: 2, GatherOperationArgument: 2, GatherAttrsArgument: 3, GatherInputArgument: 4,
+		ConcatOperationArgument: 2, ConcatCollectionArgument: 3, ConcatAttrsArgument: 4,
+		PackedRowsEqualBatchTimesStride: true, BatchPositive: true, StrideGreaterThanOne: true, NativeIntArithmeticNoOverflow: true,
+		TransformRowsIndependent: true, TransformPreservesRowOrderAndWidth: true, TransformParametersImmutable: true,
+		TransformDoesNotMutateInput: true, TransformInputOutputDoNotAlias: true, TransformDoesNotRetainArguments: true,
+		CallsExecuteSynchronously: true, DiscardedRowsHaveNoEffectsStateOrRNG: true,
+		GatherDeterministicAndValueIndependent: true, GatherAndConcatDoNotMutateOrRetain: true,
+		SelectedFirstEquivalent: true, FusedForwardParity: true, FloatingPointPolicyPreserved: true,
+		ErrorAndPanicParity: true, PartialOutputParity: true, RecorderOrderParity: true, VJPAllInputGradientsParity: true,
+		SupportedDTypesLayoutsBackends: true, EquivalentFallbackUnlessForwardAndBackwardAvailable: true,
 	}
 }
 
@@ -941,6 +1023,7 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"ReusableOneShotWrapperContracts": len(c.ReusableOneShotWrapperContracts),
 		"ReusableResultLoopContracts":     len(c.ReusableResultLoopContracts),
 		"RecorderResidualAddContracts":    len(c.RecorderResidualAddContracts),
+		"RowLocalSparseGatherContracts":   len(c.RowLocalSparseGatherContracts),
 	}
 	for name, n := range fields {
 		if n == 0 {
@@ -964,6 +1047,9 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 	}
 	if len(c.RecorderResidualAddContracts) != 1 || !c.RecorderResidualAddContracts[0].Valid() {
 		t.Errorf("example config has invalid recorder residual-add contract: %+v", c.RecorderResidualAddContracts)
+	}
+	if len(c.RowLocalSparseGatherContracts) != 1 || !c.RowLocalSparseGatherContracts[0].Valid() {
+		t.Errorf("example config has invalid row-local sparse-gather contract: %+v", c.RowLocalSparseGatherContracts)
 	}
 	if len(c.SchedulerTileGrainContracts) != 1 || !c.SchedulerTileGrainContracts[0].Valid() {
 		t.Errorf("example config has invalid scheduler tile-grain contract: %+v", c.SchedulerTileGrainContracts)
