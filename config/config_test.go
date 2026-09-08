@@ -40,6 +40,10 @@ func TestToSetAndCompile(t *testing.T) {
 			MutableStateFields:     []string{"example.com/p.Recorder.encoder"},
 			AllowedSynchronousUses: []ReusableOneShotMethod{{Static: "example.com/p.Recorder.Encode"}},
 		}},
+		ReusableResultLoopContracts: []ReusableResultLoopContract{{
+			Name:                   "decode-logits",
+			ShapeArgumentPositions: []int{2},
+		}},
 		TopKOneContracts: []TopKOneContract{{
 			Name: "resident-topk-one",
 		}},
@@ -73,6 +77,9 @@ func TestToSetAndCompile(t *testing.T) {
 	}
 	if len(sets.ReusableOneShotWrapperContracts) != 1 || sets.ReusableOneShotWrapperContracts[0].Name != "recorder-shell" {
 		t.Errorf("Compile lost reusable one-shot wrapper contracts: %+v", sets.ReusableOneShotWrapperContracts)
+	}
+	if len(sets.ReusableResultLoopContracts) != 1 || sets.ReusableResultLoopContracts[0].Name != "decode-logits" {
+		t.Errorf("Compile lost reusable-result loop contracts: %+v", sets.ReusableResultLoopContracts)
 	}
 	if len(sets.TopKOneContracts) != 1 || sets.TopKOneContracts[0].Name != "resident-topk-one" {
 		t.Errorf("Compile lost Top-K(k=1) contracts: %+v", sets.TopKOneContracts)
@@ -113,8 +120,74 @@ func TestToSetAndCompile(t *testing.T) {
 		sets.ReusableOneShotWrapperContracts[0].AllowedSynchronousUses[0].Static != "example.com/p.Recorder.Encode" {
 		t.Error("Compile must deeply clone reusable one-shot wrapper contracts")
 	}
+	c.ReusableResultLoopContracts[0].Name = "mutated"
+	c.ReusableResultLoopContracts[0].ShapeArgumentPositions[0] = 9
+	if sets.ReusableResultLoopContracts[0].Name != "decode-logits" || sets.ReusableResultLoopContracts[0].ShapeArgumentPositions[0] != 2 {
+		t.Error("Compile must deeply clone reusable-result loop contracts")
+	}
 	if sets.ElementCountMethods != nil {
 		t.Errorf("empty field must compile to a nil set, got %v", sets.ElementCountMethods)
+	}
+}
+
+func TestReusableResultLoopContractValid(t *testing.T) {
+	t.Parallel()
+	valid := ReusableResultLoopContract{
+		Name:                     "decode-logits",
+		Wrapper:                  "example.com/model.Decoder.Step",
+		Into:                     "example.com/model.Decoder.StepInto",
+		ResultPosition:           1,
+		DestinationArgument:      3,
+		ShapeArgumentPositions:   []int{2},
+		ConfiguredResultElements: 50257,
+		ConfiguredLoopIterations: 8,
+		WrapperReturnsFreshOwned: true,
+		ResultLengthStableForReceiverAndListedArgs:     true,
+		IntoOverwritesDestinationOnSuccess:             true,
+		IntoDoesNotReadDestinationBeforeOverwrite:      true,
+		IntoIgnoresDestinationIdentityAndExtraCapacity: true,
+		IntoDoesNotRetainDestination:                   true,
+		IntoExecutesSynchronously:                      true,
+		WrapperAndIntoHaveIdenticalStateEffects:        true,
+		WrapperAndIntoHaveIdenticalErrorsAndPanics:     true,
+	}
+	if !valid.Valid() {
+		t.Fatal("complete reusable-result loop contract is invalid")
+	}
+	tests := []struct {
+		name   string
+		mutate func(*ReusableResultLoopContract)
+	}{
+		{"blank name", func(c *ReusableResultLoopContract) { c.Name = "" }},
+		{"padded name", func(c *ReusableResultLoopContract) { c.Name = " decode" }},
+		{"invalid wrapper", func(c *ReusableResultLoopContract) { c.Wrapper = "Step" }},
+		{"invalid into", func(c *ReusableResultLoopContract) { c.Into = "StepInto" }},
+		{"same methods", func(c *ReusableResultLoopContract) { c.Into = c.Wrapper }},
+		{"zero result role", func(c *ReusableResultLoopContract) { c.ResultPosition = 0 }},
+		{"zero destination role", func(c *ReusableResultLoopContract) { c.DestinationArgument = 0 }},
+		{"duplicate shape role", func(c *ReusableResultLoopContract) { c.ShapeArgumentPositions = []int{2, 2} }},
+		{"negative shape role", func(c *ReusableResultLoopContract) { c.ShapeArgumentPositions = []int{-1} }},
+		{"partial configured model", func(c *ReusableResultLoopContract) { c.ConfiguredLoopIterations = 0 }},
+		{"missing fresh ownership", func(c *ReusableResultLoopContract) { c.WrapperReturnsFreshOwned = false }},
+		{"unstable result shape", func(c *ReusableResultLoopContract) { c.ResultLengthStableForReceiverAndListedArgs = false }},
+		{"partial overwrite", func(c *ReusableResultLoopContract) { c.IntoOverwritesDestinationOnSuccess = false }},
+		{"destination read", func(c *ReusableResultLoopContract) { c.IntoDoesNotReadDestinationBeforeOverwrite = false }},
+		{"identity-sensitive destination", func(c *ReusableResultLoopContract) { c.IntoIgnoresDestinationIdentityAndExtraCapacity = false }},
+		{"retained destination", func(c *ReusableResultLoopContract) { c.IntoDoesNotRetainDestination = false }},
+		{"asynchronous into", func(c *ReusableResultLoopContract) { c.IntoExecutesSynchronously = false }},
+		{"state mismatch", func(c *ReusableResultLoopContract) { c.WrapperAndIntoHaveIdenticalStateEffects = false }},
+		{"error mismatch", func(c *ReusableResultLoopContract) { c.WrapperAndIntoHaveIdenticalErrorsAndPanics = false }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			candidate := valid
+			candidate.ShapeArgumentPositions = slices.Clone(valid.ShapeArgumentPositions)
+			test.mutate(&candidate)
+			if candidate.Valid() {
+				t.Errorf("mutated contract unexpectedly valid: %+v", candidate)
+			}
+		})
 	}
 }
 
@@ -668,6 +741,7 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"BoundedScratchFlowContracts":     len(c.BoundedScratchFlowContracts),
 		"ReceiverStagingContracts":        len(c.ReceiverStagingContracts),
 		"ReusableOneShotWrapperContracts": len(c.ReusableOneShotWrapperContracts),
+		"ReusableResultLoopContracts":     len(c.ReusableResultLoopContracts),
 	}
 	for name, n := range fields {
 		if n == 0 {
@@ -685,5 +759,8 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 	}
 	if len(c.ReusableOneShotWrapperContracts) != 1 || !c.ReusableOneShotWrapperContracts[0].Valid() {
 		t.Errorf("example config has invalid reusable one-shot wrapper contract: %+v", c.ReusableOneShotWrapperContracts)
+	}
+	if len(c.ReusableResultLoopContracts) != 1 || !c.ReusableResultLoopContracts[0].Valid() {
+		t.Errorf("example config has invalid reusable-result loop contract: %+v", c.ReusableResultLoopContracts)
 	}
 }
