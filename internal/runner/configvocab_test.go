@@ -227,6 +227,22 @@ func TestMissingVocabTinySynchronousAcceleratorScreenContracts(t *testing.T) {
 	}
 }
 
+func TestMissingVocabResidentWeightBenchmarkContracts(t *testing.T) {
+	t.Parallel()
+	check := &lint.Check{NeedsConfig: true, Vocab: []string{"residentWeightBenchmarkContracts"}}
+	if got := missingVocab(check, &config.Config{}); len(got) != 1 {
+		t.Fatalf("empty vocabulary reported %v", got)
+	}
+	invalid := config.Config{ResidentWeightBenchmarkContracts: []config.ResidentWeightBenchmarkContract{{AcceleratorCallable: "Launch", WeightArgument: 2}}}
+	if got := missingVocab(check, &invalid); len(got) != 1 {
+		t.Fatalf("invalid vocabulary reported %v", got)
+	}
+	valid := config.Config{ResidentWeightBenchmarkContracts: []config.ResidentWeightBenchmarkContract{{AcceleratorCallable: "example.com/backend.Device.Launch", WeightArgument: 2}}}
+	if got := missingVocab(check, &valid); len(got) != 0 {
+		t.Fatalf("valid vocabulary reported %v", got)
+	}
+}
+
 func TestMissingVocabForwardLossBackwardGraphContracts(t *testing.T) {
 	t.Parallel()
 	check := &lint.Check{NeedsConfig: true, Vocab: []string{"forwardLossBackwardGraphContracts"}}

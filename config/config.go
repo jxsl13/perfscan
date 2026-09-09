@@ -256,6 +256,12 @@ type Config struct {
 	// they are not runtime shape, placement, transfer, or profitability proof.
 	TinySynchronousAcceleratorScreenContracts []TinySynchronousAcceleratorScreenContract `json:"tinySynchronousAcceleratorScreenContracts,omitempty" yaml:"tinySynchronousAcceleratorScreenContracts"`
 
+	// ResidentWeightBenchmarkContracts identify an exact typed accelerator
+	// launch and its weight operand for PS6119. Argument positions are one-based;
+	// WeightReceiver selects the method receiver instead. Names and spelling do
+	// not imply accelerator or residency semantics.
+	ResidentWeightBenchmarkContracts []ResidentWeightBenchmarkContract `json:"residentWeightBenchmarkContracts,omitempty" yaml:"residentWeightBenchmarkContracts"`
+
 	// ForwardLossBackwardGraphContracts bind one exact private-recorder objective
 	// from forward through scalar loss, backward, and parameter-ordered gradient
 	// extraction for PS6116. Source structure proves the chain; the deliberately
@@ -1017,6 +1023,20 @@ func (c *CrossStepAcceleratorResidencyContract) Valid() bool {
 		c.ErrorAndPanicParity && c.MutationParity && c.OwnershipParity && c.AutogradParity &&
 		c.BackendSelectionParity && c.ExplicitSyncRequired && c.ExplicitCheckpointRequired &&
 		c.PairedEndToEndValidationRequired
+}
+
+// ResidentWeightBenchmarkContract identifies the typed launch boundary and
+// weight operand inspected by PS6119. Exactly one operand form is required.
+type ResidentWeightBenchmarkContract struct {
+	AcceleratorCallable string `json:"acceleratorCallable" yaml:"acceleratorCallable"`
+	WeightArgument      int    `json:"weightArgument,omitempty" yaml:"weightArgument,omitempty"`
+	WeightReceiver      bool   `json:"weightReceiver,omitempty" yaml:"weightReceiver,omitempty"`
+}
+
+// Valid reports whether the launch identity and weight operand are complete.
+func (c ResidentWeightBenchmarkContract) Valid() bool {
+	return ps6109CallableIDValid(c.AcceleratorCallable) &&
+		(c.WeightArgument > 0 && !c.WeightReceiver || c.WeightArgument == 0 && c.WeightReceiver)
 }
 
 // TinySynchronousAcceleratorScreenCall identifies one direct accelerator
@@ -2118,6 +2138,7 @@ type Sets struct {
 	RowLocalSparseGatherContracts     []RowLocalSparseGatherContract
 
 	TinySynchronousAcceleratorScreenContracts []TinySynchronousAcceleratorScreenContract
+	ResidentWeightBenchmarkContracts          []ResidentWeightBenchmarkContract
 	ForwardLossBackwardGraphContracts         []ForwardLossBackwardGraphContract
 	FragmentedAcceleratorObjectiveContracts   []FragmentedAcceleratorObjectiveContract
 	CrossStepAcceleratorResidencyContracts    []CrossStepAcceleratorResidencyContract
@@ -2177,6 +2198,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		RowLocalSparseGatherContracts:     slices.Clone(c.RowLocalSparseGatherContracts),
 
 		TinySynchronousAcceleratorScreenContracts: cloneTinySynchronousAcceleratorScreenContracts(c.TinySynchronousAcceleratorScreenContracts),
+		ResidentWeightBenchmarkContracts:          slices.Clone(c.ResidentWeightBenchmarkContracts),
 		ForwardLossBackwardGraphContracts:         slices.Clone(c.ForwardLossBackwardGraphContracts),
 		FragmentedAcceleratorObjectiveContracts:   cloneFragmentedAcceleratorObjectiveContracts(c.FragmentedAcceleratorObjectiveContracts),
 		CrossStepAcceleratorResidencyContracts:    slices.Clone(c.CrossStepAcceleratorResidencyContracts),
