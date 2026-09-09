@@ -112,6 +112,13 @@ Rules without a pair, and why:
   and gradient parity, floating-point/error/panic/mutation/alias/ownership and
   recorder/autograd/backend-selection behavior, then use paired end-to-end
   application measurements on the configured target.
+- **PS6119** (single-resident-weight benchmark advisory): this check audits
+  whether accelerator evidence repeats one configured weight handle. A toy
+  Before/After pair cannot reproduce device cache capacity, resident working
+  sets, command encoding, or the parent graph. Keep the cache-hot cell, then
+  measure rotating parent-shaped weights with GPU/encoder/wall decomposition,
+  working-set versus cache bytes, a whole-workload gate, and an equal
+  host/device-boundary gate.
 - **PS6117** (fragmented accelerator-objective advisory): a portable toy cannot
   reproduce a backend's eager command lifecycle, reusable graph compilation,
   device placement, or dense parameter-gradient materialization. GoAI's pinned

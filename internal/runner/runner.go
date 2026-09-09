@@ -371,6 +371,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"rowLocalSparseGatherContracts":     validRowLocalSparseGatherContracts(cfg.RowLocalSparseGatherContracts),
 
 		"tinySynchronousAcceleratorScreenContracts": validTinySynchronousAcceleratorScreenContracts(cfg.TinySynchronousAcceleratorScreenContracts),
+		"residentWeightBenchmarkContracts":          validResidentWeightBenchmarkContracts(cfg.ResidentWeightBenchmarkContracts),
 		"forwardLossBackwardGraphContracts":         validForwardLossBackwardGraphContracts(cfg.ForwardLossBackwardGraphContracts),
 		"fragmentedAcceleratorObjectiveContracts":   validFragmentedAcceleratorObjectiveContracts(cfg.FragmentedAcceleratorObjectiveContracts),
 		"crossStepAcceleratorResidencyContracts":    validCrossStepAcceleratorResidencyContracts(cfg.CrossStepAcceleratorResidencyContracts),
@@ -384,6 +385,22 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		}
 	}
 	return missing
+}
+
+func validResidentWeightBenchmarkContracts(contracts []config.ResidentWeightBenchmarkContract) int {
+	counts := make(map[string]int)
+	for _, contract := range contracts {
+		if contract.Valid() {
+			counts[contract.AcceleratorCallable]++
+		}
+	}
+	valid := 0
+	for _, contract := range contracts {
+		if contract.Valid() && counts[contract.AcceleratorCallable] == 1 {
+			valid++
+		}
+	}
+	return valid
 }
 
 func validStateExpandedLookupContracts(contracts []config.StateExpandedLookupContract) int {

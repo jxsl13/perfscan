@@ -1151,6 +1151,16 @@ func TestSetForTesting(t *testing.T) {
 	}
 }
 
+func TestResidentWeightBenchmarkContractsCompileClone(t *testing.T) {
+	t.Parallel()
+	configuration := Config{ResidentWeightBenchmarkContracts: []ResidentWeightBenchmarkContract{{AcceleratorCallable: "example.com/backend.Device.Launch", WeightArgument: 2}}}
+	compiled := configuration.Compile()
+	configuration.ResidentWeightBenchmarkContracts[0].WeightArgument = 3
+	if got := compiled.ResidentWeightBenchmarkContracts[0].WeightArgument; got != 2 {
+		t.Fatalf("Compile did not clone resident-weight contracts: got %d", got)
+	}
+}
+
 func TestUnknownKeys(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "perfscan.yaml")
