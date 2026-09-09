@@ -275,6 +275,355 @@ type Config struct {
 	// prove device placement, dense-result ownership, optimizer semantics, or a
 	// safe resident-session lifecycle, so every such fact remains explicit.
 	CrossStepAcceleratorResidencyContracts []CrossStepAcceleratorResidencyContract `json:"crossStepAcceleratorResidencyContracts,omitempty" yaml:"crossStepAcceleratorResidencyContracts"`
+
+	// SharedFanOutContracts bind PS6081 to an exact owner, two producer roles,
+	// their fan-out routes, and the only accepted consumer flow.
+	SharedFanOutContracts []SharedFanOutContract `json:"sharedFanOutContracts,omitempty" yaml:"sharedFanOutContracts"`
+}
+
+// SharedFanOutCallableKind disambiguates dotted function and method IDs.
+type SharedFanOutCallableKind string
+
+const (
+	SharedFanOutFunction SharedFanOutCallableKind = "function"
+	SharedFanOutMethod   SharedFanOutCallableKind = "method"
+)
+
+// SharedFanOutResultMode describes the exact result/control-flow shape of a
+// configured consumer.
+type SharedFanOutResultMode string
+
+const (
+	SharedFanOutDataError       SharedFanOutResultMode = "data-error"
+	SharedFanOutCollectionError SharedFanOutResultMode = "collection-error"
+	SharedFanOutBoolCondition   SharedFanOutResultMode = "bool-condition"
+	SharedFanOutDirectReturn    SharedFanOutResultMode = "direct-return"
+)
+
+// SharedFanOutCallable is an exact typed callable used only by owner
+// eligibility guards. These calls may not consume participating values.
+type SharedFanOutCallable struct {
+	Callable string                   `json:"callable" yaml:"callable"`
+	Kind     SharedFanOutCallableKind `json:"kind" yaml:"kind"`
+}
+
+// SharedFanOutRouteStep is one exact call on a producer-to-fan-out route.
+// Positions are one-based and exclude method receivers. WorkArgument maps the
+// per-row work term; CallbackArgument is reserved for the terminal helper.
+type SharedFanOutRouteStep struct {
+	Callable         string                   `json:"callable" yaml:"callable"`
+	Kind             SharedFanOutCallableKind `json:"kind" yaml:"kind"`
+	DomainArguments  []int                    `json:"domainArguments" yaml:"domainArguments"`
+	WorkArgument     int                      `json:"workArgument" yaml:"workArgument"`
+	CallbackArgument int                      `json:"callbackArgument,omitempty" yaml:"callbackArgument,omitempty"`
+}
+
+// SharedFanOutProducer binds one sibling producer role. ReceiverPath is an
+// exact path from the owner receiver. Exactly one weight role is required.
+type SharedFanOutProducer struct {
+	Callable               string                   `json:"callable" yaml:"callable"`
+	Kind                   SharedFanOutCallableKind `json:"kind" yaml:"kind"`
+	ReceiverPath           string                   `json:"receiverPath,omitempty" yaml:"receiverPath,omitempty"`
+	InputArgument          int                      `json:"inputArgument" yaml:"inputArgument"`
+	WeightArgument         int                      `json:"weightArgument,omitempty" yaml:"weightArgument,omitempty"`
+	WeightReceiverField    string                   `json:"weightReceiverField,omitempty" yaml:"weightReceiverField,omitempty"`
+	MetadataArguments      []int                    `json:"metadataArguments,omitempty" yaml:"metadataArguments,omitempty"`
+	MetadataReceiverFields []string                 `json:"metadataReceiverFields,omitempty" yaml:"metadataReceiverFields,omitempty"`
+	DomainArguments        []int                    `json:"domainArguments,omitempty" yaml:"domainArguments,omitempty"`
+	DomainReceiverFields   []string                 `json:"domainReceiverFields,omitempty" yaml:"domainReceiverFields,omitempty"`
+	WorkArgument           int                      `json:"workArgument,omitempty" yaml:"workArgument,omitempty"`
+	WorkReceiverField      string                   `json:"workReceiverField,omitempty" yaml:"workReceiverField,omitempty"`
+	DataResult             int                      `json:"dataResult" yaml:"dataResult"`
+	ErrorResult            int                      `json:"errorResult" yaml:"errorResult"`
+	Route                  []SharedFanOutRouteStep  `json:"route" yaml:"route"`
+}
+
+// SharedFanOutConsumer binds an exact transform, composite, final, or optional
+// alternate consumer, including operand and operation-constant roles.
+type SharedFanOutConsumer struct {
+	Callable                string                   `json:"callable" yaml:"callable"`
+	Kind                    SharedFanOutCallableKind `json:"kind" yaml:"kind"`
+	ResultMode              SharedFanOutResultMode   `json:"resultMode" yaml:"resultMode"`
+	ReceiverPath            string                   `json:"receiverPath,omitempty" yaml:"receiverPath,omitempty"`
+	OperandArguments        []int                    `json:"operandArguments,omitempty" yaml:"operandArguments,omitempty"`
+	CollectionArgument      int                      `json:"collectionArgument,omitempty" yaml:"collectionArgument,omitempty"`
+	CollectionIndexes       []int                    `json:"collectionIndexes,omitempty" yaml:"collectionIndexes,omitempty"`
+	ResultCollectionIndexes []int                    `json:"resultCollectionIndexes,omitempty" yaml:"resultCollectionIndexes,omitempty"`
+	OperationArgument       int                      `json:"operationArgument,omitempty" yaml:"operationArgument,omitempty"`
+	OperationConstant       string                   `json:"operationConstant,omitempty" yaml:"operationConstant,omitempty"`
+	OperationConstantValue  string                   `json:"operationConstantValue,omitempty" yaml:"operationConstantValue,omitempty"`
+	DataResult              int                      `json:"dataResult,omitempty" yaml:"dataResult,omitempty"`
+	ErrorResult             int                      `json:"errorResult,omitempty" yaml:"errorResult,omitempty"`
+}
+
+// SharedFanOutContract is the fail-closed PS6081 contract. The project-owned
+// booleans expose facts that local Go syntax cannot establish.
+type SharedFanOutContract struct {
+	Name                     string                   `json:"name" yaml:"name"`
+	OwnerSite                string                   `json:"ownerSite" yaml:"ownerSite"`
+	OwnerKind                SharedFanOutCallableKind `json:"ownerKind" yaml:"ownerKind"`
+	Producers                []SharedFanOutProducer   `json:"producers" yaml:"producers"`
+	FanOutHelper             string                   `json:"fanOutHelper" yaml:"fanOutHelper"`
+	FanOutHelperKind         SharedFanOutCallableKind `json:"fanOutHelperKind" yaml:"fanOutHelperKind"`
+	FanOutDomainArguments    []int                    `json:"fanOutDomainArguments" yaml:"fanOutDomainArguments"`
+	FanOutWorkArgument       int                      `json:"fanOutWorkArgument" yaml:"fanOutWorkArgument"`
+	FanOutCallbackArgument   int                      `json:"fanOutCallbackArgument" yaml:"fanOutCallbackArgument"`
+	TransformConsumers       []SharedFanOutConsumer   `json:"transformConsumers" yaml:"transformConsumers"`
+	CompositeConsumer        SharedFanOutConsumer     `json:"compositeConsumer" yaml:"compositeConsumer"`
+	FinalConsumer            SharedFanOutConsumer     `json:"finalConsumer" yaml:"finalConsumer"`
+	AlternateConsumers       []SharedFanOutConsumer   `json:"alternateConsumers,omitempty" yaml:"alternateConsumers,omitempty"`
+	AllowedEligibilityGuards []SharedFanOutCallable   `json:"allowedEligibilityGuards,omitempty" yaml:"allowedEligibilityGuards,omitempty"`
+
+	InputsImmutable               bool `json:"inputsImmutable" yaml:"inputsImmutable"`
+	WeightsImmutable              bool `json:"weightsImmutable" yaml:"weightsImmutable"`
+	ProducersSideEffectFree       bool `json:"producersSideEffectFree" yaml:"producersSideEffectFree"`
+	FreshOwnedNonescapingOutputs  bool `json:"freshOwnedNonescapingOutputs" yaml:"freshOwnedNonescapingOutputs"`
+	DisjointWrites                bool `json:"disjointWrites" yaml:"disjointWrites"`
+	SynchronousCompletion         bool `json:"synchronousCompletion" yaml:"synchronousCompletion"`
+	CompositeMeaningPreserved     bool `json:"compositeMeaningPreserved" yaml:"compositeMeaningPreserved"`
+	ErrorParity                   bool `json:"errorParity" yaml:"errorParity"`
+	PanicParity                   bool `json:"panicParity" yaml:"panicParity"`
+	BackendSelectionParity        bool `json:"backendSelectionParity" yaml:"backendSelectionParity"`
+	FallbackParity                bool `json:"fallbackParity" yaml:"fallbackParity"`
+	ExactShapeCompatibility       bool `json:"exactShapeCompatibility" yaml:"exactShapeCompatibility"`
+	ExactDTypeCompatibility       bool `json:"exactDtypeCompatibility" yaml:"exactDtypeCompatibility"`
+	ExactBackendCompatibility     bool `json:"exactBackendCompatibility" yaml:"exactBackendCompatibility"`
+	ExactFanOutDomainMapping      bool `json:"exactFanOutDomainMapping" yaml:"exactFanOutDomainMapping"`
+	ExactOutputValidationRequired bool `json:"exactOutputValidationRequired" yaml:"exactOutputValidationRequired"`
+	OddTailValidationRequired     bool `json:"oddTailValidationRequired" yaml:"oddTailValidationRequired"`
+	PairedBenchmarkRequired       bool `json:"pairedBenchmarkRequired" yaml:"pairedBenchmarkRequired"`
+}
+
+// Valid reports whether the contract is complete and internally unambiguous.
+func (c *SharedFanOutContract) Valid() bool {
+	if c == nil || c.Name == "" || strings.TrimSpace(c.Name) != c.Name || c.OwnerKind != SharedFanOutMethod ||
+		!psSharedCallableValid(c.OwnerSite, c.OwnerKind) || !psSharedCallableValid(c.FanOutHelper, c.FanOutHelperKind) ||
+		len(c.Producers) != 2 || len(c.TransformConsumers) == 0 || len(c.AlternateConsumers) == 0 ||
+		c.FanOutWorkArgument <= 0 || c.FanOutCallbackArgument <= 0 ||
+		c.FanOutCallbackArgument == c.FanOutWorkArgument || slices.Contains(c.FanOutDomainArguments, c.FanOutCallbackArgument) ||
+		!psSharedPositiveUnique(c.FanOutDomainArguments) ||
+		!c.InputsImmutable || !c.WeightsImmutable || !c.ProducersSideEffectFree ||
+		!c.FreshOwnedNonescapingOutputs || !c.DisjointWrites || !c.SynchronousCompletion ||
+		!c.CompositeMeaningPreserved || !c.ErrorParity || !c.PanicParity ||
+		!c.BackendSelectionParity || !c.FallbackParity || !c.ExactShapeCompatibility ||
+		!c.ExactDTypeCompatibility || !c.ExactBackendCompatibility || !c.ExactFanOutDomainMapping ||
+		!c.ExactOutputValidationRequired || !c.OddTailValidationRequired || !c.PairedBenchmarkRequired {
+		return false
+	}
+	seen := make(map[string]bool, 2)
+	for index := range c.Producers {
+		producer := &c.Producers[index]
+		claim := producer.Callable + "\x00" + string(producer.Kind) + "\x00" + producer.ReceiverPath
+		functionRoles := producer.Kind == SharedFanOutFunction && producer.ReceiverPath == "" && producer.WeightArgument > 0 && producer.WeightReceiverField == "" &&
+			len(producer.MetadataReceiverFields) == 0 && len(producer.DomainReceiverFields) == 0 && producer.WorkArgument > 0 && producer.WorkReceiverField == ""
+		methodRoles := producer.Kind == SharedFanOutMethod && producer.WeightArgument == 0 && producer.WeightReceiverField != "" && producer.WorkArgument == 0 && producer.WorkReceiverField != ""
+		positionConflict := producer.InputArgument == producer.WeightArgument || producer.InputArgument == producer.WorkArgument ||
+			producer.WeightArgument > 0 && producer.WeightArgument == producer.WorkArgument ||
+			slices.Contains(producer.DomainArguments, producer.InputArgument) || slices.Contains(producer.DomainArguments, producer.WeightArgument)
+		receiverTypeConflict := producer.Kind == SharedFanOutMethod &&
+			(producer.WeightReceiverField == producer.WorkReceiverField || slices.Contains(producer.DomainReceiverFields, producer.WeightReceiverField))
+		if !psSharedCallableValid(producer.Callable, producer.Kind) || seen[claim] || producer.InputArgument <= 0 || (!functionRoles && !methodRoles) || positionConflict || receiverTypeConflict ||
+			(producer.WeightArgument > 0) == (producer.WeightReceiverField != "") ||
+			(producer.WorkArgument > 0) == (producer.WorkReceiverField != "") ||
+			producer.DataResult <= 0 || producer.ErrorResult <= 0 || producer.DataResult == producer.ErrorResult ||
+			!psSharedPathValid(producer.ReceiverPath, true) || !psSharedPathValid(producer.WeightReceiverField, true) ||
+			!psSharedPositionsValid(producer.MetadataArguments) || !psSharedPathsValid(producer.MetadataReceiverFields) ||
+			len(producer.DomainArguments)+len(producer.DomainReceiverFields) == 0 ||
+			!psSharedPositionsValid(producer.DomainArguments) || !psSharedPathsValid(producer.DomainReceiverFields) ||
+			!psSharedPathValid(producer.WorkReceiverField, true) ||
+			len(producer.Route) == 0 {
+			return false
+		}
+		seen[claim] = true
+		for routeIndex := range producer.Route {
+			step := &producer.Route[routeIndex]
+			last := routeIndex == len(producer.Route)-1
+			if !psSharedCallableValid(step.Callable, step.Kind) || !psSharedPositiveUnique(step.DomainArguments) || step.WorkArgument <= 0 ||
+				(last != (step.Callable == c.FanOutHelper && step.Kind == c.FanOutHelperKind)) ||
+				(last && (step.WorkArgument != c.FanOutWorkArgument || step.CallbackArgument != c.FanOutCallbackArgument || !slices.Equal(step.DomainArguments, c.FanOutDomainArguments))) ||
+				(!last && step.CallbackArgument != 0) {
+				return false
+			}
+		}
+	}
+	if len(c.Producers[0].MetadataArguments) != len(c.Producers[1].MetadataArguments) ||
+		len(c.Producers[0].DomainArguments) != len(c.Producers[1].DomainArguments) ||
+		c.Producers[0].WeightReceiverField != c.Producers[1].WeightReceiverField ||
+		c.Producers[0].WorkReceiverField != c.Producers[1].WorkReceiverField ||
+		!slices.Equal(c.Producers[0].MetadataReceiverFields, c.Producers[1].MetadataReceiverFields) ||
+		!slices.Equal(c.Producers[0].DomainReceiverFields, c.Producers[1].DomainReceiverFields) {
+		return false
+	}
+	seenTransforms := make(map[string]bool, len(c.TransformConsumers))
+	for index := range c.TransformConsumers {
+		consumer := &c.TransformConsumers[index]
+		direct := len(consumer.OperandArguments) == 1 && consumer.CollectionArgument == 0
+		collection := len(consumer.OperandArguments) == 0 && len(consumer.CollectionIndexes) == 1
+		key := consumer.Callable + "\x00" + string(consumer.Kind)
+		modeSupported := consumer.ResultMode == SharedFanOutDataError || consumer.ResultMode == SharedFanOutCollectionError
+		if !consumer.valid() || !modeSupported || (!direct && !collection) || seenTransforms[key] {
+			return false
+		}
+		seenTransforms[key] = true
+	}
+	compositeDirect := len(c.CompositeConsumer.OperandArguments) == 2 && c.CompositeConsumer.CollectionArgument == 0
+	compositeCollection := len(c.CompositeConsumer.OperandArguments) == 0 && len(c.CompositeConsumer.CollectionIndexes) == 2
+	finalDirect := len(c.FinalConsumer.OperandArguments) == 1 && c.FinalConsumer.CollectionArgument == 0
+	finalCollection := len(c.FinalConsumer.OperandArguments) == 0 && len(c.FinalConsumer.CollectionIndexes) == 1
+	compositeModeSupported := c.CompositeConsumer.ResultMode == SharedFanOutDataError || c.CompositeConsumer.ResultMode == SharedFanOutCollectionError
+	if !c.CompositeConsumer.valid() || !compositeModeSupported || (!compositeDirect && !compositeCollection) ||
+		!c.FinalConsumer.valid() || c.FinalConsumer.ResultMode != SharedFanOutDirectReturn ||
+		(!finalDirect && !finalCollection) {
+		return false
+	}
+	seenAlternates := make(map[string]bool, len(c.AlternateConsumers))
+	for index := range c.AlternateConsumers {
+		consumer := &c.AlternateConsumers[index]
+		direct := len(consumer.OperandArguments) == 2 && consumer.CollectionArgument == 0
+		collection := len(consumer.OperandArguments) == 0 && len(consumer.CollectionIndexes) == 2
+		key := consumer.Callable + "\x00" + string(consumer.Kind) + "\x00" + consumer.ReceiverPath
+		if !consumer.valid() || consumer.ResultMode != SharedFanOutBoolCondition || (!direct && !collection) || seenAlternates[key] {
+			return false
+		}
+		seenAlternates[key] = true
+	}
+	compositeKey := c.CompositeConsumer.Callable + "\x00" + string(c.CompositeConsumer.Kind) + "\x00" + c.CompositeConsumer.ReceiverPath
+	finalKey := c.FinalConsumer.Callable + "\x00" + string(c.FinalConsumer.Kind) + "\x00" + c.FinalConsumer.ReceiverPath
+	if seen[compositeKey] || seen[finalKey] || compositeKey == finalKey {
+		return false
+	}
+	for index := range c.AlternateConsumers {
+		alternate := &c.AlternateConsumers[index]
+		alternateKey := alternate.Callable + "\x00" + string(alternate.Kind) + "\x00" + alternate.ReceiverPath
+		if seen[alternateKey] || alternateKey == compositeKey || alternateKey == finalKey {
+			return false
+		}
+	}
+	hasRepresentableTransform := false
+	for index := range c.TransformConsumers {
+		transform := &c.TransformConsumers[index]
+		transformKey := transform.Callable + "\x00" + string(transform.Kind) + "\x00" + transform.ReceiverPath
+		if !seen[transformKey] && transformKey != finalKey && !seenAlternates[transformKey] {
+			hasRepresentableTransform = true
+			break
+		}
+	}
+	if !hasRepresentableTransform {
+		return false
+	}
+	seenGuards := make(map[string]bool, len(c.AllowedEligibilityGuards))
+	for _, guard := range c.AllowedEligibilityGuards {
+		key := guard.Callable + "\x00" + string(guard.Kind)
+		if !psSharedCallableValid(guard.Callable, guard.Kind) || seenGuards[key] {
+			return false
+		}
+		seenGuards[key] = true
+	}
+	return true
+}
+
+// UsableSharedFanOutContractCount counts only complete contracts whose names
+// and owner/producer semantic claims are unique. The runner uses this same
+// fail-closed definition when deciding whether PS6081 has vocabulary.
+func UsableSharedFanOutContractCount(contracts []SharedFanOutContract) int {
+	names := make(map[string]int)
+	claims := make(map[string]int)
+	for index := range contracts {
+		contract := &contracts[index]
+		if contract.Valid() {
+			names[contract.Name]++
+			claims[psSharedFanOutClaim(contract)]++
+		}
+	}
+	usable := 0
+	for index := range contracts {
+		contract := &contracts[index]
+		if contract.Valid() && names[contract.Name] == 1 && claims[psSharedFanOutClaim(contract)] == 1 {
+			usable++
+		}
+	}
+	return usable
+}
+
+func psSharedFanOutClaim(contract *SharedFanOutContract) string {
+	return contract.OwnerSite + "\x00" + string(contract.OwnerKind) + "\x00" +
+		contract.Producers[0].Callable + "\x00" + string(contract.Producers[0].Kind) + "\x00" + contract.Producers[0].ReceiverPath + "\x00" +
+		contract.Producers[1].Callable + "\x00" + string(contract.Producers[1].Kind) + "\x00" + contract.Producers[1].ReceiverPath
+}
+
+func (c *SharedFanOutConsumer) valid() bool {
+	constantAbsent := c.OperationArgument == 0 && c.OperationConstant == "" && c.OperationConstantValue == ""
+	constantPresent := c.OperationArgument > 0 && psTopKFunctionIDValid(c.OperationConstant) &&
+		c.OperationConstantValue != "" && strings.TrimSpace(c.OperationConstantValue) == c.OperationConstantValue
+	collectionAbsent := c.CollectionArgument == 0 && len(c.CollectionIndexes) == 0
+	collectionPresent := c.CollectionArgument > 0 && psSharedPositiveUnique(c.CollectionIndexes)
+	operandsValid := len(c.OperandArguments) > 0 && collectionAbsent || len(c.OperandArguments) == 0 && collectionPresent
+	callableRoleValid := c.Kind != SharedFanOutFunction || c.ReceiverPath == ""
+	operationRoleValid := c.OperationArgument == 0 || c.OperationArgument != c.CollectionArgument && !slices.Contains(c.OperandArguments, c.OperationArgument)
+	resultsValid := false
+	switch c.ResultMode {
+	case SharedFanOutDataError:
+		resultsValid = c.DataResult > 0 && c.ErrorResult > 0 && c.DataResult != c.ErrorResult && len(c.ResultCollectionIndexes) == 0
+	case SharedFanOutCollectionError:
+		resultsValid = c.DataResult > 0 && c.ErrorResult > 0 && c.DataResult != c.ErrorResult && psSharedPositiveUnique(c.ResultCollectionIndexes)
+	case SharedFanOutBoolCondition, SharedFanOutDirectReturn:
+		resultsValid = c.DataResult == 0 && c.ErrorResult == 0 && len(c.ResultCollectionIndexes) == 0
+	}
+	return psSharedCallableValid(c.Callable, c.Kind) && callableRoleValid && operationRoleValid && psSharedPathValid(c.ReceiverPath, true) &&
+		psSharedPositionsValid(c.OperandArguments) && (constantAbsent || constantPresent) &&
+		operandsValid && resultsValid
+}
+
+func psSharedCallableValid(id string, kind SharedFanOutCallableKind) bool {
+	switch kind {
+	case SharedFanOutFunction:
+		return psTopKFunctionIDValid(id)
+	case SharedFanOutMethod:
+		return psTopKMethodIDValid(id)
+	default:
+		return false
+	}
+}
+
+func psSharedPositionsValid(values []int) bool {
+	return len(values) == 0 || psSharedPositiveUnique(values)
+}
+
+func psSharedPositiveUnique(values []int) bool {
+	if len(values) == 0 {
+		return false
+	}
+	ordered := slices.Clone(values)
+	slices.Sort(ordered)
+	for index, value := range ordered {
+		if value <= 0 || index > 0 && value == ordered[index-1] {
+			return false
+		}
+	}
+	return true
+}
+
+func psSharedPathValid(path string, optional bool) bool {
+	if path == "" {
+		return optional
+	}
+	for part := range strings.SplitSeq(path, ".") {
+		if !psTopKIdentifierValid(part) {
+			return false
+		}
+	}
+	return true
+}
+
+func psSharedPathsValid(paths []string) bool {
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		if !psSharedPathValid(path, false) || seen[path] {
+			return false
+		}
+		seen[path] = true
+	}
+	return true
 }
 
 // ForwardLossBackwardGraphContract describes one complete eager objective and
@@ -1682,6 +2031,7 @@ type Sets struct {
 	ForwardLossBackwardGraphContracts         []ForwardLossBackwardGraphContract
 	FragmentedAcceleratorObjectiveContracts   []FragmentedAcceleratorObjectiveContract
 	CrossStepAcceleratorResidencyContracts    []CrossStepAcceleratorResidencyContract
+	SharedFanOutContracts                     []SharedFanOutContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -1739,7 +2089,47 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		ForwardLossBackwardGraphContracts:         slices.Clone(c.ForwardLossBackwardGraphContracts),
 		FragmentedAcceleratorObjectiveContracts:   cloneFragmentedAcceleratorObjectiveContracts(c.FragmentedAcceleratorObjectiveContracts),
 		CrossStepAcceleratorResidencyContracts:    slices.Clone(c.CrossStepAcceleratorResidencyContracts),
+		SharedFanOutContracts:                     cloneSharedFanOutContracts(c.SharedFanOutContracts),
 	}
+}
+
+func cloneSharedFanOutContracts(contracts []SharedFanOutContract) []SharedFanOutContract {
+	cloned := slices.Clone(contracts)
+	for index := range cloned {
+		cloned[index].Producers = slices.Clone(cloned[index].Producers)
+		for producer := range cloned[index].Producers {
+			item := &cloned[index].Producers[producer]
+			item.MetadataArguments = slices.Clone(item.MetadataArguments)
+			item.MetadataReceiverFields = slices.Clone(item.MetadataReceiverFields)
+			item.DomainArguments = slices.Clone(item.DomainArguments)
+			item.DomainReceiverFields = slices.Clone(item.DomainReceiverFields)
+			item.Route = slices.Clone(item.Route)
+			for route := range item.Route {
+				item.Route[route].DomainArguments = slices.Clone(item.Route[route].DomainArguments)
+			}
+		}
+		cloned[index].FanOutDomainArguments = slices.Clone(cloned[index].FanOutDomainArguments)
+		cloned[index].TransformConsumers = cloneSharedFanOutConsumers(cloned[index].TransformConsumers)
+		cloneSharedFanOutConsumer(&cloned[index].CompositeConsumer)
+		cloneSharedFanOutConsumer(&cloned[index].FinalConsumer)
+		cloned[index].AlternateConsumers = cloneSharedFanOutConsumers(cloned[index].AlternateConsumers)
+		cloned[index].AllowedEligibilityGuards = slices.Clone(cloned[index].AllowedEligibilityGuards)
+	}
+	return cloned
+}
+
+func cloneSharedFanOutConsumers(consumers []SharedFanOutConsumer) []SharedFanOutConsumer {
+	cloned := slices.Clone(consumers)
+	for index := range cloned {
+		cloneSharedFanOutConsumer(&cloned[index])
+	}
+	return cloned
+}
+
+func cloneSharedFanOutConsumer(consumer *SharedFanOutConsumer) {
+	consumer.OperandArguments = slices.Clone(consumer.OperandArguments)
+	consumer.CollectionIndexes = slices.Clone(consumer.CollectionIndexes)
+	consumer.ResultCollectionIndexes = slices.Clone(consumer.ResultCollectionIndexes)
 }
 
 func cloneFragmentedAcceleratorObjectiveContracts(contracts []FragmentedAcceleratorObjectiveContract) []FragmentedAcceleratorObjectiveContract {
