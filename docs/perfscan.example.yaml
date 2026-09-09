@@ -90,6 +90,94 @@ vectorizedSiblingFuncs:
 fanOutHelpers:
   - parallel.For
 
+# PS6081 is separately gated by a fail-closed owner contract. Exact typed IDs,
+# receiver/argument/result roles, route/domain mapping, consumer flow, and every
+# semantic promise are mandatory. Bare fanOutHelpers never activates PS6081.
+sharedFanOutContracts:
+  - name: quant-swiglu-forward
+    ownerSite: example.com/model.QuantSwiGLU.Forward
+    ownerKind: method
+    producers:
+      - callable: example.com/model.QuantLinear.Forward
+        kind: method
+        receiverPath: Gate
+        inputArgument: 2
+        weightReceiverField: Weight
+        metadataReceiverFields: [Backend]
+        domainReceiverFields: [Rows]
+        workReceiverField: Depth
+        dataResult: 1
+        errorResult: 2
+        route:
+          - {callable: example.com/gguf.QMatMul, kind: function, domainArguments: [4], workArgument: 5}
+          - {callable: example.com/gguf.qmatmulParallelChunks, kind: function, domainArguments: [1], workArgument: 2, callbackArgument: 3}
+      - callable: example.com/model.QuantLinear.Forward
+        kind: method
+        receiverPath: Up
+        inputArgument: 2
+        weightReceiverField: Weight
+        metadataReceiverFields: [Backend]
+        domainReceiverFields: [Rows]
+        workReceiverField: Depth
+        dataResult: 1
+        errorResult: 2
+        route:
+          - {callable: example.com/gguf.QMatMul, kind: function, domainArguments: [4], workArgument: 5}
+          - {callable: example.com/gguf.qmatmulParallelChunks, kind: function, domainArguments: [1], workArgument: 2, callbackArgument: 3}
+    fanOutHelper: example.com/gguf.qmatmulParallelChunks
+    fanOutHelperKind: function
+    fanOutDomainArguments: [1]
+    fanOutWorkArgument: 2
+    fanOutCallbackArgument: 3
+    transformConsumers:
+      - callable: example.com/backend.Execute
+        kind: function
+        resultMode: collection-error
+        collectionArgument: 3
+        collectionIndexes: [1]
+        resultCollectionIndexes: [1]
+        operationArgument: 2
+        operationConstant: example.com/backend.OpSiLU
+        operationConstantValue: "5"
+        dataResult: 1
+        errorResult: 2
+    compositeConsumer:
+      callable: example.com/backend.Execute
+      kind: function
+      resultMode: collection-error
+      collectionArgument: 3
+      collectionIndexes: [1, 2]
+      resultCollectionIndexes: [1]
+      operationArgument: 2
+      operationConstant: example.com/backend.OpMul
+      operationConstantValue: "7"
+      dataResult: 1
+      errorResult: 2
+    finalConsumer: {callable: example.com/model.QuantLinear.Forward, kind: method, resultMode: direct-return, receiverPath: Down, operandArguments: [2]}
+    alternateConsumers:
+      - {callable: example.com/model.SwiGLUFuser.FuseSwiGLUInPlace, kind: method, resultMode: bool-condition, operandArguments: [1, 2]}
+    allowedEligibilityGuards:
+      - {callable: example.com/backend.Default, kind: function}
+      - {callable: example.com/backend.Backend.Name, kind: method}
+    inputsImmutable: true
+    weightsImmutable: true
+    producersSideEffectFree: true
+    freshOwnedNonescapingOutputs: true
+    disjointWrites: true
+    synchronousCompletion: true
+    compositeMeaningPreserved: true
+    errorParity: true
+    panicParity: true
+    backendSelectionParity: true
+    fallbackParity: true
+    exactShapeCompatibility: true
+    exactDtypeCompatibility: true
+    exactBackendCompatibility: true
+    exactFanOutDomainMapping: true
+    exactOutputValidationRequired: true
+    oddTailValidationRequired: true
+    pairedBenchmarkRequired: true
+
 # Element-type discriminator methods whose switch PS1009 inspects for a case left
 # on the per-element accessor while a sibling case takes typed storage.
 # (n-dimensional data only; e.g. Dtype, Kind)
