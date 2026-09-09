@@ -941,4 +941,6 @@ crossStepAcceleratorResidencyContracts:
 #   residentWeightBenchmarkContracts:
 #     - {acceleratorCallable: example.com/backend.Recorder.Launch, weightArgument: 2}
 #     - {acceleratorCallable: example.com/backend.ResidentWeight.Dispatch, weightReceiver: true}
+#   residentCodebookContracts:
+#     - {name: iq2-s, configuredSite: example.com/backend.dispatchRows, producerCallable: example.com/backend.exactGrid, uploadCallable: example.com/backend.Device.Upload, dispatchCallable: example.com/backend.Device.Dispatch, uploadDataArgument: 1, dispatchBufferArgument: 1, wideElementBytes: 4, packedBitsPerSymbol: 2, symbolCount: 8192, distinctValueCount: 3, rowCount: 1024, symbolsPerPackedWord: 8, packedWordBits: 16, maxCodebookBytes: 2048, configuredEvidence: hash-pinned-target-campaign, nativeBoundaryEvidence: reviewed-shader-buffer-binding, producerReturnsFreshWideCodebook: true, producerExactAndInvariant: true, uploadCopiesSynchronously: true, uploadDoesNotRetainHostSlice: true, deviceBufferImmutableDuringDispatch: true, hostPackingMatchesNativeDecode: true, nativeDecodeExactAndCheap: true, pairedResidentAndHostBenchmarkRequired: true, numericalParityRequired: true, lifetimeAndSynchronizationValidationRequired: true}
 # ---------------------------------------------------------------------------

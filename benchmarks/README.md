@@ -145,3 +145,7 @@ Rules without a pair, and why:
   accelerator-cache operations. The owner replay is the exact receiver-owned
   AdamF32 shape: a three-result LossAndGrad call, returned-error guards, and a
   GradFn callback mapping each optimizer-owned parameter to its dense gradient.
+- **PS6120** (resident accelerator codebook advisory): a portable Go timing
+  cannot validate device residency, native symbol decode cost, or separation
+  of resident and host-transfer routes. Require paired target-hardware evidence
+  plus numerical and lifecycle validation.

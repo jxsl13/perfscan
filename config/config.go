@@ -282,6 +282,12 @@ type Config struct {
 	// safe resident-session lifecycle, so every such fact remains explicit.
 	CrossStepAcceleratorResidencyContracts []CrossStepAcceleratorResidencyContract `json:"crossStepAcceleratorResidencyContracts,omitempty" yaml:"crossStepAcceleratorResidencyContracts"`
 
+	// ResidentCodebookContracts bind an exact hot function to its codebook
+	// producer, device upload, and dispatch boundary for PS6120. The analyzer
+	// proves the repeated source chain and literal compactability where visible;
+	// records bridge only semantics hidden behind typed call boundaries.
+	ResidentCodebookContracts []ResidentCodebookContract `json:"residentCodebookContracts,omitempty" yaml:"residentCodebookContracts"`
+
 	// StateExpandedLookupContracts bind PS6085 to one exact profiled function
 	// and package-level lookup array. The explicit evidence, byte budget, and
 	// validation promises keep a cache-for-arithmetic trade out of generic
@@ -915,6 +921,76 @@ func (c *FragmentedAcceleratorObjectiveContract) Valid() bool {
 		c.PerOperationBackendRoutePreservationRequired && c.TrueCausalMaskSemanticsRequired &&
 		c.PairedApplicationBenchmarkRequired && c.NumericalValidationRequired &&
 		c.ShapeAwareEmbeddingGradientValidationRequired && c.RepeatedIndexGradientParityRequired && c.ScatterNDNotAssumedFaster
+}
+
+// ResidentCodebookContract describes external facts at an otherwise
+// source-visible producer -> upload -> dispatch chain. Argument positions are
+// one-based and exclude method receivers.
+type ResidentCodebookContract struct {
+	Name                                         string `json:"name" yaml:"name"`
+	ConfiguredSite                               string `json:"configuredSite" yaml:"configuredSite"`
+	ProducerCallable                             string `json:"producerCallable,omitempty" yaml:"producerCallable,omitempty"`
+	UploadCallable                               string `json:"uploadCallable" yaml:"uploadCallable"`
+	DispatchCallable                             string `json:"dispatchCallable" yaml:"dispatchCallable"`
+	UploadDataArgument                           int    `json:"uploadDataArgument" yaml:"uploadDataArgument"`
+	DispatchBufferArgument                       int    `json:"dispatchBufferArgument" yaml:"dispatchBufferArgument"`
+	WideElementBytes                             int64  `json:"wideElementBytes" yaml:"wideElementBytes"`
+	PackedBitsPerSymbol                          int64  `json:"packedBitsPerSymbol" yaml:"packedBitsPerSymbol"`
+	SymbolCount                                  int64  `json:"symbolCount" yaml:"symbolCount"`
+	DistinctValueCount                           int64  `json:"distinctValueCount" yaml:"distinctValueCount"`
+	RowCount                                     int64  `json:"rowCount" yaml:"rowCount"`
+	SymbolsPerPackedWord                         int64  `json:"symbolsPerPackedWord" yaml:"symbolsPerPackedWord"`
+	PackedWordBits                               int64  `json:"packedWordBits" yaml:"packedWordBits"`
+	MaxCodebookBytes                             int64  `json:"maxCodebookBytes" yaml:"maxCodebookBytes"`
+	ConfiguredEvidence                           string `json:"configuredEvidence" yaml:"configuredEvidence"`
+	NativeBoundaryEvidence                       string `json:"nativeBoundaryEvidence" yaml:"nativeBoundaryEvidence"`
+	ProducerReturnsFreshWideCodebook             bool   `json:"producerReturnsFreshWideCodebook,omitempty" yaml:"producerReturnsFreshWideCodebook,omitempty"`
+	ProducerExactAndInvariant                    bool   `json:"producerExactAndInvariant,omitempty" yaml:"producerExactAndInvariant,omitempty"`
+	UploadCopiesSynchronously                    bool   `json:"uploadCopiesSynchronously" yaml:"uploadCopiesSynchronously"`
+	UploadDoesNotRetainHostSlice                 bool   `json:"uploadDoesNotRetainHostSlice" yaml:"uploadDoesNotRetainHostSlice"`
+	DeviceBufferImmutableDuringDispatch          bool   `json:"deviceBufferImmutableDuringDispatch" yaml:"deviceBufferImmutableDuringDispatch"`
+	HostPackingMatchesNativeDecode               bool   `json:"hostPackingMatchesNativeDecode" yaml:"hostPackingMatchesNativeDecode"`
+	NativeDecodeExactAndCheap                    bool   `json:"nativeDecodeExactAndCheap" yaml:"nativeDecodeExactAndCheap"`
+	PairedResidentAndHostBenchmarkRequired       bool   `json:"pairedResidentAndHostBenchmarkRequired" yaml:"pairedResidentAndHostBenchmarkRequired"`
+	NumericalParityRequired                      bool   `json:"numericalParityRequired" yaml:"numericalParityRequired"`
+	LifetimeAndSynchronizationValidationRequired bool   `json:"lifetimeAndSynchronizationValidationRequired" yaml:"lifetimeAndSynchronizationValidationRequired"`
+}
+
+func (c *ResidentCodebookContract) Valid() bool {
+	producer := c.ProducerCallable == "" || ps6109CallableIDValid(c.ProducerCallable)
+	return producer && c.Name != "" && strings.TrimSpace(c.Name) == c.Name &&
+		ps6109CallableIDValid(c.ConfiguredSite) && ps6109CallableIDValid(c.UploadCallable) &&
+		ps6109CallableIDValid(c.DispatchCallable) && c.UploadCallable != c.DispatchCallable &&
+		c.UploadDataArgument > 0 && c.DispatchBufferArgument > 0 && (c.WideElementBytes == 4 || c.WideElementBytes == 8) &&
+		c.PackedBitsPerSymbol > 0 && c.PackedBitsPerSymbol <= 16 && c.PackedBitsPerSymbol < 8*c.WideElementBytes &&
+		c.SymbolCount >= 2 && c.DistinctValueCount >= 2 && c.DistinctValueCount <= int64(1)<<c.PackedBitsPerSymbol &&
+		c.RowCount >= 1 && c.SymbolsPerPackedWord >= 1 && c.PackedWordBits >= 8 && c.PackedWordBits%8 == 0 &&
+		c.SymbolCount%c.SymbolsPerPackedWord == 0 && c.RowCount == c.SymbolCount/c.SymbolsPerPackedWord && c.SymbolsPerPackedWord <= c.PackedWordBits/c.PackedBitsPerSymbol &&
+		c.RowCount <= c.MaxCodebookBytes*8/c.PackedWordBits &&
+		c.MaxCodebookBytes > 0 && c.MaxCodebookBytes <= 64<<10 && c.ConfiguredEvidence != "" &&
+		strings.TrimSpace(c.ConfiguredEvidence) == c.ConfiguredEvidence && c.NativeBoundaryEvidence != "" && strings.TrimSpace(c.NativeBoundaryEvidence) == c.NativeBoundaryEvidence &&
+		(c.ProducerCallable == "" || (c.ProducerReturnsFreshWideCodebook && c.ProducerExactAndInvariant)) &&
+		c.UploadCopiesSynchronously && c.UploadDoesNotRetainHostSlice &&
+		c.DeviceBufferImmutableDuringDispatch && c.HostPackingMatchesNativeDecode && c.NativeDecodeExactAndCheap && c.PairedResidentAndHostBenchmarkRequired &&
+		c.NumericalParityRequired && c.LifetimeAndSynchronizationValidationRequired
+}
+
+// UsableResidentCodebookContractCount applies the same ambiguity policy as PS6120.
+func UsableResidentCodebookContractCount(in []ResidentCodebookContract) int {
+	names, claims := map[string]int{}, map[string]int{}
+	for i := range in {
+		if in[i].Valid() {
+			names[in[i].Name]++
+			claims[in[i].ConfiguredSite+"\x00"+in[i].UploadCallable+"\x00"+in[i].DispatchCallable]++
+		}
+	}
+	count := 0
+	for i := range in {
+		if in[i].Valid() && names[in[i].Name] == 1 && claims[in[i].ConfiguredSite+"\x00"+in[i].UploadCallable+"\x00"+in[i].DispatchCallable] == 1 {
+			count++
+		}
+	}
+	return count
 }
 
 // CrossStepAcceleratorResidencyContract describes one configured fixed-count
@@ -2142,6 +2218,7 @@ type Sets struct {
 	ForwardLossBackwardGraphContracts         []ForwardLossBackwardGraphContract
 	FragmentedAcceleratorObjectiveContracts   []FragmentedAcceleratorObjectiveContract
 	CrossStepAcceleratorResidencyContracts    []CrossStepAcceleratorResidencyContract
+	ResidentCodebookContracts                 []ResidentCodebookContract
 	StateExpandedLookupContracts              []StateExpandedLookupContract
 	SharedFanOutContracts                     []SharedFanOutContract
 }
@@ -2202,6 +2279,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		ForwardLossBackwardGraphContracts:         slices.Clone(c.ForwardLossBackwardGraphContracts),
 		FragmentedAcceleratorObjectiveContracts:   cloneFragmentedAcceleratorObjectiveContracts(c.FragmentedAcceleratorObjectiveContracts),
 		CrossStepAcceleratorResidencyContracts:    slices.Clone(c.CrossStepAcceleratorResidencyContracts),
+		ResidentCodebookContracts:                 slices.Clone(c.ResidentCodebookContracts),
 		StateExpandedLookupContracts:              slices.Clone(c.StateExpandedLookupContracts),
 		SharedFanOutContracts:                     cloneSharedFanOutContracts(c.SharedFanOutContracts),
 	}

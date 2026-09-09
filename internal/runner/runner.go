@@ -375,6 +375,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"forwardLossBackwardGraphContracts":         validForwardLossBackwardGraphContracts(cfg.ForwardLossBackwardGraphContracts),
 		"fragmentedAcceleratorObjectiveContracts":   validFragmentedAcceleratorObjectiveContracts(cfg.FragmentedAcceleratorObjectiveContracts),
 		"crossStepAcceleratorResidencyContracts":    validCrossStepAcceleratorResidencyContracts(cfg.CrossStepAcceleratorResidencyContracts),
+		"residentCodebookContracts":                 validResidentCodebookContracts(cfg.ResidentCodebookContracts),
 		"stateExpandedLookupContracts":              validStateExpandedLookupContracts(cfg.StateExpandedLookupContracts),
 		"sharedFanOutContracts":                     validSharedFanOutContracts(cfg.SharedFanOutContracts),
 	}
@@ -401,6 +402,10 @@ func validResidentWeightBenchmarkContracts(contracts []config.ResidentWeightBenc
 		}
 	}
 	return valid
+}
+
+func validResidentCodebookContracts(contracts []config.ResidentCodebookContract) int {
+	return config.UsableResidentCodebookContractCount(contracts)
 }
 
 func validStateExpandedLookupContracts(contracts []config.StateExpandedLookupContract) int {
