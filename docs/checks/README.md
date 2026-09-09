@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**408 checks total** — **265 with a bit-identical auto-fix**, 143 advisory. By fix level: **246 L1** (idiomatic), **122 L2** (structured), **40 L3** (aggressive).
+**409 checks total** — **265 with a bit-identical auto-fix**, 144 advisory. By fix level: **246 L1** (idiomatic), **122 L2** (structured), **41 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -420,4 +420,5 @@ checks' fixes.
 | [PS6115](PS6115.md) | verify | L3 |  | a tiny synchronous accelerator boundary may merit same-semantics host screening |
 | [PS6116](PS6116.md) | verify | L3 |  | an eager forward-loss-backward objective may merit one cached graph submission |
 | [PS6117](PS6117.md) | verify | L3 |  | a complete accelerator objective is fragmented by repeated host synchronization |
+| [PS6118](PS6118.md) | verify | L3 |  | an accelerator objective materializes training state around a host optimizer on every step |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |

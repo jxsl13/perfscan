@@ -123,3 +123,18 @@ Rules without a pair, and why:
   Validate the scalar and every parameter gradient, repeated-index accumulation,
   immutability, fallback/recorder/backend behavior, cache reuse, and paired
   same-binary application performance at the configured geometry.
+- **PS6118** (cross-step accelerator residency advisory): a portable slice
+  loop cannot reproduce parameter upload, dense accelerator-gradient
+  materialization, resident device storage, a host AdamW traversal, or one
+  objective-plus-update command buffer. GoAI PR #1202 is the pinned evidence:
+  about 1.91 ms upload, 4.56 ms gradient copy-out, and 10.5 ms host AdamW around
+  a roughly 20.75 ms objective; the resident session measured 15.529600 ms
+  versus 28.190119 ms, 1.81890x paired median and 1.78324x worst. The check
+  reports configured bytes and requires explicit Sync/checkpoint semantics plus
+  paired end-to-end validation; a synthetic benchmark would falsely imply that
+  residency, numerical, lifetime, ownership, autograd, concurrency, and backend
+  parity had been established. An unresolved post-merge P1 review on the pinned
+  head also requires resident-session construction to be serialized with shared
+  accelerator-cache operations. The owner replay is the exact receiver-owned
+  AdamF32 shape: a three-result LossAndGrad call, returned-error guards, and a
+  GradFn callback mapping each optimizer-owned parameter to its dense gradient.
