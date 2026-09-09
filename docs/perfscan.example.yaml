@@ -23,6 +23,28 @@ _comment: Replace every placeholder below with this repository's vocabulary.
 # conservative 64-byte default; Apple M-series CPUs use 128-byte cache lines.
 cacheLineBytes: 128
 
+# PS6085 is a fail-closed advisory for a profiled function that repeatedly adds
+# one of exactly two floating-point offsets to every lane of an
+# immutable package-level lookup row before multiplying it. Bind the exact
+# unexported fixed-size array and set maxExpandedBytes to the reviewed footprint
+# of all expanded states (not just the original table). The required gates make
+# initialization order, element-type rounding, cache cost, exact outputs, and
+# paired before/after measurements explicit. PS6085 never applies a fix.
+stateExpandedLookupContracts:
+  - name: decode-state-grid
+    ownerSite: example.com/codec.decodeRow
+    ownerKind: function
+    tableObject: example.com/codec.weightGrid
+    maxStateCardinality: 2
+    maxExpandedBytes: 131072
+    hotPathEvidence: true
+    tableImmutableAfterInitialization: true
+    initializationReproducesExactDtype: true
+    initializationOrderValidationRequired: true
+    cacheFootprintReviewRequired: true
+    exactOutputValidationRequired: true
+    pairedBenchmarkRequired: true
+
 # Per-element getter/setter methods whose per-call dispatch inside a hot loop the
 # PS1xxx checks report. (matrix lib: At/Set — tensor lib: AtF64/SetF64)
 elementAccessors:

@@ -374,6 +374,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"forwardLossBackwardGraphContracts":         validForwardLossBackwardGraphContracts(cfg.ForwardLossBackwardGraphContracts),
 		"fragmentedAcceleratorObjectiveContracts":   validFragmentedAcceleratorObjectiveContracts(cfg.FragmentedAcceleratorObjectiveContracts),
 		"crossStepAcceleratorResidencyContracts":    validCrossStepAcceleratorResidencyContracts(cfg.CrossStepAcceleratorResidencyContracts),
+		"stateExpandedLookupContracts":              validStateExpandedLookupContracts(cfg.StateExpandedLookupContracts),
 		"sharedFanOutContracts":                     validSharedFanOutContracts(cfg.SharedFanOutContracts),
 	}
 	missing := make([]string, 0, len(c.Vocab))
@@ -383,6 +384,10 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		}
 	}
 	return missing
+}
+
+func validStateExpandedLookupContracts(contracts []config.StateExpandedLookupContract) int {
+	return config.UsableStateExpandedLookupContractCount(contracts)
 }
 
 func validSharedFanOutContracts(contracts []config.SharedFanOutContract) int {
