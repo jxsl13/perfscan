@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**411 checks total** — **265 with a bit-identical auto-fix**, 146 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **41 L3** (aggressive).
+**412 checks total** — **265 with a bit-identical auto-fix**, 147 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **42 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -394,6 +394,7 @@ checks' fixes.
 | [PS6081](PS6081.md) | verify | L2 |  | configured sibling kernels repeat one exact parallel fan-out |
 | [PS6083](PS6083.md) | arith | L2 | yes | a small masked integer domain is repeatedly converted to float |
 | [PS6084](PS6084.md) | verify | L2 |  | fixed scalar scratch is built immediately before a noescape native leaf |
+| [PS6085](PS6085.md) | verify | L3 |  | a hot loop repeatedly adjusts a bounded immutable lookup row for a small state |
 | [PS6086](PS6086.md) | verify | L3 |  | all-goroutine fan-out leaves the caller waiting; caller participation needs a latency benchmark, not an allocation-only rewrite |
 | [PS6087](PS6087.md) | alloc | L2 |  | a contract-proven private single-use tensor chain has a provider-bound in-place fusion capability |
 | [PS6088](PS6088.md) | verify | L3 |  | a repeated fresh fan-out barrier has no caller-attributed lifecycle A/B evidence |

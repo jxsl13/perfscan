@@ -276,9 +276,99 @@ type Config struct {
 	// safe resident-session lifecycle, so every such fact remains explicit.
 	CrossStepAcceleratorResidencyContracts []CrossStepAcceleratorResidencyContract `json:"crossStepAcceleratorResidencyContracts,omitempty" yaml:"crossStepAcceleratorResidencyContracts"`
 
+	// StateExpandedLookupContracts bind PS6085 to one exact profiled function
+	// and package-level lookup array. The explicit evidence, byte budget, and
+	// validation promises keep a cache-for-arithmetic trade out of generic
+	// identifier heuristics.
+	StateExpandedLookupContracts []StateExpandedLookupContract `json:"stateExpandedLookupContracts,omitempty" yaml:"stateExpandedLookupContracts"`
+
 	// SharedFanOutContracts bind PS6081 to an exact owner, two producer roles,
 	// their fan-out routes, and the only accepted consumer flow.
 	SharedFanOutContracts []SharedFanOutContract `json:"sharedFanOutContracts,omitempty" yaml:"sharedFanOutContracts"`
+}
+
+// MaxStateExpandedLookupBytes is the largest expanded lookup footprint PS6085
+// accepts from configuration. Smaller project-specific cache budgets remain
+// mandatory on each contract.
+const MaxStateExpandedLookupBytes int64 = 8 << 20
+
+// StateExpandedLookupCallableKind disambiguates exact function and method IDs.
+type StateExpandedLookupCallableKind string
+
+const (
+	StateExpandedLookupFunction StateExpandedLookupCallableKind = "function"
+	StateExpandedLookupMethod   StateExpandedLookupCallableKind = "method"
+)
+
+// StateExpandedLookupContract is the fail-closed project-owned evidence for
+// PS6085. Source analysis still proves the concrete two-state float expression,
+// fixed lane loop, table shape, and absence of visible post-init mutation.
+type StateExpandedLookupContract struct {
+	Name                string                          `json:"name" yaml:"name"`
+	OwnerSite           string                          `json:"ownerSite" yaml:"ownerSite"`
+	OwnerKind           StateExpandedLookupCallableKind `json:"ownerKind" yaml:"ownerKind"`
+	TableObject         string                          `json:"tableObject" yaml:"tableObject"`
+	MaxStateCardinality int                             `json:"maxStateCardinality" yaml:"maxStateCardinality"`
+	MaxExpandedBytes    int64                           `json:"maxExpandedBytes" yaml:"maxExpandedBytes"`
+
+	HotPathEvidence                       bool `json:"hotPathEvidence" yaml:"hotPathEvidence"`
+	TableImmutableAfterInitialization     bool `json:"tableImmutableAfterInitialization" yaml:"tableImmutableAfterInitialization"`
+	InitializationReproducesExactDType    bool `json:"initializationReproducesExactDtype" yaml:"initializationReproducesExactDtype"`
+	InitializationOrderValidationRequired bool `json:"initializationOrderValidationRequired" yaml:"initializationOrderValidationRequired"`
+	CacheFootprintReviewRequired          bool `json:"cacheFootprintReviewRequired" yaml:"cacheFootprintReviewRequired"`
+	ExactOutputValidationRequired         bool `json:"exactOutputValidationRequired" yaml:"exactOutputValidationRequired"`
+	PairedBenchmarkRequired               bool `json:"pairedBenchmarkRequired" yaml:"pairedBenchmarkRequired"`
+}
+
+// Valid reports whether every required PS6085 fact is explicit and bounded.
+func (c *StateExpandedLookupContract) Valid() bool {
+	if c == nil || c.Name == "" || strings.TrimSpace(c.Name) != c.Name ||
+		strings.IndexFunc(c.Name, unicode.IsControl) >= 0 ||
+		!psStateExpandedCallableValid(c.OwnerSite, c.OwnerKind) || !psTopKFunctionIDValid(c.TableObject) ||
+		c.MaxStateCardinality < 2 || c.MaxStateCardinality > 8 ||
+		c.MaxExpandedBytes <= 0 || c.MaxExpandedBytes > MaxStateExpandedLookupBytes {
+		return false
+	}
+	return c.HotPathEvidence && c.TableImmutableAfterInitialization &&
+		c.InitializationReproducesExactDType && c.InitializationOrderValidationRequired &&
+		c.CacheFootprintReviewRequired && c.ExactOutputValidationRequired && c.PairedBenchmarkRequired
+}
+
+// UsableStateExpandedLookupContractCount counts complete contracts only when
+// both their names and owner/table claims are unique.
+func UsableStateExpandedLookupContractCount(contracts []StateExpandedLookupContract) int {
+	names := make(map[string]int)
+	claims := make(map[string]int)
+	for index := range contracts {
+		contract := &contracts[index]
+		if contract.Valid() {
+			names[contract.Name]++
+			claims[psStateExpandedLookupClaim(contract)]++
+		}
+	}
+	usable := 0
+	for index := range contracts {
+		contract := &contracts[index]
+		if contract.Valid() && names[contract.Name] == 1 && claims[psStateExpandedLookupClaim(contract)] == 1 {
+			usable++
+		}
+	}
+	return usable
+}
+
+func psStateExpandedCallableValid(id string, kind StateExpandedLookupCallableKind) bool {
+	switch kind {
+	case StateExpandedLookupFunction:
+		return psTopKFunctionIDValid(id)
+	case StateExpandedLookupMethod:
+		return psTopKMethodIDValid(id)
+	default:
+		return false
+	}
+}
+
+func psStateExpandedLookupClaim(contract *StateExpandedLookupContract) string {
+	return contract.OwnerSite + "\x00" + string(contract.OwnerKind) + "\x00" + contract.TableObject
 }
 
 // SharedFanOutCallableKind disambiguates dotted function and method IDs.
@@ -2031,6 +2121,7 @@ type Sets struct {
 	ForwardLossBackwardGraphContracts         []ForwardLossBackwardGraphContract
 	FragmentedAcceleratorObjectiveContracts   []FragmentedAcceleratorObjectiveContract
 	CrossStepAcceleratorResidencyContracts    []CrossStepAcceleratorResidencyContract
+	StateExpandedLookupContracts              []StateExpandedLookupContract
 	SharedFanOutContracts                     []SharedFanOutContract
 }
 
@@ -2089,6 +2180,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		ForwardLossBackwardGraphContracts:         slices.Clone(c.ForwardLossBackwardGraphContracts),
 		FragmentedAcceleratorObjectiveContracts:   cloneFragmentedAcceleratorObjectiveContracts(c.FragmentedAcceleratorObjectiveContracts),
 		CrossStepAcceleratorResidencyContracts:    slices.Clone(c.CrossStepAcceleratorResidencyContracts),
+		StateExpandedLookupContracts:              slices.Clone(c.StateExpandedLookupContracts),
 		SharedFanOutContracts:                     cloneSharedFanOutContracts(c.SharedFanOutContracts),
 	}
 }
