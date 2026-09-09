@@ -1272,6 +1272,7 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 		"TinySynchronousAcceleratorScreenContracts": len(c.TinySynchronousAcceleratorScreenContracts),
 		"ForwardLossBackwardGraphContracts":         len(c.ForwardLossBackwardGraphContracts),
 		"FragmentedAcceleratorObjectiveContracts":   len(c.FragmentedAcceleratorObjectiveContracts),
+		"CrossStepAcceleratorResidencyContracts":    len(c.CrossStepAcceleratorResidencyContracts),
 	}
 	for name, n := range fields {
 		if n == 0 {
@@ -1307,6 +1308,9 @@ func TestExampleConfigIsValidAndGeneric(t *testing.T) {
 	}
 	if len(c.FragmentedAcceleratorObjectiveContracts) != 1 || !c.FragmentedAcceleratorObjectiveContracts[0].Valid() {
 		t.Errorf("example config has invalid fragmented accelerator-objective contract: %+v", c.FragmentedAcceleratorObjectiveContracts)
+	}
+	if len(c.CrossStepAcceleratorResidencyContracts) != 1 || !c.CrossStepAcceleratorResidencyContracts[0].Valid() {
+		t.Errorf("example config has invalid cross-step accelerator residency contract: %+v", c.CrossStepAcceleratorResidencyContracts)
 	}
 	if len(c.SchedulerTileGrainContracts) != 1 || !c.SchedulerTileGrainContracts[0].Valid() {
 		t.Errorf("example config has invalid scheduler tile-grain contract: %+v", c.SchedulerTileGrainContracts)

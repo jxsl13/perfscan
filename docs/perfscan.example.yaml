@@ -718,6 +718,71 @@ fragmentedAcceleratorObjectiveContracts:
     repeatedIndexGradientParityRequired: true
     scatterNDNotAssumedFaster: true
 
+# Exact repeated objective -> host optimizer -> scalar observer contracts for
+# PS6118. Byte counts are configured per-step estimates; they are not inferred
+# from runtime tensor shapes. V1 binds receiver-owned parameters, a GradFn-style
+# parameter-to-gradient callback, and returned objective/optimizer errors.
+# Every semantic and lifecycle fact is mandatory.
+crossStepAcceleratorResidencyContracts:
+  - name: gpt-adamw-cross-step
+    configuredSite: example.com/project/training.trainGPT
+    objectiveCallable: example.com/project/accelerator.Objective.LossAndGrad
+    optimizerCallable: example.com/project/optim.AdamW.Step
+    scalarObserverCallable: example.com/project/metrics.ObserveLoss
+    objectiveScalarResult: 1
+    objectiveGradientResult: 2
+    objectiveErrorResult: 3
+    optimizerGradientCallbackArgument: 1
+    optimizerErrorResult: 1
+    scalarObserverArgument: 1
+    objectiveErrorControlFlow: return
+    optimizerErrorControlFlow: return
+    configuredLoopIterations: 20
+    configuredParameterBytes: 4194304
+    configuredGradientBytes: 4194304
+    configuredAvoidableBytes: 8388608
+    targetGOOS: darwin
+    targetGOARCH: arm64
+    memoryModel: unified
+    configuredEvidence: goai-pr1202-b86d9a755090df93ed64a30583774f30eefa0c3a
+    objectiveReceiverOwnsParameters: true
+    optimizerReceiverOwnsParameters: true
+    receiverParameterSetsIdentical: true
+    gradientCallbackMapsReceiverParameter: true
+    denseGradientPerParameter: true
+    stableParameterGradientOrder: true
+    parameterUploadEveryStep: true
+    gradientHostMaterializedEveryStep: true
+    hostOptimizerEveryStep: true
+    parametersReuploadedNextStep: true
+    onlyScalarObservedBetweenSteps: true
+    scalarResultIsHostMetric: true
+    scalarObservationDoesNotSynchronizeState: true
+    noIntermediateCheckpointRequired: true
+    objectiveAndOptimizerSynchronous: true
+    objectiveDoesNotRetainArguments: true
+    optimizerDoesNotRetainArguments: true
+    noCustomHooks: true
+    noAliasesOrEscapes: true
+    noConcurrentSessionAccess: true
+    residentSessionConstructionSerialized: true
+    deviceStorageAndTransfersKnown: true
+    residentSessionOpportunityConfirmed: true
+    exactDTypeCoverage: true
+    exactLayoutCoverage: true
+    exactOptimizerCoverage: true
+    lifetimeParity: true
+    numericalParity: true
+    checkpointParity: true
+    errorAndPanicParity: true
+    mutationParity: true
+    ownershipParity: true
+    autogradParity: true
+    backendSelectionParity: true
+    explicitSyncRequired: true
+    explicitCheckpointRequired: true
+    pairedEndToEndValidationRequired: true
+
 # ---------------------------------------------------------------------------
 # Concrete instance — a tensor / numerical library (e.g. goai). The same
 # fields, filled with that project's real vocabulary. Copy the SHAPE, not the

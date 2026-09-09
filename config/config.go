@@ -269,6 +269,12 @@ type Config struct {
 	// that local Go syntax cannot prove, including graph-cache suitability,
 	// synchronization, residency, and validation obligations.
 	FragmentedAcceleratorObjectiveContracts []FragmentedAcceleratorObjectiveContract `json:"fragmentedAcceleratorObjectiveContracts,omitempty" yaml:"fragmentedAcceleratorObjectiveContracts"`
+
+	// CrossStepAcceleratorResidencyContracts bind one exact repeated objective,
+	// host optimizer, and scalar observer chain for PS6118. Source syntax cannot
+	// prove device placement, dense-result ownership, optimizer semantics, or a
+	// safe resident-session lifecycle, so every such fact remains explicit.
+	CrossStepAcceleratorResidencyContracts []CrossStepAcceleratorResidencyContract `json:"crossStepAcceleratorResidencyContracts,omitempty" yaml:"crossStepAcceleratorResidencyContracts"`
 }
 
 // ForwardLossBackwardGraphContract describes one complete eager objective and
@@ -464,6 +470,114 @@ func (c *FragmentedAcceleratorObjectiveContract) Valid() bool {
 		c.PerOperationBackendRoutePreservationRequired && c.TrueCausalMaskSemanticsRequired &&
 		c.PairedApplicationBenchmarkRequired && c.NumericalValidationRequired &&
 		c.ShapeAwareEmbeddingGradientValidationRequired && c.RepeatedIndexGradientParityRequired && c.ScatterNDNotAssumedFaster
+}
+
+// CrossStepAcceleratorResidencyContract describes one configured fixed-count
+// training loop whose parameters cross an accelerator boundary in both
+// directions around a receiver-owned host optimizer. Result and argument
+// positions are one-based and exclude method receivers. Configured byte counts
+// are per step.
+type CrossStepAcceleratorResidencyContract struct {
+	Name                              string `json:"name" yaml:"name"`
+	ConfiguredSite                    string `json:"configuredSite" yaml:"configuredSite"`
+	ObjectiveCallable                 string `json:"objectiveCallable" yaml:"objectiveCallable"`
+	OptimizerCallable                 string `json:"optimizerCallable" yaml:"optimizerCallable"`
+	ScalarObserverCallable            string `json:"scalarObserverCallable" yaml:"scalarObserverCallable"`
+	ObjectiveScalarResult             int    `json:"objectiveScalarResult" yaml:"objectiveScalarResult"`
+	ObjectiveGradientResult           int    `json:"objectiveGradientResult" yaml:"objectiveGradientResult"`
+	ObjectiveErrorResult              int    `json:"objectiveErrorResult" yaml:"objectiveErrorResult"`
+	OptimizerGradientCallbackArgument int    `json:"optimizerGradientCallbackArgument" yaml:"optimizerGradientCallbackArgument"`
+	OptimizerErrorResult              int    `json:"optimizerErrorResult" yaml:"optimizerErrorResult"`
+	ScalarObserverArgument            int    `json:"scalarObserverArgument" yaml:"scalarObserverArgument"`
+	ObjectiveErrorControlFlow         string `json:"objectiveErrorControlFlow" yaml:"objectiveErrorControlFlow"`
+	OptimizerErrorControlFlow         string `json:"optimizerErrorControlFlow" yaml:"optimizerErrorControlFlow"`
+	ConfiguredLoopIterations          int64  `json:"configuredLoopIterations" yaml:"configuredLoopIterations"`
+	ConfiguredParameterBytes          int64  `json:"configuredParameterBytes" yaml:"configuredParameterBytes"`
+	ConfiguredGradientBytes           int64  `json:"configuredGradientBytes" yaml:"configuredGradientBytes"`
+	ConfiguredAvoidableBytes          int64  `json:"configuredAvoidableBytes" yaml:"configuredAvoidableBytes"`
+	TargetGOOS                        string `json:"targetGOOS" yaml:"targetGOOS"`
+	TargetGOARCH                      string `json:"targetGOARCH" yaml:"targetGOARCH"`
+	MemoryModel                       string `json:"memoryModel" yaml:"memoryModel"`
+	ConfiguredEvidence                string `json:"configuredEvidence,omitempty" yaml:"configuredEvidence,omitempty"`
+	ExistingResidentSession           bool   `json:"existingResidentSession,omitempty" yaml:"existingResidentSession,omitempty"`
+	IntentionalHostOptimizer          bool   `json:"intentionalHostOptimizer,omitempty" yaml:"intentionalHostOptimizer,omitempty"`
+
+	ObjectiveReceiverOwnsParameters          bool `json:"objectiveReceiverOwnsParameters" yaml:"objectiveReceiverOwnsParameters"`
+	OptimizerReceiverOwnsParameters          bool `json:"optimizerReceiverOwnsParameters" yaml:"optimizerReceiverOwnsParameters"`
+	ReceiverParameterSetsIdentical           bool `json:"receiverParameterSetsIdentical" yaml:"receiverParameterSetsIdentical"`
+	GradientCallbackMapsReceiverParameter    bool `json:"gradientCallbackMapsReceiverParameter" yaml:"gradientCallbackMapsReceiverParameter"`
+	DenseGradientPerParameter                bool `json:"denseGradientPerParameter" yaml:"denseGradientPerParameter"`
+	StableParameterGradientOrder             bool `json:"stableParameterGradientOrder" yaml:"stableParameterGradientOrder"`
+	ParameterUploadEveryStep                 bool `json:"parameterUploadEveryStep" yaml:"parameterUploadEveryStep"`
+	GradientHostMaterializedEveryStep        bool `json:"gradientHostMaterializedEveryStep" yaml:"gradientHostMaterializedEveryStep"`
+	HostOptimizerEveryStep                   bool `json:"hostOptimizerEveryStep" yaml:"hostOptimizerEveryStep"`
+	ParametersReuploadedNextStep             bool `json:"parametersReuploadedNextStep" yaml:"parametersReuploadedNextStep"`
+	OnlyScalarObservedBetweenSteps           bool `json:"onlyScalarObservedBetweenSteps" yaml:"onlyScalarObservedBetweenSteps"`
+	ScalarResultIsHostMetric                 bool `json:"scalarResultIsHostMetric" yaml:"scalarResultIsHostMetric"`
+	ScalarObservationDoesNotSynchronizeState bool `json:"scalarObservationDoesNotSynchronizeState" yaml:"scalarObservationDoesNotSynchronizeState"`
+	NoIntermediateCheckpointRequired         bool `json:"noIntermediateCheckpointRequired" yaml:"noIntermediateCheckpointRequired"`
+	ObjectiveAndOptimizerSynchronous         bool `json:"objectiveAndOptimizerSynchronous" yaml:"objectiveAndOptimizerSynchronous"`
+	ObjectiveDoesNotRetainArguments          bool `json:"objectiveDoesNotRetainArguments" yaml:"objectiveDoesNotRetainArguments"`
+	OptimizerDoesNotRetainArguments          bool `json:"optimizerDoesNotRetainArguments" yaml:"optimizerDoesNotRetainArguments"`
+	NoCustomHooks                            bool `json:"noCustomHooks" yaml:"noCustomHooks"`
+	NoAliasesOrEscapes                       bool `json:"noAliasesOrEscapes" yaml:"noAliasesOrEscapes"`
+	NoConcurrentSessionAccess                bool `json:"noConcurrentSessionAccess" yaml:"noConcurrentSessionAccess"`
+	ResidentSessionConstructionSerialized    bool `json:"residentSessionConstructionSerialized" yaml:"residentSessionConstructionSerialized"`
+	DeviceStorageAndTransfersKnown           bool `json:"deviceStorageAndTransfersKnown" yaml:"deviceStorageAndTransfersKnown"`
+	ResidentSessionOpportunityConfirmed      bool `json:"residentSessionOpportunityConfirmed" yaml:"residentSessionOpportunityConfirmed"`
+	ExactDTypeCoverage                       bool `json:"exactDTypeCoverage" yaml:"exactDTypeCoverage"`
+	ExactLayoutCoverage                      bool `json:"exactLayoutCoverage" yaml:"exactLayoutCoverage"`
+	ExactOptimizerCoverage                   bool `json:"exactOptimizerCoverage" yaml:"exactOptimizerCoverage"`
+	LifetimeParity                           bool `json:"lifetimeParity" yaml:"lifetimeParity"`
+	NumericalParity                          bool `json:"numericalParity" yaml:"numericalParity"`
+	CheckpointParity                         bool `json:"checkpointParity" yaml:"checkpointParity"`
+	ErrorAndPanicParity                      bool `json:"errorAndPanicParity" yaml:"errorAndPanicParity"`
+	MutationParity                           bool `json:"mutationParity" yaml:"mutationParity"`
+	OwnershipParity                          bool `json:"ownershipParity" yaml:"ownershipParity"`
+	AutogradParity                           bool `json:"autogradParity" yaml:"autogradParity"`
+	BackendSelectionParity                   bool `json:"backendSelectionParity" yaml:"backendSelectionParity"`
+	ExplicitSyncRequired                     bool `json:"explicitSyncRequired" yaml:"explicitSyncRequired"`
+	ExplicitCheckpointRequired               bool `json:"explicitCheckpointRequired" yaml:"explicitCheckpointRequired"`
+	PairedEndToEndValidationRequired         bool `json:"pairedEndToEndValidationRequired" yaml:"pairedEndToEndValidationRequired"`
+}
+
+// Valid reports whether PS6118 has a complete, bounded owner contract.
+func (c *CrossStepAcceleratorResidencyContract) Valid() bool {
+	callables := c.ObjectiveCallable != c.OptimizerCallable && c.ObjectiveCallable != c.ScalarObserverCallable &&
+		c.OptimizerCallable != c.ScalarObserverCallable
+	positions := c.ObjectiveScalarResult > 0 && c.ObjectiveScalarResult <= 3 &&
+		c.ObjectiveGradientResult > 0 && c.ObjectiveGradientResult <= 3 &&
+		c.ObjectiveErrorResult > 0 && c.ObjectiveErrorResult <= 3 &&
+		c.ObjectiveScalarResult != c.ObjectiveGradientResult && c.ObjectiveScalarResult != c.ObjectiveErrorResult &&
+		c.ObjectiveGradientResult != c.ObjectiveErrorResult && c.OptimizerGradientCallbackArgument == 1 &&
+		c.OptimizerErrorResult == 1 && c.ScalarObserverArgument == 1
+	bytesValid := c.ConfiguredParameterBytes > 0 && c.ConfiguredGradientBytes > 0 &&
+		c.ConfiguredParameterBytes <= 1<<63-1-c.ConfiguredGradientBytes &&
+		c.ConfiguredAvoidableBytes == c.ConfiguredParameterBytes+c.ConfiguredGradientBytes &&
+		c.ConfiguredLoopIterations <= (1<<63-1)/c.ConfiguredAvoidableBytes
+	if c.Name == "" || strings.TrimSpace(c.Name) != c.Name || !ps6109CallableIDValid(c.ConfiguredSite) ||
+		!ps6109CallableIDValid(c.ObjectiveCallable) || !ps6109CallableIDValid(c.OptimizerCallable) ||
+		!ps6109CallableIDValid(c.ScalarObserverCallable) || !callables || !positions ||
+		c.ObjectiveErrorControlFlow != "return" || c.OptimizerErrorControlFlow != "return" ||
+		c.ConfiguredEvidence == "" || strings.TrimSpace(c.ConfiguredEvidence) != c.ConfiguredEvidence ||
+		c.ConfiguredLoopIterations < 2 || !bytesValid || !psTinyGOOS(c.TargetGOOS) ||
+		!psTinyGOARCH(c.TargetGOARCH) || (c.MemoryModel != "unified" && c.MemoryModel != "shared" && c.MemoryModel != "discrete") {
+		return false
+	}
+	return c.ObjectiveReceiverOwnsParameters && c.OptimizerReceiverOwnsParameters &&
+		c.ReceiverParameterSetsIdentical && c.GradientCallbackMapsReceiverParameter &&
+		c.DenseGradientPerParameter && c.StableParameterGradientOrder && c.ParameterUploadEveryStep &&
+		c.GradientHostMaterializedEveryStep && c.HostOptimizerEveryStep && c.ParametersReuploadedNextStep &&
+		c.OnlyScalarObservedBetweenSteps && c.ScalarResultIsHostMetric && c.ScalarObservationDoesNotSynchronizeState &&
+		c.NoIntermediateCheckpointRequired && c.ObjectiveAndOptimizerSynchronous &&
+		c.ObjectiveDoesNotRetainArguments && c.OptimizerDoesNotRetainArguments && c.NoCustomHooks &&
+		c.NoAliasesOrEscapes && c.NoConcurrentSessionAccess && c.ResidentSessionConstructionSerialized &&
+		c.DeviceStorageAndTransfersKnown &&
+		c.ResidentSessionOpportunityConfirmed && c.ExactDTypeCoverage && c.ExactLayoutCoverage &&
+		c.ExactOptimizerCoverage && c.LifetimeParity && c.NumericalParity && c.CheckpointParity &&
+		c.ErrorAndPanicParity && c.MutationParity && c.OwnershipParity && c.AutogradParity &&
+		c.BackendSelectionParity && c.ExplicitSyncRequired && c.ExplicitCheckpointRequired &&
+		c.PairedEndToEndValidationRequired
 }
 
 // TinySynchronousAcceleratorScreenCall identifies one direct accelerator
@@ -1567,6 +1681,7 @@ type Sets struct {
 	TinySynchronousAcceleratorScreenContracts []TinySynchronousAcceleratorScreenContract
 	ForwardLossBackwardGraphContracts         []ForwardLossBackwardGraphContract
 	FragmentedAcceleratorObjectiveContracts   []FragmentedAcceleratorObjectiveContract
+	CrossStepAcceleratorResidencyContracts    []CrossStepAcceleratorResidencyContract
 }
 
 func toSet(xs []string) map[string]bool {
@@ -1623,6 +1738,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		TinySynchronousAcceleratorScreenContracts: cloneTinySynchronousAcceleratorScreenContracts(c.TinySynchronousAcceleratorScreenContracts),
 		ForwardLossBackwardGraphContracts:         slices.Clone(c.ForwardLossBackwardGraphContracts),
 		FragmentedAcceleratorObjectiveContracts:   cloneFragmentedAcceleratorObjectiveContracts(c.FragmentedAcceleratorObjectiveContracts),
+		CrossStepAcceleratorResidencyContracts:    slices.Clone(c.CrossStepAcceleratorResidencyContracts),
 	}
 }
 
