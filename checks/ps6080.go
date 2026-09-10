@@ -1719,6 +1719,7 @@ type ps6080MapAliasContext struct {
 	bindings            map[types.Object][]ps6080MapAliasBinding
 	parameters          map[types.Object]ps6080MapAliasParameter
 	invocations         map[*ast.FuncLit]map[*ast.CallExpr]bool
+	unknownInvocations  map[*ast.FuncLit]map[*ast.CallExpr]bool
 	invocationOrders    map[*ast.FuncLit]map[*ast.CallExpr][][]token.Pos
 	invocationArguments map[*ast.FuncLit]map[*ast.CallExpr]ps6080InvocationArguments
 	orderedArguments    map[*ast.FuncLit]map[*ast.CallExpr][]ps6080OrderedInvocation
@@ -1755,6 +1756,7 @@ func ps6080NewMapAliasContext(
 		invoked := ps6080InvokedFunctionLiteralResult(pass, body)
 		invokedLiterals := invoked.literals
 		context.invocations = invoked.calls
+		context.unknownInvocations = invoked.unknown
 		context.invocationOrders = invoked.orders
 		context.invocationArguments = invoked.arguments
 		context.orderedArguments = invoked.orderedArgs
@@ -1858,6 +1860,7 @@ func ps6080NewMapAliasContext(
 				}
 				for _, invocationOrder := range orders {
 					projected := effect
+					projected.guaranteed = projected.guaranteed && len(context.unknownInvocations[callee]) == 0
 					projected.position = call.Pos()
 					projected.order = slices.Concat(invocationOrder, effect.order)
 					projected.node = call
@@ -2058,6 +2061,13 @@ func (context *ps6080MapAliasContext) activeWithVisiting(
 	invoking map[*ast.FuncLit]bool,
 	visiting map[types.Object]bool,
 ) (bool, bool) {
+	if literal := context.containingLiteral(reference); len(context.unknownInvocations[literal]) > 0 {
+		if object := context.aliasObject(expression); object != nil && context.aliases[object] {
+			// Unknown invocation context may supply any table alias. It cannot
+			// establish a captured-value or parameter kill.
+			return true, true
+		}
+	}
 	if tableExpression, ok := context.tableLiteral.(ast.Expr); ok &&
 		ps2110Unparen(expression) == ps2110Unparen(tableExpression) {
 		return true, true
@@ -4425,6 +4435,9 @@ func ps6080NamedCallbackCalls(
 		}
 		dispatcher, _ := callee.Type().(*types.Signature)
 		for _, site := range sites {
+			if site.returnOnly {
+				continue
+			}
 			result = append(result, ps6080CPUCall{
 				callee:   target.function,
 				bindings: ps6080CallableReceiverBindings(pass, caller, target, call, parents),
@@ -4441,7 +4454,7 @@ func ps6080NamedCallbackCalls(
 		callbackParameters[index] = mapping != nil
 	}
 	for index, sites := range mayCallbacks[callee] {
-		callbackParameters[index] = callbackParameters[index] || len(sites) > 0
+		callbackParameters[index] = callbackParameters[index] || ps6080CallbackMayInvoke(sites)
 	}
 	for callbackParameter, callback := range callbackParameters {
 		if !callback || callbackParameter >= len(call.Args) {
@@ -4480,6 +4493,9 @@ func ps6080NamedCallbackCalls(
 				targetSignature, _ := target.function.Type().(*types.Signature)
 				if targetSignature != nil {
 					for _, site := range sites {
+						if site.returnOnly {
+							continue
+						}
 						scopeSets = append(scopeSets, ps6080NamedCallbackSiteScopes(
 							pass, caller, call, parents, invoked, site, dispatcher, targetSignature,
 							target.receiver, target.receiverQuery, target.methodExpression,
@@ -4594,6 +4610,20 @@ func ps6080NamedCallbackSiteScopes(
 	domains map[*types.TypeName][]*types.Const,
 ) map[types.Object]*ps6080CPUCallScope {
 	result := make(map[types.Object]*ps6080CPUCallScope)
+	if site.unknown {
+		for index := range target.Params().Len() {
+			parameter := target.Params().At(index)
+			if enum, ok := ps6080EnumType(parameter.Type()); ok {
+				result[parameter] = &ps6080CPUCallScope{enum: enum, universal: true}
+			}
+		}
+		if receiver := target.Recv(); receiver != nil {
+			if enum, ok := ps6080EnumType(receiver.Type()); ok {
+				result[receiver] = &ps6080CPUCallScope{enum: enum, universal: true}
+			}
+		}
+		return result
+	}
 	compose := func(enum *types.TypeName, inner *ps6080CPUCallScope) *ps6080CPUCallScope {
 		for forwardIndex := range site.forwarding {
 			forward := &site.forwarding[forwardIndex]
@@ -4603,11 +4633,15 @@ func ps6080NamedCallbackSiteScopes(
 			}
 			inner = ps6080ComposeNamedCallbackScope(
 				pass, forward.function, forward.call, forward.parents, forwardInvoked,
-				forward.dispatcher, enum, inner, constantEnums, domains,
+				forward.dispatcher, forward.argumentOffset, enum, inner, constantEnums, domains,
 			)
 		}
+		offset := 0
+		if ps6091MethodExpression(pass, call.Fun) {
+			offset = 1
+		}
 		return ps6080ComposeNamedCallbackScope(
-			pass, caller, call, parents, invoked, dispatcher, enum, inner,
+			pass, caller, call, parents, invoked, dispatcher, offset, enum, inner,
 			constantEnums, domains,
 		)
 	}
@@ -4673,6 +4707,7 @@ func ps6080ComposeNamedCallbackScope(
 	parents map[ast.Node]ast.Node,
 	invoked *ps6080InvokedLiteralResult,
 	dispatcher *types.Signature,
+	argumentOffset int,
 	enum *types.TypeName,
 	inner *ps6080CPUCallScope,
 	constantEnums map[*types.Const][]*types.TypeName,
@@ -4691,7 +4726,7 @@ func ps6080ComposeNamedCallbackScope(
 	if dispatcher != nil {
 		for index := range dispatcher.Params().Len() {
 			if dispatcher.Params().At(index) == inner.source {
-				sourceIndex = index
+				sourceIndex = index + argumentOffset
 				break
 			}
 		}
@@ -5191,6 +5226,9 @@ func ps6080LiteralRootInvocationPositions(
 	literal *ast.FuncLit,
 	excluded []token.Pos,
 ) []token.Pos {
+	if len(invoked.unknown[literal]) > 0 {
+		return nil
+	}
 	var result []token.Pos
 	for _, orders := range invoked.orders[literal] {
 		for _, order := range orders {
@@ -5656,6 +5694,9 @@ func ps6080PossibleNamedFunctionTargetsVisiting(
 			}
 			queryLiteral := ps6080ContainingLiteral(query, parents)
 			queryEntryMayReach := func() bool {
+				if len(invoked.unknown[queryLiteral]) > 0 {
+					return true
+				}
 				if queryLiteral == nil {
 					return ps6080CFGEntryMayReachWithoutAssignments(
 						pass, graph, parents, query.Pos(), allPositions,
@@ -5718,6 +5759,9 @@ func ps6080PossibleNamedFunctionTargetsVisiting(
 				}
 			}
 			literalAssignmentMayReachQuery := func(literal *ast.FuncLit, from token.Pos) bool {
+				if len(invoked.unknown[queryLiteral]) > 0 {
+					return true
+				}
 				if queryLiteral == nil || !ps6080NodeWithin(query, literal.Body) {
 					return false
 				}
@@ -6854,6 +6898,9 @@ func ps6080SafeNamedCallbackReference(
 		}
 		callee, _, direct := typedCallee(pass, call.Fun)
 		if !direct {
+			return false
+		}
+		if argument < len(mayCallbacks[callee]) && ps6080UnknownCallbackSites(mayCallbacks[callee][argument]) {
 			return false
 		}
 		return argument < len(callbacks[callee]) && callbacks[callee][argument] != nil ||
@@ -8007,7 +8054,13 @@ func ps6080MayCallbackLiteralScope(
 			continue
 		}
 		var result *ps6080CPUCallScope
+		if !ps6080CallbackMayInvoke(mayCallbacks[callee][index]) {
+			continue
+		}
 		for _, site := range mayCallbacks[callee][index] {
+			if site.returnOnly {
+				continue
+			}
 			scopes := ps6080NamedCallbackSiteScopes(
 				pass, caller, invocation, parents, invoked, site, dispatcher, target,
 				nil, nil, false, constantEnums, domains,
@@ -8824,6 +8877,7 @@ func ps6080FeasibleSuccessors(
 }
 
 type ps6080InvokedLiteralResult struct {
+	unknown       map[*ast.FuncLit]map[*ast.CallExpr]bool
 	literals      map[*ast.FuncLit]bool
 	calls         map[*ast.FuncLit]map[*ast.CallExpr]bool
 	orders        map[*ast.FuncLit]map[*ast.CallExpr][][]token.Pos
@@ -8840,6 +8894,7 @@ type ps6080OrderedInvocation struct {
 
 func ps6080EmptyInvokedLiteralResult() *ps6080InvokedLiteralResult {
 	return &ps6080InvokedLiteralResult{
+		unknown:       make(map[*ast.FuncLit]map[*ast.CallExpr]bool),
 		literals:      make(map[*ast.FuncLit]bool),
 		calls:         make(map[*ast.FuncLit]map[*ast.CallExpr]bool),
 		orders:        make(map[*ast.FuncLit]map[*ast.CallExpr][][]token.Pos),
@@ -9086,6 +9141,8 @@ func ps6080NamedCallbackParameters(pass *analysis.Pass) map[*types.Func]ps6080Ca
 }
 
 type ps6080MayCallbackSite struct {
+	returnOnly bool // Deferred to the returned-callable factory analysis.
+	unknown    bool // MAY effect without a unique, fully modeled invocation path.
 	call       *ast.CallExpr
 	function   *ps6080Function
 	parents    map[ast.Node]ast.Node
@@ -9095,11 +9152,12 @@ type ps6080MayCallbackSite struct {
 }
 
 type ps6080MayCallbackForward struct {
-	call       *ast.CallExpr
-	function   *ps6080Function
-	parents    map[ast.Node]ast.Node
-	invoked    *ps6080InvokedLiteralResult
-	dispatcher *types.Signature
+	argumentOffset int
+	call           *ast.CallExpr
+	function       *ps6080Function
+	parents        map[ast.Node]ast.Node
+	invoked        *ps6080InvokedLiteralResult
+	dispatcher     *types.Signature
 }
 
 func ps6080CallbackParameterIndex(
@@ -9138,304 +9196,9 @@ func ps6080CallbackParameterIndex(
 	}
 }
 
-func ps6080MayNamedCallbackSites(pass *analysis.Pass) map[*types.Func][][]*ps6080MayCallbackSite {
-	if cached, ok := ps6080MayCallbackCaches.Load(pass); ok {
-		return cached.(map[*types.Func][][]*ps6080MayCallbackSite)
-	}
-	type forwardingCall struct {
-		caller     *types.Func
-		callee     *types.Func
-		call       *ast.CallExpr
-		function   *ps6080Function
-		parents    map[ast.Node]ast.Node
-		parameters map[types.Object]int
-	}
-	result := make(map[*types.Func][][]*ps6080MayCallbackSite)
-	var forwarding []forwardingCall
-	functionCount := 0
-	appendSite := func(function *types.Func, parameter int, site *ps6080MayCallbackSite) bool {
-		sites := ps6080GrowIndexSlice(result[function], parameter)
-		for _, existing := range sites[parameter] {
-			if slices.Equal(existing.order, site.order) {
-				return false
-			}
-		}
-		sites[parameter] = append(sites[parameter], site)
-		result[function] = sites
-		return true
-	}
-	for _, file := range pass.Files {
-		for _, declaration := range file.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Body == nil {
-				continue
-			}
-			object, ok := pass.TypesInfo.Defs[function.Name].(*types.Func)
-			if !ok {
-				continue
-			}
-			functionCount++
-			signature, _ := object.Type().(*types.Signature)
-			if signature == nil || signature.Params().Len() == 0 {
-				continue
-			}
-			parameters := make(map[types.Object]int)
-			for index := range signature.Params().Len() {
-				parameter := signature.Params().At(index)
-				if ps6080CallableType(parameter.Type()) {
-					parameters[parameter] = index
-				}
-			}
-			if len(parameters) == 0 {
-				continue
-			}
-			parents := ps6071Parents(function.Body)
-			graph := cfg.New(function.Body, ps6080CallMayReturn(pass))
-			literalGraphs := make(map[*ast.FuncLit]*cfg.CFG)
-			info := &ps6080Function{
-				declaration: function, object: object, signature: signature, body: function.Body,
-			}
-			literalInvocations := ps6080CallbackLiteralInvocations(pass, info, parents)
-			ast.Inspect(function.Body, func(node ast.Node) bool {
-				if literal, nested := node.(*ast.FuncLit); nested {
-					return len(literalInvocations[literal]) > 0
-				}
-				call, ok := node.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				callGraph := graph
-				if literal := ps6080ContainingLiteral(call, parents); literal != nil {
-					callGraph = literalGraphs[literal]
-					if callGraph == nil {
-						callGraph = cfg.New(literal.Body, ps6080CallMayReturn(pass))
-						literalGraphs[literal] = callGraph
-					}
-					if !ps6080CallbackLiteralReachable(
-						pass, graph, literalGraphs, parents, literalInvocations, literal,
-						false, make(map[*ast.FuncLit]bool),
-					) {
-						return true
-					}
-				}
-				if !ps6080NodeReachable(pass, callGraph, parents, call) {
-					return true
-				}
-				if index, callback := ps6080CallbackParameterIndex(
-					pass, info, call.Fun, call, parents, parameters,
-				); callback {
-					appendSite(object, index, &ps6080MayCallbackSite{
-						call: call, function: info, parents: parents, order: []token.Pos{call.Pos()},
-					})
-					return true
-				}
-				if callee, _, direct := typedCallee(pass, call.Fun); direct {
-					forwarding = append(forwarding, forwardingCall{
-						caller: object, callee: callee, call: call, function: info,
-						parents: parents, parameters: parameters,
-					})
-				}
-				return true
-			})
-		}
-	}
-	changed := true
-	for changed {
-		changed = false
-		for _, forward := range forwarding {
-			dispatcher, _ := forward.callee.Type().(*types.Signature)
-			for calleeParameter, sites := range result[forward.callee] {
-				if calleeParameter >= len(forward.call.Args) {
-					continue
-				}
-				callerParameter, forwarded := ps6080CallbackParameterIndex(
-					pass, forward.function, forward.call.Args[calleeParameter], forward.call,
-					forward.parents, forward.parameters,
-				)
-				if !forwarded {
-					continue
-				}
-				for _, site := range sites {
-					if len(site.order) >= functionCount {
-						continue
-					}
-					copy := *site
-					copy.forwarding = slices.Clone(site.forwarding)
-					copy.forwarding = append(copy.forwarding, ps6080MayCallbackForward{
-						call: forward.call, function: forward.function,
-						parents: forward.parents, dispatcher: dispatcher,
-					})
-					copy.order = append(slices.Clone(site.order), forward.call.Pos())
-					changed = appendSite(forward.caller, callerParameter, &copy) || changed
-				}
-			}
-		}
-	}
-	value, _ := ps6080MayCallbackCaches.LoadOrStore(pass, result)
-	return value.(map[*types.Func][][]*ps6080MayCallbackSite)
-}
-
 type ps6080NamedCallbackInvocation struct {
 	order     []token.Pos
 	arguments ps6080InvocationArguments
-}
-
-func ps6080NamedCallbackInvocations(pass *analysis.Pass) map[*types.Func][][]ps6080NamedCallbackInvocation {
-	if cached, ok := ps6080NamedOrderCaches.Load(pass); ok {
-		return cached.(map[*types.Func][][]ps6080NamedCallbackInvocation)
-	}
-	type forwardingCall struct {
-		caller     *types.Func
-		callee     *types.Func
-		position   token.Pos
-		arguments  []ast.Expr
-		parameters map[types.Object]int
-	}
-	result := make(map[*types.Func][][]ps6080NamedCallbackInvocation)
-	var forwarding []forwardingCall
-	functionCount := 0
-	appendInvocation := func(
-		function *types.Func,
-		parameter int,
-		invocation ps6080NamedCallbackInvocation,
-	) bool {
-		invocations := ps6080GrowIndexSlice(result[function], parameter)
-		for _, existing := range invocations[parameter] {
-			if slices.Equal(existing.order, invocation.order) &&
-				ps6080InvocationArgumentsEqual(existing.arguments, invocation.arguments) {
-				return false
-			}
-		}
-		invocations[parameter] = append(
-			invocations[parameter], ps6080NamedCallbackInvocation{
-				order: slices.Clone(invocation.order), arguments: invocation.arguments,
-			},
-		)
-		result[function] = invocations
-		return true
-	}
-	for _, file := range pass.Files {
-		for _, declaration := range file.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Body == nil {
-				continue
-			}
-			object, ok := pass.TypesInfo.Defs[function.Name].(*types.Func)
-			if !ok {
-				continue
-			}
-			functionCount++
-			signature, _ := object.Type().(*types.Signature)
-			parameters := make(map[types.Object]int)
-			if signature != nil {
-				for index := range signature.Params().Len() {
-					parameters[signature.Params().At(index)] = index
-				}
-			}
-			if len(parameters) == 0 {
-				continue
-			}
-			parents := ps6071Parents(function.Body)
-			graph := cfg.New(function.Body, ps6080CallMayReturn(pass))
-			ast.Inspect(function.Body, func(node ast.Node) bool {
-				if _, nested := node.(*ast.FuncLit); nested {
-					return false
-				}
-				call, ok := node.(*ast.CallExpr)
-				if !ok || !ps6080NodeReachable(pass, graph, parents, call) ||
-					!ps6080CFGNodeGuaranteed(graph, call) {
-					return true
-				}
-				switch parent := parents[call].(type) {
-				case *ast.GoStmt:
-					if parent.Call == call {
-						return true
-					}
-				case *ast.DeferStmt:
-					if parent.Call == call {
-						return true
-					}
-				}
-				if identifier, direct := ps2110Unparen(call.Fun).(*ast.Ident); direct {
-					parameterObject := pass.TypesInfo.ObjectOf(identifier)
-					if index, parameter := parameters[parameterObject]; parameter &&
-						ps6080CallableType(parameterObject.Type()) {
-						var arguments ps6080InvocationArguments
-						for argument, expression := range call.Args {
-							identifier, direct := ps2110Unparen(expression).(*ast.Ident)
-							if !direct {
-								continue
-							}
-							if source, forwarded := parameters[pass.TypesInfo.ObjectOf(identifier)]; forwarded {
-								ps6080AddInvocationArgument(&arguments, argument, source)
-							}
-						}
-						appendInvocation(object, index, ps6080NamedCallbackInvocation{
-							order: []token.Pos{call.Pos()}, arguments: arguments,
-						})
-						return true
-					}
-				}
-				if callee, _, direct := typedCallee(pass, call.Fun); direct {
-					forwarding = append(forwarding, forwardingCall{
-						caller: object, callee: callee, position: call.Pos(),
-						arguments: call.Args, parameters: parameters,
-					})
-				}
-				return true
-			})
-		}
-	}
-	changed := true
-	for changed {
-		changed = false
-		for _, call := range forwarding {
-			for parameter, invocations := range result[call.callee] {
-				if parameter >= len(call.arguments) {
-					continue
-				}
-				identifier, direct := ps2110Unparen(call.arguments[parameter]).(*ast.Ident)
-				if !direct {
-					continue
-				}
-				source, forwarded := call.parameters[pass.TypesInfo.ObjectOf(identifier)]
-				if !forwarded {
-					continue
-				}
-				for _, invocation := range invocations {
-					if len(invocation.order) > functionCount {
-						continue
-					}
-					var arguments ps6080InvocationArguments
-					for argument, calleeParameters := range invocation.arguments {
-						for calleeParameter, present := range calleeParameters {
-							if !present {
-								continue
-							}
-							if calleeParameter >= len(call.arguments) {
-								continue
-							}
-							identifier, direct := ps2110Unparen(call.arguments[calleeParameter]).(*ast.Ident)
-							if !direct {
-								continue
-							}
-							callerParameter, mapped := call.parameters[pass.TypesInfo.ObjectOf(identifier)]
-							if !mapped {
-								continue
-							}
-							ps6080AddInvocationArgument(&arguments, argument, callerParameter)
-						}
-					}
-					forwardedOrder := append([]token.Pos{call.position}, invocation.order...)
-					changed = appendInvocation(call.caller, source, ps6080NamedCallbackInvocation{
-						order: forwardedOrder, arguments: arguments,
-					}) || changed
-				}
-			}
-		}
-	}
-	value, _ := ps6080NamedOrderCaches.LoadOrStore(pass, result)
-	return value.(map[*types.Func][][]ps6080NamedCallbackInvocation)
 }
 
 func ps6080NamedCallbackSafeMapParameters(pass *analysis.Pass) map[*types.Func]ps6080IndexSet {
@@ -10673,6 +10436,14 @@ func ps6080ComputeInvokedFunctionLiterals(
 					if mapping == nil || index >= len(call.Args) {
 						continue
 					}
+					if index < len(mayCallbacks[callee]) && ps6080UnknownCallbackSites(mayCallbacks[callee][index]) {
+						continue
+					}
+					if index >= len(namedInvocations[callee]) || len(namedInvocations[callee][index]) == 0 {
+						// MAY reachability is handled below. An absent definite
+						// path must not become an invented call-site-only order.
+						continue
+					}
 					argumentTargets := resolveExpression(context, call, call.Args[index], state)
 					mergeTargets(
 						argumentTargets, staticLiteralTargets(call.Args[index], make(map[types.Object]bool)),
@@ -10686,9 +10457,6 @@ func ps6080ComputeInvokedFunctionLiterals(
 					var invocations []ps6080NamedCallbackInvocation
 					if index < len(namedInvocations[callee]) {
 						invocations = namedInvocations[callee][index]
-					}
-					if len(invocations) == 0 {
-						invocations = []ps6080NamedCallbackInvocation{{arguments: mapping}}
 					}
 					for literal := range argumentTargets {
 						enqueue(context, literal, call)
@@ -10707,14 +10475,20 @@ func ps6080ComputeInvokedFunctionLiterals(
 					}
 				}
 				for index, sites := range mayCallbacks[callee] {
-					if len(sites) == 0 || index >= len(call.Args) {
+					if !ps6080CallbackMayInvoke(sites) || index >= len(call.Args) {
 						continue
 					}
+					unknown := ps6080UnknownCallbackSites(sites)
+					definite := 0
+					if index < len(namedInvocations[callee]) {
+						definite = len(namedInvocations[callee][index])
+					}
+					uncertainOrder := unknown || definite < len(sites)
 					argumentTargets := resolveExpression(context, call, call.Args[index], state)
 					mergeTargets(
 						argumentTargets, staticLiteralTargets(call.Args[index], make(map[types.Object]bool)),
 					)
-					if len(argumentTargets) > 0 &&
+					if !unknown && len(argumentTargets) > 0 &&
 						!mayCallNonLiteral(call.Args[index], make(map[types.Object]bool)) {
 						safeArguments := result.safeArguments[call]
 						ps6080AddIndex(&safeArguments, index)
@@ -10722,7 +10496,16 @@ func ps6080ComputeInvokedFunctionLiterals(
 					}
 					for literal := range argumentTargets {
 						enqueue(context, literal, call)
+						if uncertainOrder {
+							if result.unknown[literal] == nil {
+								result.unknown[literal] = make(map[*ast.CallExpr]bool)
+							}
+							result.unknown[literal][call] = true
+						}
 						for _, site := range sites {
+							if site.unknown {
+								continue
+							}
 							order := append([]token.Pos{call.Pos()}, site.order...)
 							ps6080AddInvocationOrder(result, literal, call, order)
 						}
@@ -10790,6 +10573,7 @@ func ps6080ComputeInvokedFunctionLiterals(
 			})
 		}
 		if len(queue) == 0 {
+			ps6080PropagateUnknownInvocations(result, parents)
 			return result
 		}
 	}
