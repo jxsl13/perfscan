@@ -79,7 +79,24 @@ alignment, aliases, tails, feature gates, fallback behavior, and the noescape
 contract. Validate arbitrary packed rows against a scalar oracle, inspect the
 native code, keep the candidate separately selectable, and retain it only
 after same-binary alternating-order complete-operation benchmarks. A reviewed
-wrapper can use //perfscan:native-scratch-validated on its function declaration.`,
+wrapper can use //perfscan:native-scratch-validated on its function declaration.
+
+Owner issue #843 covers the independent-row form of this same repeated-call
+pattern, not a second overlapping rule. Keep exact block iteration order and
+per-block reduction boundaries (including float32 subtotals widened to ordered
+float64 accumulation). Preserve a zero-length fast path before forming element
+pointers, and change only architecture-specific routing while retaining other
+architectures and scalar fallbacks. Build with the minimum supported compiler
+as well as the current one. Retain arbitrary-header parity, allocation checks,
+and end-to-end benchmarks in addition to the isolated row benchmark.
+
+Prioritize a candidate when a retained profile confirms meaningful wrapper/ABI
+cost and measurements confirm an allocation-free native arithmetic leaf.
+Noescape proves nonretention, not allocation freedom or absence of side effects;
+neither native purity nor arithmetic ownership is inferred from its name or
+directive. The source detector deliberately requires the fixed-array staging
+and packed-input proofs above; scalar-local-only or unmodeled orchestration
+stays outside its supported subset.`,
 		Before: `//go:noescape
 func blockLeaf(dst, packed *byte, coefficients *float32)
 
@@ -114,7 +131,22 @@ median and three wins; final numerical digests were identical. An enlarged Go
 staging alternative was rejected after growing the frame from 224 to 1216
 bytes, zeroing 1088 bytes, and regressing. These owner-specific measurements
 require the pinned emitted-code and end-to-end evidence; source analysis alone
-does not prove zeroing, a speedup, or native purity.`,
+does not prove zeroing, a speedup, or native purity.
+
+Owner issue #843's independent Q4_K row moved 16-float metadata staging and
+eight block calls at K=2048 into one ARM64 row call. On Apple M2 Pro the owner
+reported 283.5 to 245.4 ns (1.155x, 7/7 row wins, zero allocations),
+157.548 to 147.343 us at M1/N=4096 (1.069x, 5/7, 29 allocations unchanged),
+and 1.788325 to 1.651625 s for 64-token production decode (1.083x, 7/7).
+Every retained production pair had final-logit digest ea3df5516f17df83.
+The pinned owner campaign compares baseline source
+9f1801c82f91330c79c4d02ab9e4755f635a4ada with candidate
+68f4018355d7de48c6e2b0fb5fbe1bef51044ca1; evidence is at
+https://github.com/jxsl13/goai/tree/8d1d26d4e3fb239d7c727f2dec6bb398335da46b/internal/benchcompare/leadership/evidence/m2-cpu-q4k-single-row-asm-20260823.
+These are the owner's separate-binary, alternating fresh-process results, not
+a new perfscan benchmark run or a general speedup guarantee. The campaign
+records Go 1.26.6/1.27.0 package checks and cross-builds, and separately records
+unrelated full-repository test failures; it does not claim that run was green.`,
 	},
 	Analyzer: &analysis.Analyzer{
 		Name: "PS6084",
@@ -124,8 +156,9 @@ does not prove zeroing, a speedup, or native purity.`,
 })
 
 const (
-	ps6084MinimumScratch = int64(2)
-	ps6084MaximumScratch = int64(64)
+	ps6084MinimumScratch     = int64(2)
+	ps6084MaximumScratch     = int64(64)
+	ps6084WholeRowGuardrails = " Preserve exact block iteration order and per-block reduction boundaries, a zero-length fast path before element pointers, and architecture-specific routing; require minimum-supported-compiler builds and retained end-to-end benchmarks. Noescape alone does not prove allocation freedom or native purity."
 )
 
 type ps6084Fill struct {
@@ -1169,7 +1202,7 @@ func ps6084Report(pass *analysis.Pass, match *ps6084Match) {
 	}
 	repeated := ""
 	if match.repeated {
-		repeated = " The enclosing Go loop also repeats this noescape ABI crossing; benchmark whether the native boundary can cover the complete row while retaining live partials."
+		repeated = " The enclosing Go loop also repeats this noescape ABI crossing; benchmark whether the native boundary can cover the complete row while retaining live partials." + ps6084WholeRowGuardrails
 	}
 	pass.Reportf(match.fill.loop.Pos(), "fixed %d-element %s scratch %s is completely built by this Go loop, used nowhere else, and immediately consumed by noescape native/assembly leaf %s, which independently receives packed source %s; move only the block-local coefficient construction across the existing ABI so the leaf can reuse already-loaded metadata.%s Preserve exact dtype and operation order, alignment, bounds, aliases, tails, feature gates, fallback behavior, and the noescape contract; validate arbitrary packed rows against a scalar oracle, inspect native code, and require same-binary alternating-order complete-operation benchmarks (advisory, no automatic fix)",
 		match.fill.length, element, match.fill.scratchName, match.leaf.Name(), strings.Join(sourceNames, ", "), repeated)

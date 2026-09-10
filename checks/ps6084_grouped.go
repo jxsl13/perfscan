@@ -1143,6 +1143,6 @@ func ps6084ReportGrouped(pass *analysis.Pass, match *ps6084GroupedMatch) {
 		names = append(names, scratch.Name())
 		sources = append(sources, match.sources[scratch].Name())
 	}
-	pass.Reportf(match.loop.Pos(), "fixed scratch arrays %s are completely overwritten by this affine Go fill, used nowhere else, and immediately consumed with paired packed sources %s by noescape native/assembly leaf %s on a path that may repeat; benchmark whether a coarser native row boundary can own the header decode and scratch lifetime (advisory, no automatic fix). Preserve exact dtype and operation order, numerical behavior, alignment, bounds, aliases, tails, ABI, feature gates, and fallbacks; verify emitted frame/zeroing behavior and require same-binary alternating-order complete-operation benchmarks",
+	pass.Reportf(match.loop.Pos(), "fixed scratch arrays %s are completely overwritten by this affine Go fill, used nowhere else, and immediately consumed with paired packed sources %s by noescape native/assembly leaf %s on a path that may repeat; benchmark whether a coarser native row boundary can own the header decode and scratch lifetime (advisory, no automatic fix). Preserve exact dtype and operation order, numerical behavior, alignment, bounds, aliases, tails, ABI, feature gates, and fallbacks; verify emitted frame/zeroing behavior and require same-binary alternating-order complete-operation benchmarks."+ps6084WholeRowGuardrails,
 		strings.Join(names, ", "), strings.Join(sources, ", "), match.leaf.Name())
 }
