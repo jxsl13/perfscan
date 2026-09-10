@@ -149,3 +149,12 @@ Rules without a pair, and why:
   cannot validate device residency, native symbol decode cost, or separation
   of resident and host-transfer routes. Require paired target-hardware evidence
   plus numerical and lifecycle validation.
+- **PS6121** (monomorphic loop-callback dispatch advisory): a toy callback
+  benchmark would measure an isolated indirect call, not whether that call
+  survives in the exact compiled callback or matters to the enclosing
+  operation. The owner removed a confirmed indirect call, yet all three
+  complete CPU GELU-backward campaigns failed both the predeclared 1.05x and
+  p<0.05 gates (1.0114x/0.382867, 1.0049x/0.710373, and
+  1.0400x/0.620047), so the candidate was rejected. Inspect exact machine code
+  and apply the documented numerical and complete-operation gates at the real
+  site.
