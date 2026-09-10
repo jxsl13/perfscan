@@ -231,19 +231,46 @@ type ps6100CallableResolution struct {
 }
 
 func runPS6100(pass *analysis.Pass) (any, error) {
+	candidates := ps6100CandidateFunctions(pass)
+	if len(candidates) == 0 {
+		return nil, nil
+	}
 	helpers := ps6100LocalFunctions(pass)
 	callables := ps6100LocalCallableBindings(pass, helpers)
 	addresses := ps6100Addresses(pass)
+	for _, function := range candidates {
+		ps6100Function(pass, function, helpers, callables, addresses)
+	}
+	return nil, nil
+}
+
+func ps6100CandidateFunctions(pass *analysis.Pass) []*ast.FuncDecl {
+	var candidates []*ast.FuncDecl
 	for _, file := range pass.Files {
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Body == nil {
+			if !ok || function.Body == nil || !ps6100HasNecessaryLoops(function.Body) {
 				continue
 			}
-			ps6100Function(pass, function, helpers, callables, addresses)
+			candidates = append(candidates, function)
 		}
 	}
-	return nil, nil
+	return candidates
+}
+
+func ps6100HasNecessaryLoops(body *ast.BlockStmt) bool {
+	loops := 0
+	ast.Inspect(body, func(node ast.Node) bool {
+		if _, literal := node.(*ast.FuncLit); literal {
+			return false
+		}
+		switch node.(type) {
+		case *ast.ForStmt, *ast.RangeStmt:
+			loops++
+		}
+		return loops < 2
+	})
+	return loops >= 2
 }
 
 func ps6100LocalFunctions(pass *analysis.Pass) ps6100Helpers {
