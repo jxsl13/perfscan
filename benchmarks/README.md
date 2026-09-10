@@ -167,3 +167,10 @@ Rules without a pair, and why:
   profitability. Both owner variants were rejected; validation requires the
   configured backend, mixed/homogeneous lanes, scalar tails, numerical classes,
   fixed controls, and repeated alternating whole-operation campaigns.
+- **PS6124** (scoped backend-routing attribution advisory): the relevant route
+  crosses project-owned context, construction, model, and backend-registry
+  boundaries. A toy benchmark would fabricate both routing and speed evidence.
+  If independent evidence proves that the measured route already uses the
+  intended backend without process-global mutation, retain that design and
+  document the attribution with `//perfscan:ignore PS6124 <reason>`; otherwise
+  validate a serialized scoped pin and restoration in the real benchmark.

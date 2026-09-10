@@ -367,6 +367,26 @@ schedulerTileGrainContracts:
         kernelEntryRoutesFullTiles: true
         scalarFallbackHandlesTileRemainder: true
 
+# Exact scoped backend-routing contract for PS6124. The listed APIs and
+# construction callables are vocabulary and lifecycle boundaries only: PS6124
+# derives a source-feasible may-reach route to globalRouters from typed
+# source/object facts; this does not assert runtime execution.
+# processGlobalWriterIsolation is a required reviewed project assertion that
+# this test/benchmark owns or serializes the process-global mutation region.
+scopedBackendRoutingContracts:
+  - name: cpu-quant-decode
+    configuredSite: example.com/project/internal/bench.TestCPUQuantDecode
+    backendGet: example.com/project/backend.Get
+    contextWithBackend: example.com/project/backend.Context.WithBackend
+    preference: example.com/project/backend.Preference
+    setPreference: example.com/project/backend.SetPreference
+    selectedBackend: example.com/project/backend.CPU
+    constructionCallables:
+      - example.com/project/model.LoadQuantized
+    globalRouters:
+      - example.com/project/backend.Default
+    processGlobalWriterIsolation: true
+
 # Helpers exposing typed input views and caller-owned output views.
 inputViewFuncs:
   - f64Data
