@@ -232,6 +232,9 @@ type ps6100CallableResolution struct {
 
 func runPS6100(pass *analysis.Pass) (any, error) {
 	candidates := ps6100CandidateFunctions(pass)
+	candidates = slices.DeleteFunc(candidates, func(function *ast.FuncDecl) bool {
+		return !ps6100HasRepeatedInnerLoops(function.Body)
+	})
 	if len(candidates) == 0 {
 		return nil, nil
 	}
@@ -271,6 +274,45 @@ func ps6100HasNecessaryLoops(body *ast.BlockStmt) bool {
 		return loops < 2
 	})
 	return loops >= 2
+}
+
+// A report groups at least two own-body scans by their nearest enclosing loop.
+// Alias and helper summaries cannot introduce new loop nodes or change that
+// ownership, so bodies without this shape cannot report even before typing.
+func ps6100HasRepeatedInnerLoops(body *ast.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	found := false
+	ast.Walk(&ps6100InnerLoopVisitor{counts: make(map[ast.Node]int), found: &found}, body)
+	return found
+}
+
+type ps6100InnerLoopVisitor struct {
+	owner  ast.Node
+	counts map[ast.Node]int
+	found  *bool
+}
+
+func (visitor *ps6100InnerLoopVisitor) Visit(node ast.Node) ast.Visitor {
+	if node == nil || *visitor.found {
+		return nil
+	}
+	if _, literal := node.(*ast.FuncLit); literal {
+		return nil
+	}
+	switch node.(type) {
+	case *ast.ForStmt, *ast.RangeStmt:
+		if visitor.owner != nil {
+			visitor.counts[visitor.owner]++
+			if visitor.counts[visitor.owner] >= 2 {
+				*visitor.found = true
+				return nil
+			}
+		}
+		return &ps6100InnerLoopVisitor{owner: node, counts: visitor.counts, found: visitor.found}
+	}
+	return visitor
 }
 
 func ps6100LocalFunctions(pass *analysis.Pass) ps6100Helpers {
