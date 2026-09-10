@@ -8,5 +8,5 @@ import (
 
 func TestPS6084(t *testing.T) {
 	t.Parallel()
-	analysistest.Run(t, analysistest.TestData(), PS6084.Analyzer, "ps6084")
+	analysistest.Run(t, analysistest.TestData(), PS6084.Analyzer, "ps6084", "ps6084grouped")
 }
