@@ -238,7 +238,8 @@ gpuReductionKernels:
 # ownership. Graph checks use short names to distinguish compute from movement.
 # PS6090 additionally accepts exact typed IDs (import/path.Func or
 # import/path.Type.Method) and audits that benchmark loops keep their primary
-# non-error result observably live. Prefer exact IDs for that benchmark audit.
+# non-error result observably live. PS6123 treats listed calls as reviewed-pure
+# expensive SIMD DAG leaves. Prefer exact IDs for typed audits.
 pureComputeFuncs:
   - forward
   - example.com/project/math.QMatMul
