@@ -147,3 +147,73 @@ func f(inner int) {
 		t.Fatalf("stored callback RMW lost dependency: known=%v derived=%v stride=%q", known, output.deps[base], output.strideDeps[base])
 	}
 }
+
+func TestPS4008RecursiveReceiverEffectsAreConservative(t *testing.T) {
+	t.Parallel()
+	const source = `package sample
+type box struct{ value int }
+func (b *box) direct() { b.direct() }
+func (b *box) left() { b.right() }
+func (b *box) right() { b.left() }
+func (b *box) aliasCycle() { next := b.aliasCycle; next() }
+func (b *box) expressionCycle() { (*box).expressionCycle(b) }
+func invoke(callback func()) { callback() }
+func (b *box) callbackCycle() { invoke(b.callbackCycle) }
+func (b *box) readOnly() { _ = b.value }
+func (b *box) write() { b.value++ }
+type genericBox[T any] struct{ value T }
+func (b *genericBox[T]) cycle() { b.cycle() }
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "recursive_receiver.go", source, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := &types.Info{
+		Types:      make(map[ast.Expr]types.TypeAndValue),
+		Defs:       make(map[*ast.Ident]types.Object),
+		Uses:       make(map[*ast.Ident]types.Object),
+		Selections: make(map[*ast.SelectorExpr]*types.Selection),
+	}
+	pkg, err := (&types.Config{}).Check("sample", fset, []*ast.File{file}, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pass := &analysis.Pass{Fset: fset, Files: []*ast.File{file}, Pkg: pkg, TypesInfo: info}
+	index := ps1006BuildAnalysisIndex(pass)
+	ps1006ActiveAnalysisIndexes.Store(pass, index)
+	defer ps1006ActiveAnalysisIndexes.Delete(pass)
+
+	want := map[string]bool{
+		"direct": true, "left": true, "right": true,
+		"aliasCycle": true, "expressionCycle": true, "callbackCycle": true, "cycle": true,
+		"readOnly": false, "write": true,
+	}
+	seen := make(map[string]bool)
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Recv == nil {
+			continue
+		}
+		expected, ok := want[function.Name.Name]
+		if !ok {
+			continue
+		}
+		seen[function.Name.Name] = true
+		syntax := ps4008CallableSyntaxValue{functionType: function.Type, receiver: function.Recv, receiverArgument: true, body: function.Body}
+		receiver := ps4008SyntaxParameterObject(pass, syntax, 0)
+		if got := ps4008CallableMayWriteParameter(pass, function.Body, receiver); got != expected {
+			t.Errorf("%s receiver may-write = %v, want %v", function.Name.Name, got, expected)
+		}
+		// Repeating the query exercises the completed per-pass summary rather
+		// than re-entering either a direct or mutual cycle.
+		if got := ps4008CallableMayWriteParameter(pass, function.Body, receiver); got != expected {
+			t.Errorf("cached %s receiver may-write = %v, want %v", function.Name.Name, got, expected)
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("receiver method %s was not exercised", name)
+		}
+	}
+}

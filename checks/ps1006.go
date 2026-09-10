@@ -3902,6 +3902,9 @@ type ps1006AnalysisIndex struct {
 	pureCalls              map[*ast.CallExpr]bool
 	pureCallsKnown         map[*ast.CallExpr]bool
 	activeCallableBodies   map[*ast.BlockStmt]bool
+	activeCallableParams   map[ps4008CallableParameterKey]bool
+	callableParamWrites    map[ps4008CallableParameterKey]bool
+	callableParamKnown     map[ps4008CallableParameterKey]bool
 	activeCallableReturns  map[*ast.CallExpr]bool
 	callableEffects        map[ps4008CallableEffectKey]map[types.Object]bool
 	callableInvocations    map[ps4008CallableInvocationKey]bool
@@ -4002,6 +4005,9 @@ func ps1006BuildAnalysisIndex(pass *analysis.Pass) *ps1006AnalysisIndex {
 		pureCalls:              make(map[*ast.CallExpr]bool),
 		pureCallsKnown:         make(map[*ast.CallExpr]bool),
 		activeCallableBodies:   make(map[*ast.BlockStmt]bool),
+		activeCallableParams:   make(map[ps4008CallableParameterKey]bool),
+		callableParamWrites:    make(map[ps4008CallableParameterKey]bool),
+		callableParamKnown:     make(map[ps4008CallableParameterKey]bool),
 		activeCallableReturns:  make(map[*ast.CallExpr]bool),
 		callableEffects:        make(map[ps4008CallableEffectKey]map[types.Object]bool),
 		callableInvocations:    make(map[ps4008CallableInvocationKey]bool),
