@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**414 checks total** — **265 with a bit-identical auto-fix**, 149 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **44 L3** (aggressive).
+**415 checks total** — **265 with a bit-identical auto-fix**, 150 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **45 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -426,4 +426,5 @@ checks' fixes.
 | [PS6118](PS6118.md) | verify | L3 |  | an accelerator objective materializes training state around a host optimizer on every step |
 | [PS6119](PS6119.md) | verify | L3 |  | one invariant resident weight can make accelerator evidence unrepresentatively cache-hot |
 | [PS6120](PS6120.md) | verify | L3 |  | a small invariant accelerator codebook is rebuilt and uploaded in a repeated dispatch path |
+| [PS6121](PS6121.md) | verify | L3 |  | a source-monomorphic function value is invoked inside a parallel element loop |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |

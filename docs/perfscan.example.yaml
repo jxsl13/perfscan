@@ -108,7 +108,8 @@ vectorizedSiblingFuncs:
 
 # The project's parallel fan-out entry points. PS3xxx checks inspect serial
 # work and closure escapes around them; PS6076 detects invariant packing
-# repeated by every callback band. (e.g. parallel.For)
+# repeated by every callback band, and PS6121 verifies source-monomorphic
+# function parameters invoked inside callback-band element loops. (e.g. parallel.For)
 fanOutHelpers:
   - parallel.For
 
