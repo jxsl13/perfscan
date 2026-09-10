@@ -394,6 +394,33 @@ func TestMissingVocabSchedulerTileGrainContracts(t *testing.T) {
 	}
 }
 
+func TestMissingVocabScopedBackendRoutingContracts(t *testing.T) {
+	t.Parallel()
+	check := &lint.Check{NeedsConfig: true, Vocab: []string{"scopedBackendRoutingContracts"}}
+	if got := missingVocab(check, &config.Config{}); len(got) != 1 {
+		t.Fatalf("missingVocab(empty)=%v", got)
+	}
+	invalid := config.Config{ScopedBackendRoutingContracts: []config.ScopedBackendRoutingContract{{Name: "incomplete"}}}
+	if got := missingVocab(check, &invalid); len(got) != 1 {
+		t.Fatalf("missingVocab(invalid)=%v", got)
+	}
+	contract := config.ScopedBackendRoutingContract{
+		Name: "cpu", ConfiguredSite: "example.com/p.TestCPU", BackendGet: "example.com/b.Get",
+		ContextWithBackend: "example.com/b.Context.WithBackend", Preference: "example.com/b.Preference",
+		SetPreference: "example.com/b.SetPreference", SelectedBackend: "example.com/b.CPU",
+		ConstructionCallables: []string{"example.com/m.Load"}, GlobalRouters: []string{"example.com/b.Default"},
+		ProcessGlobalWriterIsolation: true,
+	}
+	configured := config.Config{ScopedBackendRoutingContracts: []config.ScopedBackendRoutingContract{contract}}
+	if got := missingVocab(check, &configured); len(got) != 0 {
+		t.Fatalf("missingVocab(configured)=%v", got)
+	}
+	configured.ScopedBackendRoutingContracts = append(configured.ScopedBackendRoutingContracts, contract)
+	if got := missingVocab(check, &configured); len(got) != 1 {
+		t.Fatalf("missingVocab(ambiguous)=%v", got)
+	}
+}
+
 func schedulerTileGrainContractForTest() config.SchedulerTileGrainContract {
 	return config.SchedulerTileGrainContract{
 		Name:               "attention-bands",

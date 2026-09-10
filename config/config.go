@@ -185,6 +185,10 @@ type Config struct {
 	// identifier spelling. With no complete contract PS6112 stays silent.
 	SchedulerTileGrainContracts []SchedulerTileGrainContract `json:"schedulerTileGrainContracts,omitempty" yaml:"schedulerTileGrainContracts"`
 
+	// ScopedBackendRoutingContracts identify backend-specific tests or benchmarks
+	// whose explicit Context selection can coexist with downstream global routing.
+	ScopedBackendRoutingContracts []ScopedBackendRoutingContract `json:"scopedBackendRoutingContracts,omitempty" yaml:"scopedBackendRoutingContracts"`
+
 	// InputViewFuncs and OutputViewFuncs expose repository-specific typed views
 	// over input and destination storage respectively.
 	InputViewFuncs  []string `json:"inputViewFuncs,omitempty" yaml:"inputViewFuncs"`
@@ -2112,6 +2116,60 @@ func (c TopKOneContract) Valid() bool {
 	return ok
 }
 
+// ScopedBackendRoutingContract binds exact typed routing APIs and lifecycle
+// boundaries for PS6124. Names use import-path-qualified function, method, or
+// object identities (for example example.com/backend.SetPreference).
+type ScopedBackendRoutingContract struct {
+	Name                  string   `json:"name" yaml:"name"`
+	ConfiguredSite        string   `json:"configuredSite" yaml:"configuredSite"`
+	BackendGet            string   `json:"backendGet" yaml:"backendGet"`
+	ContextWithBackend    string   `json:"contextWithBackend" yaml:"contextWithBackend"`
+	Preference            string   `json:"preference" yaml:"preference"`
+	SetPreference         string   `json:"setPreference" yaml:"setPreference"`
+	SelectedBackend       string   `json:"selectedBackend" yaml:"selectedBackend"`
+	ConstructionCallables []string `json:"constructionCallables" yaml:"constructionCallables"`
+	GlobalRouters         []string `json:"globalRouters" yaml:"globalRouters"`
+	// ProcessGlobalWriterIsolation records a project review that the configured
+	// test/benchmark owns or serializes the process-global preference region.
+	// Go source order cannot establish that cross-goroutine property.
+	ProcessGlobalWriterIsolation bool `json:"processGlobalWriterIsolation" yaml:"processGlobalWriterIsolation"`
+}
+
+func (c ScopedBackendRoutingContract) Valid() bool { //perfscan:ignore PS3106 public config value validation
+	return c.Name != "" && strings.TrimSpace(c.Name) == c.Name && ps6109CallableIDValid(c.ConfiguredSite) &&
+		ps6109CallableIDValid(c.BackendGet) && ps6109CallableIDValid(c.ContextWithBackend) &&
+		ps6109CallableIDValid(c.Preference) && ps6109CallableIDValid(c.SetPreference) &&
+		ps6109TypeIDValid(c.SelectedBackend) && len(c.ConstructionCallables) > 0 &&
+		len(c.GlobalRouters) > 0 && c.ProcessGlobalWriterIsolation &&
+		allContractNamesValid(c.ConstructionCallables) && allContractNamesValid(c.GlobalRouters)
+}
+
+func allContractNamesValid(names []string) bool {
+	for _, name := range names {
+		if !ps6109CallableIDValid(name) {
+			return false
+		}
+	}
+	return true
+}
+
+// UsableScopedBackendRoutingContractCount rejects ambiguous configured sites.
+func UsableScopedBackendRoutingContractCount(contracts []ScopedBackendRoutingContract) int {
+	counts := make(map[string]int)
+	for index := range contracts {
+		if contracts[index].Valid() {
+			counts[contracts[index].ConfiguredSite]++
+		}
+	}
+	usable := 0
+	for index := range contracts {
+		if contracts[index].Valid() && counts[contracts[index].ConfiguredSite] == 1 {
+			usable++
+		}
+	}
+	return usable
+}
+
 // ResolvedKind returns the contract's explicit or unambiguous API kind.
 func (c TopKOneContract) ResolvedKind() (TopKOneContractKind, bool) {
 	if c.KArgPosition <= 0 || c.IndicesResultPosition <= 0 ||
@@ -2200,6 +2258,7 @@ type Sets struct {
 	TopKOneContracts                  []TopKOneContract
 	NativeSnapshotStringCopyContracts []NativeSnapshotStringCopyContract
 	SchedulerTileGrainContracts       []SchedulerTileGrainContract
+	ScopedBackendRoutingContracts     []ScopedBackendRoutingContract
 	InputViewFuncs                    map[string]bool
 	OutputViewFuncs                   map[string]bool
 	ReferenceBackendPkg               string
@@ -2261,6 +2320,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		TopKOneContracts:                  slices.Clone(c.TopKOneContracts),
 		NativeSnapshotStringCopyContracts: slices.Clone(c.NativeSnapshotStringCopyContracts),
 		SchedulerTileGrainContracts:       cloneSchedulerTileGrainContracts(c.SchedulerTileGrainContracts),
+		ScopedBackendRoutingContracts:     cloneScopedBackendRoutingContracts(c.ScopedBackendRoutingContracts),
 		InputViewFuncs:                    toSet(c.InputViewFuncs),
 		OutputViewFuncs:                   toSet(c.OutputViewFuncs),
 		ReferenceBackendPkg:               c.ReferenceBackendPkg,
@@ -2283,6 +2343,15 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		StateExpandedLookupContracts:              slices.Clone(c.StateExpandedLookupContracts),
 		SharedFanOutContracts:                     cloneSharedFanOutContracts(c.SharedFanOutContracts),
 	}
+}
+
+func cloneScopedBackendRoutingContracts(contracts []ScopedBackendRoutingContract) []ScopedBackendRoutingContract {
+	cloned := slices.Clone(contracts)
+	for index := range cloned {
+		cloned[index].ConstructionCallables = slices.Clone(cloned[index].ConstructionCallables)
+		cloned[index].GlobalRouters = slices.Clone(cloned[index].GlobalRouters)
+	}
+	return cloned
 }
 
 func cloneSharedFanOutContracts(contracts []SharedFanOutContract) []SharedFanOutContract {

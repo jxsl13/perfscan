@@ -359,6 +359,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"topKOneContracts":                  validTopKOneContracts(cfg.TopKOneContracts),
 		"nativeSnapshotStringCopyContracts": validNativeSnapshotStringCopyContracts(cfg.NativeSnapshotStringCopyContracts),
 		"schedulerTileGrainContracts":       validSchedulerTileGrainContracts(cfg.SchedulerTileGrainContracts),
+		"scopedBackendRoutingContracts":     validScopedBackendRoutingContracts(cfg.ScopedBackendRoutingContracts),
 		"inputViewFuncs":                    len(cfg.InputViewFuncs),
 		"outputViewFuncs":                   len(cfg.OutputViewFuncs),
 		"referenceBackendPkg":               len(cfg.ReferenceBackendPkg),
@@ -386,6 +387,10 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		}
 	}
 	return missing
+}
+
+func validScopedBackendRoutingContracts(contracts []config.ScopedBackendRoutingContract) int {
+	return config.UsableScopedBackendRoutingContractCount(contracts)
 }
 
 func validResidentWeightBenchmarkContracts(contracts []config.ResidentWeightBenchmarkContract) int {
