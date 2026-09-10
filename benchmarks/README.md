@@ -158,3 +158,7 @@ Rules without a pair, and why:
   1.0400x/0.620047), so the candidate was rejected. Inspect exact machine code
   and apply the documented numerical and complete-operation gates at the real
   site.
+- **PS6122** (constant SIMD shift code-generation advisory): source-level Go
+  benchmarks cannot establish whether a pinned compiler emits an immediate or
+  broadcast variable shift. Validate disassembly first, then benchmark the
+  complete consumer and preallocated leaf on the exact compiler and ISA.
