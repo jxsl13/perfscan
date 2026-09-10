@@ -299,7 +299,7 @@ func runPS6080(pass *analysis.Pass) (any, error) {
 	defer ps6080ReturnFailureCaches.Delete(pass)
 
 	functions := ps6080Functions(pass)
-	if len(functions) == 0 {
+	if !ps6080HasRequiredRoleSeeds(functions) {
 		return nil, nil
 	}
 	constantEnums := ps6080ConstantEnums(pass)
@@ -388,6 +388,27 @@ func runPS6080(pass *analysis.Pass) (any, error) {
 		ps6080Report(pass, &findings[index])
 	}
 	return nil, nil
+}
+
+// ps6080HasRequiredRoleSeeds checks necessary, not sufficient, prerequisites.
+// Reachability cannot introduce a role: it starts at the declaration roles
+// collected by ps6080Functions, and synthetic callback functions have no roles.
+// Avoid constructing package-wide callback summaries when one required layer
+// cannot have any root. Do not use cpuIncoming or indirect here: those facts
+// are populated by the very graph analysis this preflight precedes.
+func ps6080HasRequiredRoleSeeds(functions map[*types.Func]*ps6080Function) bool {
+	var storage, decode, cpu bool
+	for _, function := range functions {
+		storage = storage || function.roles&ps6080StorageRole != 0
+		if !function.backend {
+			decode = decode || function.roles&ps6080DecodeRole != 0
+			cpu = cpu || function.roles&ps6080MatmulRole != 0
+		}
+		if storage && decode && cpu {
+			return true
+		}
+	}
+	return false
 }
 
 func ps6080ProductionPass(pass *analysis.Pass) *analysis.Pass {
