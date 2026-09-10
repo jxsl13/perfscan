@@ -3,3 +3,6 @@
 *.md text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
+# These owner fixtures have byte-exact digest assertions on every platform.
+checks/testdata/ps6084_owner_baseline.go.txt text eol=lf
+checks/testdata/ps6084_owner_candidate.go.txt text eol=lf
