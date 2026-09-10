@@ -162,3 +162,8 @@ Rules without a pair, and why:
   benchmarks cannot establish whether a pinned compiler emits an immediate or
   broadcast variable shift. Validate disassembly first, then benchmark the
   complete consumer and preallocated leaf on the exact compiler and ISA.
+- **PS6123** (eager SIMD select advisory): a portable toy select cannot establish
+  target SIMD lowering, uniform-mask frequency, branch cost, or complete-operation
+  profitability. Both owner variants were rejected; validation requires the
+  configured backend, mixed/homogeneous lanes, scalar tails, numerical classes,
+  fixed controls, and repeated alternating whole-operation campaigns.
