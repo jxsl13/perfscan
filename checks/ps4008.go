@@ -2829,6 +2829,25 @@ func ps4008CallableMayWriteParameter(pass *analysis.Pass, body *ast.BlockStmt, p
 		return true
 	}
 	writes := false
+	index := ps1006AnalysisIndexForPass(pass)
+	key := ps4008CallableParameterKey{body: body, parameter: parameter}
+	if index != nil {
+		if index.callableParamKnown[key] {
+			return index.callableParamWrites[key]
+		}
+		if index.activeCallableParams[key] {
+			// Recursive receiver and callback summaries have no finite local proof
+			// of purity. Treat the cycle as a possible write; callers that need a
+			// definite overwrite continue to use the separate definite-effect path.
+			return true
+		}
+		index.activeCallableParams[key] = true
+		defer func() {
+			delete(index.activeCallableParams, key)
+			index.callableParamWrites[key] = writes
+			index.callableParamKnown[key] = true
+		}()
+	}
 	ast.Inspect(body, func(node ast.Node) bool {
 		if writes {
 			return false
@@ -2887,6 +2906,11 @@ func ps4008CallableMayWriteParameter(pass *analysis.Pass, body *ast.BlockStmt, p
 		return true
 	})
 	return writes
+}
+
+type ps4008CallableParameterKey struct {
+	body      *ast.BlockStmt
+	parameter types.Object
 }
 
 func ps4008DirectObjectAssignment(pass *analysis.Pass, expression ast.Expr, object types.Object) bool {

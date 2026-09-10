@@ -358,6 +358,11 @@ func TestPS1006(t *testing.T) {
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS1006.Analyzer, "ps1006")
 }
 
+func TestPS1006RecursiveReceiverSummary(t *testing.T) {
+	t.Parallel()
+	analysistest.Run(t, analysistest.TestData(), PS1006.Analyzer, "ps1006recursion")
+}
+
 func TestPS1007(t *testing.T) {
 	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), PS1007.Analyzer, "ps1007")
 }
