@@ -48,24 +48,28 @@ jobs:
           else
             tar czf "out/${name}.tar.gz" "$bin"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
           path: out/*
           if-no-files-found: error
+          # Keep the named artifact wrapper around each release archive.
+          archive: true
 
   release:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.1
         with:
           path: dist
           merge-multiple: true
+          skip-decompress: false
+          digest-mismatch: error
       - name: Checksums
         run: cd dist && sha256sum ./* > perfscan_checksums.txt
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           files: dist/*
           fail_on_unmatched_files: true
