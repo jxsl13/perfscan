@@ -387,6 +387,27 @@ scopedBackendRoutingContracts:
       - example.com/project/backend.Default
     processGlobalWriterIsolation: true
 
+# Reviewed generation-specific native operand semantics for PS6128. The
+# analyzer derives the accepted generations and complete typed dispatch path;
+# this contract attests only facts raw Go/assembly syntax cannot establish.
+nativeGenerationDispatchContracts:
+  - name: apple-amx-quad-load
+    capabilityPredicate: example.com/project/cpu.amxSupported
+    dispatchVariable: example.com/project/cpu.gemmAMX
+    installedFunction: example.com/project/cpu.gemmAMXCompute
+    workerRunner: example.com/project/cpu.parallelWork
+    workerArgument: 2
+    mainLoopArgument: 4
+    nativeMainLoopArgument: 3
+    nativeMainLoopParameter: k
+    nativeMainLoopOffset: 24
+    nativeSymbol: example.com/project/cpu.gemmTileAMX
+    assemblyFile: gemm_amx_arm64.s
+    descriptorLiteral: "0x5000000000000000"
+    requiredGenerations: ["Apple M2", "Apple M3"]
+    workerExecutesSynchronously: true
+    descriptorMeaningReviewed: true
+
 # Helpers exposing typed input views and caller-owned output views.
 inputViewFuncs:
   - f64Data

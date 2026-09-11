@@ -47,6 +47,13 @@ type Config struct {
 	// explain why a vocabulary exists without triggering an unknown-key warning.
 	Comment string `json:"_comment,omitempty" yaml:"_comment"`
 
+	// NativeGenerationDispatchContracts identify reviewed native entry points
+	// whose operand semantics differ by hardware generation. PS6128 still
+	// proves the complete typed Go dispatch and native source path; these
+	// contracts supply only architecture semantics that Go syntax and raw
+	// instruction words cannot establish.
+	NativeGenerationDispatchContracts []NativeGenerationDispatchContract `json:"nativeGenerationDispatchContracts,omitempty" yaml:"nativeGenerationDispatchContracts"`
+
 	// CacheLineBytes is the target data-cache line size used by locality
 	// advisories such as PS6075. Zero selects the portable conservative default
 	// of 64 bytes; Apple M-series campaigns should normally set 128.
@@ -2240,6 +2247,7 @@ func psTopKImportPathValid(importPath string) bool {
 // Sets is the compiled, set-shaped view of Config used by analyzers.
 type Sets struct {
 	CacheLineBytes                    int
+	NativeGenerationDispatchContracts []NativeGenerationDispatchContract
 	ElementAccessors                  map[string]bool
 	FastPathHelpers                   map[string]bool
 	SelectorPromotionSymbols          map[string]bool
@@ -2303,6 +2311,7 @@ func toSet(xs []string) map[string]bool {
 func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep the public value API source-compatible
 	return Sets{
 		CacheLineBytes:                    c.CacheLineBytes,
+		NativeGenerationDispatchContracts: cloneNativeGenerationDispatchContracts(c.NativeGenerationDispatchContracts),
 		ElementAccessors:                  toSet(c.ElementAccessors),
 		FastPathHelpers:                   toSet(c.FastPathHelpers),
 		SelectorPromotionSymbols:          toSet(c.SelectorPromotionSymbols),
@@ -2350,6 +2359,56 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		StateExpandedLookupContracts:              slices.Clone(c.StateExpandedLookupContracts),
 		SharedFanOutContracts:                     cloneSharedFanOutContracts(c.SharedFanOutContracts),
 	}
+}
+
+// NativeGenerationDispatchContract is reviewer-supplied ISA metadata. All
+// callable identities are fully-qualified Go object IDs. AssemblyFile is a
+// package-relative basename; DescriptorLiteral is the exact constant whose
+// semantics RequiredGenerations attest.
+type NativeGenerationDispatchContract struct {
+	Name                        string   `json:"name" yaml:"name"`
+	CapabilityPredicate         string   `json:"capabilityPredicate" yaml:"capabilityPredicate"`
+	DispatchVariable            string   `json:"dispatchVariable" yaml:"dispatchVariable"`
+	InstalledFunction           string   `json:"installedFunction" yaml:"installedFunction"`
+	WorkerRunner                string   `json:"workerRunner" yaml:"workerRunner"`
+	WorkerArgument              int      `json:"workerArgument" yaml:"workerArgument"`
+	MainLoopArgument            int      `json:"mainLoopArgument" yaml:"mainLoopArgument"`
+	NativeMainLoopArgument      int      `json:"nativeMainLoopArgument" yaml:"nativeMainLoopArgument"`
+	NativeMainLoopParameter     string   `json:"nativeMainLoopParameter" yaml:"nativeMainLoopParameter"`
+	NativeMainLoopOffset        int      `json:"nativeMainLoopOffset" yaml:"nativeMainLoopOffset"`
+	NativeSymbol                string   `json:"nativeSymbol" yaml:"nativeSymbol"`
+	AssemblyFile                string   `json:"assemblyFile" yaml:"assemblyFile"`
+	DescriptorLiteral           string   `json:"descriptorLiteral" yaml:"descriptorLiteral"`
+	RequiredGenerations         []string `json:"requiredGenerations" yaml:"requiredGenerations"`
+	WorkerExecutesSynchronously bool     `json:"workerExecutesSynchronously" yaml:"workerExecutesSynchronously"`
+	DescriptorMeaningReviewed   bool     `json:"descriptorMeaningReviewed" yaml:"descriptorMeaningReviewed"`
+}
+
+func (c *NativeGenerationDispatchContract) Valid() bool {
+	return c.Name != "" && psTopKFunctionIDValid(c.CapabilityPredicate) &&
+		psTopKFunctionIDValid(c.InstalledFunction) && psTopKFunctionIDValid(c.WorkerRunner) &&
+		psTopKFunctionIDValid(c.NativeSymbol) && psTopKFunctionIDValid(c.DispatchVariable) &&
+		c.WorkerArgument >= 0 && c.MainLoopArgument >= 0 && c.NativeMainLoopArgument >= 0 &&
+		psTopKIdentifierValid(c.NativeMainLoopParameter) && c.NativeMainLoopOffset >= 0 && c.AssemblyFile != "" && c.DescriptorLiteral != "" &&
+		len(c.RequiredGenerations) != 0 && c.WorkerExecutesSynchronously && c.DescriptorMeaningReviewed
+}
+
+func UsableNativeGenerationDispatchContractCount(contracts []NativeGenerationDispatchContract) int {
+	count := 0
+	for index := range contracts {
+		if contracts[index].Valid() {
+			count++
+		}
+	}
+	return count
+}
+
+func cloneNativeGenerationDispatchContracts(contracts []NativeGenerationDispatchContract) []NativeGenerationDispatchContract {
+	cloned := slices.Clone(contracts)
+	for i := range cloned {
+		cloned[i].RequiredGenerations = slices.Clone(cloned[i].RequiredGenerations)
+	}
+	return cloned
 }
 
 func cloneScopedBackendRoutingContracts(contracts []ScopedBackendRoutingContract) []ScopedBackendRoutingContract {
