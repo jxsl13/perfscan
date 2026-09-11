@@ -1,7 +1,8 @@
 # Output-workspace extent analysis foundation
 
-The `ps6125_extent*`, `ps6125_ssa*`, `ps6125_access*`, `ps6125_call*`, and
-`ps6125_store*` components are preparatory internal analysis for issue #887.
+The `ps6125_extent*`, `ps6125_ssa*`, `ps6125_access*`, `ps6125_call*`,
+`ps6125_store*`, `ps6125_context*`, and `ps6125_cell*` components are preparatory
+internal analysis for issue #887.
 They do **not** register a check, emit diagnostics,
 enable an automatic rewrite, or establish that the issue is resolved.
 
@@ -39,12 +40,27 @@ enable an automatic rewrite, or establish that the issue is resolved.
   missing, conditional, and multiply written fields remain unknown. These facts
   do not establish the contents, capacity, or lifetime of referenced resources,
   and source SSA identities are not dynamic allocation-instance identities.
+- On-demand invocation contexts preserve the owning context of arguments,
+  returned field sources, and captured cells through exact helper chains.
+  Forwarded closures retain their creating context. Distinct source call sites
+  are not merged; phi inputs must agree on both context and value. Foreign
+  parameters and captures are rejected, and input lengths are copied only for
+  the root function's own parameters. A shared context budget and recursion
+  rejection bound traversal; queried contexts do not establish whole-program
+  completeness or distinct dynamic instances when a call site repeats.
+- Callable resolution also accepts a closed local function cell with a single
+  executable store. Address uses are checked through nested closure captures;
+  exported addresses, opaque uses, additional stores, and writing captures
+  reject the proof. Initialization must dominate the load or the call edge
+  leaving the owning context, not merely closure creation. This narrow rule
+  resolves callable sources only; other captured loads remain unknown.
 
 Inputs must be facts about the actual invocation. AST resolvers must establish
 reaching bindings, identity, effects, and path conditions before returning known
 values. Unknown loads, opaque calls, conversions, unsupported arithmetic, and
-mixed extents remain unknown. No recursive or multi-context package traversal is
-provided; a future driver must bound and join its call contexts independently.
+mixed extents remain unknown. No recursive or whole-package traversal is
+provided; a future detector must establish complete use coverage independently
+of these bounded, on-demand contexts.
 
 ## Validation
 
@@ -55,27 +71,35 @@ Access-path fixtures also cover distinct receiver roots and sibling fields,
 specialized branches, separate load snapshots, and unresolved value origins.
 Call and returned-field fixtures cover exact argument/capture bindings,
 selected closures, address escapes, overwrites, and specialized conditional
-stores. Existing regression assertions and benchmark gates remain unchanged.
+stores. Context and function-cell fixtures cover separate helper invocations,
+forwarded closures, foreign values, shared traversal budgets, nested read-only
+and writing captures, and initialization before versus after invocation.
+Existing regression assertions and benchmark gates remain unchanged.
 
 ```sh
 go test -race ./checks -run '^TestPS6125' -count=1
 ```
 
-An additional opt-in replay loads a full external GoAI checkout. It verifies the
+Additional opt-in replays load a full external GoAI checkout. One verifies the
 row-count argument of the exact typed `GPTDecoder.head.record` invocation after
-following `StepNLast` or `StepN` through the actual static helper call. Supply a
-separately verified checkout; the test itself does not verify its revision.
+following `StepNLast` or `StepN` through the actual static helper call. The other
+follows the constructor's host allocation through its captured factory to the
+backend call argument and returned wrapper field source. The backend target
+stored in an unknown operations parameter deliberately remains unresolved.
+Supply a separately verified checkout; the tests do not verify its revision.
 
 ```sh
 PERFSCAN_PS6125_EXTERNAL_SOURCE=/absolute/path/to/verified/checkout \
-  go test -race ./checks -run '^TestPS6125ExternalProjectionRows$' -count=1 -v
+  go test -race ./checks -run '^TestPS6125External' -count=1 -v
 ```
 
 Replayed revisions were `a10a6bff8f7cb0adf695742b6ec677b750b03c28` and
 `40bf79ae7d93caa9384719c779d38b6ae4aaa8a1`: both preserve the one-row versus
-bulk row-count argument. This is not a before-warning/after-negative detector
-test, nor proof of the backend's actual write extent. External source is not
-vendored, and the optional replay does not replace the unconditional fixtures.
+bulk row-count argument and constructor factory provenance. These are not
+before-warning/after-negative detector tests, nor proof of successful
+construction, backend allocation or write extent, or resource lifetime. External
+source is not vendored, and optional replays do not replace the unconditional
+fixtures.
 
 ## Remaining issue #887 obligations
 

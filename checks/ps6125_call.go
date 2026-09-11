@@ -76,18 +76,8 @@ func (origins *ps6125SSAOrigins) call(call *ssa.Call) (ps6125SSACallBinding, boo
 	if !resolved.known {
 		return ps6125SSACallBinding{}, false
 	}
-	var function *ssa.Function
-	var captures []ssa.Value
-	switch callable := resolved.value.(type) {
-	case *ssa.Function:
-		function = callable
-	case *ssa.MakeClosure:
-		function, _ = callable.Fn.(*ssa.Function)
-		captures = callable.Bindings
-	default:
-		return ps6125SSACallBinding{}, false
-	}
-	if function == nil || len(function.Blocks) == 0 || len(function.Params) != len(call.Call.Args) || len(function.FreeVars) != len(captures) {
+	function, captures := ps6125SSACallee(resolved.value)
+	if function == nil || len(function.Params) != len(call.Call.Args) {
 		return ps6125SSACallBinding{}, false
 	}
 	values := make(map[ssa.Value]ssa.Value, len(function.Params)+len(function.FreeVars))
@@ -98,4 +88,20 @@ func (origins *ps6125SSAOrigins) call(call *ssa.Call) (ps6125SSACallBinding, boo
 		values[captured] = captures[index]
 	}
 	return ps6125SSACallBinding{function: function, values: values}, true
+}
+
+func ps6125SSACallee(value ssa.Value) (*ssa.Function, []ssa.Value) {
+	var function *ssa.Function
+	var captures []ssa.Value
+	switch callable := value.(type) {
+	case *ssa.Function:
+		function = callable
+	case *ssa.MakeClosure:
+		function, _ = callable.Fn.(*ssa.Function)
+		captures = callable.Bindings
+	}
+	if function == nil || len(function.Blocks) == 0 || len(function.FreeVars) != len(captures) {
+		return nil, nil
+	}
+	return function, captures
 }
