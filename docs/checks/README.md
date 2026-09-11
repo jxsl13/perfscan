@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**420 checks total** — **265 with a bit-identical auto-fix**, 155 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **50 L3** (aggressive).
+**421 checks total** — **265 with a bit-identical auto-fix**, 156 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **51 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -432,4 +432,5 @@ checks' fixes.
 | [PS6124](PS6124.md) | verify | L3 |  | a backend-specific measurement context does not pin a downstream global route |
 | [PS6126](PS6126.md) | verify | L3 |  | an escaping worker callback grew across an allocator size class |
 | [PS6127](PS6127.md) | verify | L3 |  | a root-anchored metadata ignore conflicts with an any-depth policy |
+| [PS6128](PS6128.md) | verify | L3 |  | native dispatch admits a generation lacking a selected operand semantic |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |

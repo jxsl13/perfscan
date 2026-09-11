@@ -421,6 +421,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"residentCodebookContracts":                 validResidentCodebookContracts(cfg.ResidentCodebookContracts),
 		"stateExpandedLookupContracts":              validStateExpandedLookupContracts(cfg.StateExpandedLookupContracts),
 		"sharedFanOutContracts":                     validSharedFanOutContracts(cfg.SharedFanOutContracts),
+		"nativeGenerationDispatchContracts":         config.UsableNativeGenerationDispatchContractCount(cfg.NativeGenerationDispatchContracts),
 	}
 	missing := make([]string, 0, len(c.Vocab))
 	for _, v := range c.Vocab {

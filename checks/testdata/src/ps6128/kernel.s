@@ -1,0 +1,13 @@
+#include "textflag.h"
+#define AMX_LDY_R5 WORD $0x00201025
+
+TEXT ·tile(SB), NOSPLIT, $0-8
+	MOVD k+0(FP), R3
+	MOVD $0x5000000000000000, R16
+	ORR R16, R0, R5
+	LSR $2, R3, R15
+	CBZ R15, tail
+	AMX_LDY_R5
+	tail:
+	EOR $0x1000000000000000, R5, R5
+	RET

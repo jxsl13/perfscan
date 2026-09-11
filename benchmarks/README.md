@@ -184,3 +184,9 @@ Rules without a pair, and why:
   micro-benchmark cannot reproduce repository-specific change selection or CI
   fan-out. The rule reports a typed policy mismatch only; validate nested
   metadata and embedded code/asset controls against the real selector and CI.
+- **PS6128** (native generation-dispatch advisory): the finding is a
+  correctness mismatch between reviewed hardware-generation semantics and an
+  exact project-owned Go/assembly route. A portable toy cannot execute Apple
+  AMX or establish M1 versus M2/M3 descriptor behavior. Validate K=1..3, K=4,
+  and K=5 on each supported generation and benchmark only the retained valid
+  native path; no speedup is claimed.
