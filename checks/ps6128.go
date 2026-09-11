@@ -710,7 +710,7 @@ func ps6128ExpressionIsObject(pass *analysis.Pass, expression ast.Expr, wanted t
 }
 
 func ps6128AssemblyEvidence(pass *analysis.Pass, c *config.NativeGenerationDispatchContract) (token.Pos, bool) {
-	for _, filename := range pass.OtherFiles {
+	for _, filename := range slices.Concat(pass.OtherFiles, pass.IgnoredFiles) {
 		if filepath.Base(filename) != c.AssemblyFile {
 			continue
 		}
