@@ -5,7 +5,9 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -71,7 +73,7 @@ func runPS6127WithContracts(pass *analysis.Pass, contracts []config.RecursiveMet
 			continue
 		}
 		rootField, ignoreField, ok := ps6127RootBuilder(pass, builder, contract)
-		if !ok || !ps6127RootMatcher(pass, functions, matcher, contract, rootField, ignoreField) || ps6127RecursiveDefault(pass, functions, builder, matcher, contract) {
+		if !ok || !ps6127RootMatcher(pass, functions, matcher, contract, rootField, ignoreField) || ps6127RecursiveDefault(pass, functions, builder, matcher, contract) != ps6127PolicyAbsent {
 			continue
 		}
 		pass.Reportf(matcher.Name.Pos(), "%s: configured any-depth non-embedded metadata directory %q is filtered through a root-anchored ignore entry and its descendants only; nested contexts can bypass the policy and fan out CI—review complete contents and precedence, then use an explicit component/recursive matcher with nested metadata and embedded-code/asset controls (PS6127 advisory, no automatic fix or measured speedup claim)", contract.Name, contract.DirectoryName)
@@ -79,10 +81,25 @@ func runPS6127WithContracts(pass *analysis.Pass, contracts []config.RecursiveMet
 	return nil, nil
 }
 
-func ps6127RecursiveDefault(pass *analysis.Pass, functions map[string]*ast.FuncDecl, builder, matcher *ast.FuncDecl, contract config.RecursiveMetadataIgnoreContract) bool {
-	providers := make(map[string]int)
+type ps6127PolicyState uint8
+
+const (
+	ps6127PolicyAbsent ps6127PolicyState = iota
+	ps6127PolicyCovered
+	ps6127PolicyUnknown
+)
+
+func ps6127RecursiveDefault(pass *analysis.Pass, functions map[string]*ast.FuncDecl, builder, matcher *ast.FuncDecl, contract config.RecursiveMetadataIgnoreContract) ps6127PolicyState {
+	// Keep every returned slot: a provider can return both root path strings
+	// and regex strings matching the witness. Only the actual constructor
+	// argument selects which slot matters, never map iteration/return order.
+	providers := make(map[string][]int)
+	unknownProviders := make(map[string][]int)
 	for id, function := range functions {
 		assigned := make(map[types.Object]bool)
+		unknown := make(map[types.Object]bool)
+		pointers := make(map[types.Object]types.Object)
+		mutatingClosures := make(map[types.Object]bool)
 		resultObjects := make(map[types.Object]int)
 		resultIndex := 0
 		if function.Type.Results != nil {
@@ -97,16 +114,30 @@ func ps6127RecursiveDefault(pass *analysis.Pass, functions map[string]*ast.FuncD
 		for _, statement := range function.Body.List {
 			switch value := statement.(type) {
 			case *ast.AssignStmt:
+				if len(value.Lhs) == 1 && len(value.Rhs) == 1 {
+					lhs := ps6114ExprObject(pass, value.Lhs[0])
+					rhs := ps6114ExprObject(pass, value.Rhs[0])
+					if unary, ok := ps2110Unparen(value.Rhs[0]).(*ast.UnaryExpr); ok && unary.Op == token.AND {
+						pointers[lhs] = ps6114ExprObject(pass, unary.X)
+					} else {
+						delete(pointers, lhs)
+					}
+					if star, ok := ps2110Unparen(value.Lhs[0]).(*ast.StarExpr); ok && assigned[pointers[ps6114ExprObject(pass, star.X)]] {
+						valid = false
+					}
+					if literal, ok := ps2110Unparen(value.Rhs[0]).(*ast.FuncLit); ok {
+						mutatingClosures[lhs] = ps6127WritesTracked(pass, literal.Body, assigned)
+					} else {
+						mutatingClosures[lhs] = mutatingClosures[rhs]
+					}
+				}
 				for index, lhs := range value.Lhs {
 					rhs := ast.Expr(nil)
 					if index < len(value.Rhs) {
 						rhs = value.Rhs[index]
 					}
 					assigned[ps6114ExprObject(pass, lhs)] = rhs != nil && ps6127ContainsRecursivePattern(pass, rhs, contract.DirectoryName)
-				}
-			case *ast.IfStmt, *ast.DeferStmt:
-				if ps6127WritesTracked(pass, statement, assigned) {
-					valid = false
+					unknown[ps6114ExprObject(pass, lhs)] = rhs != nil && ps6127UnknownPolicyExpr(pass, rhs)
 				}
 			case *ast.ReturnStmt:
 				if !valid {
@@ -115,15 +146,28 @@ func ps6127RecursiveDefault(pass *analysis.Pass, functions map[string]*ast.FuncD
 				if len(value.Results) == 0 {
 					for object, index := range resultObjects {
 						if assigned[object] {
-							providers[id] = index
+							providers[id] = append(providers[id], index)
+						}
+						if unknown[object] && ps6127StringSliceResult(pass, function, index) {
+							unknownProviders[id] = append(unknownProviders[id], index)
 						}
 					}
 				} else {
 					for index, result := range value.Results {
-						if assigned[ps6114ExprObject(pass, result)] {
-							providers[id] = index
+						if assigned[ps6114ExprObject(pass, result)] && ps6127StringSliceResult(pass, function, index) {
+							providers[id] = append(providers[id], index)
+						}
+						if unknown[ps6114ExprObject(pass, result)] && ps6127StringSliceResult(pass, function, index) {
+							unknownProviders[id] = append(unknownProviders[id], index)
 						}
 					}
+				}
+			default:
+				if deferStatement, ok := statement.(*ast.DeferStmt); ok && mutatingClosures[ps6114ExprObject(pass, deferStatement.Call.Fun)] {
+					valid = false
+				}
+				if ps6127WritesTracked(pass, statement, assigned) {
+					valid = false
 				}
 			}
 		}
@@ -131,56 +175,203 @@ func ps6127RecursiveDefault(pass *analysis.Pass, functions map[string]*ast.FuncD
 	// A recursive default is relevant only when it is carried through a call
 	// chain into the configured builder, and that builder compiles the same
 	// parameter into a regexp field consumed by the configured matcher.
-	regexParameter := ps6127CompiledRegexParameter(pass, builder, matcher)
+	regexParameter, regexField := ps6127CompiledRegexParameter(pass, builder, matcher)
 	if regexParameter < 0 {
-		return false
+		return ps6127PolicyAbsent
 	}
 	for _, function := range functions {
 		values := make(map[types.Object]bool)
+		unknownValues := make(map[types.Object]bool)
 		built := make(map[types.Object]bool)
+		unknownBuilt := make(map[types.Object]bool)
+		constructed := make(map[types.Object]bool)
 		found := false
 		for _, statement := range function.Body.List {
+			ps6127DefaultStatementEffects(pass, functions, statement, regexField, built, unknownBuilt, constructed)
 			switch value := statement.(type) {
 			case *ast.AssignStmt:
+				var dependency types.Object
+				for _, rhs := range value.Rhs {
+					ast.Inspect(rhs, func(node ast.Node) bool {
+						if identifier, ok := node.(*ast.Ident); ok {
+							if object := pass.TypesInfo.ObjectOf(identifier); constructed[object] {
+								dependency = object
+							}
+						}
+						return true
+					})
+				}
+				if dependency != nil {
+					// An unsupported assignment can return/retain an alias to an
+					// existing config. Never erase an exposure's Unknown on the LHS
+					// or leave another potentially aliased return value as Absent.
+					for object := range constructed {
+						built[object], unknownBuilt[object] = false, true
+					}
+				}
 				for _, lhs := range value.Lhs {
 					object := ps6114ExprObject(pass, lhs)
 					values[object] = false
+					unknownValues[object] = false
 					built[object] = false
+					unknownBuilt[object] = false
+					delete(constructed, object)
+					if _, identifier := ps2110Unparen(lhs).(*ast.Ident); identifier && object != nil && dependency != nil && types.Identical(object.Type(), dependency.Type()) {
+						constructed[object], unknownBuilt[object] = true, true
+					}
+					if selector := ps6127Selector(lhs); selector != nil {
+						base := ps6114ExprObject(pass, selector.X)
+						if constructed[base] {
+							built[base] = false
+							unknownBuilt[base] = true
+							if len(value.Lhs) == 1 && len(value.Rhs) == 1 && ps6127AnyFieldObject(pass, lhs) == regexField && ps6114ExprObject(pass, value.Rhs[0]) == types.Universe.Lookup("nil") {
+								unknownBuilt[base] = false
+							}
+						}
+					}
 				}
 				if len(value.Rhs) == 1 {
 					if call, ok := ps2110Unparen(value.Rhs[0]).(*ast.CallExpr); ok {
-						if p, yes := providers[ps6127CallID(pass, call)]; yes && p < len(value.Lhs) {
-							values[ps6114ExprObject(pass, value.Lhs[p])] = true
+						for _, p := range providers[ps6127CallID(pass, call)] {
+							if p < len(value.Lhs) {
+								values[ps6114ExprObject(pass, value.Lhs[p])] = true
+							}
 						}
-						if ps6127CallID(pass, call) == contract.Builder && regexParameter < len(call.Args) && values[ps6114ExprObject(pass, call.Args[regexParameter])] && len(value.Lhs) > 0 {
-							built[ps6114ExprObject(pass, value.Lhs[0])] = true
+						for _, p := range unknownProviders[ps6127CallID(pass, call)] {
+							if p < len(value.Lhs) {
+								unknownValues[ps6114ExprObject(pass, value.Lhs[p])] = true
+							}
+						}
+						if ps6127CallID(pass, call) == contract.Builder && regexParameter < len(call.Args) && len(value.Lhs) > 0 {
+							argument := ps6114ExprObject(pass, call.Args[regexParameter])
+							result := ps6114ExprObject(pass, value.Lhs[0])
+							built[result] = values[argument]
+							unknownBuilt[result] = unknownValues[argument] || dependency != nil
+							constructed[result] = true
 						}
 					}
 				}
 			case *ast.ReturnStmt:
 				for _, result := range value.Results {
+					if unknownBuilt[ps6114ExprObject(pass, result)] {
+						return ps6127PolicyUnknown
+					}
 					if built[ps6114ExprObject(pass, result)] {
 						found = true
 					}
 				}
+			default:
+				if ps6127WritesTracked(pass, statement, values) {
+					for object := range values {
+						values[object] = false
+					}
+				}
+				ast.Inspect(statement, func(node ast.Node) bool {
+					assignment, ok := node.(*ast.AssignStmt)
+					if !ok {
+						return true
+					}
+					for _, lhs := range assignment.Lhs {
+						if selector := ps6127Selector(lhs); selector != nil {
+							base := ps6114ExprObject(pass, selector.X)
+							if constructed[base] {
+								built[base], unknownBuilt[base] = false, true
+							}
+						}
+					}
+					return true
+				})
 			}
 		}
 		if found {
-			return true
+			return ps6127PolicyCovered
+		}
+	}
+	if ps6127UnknownDefaultConnection(pass, functions, unknownProviders, contract.Builder, regexParameter) {
+		return ps6127PolicyUnknown
+	}
+	return ps6127PolicyAbsent
+}
+
+func ps6127UnknownDefaultConnection(pass *analysis.Pass, functions map[string]*ast.FuncDecl, providers map[string][]int, builderID string, argumentIndex int) bool {
+	for _, function := range functions {
+		unknown := make(map[types.Object]bool)
+		hasUnknownProvider := false
+		for _, statement := range function.Body.List {
+			assignment, ok := statement.(*ast.AssignStmt)
+			if !ok || len(assignment.Rhs) != 1 {
+				continue
+			}
+			call, ok := ps2110Unparen(assignment.Rhs[0]).(*ast.CallExpr)
+			if !ok {
+				continue
+			}
+			if slots := providers[ps6127CallID(pass, call)]; len(slots) > 0 {
+				for _, index := range slots {
+					if index < len(assignment.Lhs) {
+						unknown[ps6114ExprObject(pass, assignment.Lhs[index])] = true
+						hasUnknownProvider = true
+					}
+				}
+				continue
+			}
+			if ps6127CallID(pass, call) == builderID && argumentIndex < len(call.Args) && (unknown[ps6114ExprObject(pass, call.Args[argumentIndex])] || hasUnknownProvider) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
+func ps6127StringSliceResult(pass *analysis.Pass, function *ast.FuncDecl, index int) bool {
+	signature, _ := pass.TypesInfo.Defs[function.Name].Type().(*types.Signature)
+	if signature == nil || index >= signature.Results().Len() {
+		return false
+	}
+	slice, ok := types.Unalias(signature.Results().At(index).Type()).Underlying().(*types.Slice)
+	return ok && types.Identical(slice.Elem(), types.Typ[types.String])
+}
+
+func ps6127UnknownPolicyExpr(pass *analysis.Pass, expression ast.Expr) bool {
+	unknown := false
+	ast.Inspect(expression, func(node ast.Node) bool {
+		if call, ok := node.(*ast.CallExpr); ok {
+			if ps6127CallID(pass, call) == "strings.ReplaceAll" && len(call.Args) == 3 {
+				known := true
+				for _, argument := range call.Args {
+					value := pass.TypesInfo.Types[argument].Value
+					known = known && value != nil && value.Kind() == constant.String
+				}
+				if known {
+					return false
+				}
+			}
+			unknown = true
+			return false
+		}
+		return !unknown
+	})
+	return unknown
+}
+
 func ps6127WritesTracked(pass *analysis.Pass, node ast.Node, tracked map[types.Object]bool) bool {
 	writes := false
+	pointers := make(map[types.Object]types.Object)
 	ast.Inspect(node, func(n ast.Node) bool {
 		assignment, ok := n.(*ast.AssignStmt)
 		if !ok {
 			return true
 		}
+		if len(assignment.Lhs) == 1 && len(assignment.Rhs) == 1 {
+			if unary, ok := ps2110Unparen(assignment.Rhs[0]).(*ast.UnaryExpr); ok && unary.Op == token.AND {
+				pointers[ps6114ExprObject(pass, assignment.Lhs[0])] = ps6114ExprObject(pass, unary.X)
+			}
+		}
 		for _, lhs := range assignment.Lhs {
 			if tracked[ps6114ExprObject(pass, lhs)] {
+				writes = true
+			}
+			if star, ok := ps2110Unparen(lhs).(*ast.StarExpr); ok && tracked[pointers[ps6114ExprObject(pass, star.X)]] {
 				writes = true
 			}
 		}
@@ -204,7 +395,10 @@ func ps6127ContainsRecursivePattern(pass *analysis.Pass, expression ast.Expr, di
 			return true
 		}
 		pattern := constant.StringVal(value)
-		if pattern == `(^|/)`+regexp.QuoteMeta(directory)+`(/|$)` || pattern == `(^|/)[.]`+strings.TrimPrefix(directory, ".")+`(/|$)` || pattern == `(^|[/])`+regexp.QuoteMeta(directory)+`([/]|$)` {
+		// This proves only the configured concrete nested counterexample. It is
+		// not a universal regular-language claim: unsupported/nonconstant policy
+		// remains unknown and suppresses neither side of the proof.
+		if matched, err := regexp.MatchString(pattern, "pkg/"+directory+"/entry"); err == nil && matched {
 			found = true
 		}
 		return !found
@@ -212,7 +406,7 @@ func ps6127ContainsRecursivePattern(pass *analysis.Pass, expression ast.Expr, di
 	return found
 }
 
-func ps6127CompiledRegexParameter(pass *analysis.Pass, builder, matcher *ast.FuncDecl) int {
+func ps6127CompiledRegexParameter(pass *analysis.Pass, builder, matcher *ast.FuncDecl) (int, *types.Var) {
 	params := make(map[types.Object]int)
 	position := 0
 	for _, field := range builder.Type.Params.List {
@@ -238,17 +432,28 @@ func ps6127CompiledRegexParameter(pass *analysis.Pass, builder, matcher *ast.Fun
 			return true
 		}
 		item := ps6114ExprObject(pass, loop.Value)
-		ast.Inspect(loop.Body, func(n ast.Node) bool {
-			branch, ok := n.(*ast.IfStmt)
-			if !ok || !ps6127ReturnsTrue(pass, branch.Body.List) {
-				return true
+		stable := true
+		for _, statement := range loop.Body.List {
+			if _, ok := statement.(*ast.BranchStmt); ok {
+				stable = false
+				break
+			}
+			if assignment, ok := statement.(*ast.AssignStmt); ok {
+				for _, lhs := range assignment.Lhs {
+					if ps6114ExprObject(pass, lhs) == item {
+						stable = false
+					}
+				}
+			}
+			branch, ok := statement.(*ast.IfStmt)
+			if !ok || !stable || !ps6127ReturnsTrue(pass, branch.Body.List) {
+				continue
 			}
 			call, ok := ps2110Unparen(branch.Cond).(*ast.CallExpr)
 			if ok && len(call.Args) == 1 && ps6114ExprObject(pass, call.Args[0]) == input && ps6127Method(pass, call, "regexp", "Regexp", "MatchString") && ps6114ExprObject(pass, call.Fun.(*ast.SelectorExpr).X) == item {
 				consumed[field] = true
 			}
-			return true
-		})
+		}
 		return false
 	})
 	found := -1
@@ -275,6 +480,8 @@ func ps6127CompiledRegexParameter(pass *analysis.Pass, builder, matcher *ast.Fun
 			field := ps6127AnyFieldObject(pass, assignment.Lhs[0])
 			if field != nil && consumed[field] && ps6127ContainsObject(pass, assignment.Rhs[0], ps6114ExprObject(pass, call.Args[0])) {
 				found = parameter
+				foundField = field
+				foundPos = assignment.Pos()
 			}
 			return true
 		})
@@ -327,7 +534,7 @@ func ps6127CompiledRegexParameter(pass *analysis.Pass, builder, matcher *ast.Fun
 			return found >= 0
 		})
 	}
-	return found
+	return found, foundField
 }
 
 func ps6127RegexCompiler(pass *analysis.Pass, literal *ast.FuncLit) bool {
@@ -379,13 +586,18 @@ func ps6127RegexCompiler(pass *analysis.Pass, literal *ast.FuncLit) bool {
 		return false
 	})
 	if validRange {
+		aliases := map[types.Object]bool{dst: true}
 		ast.Inspect(literal.Body, func(node ast.Node) bool {
 			assignment, ok := node.(*ast.AssignStmt)
 			if !ok || assignment.Pos() <= appendPos {
 				return true
 			}
+			if len(assignment.Lhs) == 1 && len(assignment.Rhs) == 1 {
+				lhs, rhs := ps6114ExprObject(pass, assignment.Lhs[0]), ps6114ExprObject(pass, assignment.Rhs[0])
+				aliases[lhs] = aliases[rhs]
+			}
 			for _, lhs := range assignment.Lhs {
-				if star, ok := ps2110Unparen(lhs).(*ast.StarExpr); ok && ps6114ExprObject(pass, star.X) == dst {
+				if star, ok := ps2110Unparen(lhs).(*ast.StarExpr); ok && aliases[ps6114ExprObject(pass, star.X)] {
 					validRange = false
 				}
 			}
@@ -408,7 +620,7 @@ func ps6127ContainsObject(pass *analysis.Pass, expression ast.Expr, want types.O
 }
 
 func ps6127RootBuilder(pass *analysis.Pass, function *ast.FuncDecl, contract config.RecursiveMetadataIgnoreContract) (*types.Var, *types.Var, bool) {
-	state := &ps6127BuilderState{pass: pass, contract: contract, inputs: make(map[types.Object]bool), roots: make(map[types.Object]bool), entries: make(map[types.Object]int), instances: make(map[types.Object]int), stored: make(map[int]bool), rooted: make(map[int]bool), closures: make(map[types.Object]*ast.FuncLit), bound: make(map[types.Object]int)}
+	state := &ps6127BuilderState{pass: pass, contract: contract, inputs: make(map[types.Object]bool), roots: make(map[types.Object]bool), entries: make(map[types.Object]int), instances: make(map[types.Object]int), stored: []bool{false}, rooted: []bool{false}, closures: make(map[types.Object]*ast.FuncLit), bound: make(map[types.Object]int), pointers: make(map[types.Object]int)}
 	if function.Type.Params == nil || len(function.Type.Params.List) < 2 {
 		return nil, nil, false
 	}
@@ -421,7 +633,7 @@ func ps6127RootBuilder(pass *analysis.Pass, function *ast.FuncDecl, contract con
 		}
 	}
 	state.walk(function.Body.List)
-	ok := state.returned != 0 && state.stored[state.returned] && state.rooted[state.returned] && state.ignoreField != nil && state.rootField != nil && state.rootField.Parent() == state.ignoreField.Parent()
+	ok := !state.uncertain && state.returned != 0 && state.stored[state.returned] && state.rooted[state.returned] && state.ignoreField != nil && state.rootField != nil && state.rootField.Parent() == state.ignoreField.Parent()
 	return state.rootField, state.ignoreField, ok
 }
 
@@ -432,11 +644,14 @@ type ps6127BuilderState struct {
 	roots                  map[types.Object]bool
 	entries                map[types.Object]int // 1 input/directory entry; 2 same entry rooted by Join.
 	instances              map[types.Object]int
-	stored                 map[int]bool
-	rooted                 map[int]bool
+	stored                 []bool // Dense allocation identities; index zero is unknown.
+	rooted                 []bool
 	closures               map[types.Object]*ast.FuncLit
 	bound                  map[types.Object]int
+	pointers               map[types.Object]int
 	next, returned         int
+	callDepth              int
+	uncertain              bool
 	rootField, ignoreField *types.Var
 }
 
@@ -446,6 +661,7 @@ func (state *ps6127BuilderState) walk(statements []ast.Stmt) bool {
 		case *ast.AssignStmt:
 			state.assign(value)
 		case *ast.RangeStmt:
+			state.invalidateCall(value.X)
 			if state.inputs[ps6114ExprObject(state.pass, value.X)] {
 				state.entries[ps6114ExprObject(state.pass, value.Value)] = 1
 				state.walk(value.Body.List)
@@ -456,16 +672,24 @@ func (state *ps6127BuilderState) walk(statements []ast.Stmt) bool {
 			if value.Init != nil {
 				state.walk([]ast.Stmt{value.Init})
 			}
-			condition := state.pass.TypesInfo.Types[value.Cond].Value
 			state.invalidateCall(value.Cond)
-			if condition == nil {
-				previous := state.returned
-				state.walk(value.Body.List)
+			condition, known := state.condition(value.Cond)
+			if !known {
+				thenState, elseState := state.clone(), state.clone()
+				thenDone := thenState.walk(value.Body.List)
+				// Allocate distinct identities in mutually exclusive arms too.
+				elseState.next = thenState.next
+				elseState.stored = append(elseState.stored, make([]bool, len(thenState.stored)-len(elseState.stored))...)
+				elseState.rooted = append(elseState.rooted, make([]bool, len(thenState.rooted)-len(elseState.rooted))...)
+				elseDone := false
 				if value.Else != nil {
-					state.walkElse(value.Else)
+					elseDone = elseState.walkElse(value.Else)
 				}
-				state.returned = previous
-			} else if constant.BoolVal(condition) {
+				state.join(thenState, elseState, thenDone, elseDone)
+				if thenDone && elseDone {
+					return true
+				}
+			} else if condition {
 				if state.walk(value.Body.List) {
 					return true
 				}
@@ -473,24 +697,41 @@ func (state *ps6127BuilderState) walk(statements []ast.Stmt) bool {
 				return true
 			}
 		case *ast.ForStmt:
+			if value.Init != nil {
+				state.walk([]ast.Stmt{value.Init})
+			}
 			if ps6127LoopRuns(state.pass, value) {
 				state.walk(value.Body.List)
+				if value.Post != nil {
+					state.walk([]ast.Stmt{value.Post})
+				}
 			}
 		case *ast.BlockStmt:
 			if state.walk(value.List) {
 				return true
 			}
 		case *ast.ReturnStmt:
+			for _, result := range value.Results {
+				state.invalidateCall(result)
+			}
+			if state.callDepth != 0 {
+				return true
+			}
 			if len(value.Results) >= 1 {
 				state.returned = state.instances[ps6114ExprObject(state.pass, value.Results[0])]
+				if state.returned == 0 && ps6114ExprObject(state.pass, value.Results[0]) != types.Universe.Lookup("nil") {
+					state.uncertain = true
+				}
+			} else {
+				state.uncertain = true
 			}
 			return true
 		case *ast.ExprStmt:
 			if call, ok := ps2110Unparen(value.X).(*ast.CallExpr); ok {
 				if literal, ok := ps2110Unparen(call.Fun).(*ast.FuncLit); ok {
-					state.walk(literal.Body.List)
+					state.walkClosure(literal)
 				} else if literal := state.closures[ps6114ExprObject(state.pass, call.Fun)]; literal != nil {
-					state.walk(literal.Body.List)
+					state.walkClosure(literal)
 				} else if instance := state.bound[ps6114ExprObject(state.pass, call.Fun)]; instance != 0 {
 					state.stored[instance], state.rooted[instance] = false, false
 				}
@@ -505,31 +746,191 @@ func (state *ps6127BuilderState) walk(statements []ast.Stmt) bool {
 			if value.Init != nil {
 				state.walk([]ast.Stmt{value.Init})
 			}
+			if value.Tag != nil && state.pass.TypesInfo.Types[value.Tag].Value == nil {
+				state.uncertain = true
+				break
+			}
+			for _, raw := range value.Body.List {
+				for _, expression := range raw.(*ast.CaseClause).List {
+					if state.pass.TypesInfo.Types[expression].Value == nil {
+						state.uncertain = true
+					}
+				}
+			}
+			if state.uncertain {
+				break
+			}
+			selected := false
 			for _, raw := range value.Body.List {
 				clause := raw.(*ast.CaseClause)
-				if len(clause.List) == 0 || ps6127CaseMayRun(state.pass, value.Tag, clause.List) {
+				if len(clause.List) != 0 && ps6127CaseMayRun(state.pass, value.Tag, clause.List) {
 					if state.walk(clause.Body) {
 						return true
 					}
+					selected = true
 					break
 				}
 			}
+			if !selected {
+				for _, raw := range value.Body.List {
+					clause := raw.(*ast.CaseClause)
+					if len(clause.List) == 0 {
+						if state.walk(clause.Body) {
+							return true
+						}
+						break
+					}
+				}
+			}
 		case *ast.SelectStmt:
-			for _, raw := range value.Body.List {
-				state.walk(raw.(*ast.CommClause).Body)
-			}
+			state.uncertain = true
 		case *ast.TypeSwitchStmt:
-			if value.Init != nil {
-				state.walk([]ast.Stmt{value.Init})
-			}
-			for _, raw := range value.Body.List {
-				state.walk(raw.(*ast.CaseClause).Body)
-			}
+			state.uncertain = true
 		case *ast.LabeledStmt:
 			state.walk([]ast.Stmt{value.Stmt})
+		case *ast.DeclStmt:
+			declaration, ok := value.Decl.(*ast.GenDecl)
+			if ok {
+				for _, spec := range declaration.Specs {
+					values, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for i, name := range values.Names {
+						if i < len(values.Values) {
+							state.assign(&ast.AssignStmt{Lhs: []ast.Expr{name}, Rhs: []ast.Expr{values.Values[i]}, Tok: token.DEFINE})
+						}
+					}
+				}
+			}
+		case *ast.BranchStmt:
+			if value.Tok == token.GOTO {
+				state.returned = 0
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func (state *ps6127BuilderState) clone() *ps6127BuilderState {
+	result := *state
+	result.inputs = maps.Clone(state.inputs)
+	result.roots = maps.Clone(state.roots)
+	result.entries = maps.Clone(state.entries)
+	result.instances = maps.Clone(state.instances)
+	result.stored = slices.Clone(state.stored)
+	result.rooted = slices.Clone(state.rooted)
+	result.closures = maps.Clone(state.closures)
+	result.bound = maps.Clone(state.bound)
+	result.pointers = maps.Clone(state.pointers)
+	return &result
+}
+
+func (state *ps6127BuilderState) walkClosure(literal *ast.FuncLit) {
+	captures := false
+	ast.Inspect(literal.Body, func(node ast.Node) bool {
+		if identifier, ok := node.(*ast.Ident); ok {
+			object := state.pass.TypesInfo.ObjectOf(identifier)
+			captures = captures || state.instances[object] != 0 || state.pointers[object] != 0 || state.bound[object] != 0 || state.closures[object] != nil || state.roots[object] || state.inputs[object] || state.entries[object] != 0
+		}
+		return !captures
+	})
+	if !captures {
+		// Formal-parameter effects are handled at the actual arguments by
+		// invalidateCall. A non-capturing helper's local completion cannot
+		// discard or restore facts about an unrelated caller-owned instance.
+		return
+	}
+	if state.callDepth >= 8 {
+		state.uncertain = true
+		return
+	}
+	returned := state.returned
+	state.callDepth++
+	state.walk(literal.Body.List)
+	state.callDepth--
+	state.returned = returned
+}
+
+func (state *ps6127BuilderState) join(left, right *ps6127BuilderState, leftDone, rightDone bool) {
+	// A nil/error return cannot produce the configured instance. A returned
+	// instance or ambiguous location needs a richer disjunction; abstain rather
+	// than letting one arm's locations explain the other arm's field writes.
+	state.uncertain = left.uncertain || right.uncertain
+	if state.callDepth != 0 && leftDone != rightDone {
+		// One arm returns to the caller while the other continues the closure.
+		// A single joined continuation cannot represent both completion points.
+		state.uncertain = true
+	}
+	if state.callDepth == 0 {
+		state.uncertain = state.uncertain || (leftDone && left.returned != 0) || (rightDone && right.returned != 0)
+	}
+	if state.callDepth == 0 && leftDone && left.returned == 0 && !left.uncertain {
+		*state = *right
+		return
+	}
+	if state.callDepth == 0 && rightDone && right.returned == 0 && !right.uncertain {
+		*state = *left
+		return
+	}
+	state.uncertain = state.uncertain || !ps6127SameFacts(left.instances, right.instances) ||
+		!ps6127SameFacts(left.pointers, right.pointers) || !ps6127SameFacts(left.bound, right.bound) ||
+		!ps6127SameFacts(left.closures, right.closures) || left.rootField != right.rootField || left.ignoreField != right.ignoreField
+	state.inputs = ps6127CommonFacts(left.inputs, right.inputs)
+	state.roots = ps6127CommonFacts(left.roots, right.roots)
+	state.entries = ps6127CommonFacts(left.entries, right.entries)
+	state.instances = ps6127CommonFacts(left.instances, right.instances)
+	state.pointers = ps6127CommonFacts(left.pointers, right.pointers)
+	state.bound = ps6127CommonFacts(left.bound, right.bound)
+	state.closures = ps6127CommonFacts(left.closures, right.closures)
+	state.rootField, state.ignoreField = left.rootField, left.ignoreField
+	state.next = right.next
+	state.stored, state.rooted = make([]bool, state.next+1), make([]bool, state.next+1)
+	for instance := range left.stored {
+		state.stored[instance] = left.stored[instance] && right.stored[instance]
+		state.rooted[instance] = left.rooted[instance] && right.rooted[instance]
+	}
+}
+
+func ps6127CommonFacts[V comparable](left, right map[types.Object]V) map[types.Object]V {
+	result := make(map[types.Object]V)
+	for object, value := range left {
+		if other, ok := right[object]; ok && value == other {
+			result[object] = value
+		}
+	}
+	return result
+}
+
+func ps6127SameFacts[V comparable](left, right map[types.Object]V) bool {
+	// These maps use the zero value for unknown/no binding. An explicit zero
+	// and an absent key are the same abstract location, not an alias conflict.
+	for object, value := range left {
+		if right[object] != value {
+			return false
+		}
+	}
+	for object, value := range right {
+		if left[object] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func (state *ps6127BuilderState) condition(expression ast.Expr) (bool, bool) {
+	if truth, known := ps6122Bool(state.pass, expression); known {
+		return truth, true
+	}
+	// The witness is the configured single relative directory component, not
+	// every arbitrary caller-supplied ignore string. Its IsAbs branch is known.
+	if unary, ok := ps2110Unparen(expression).(*ast.UnaryExpr); ok && unary.Op == token.NOT {
+		if call, ok := ps2110Unparen(unary.X).(*ast.CallExpr); ok && ps6127CallID(state.pass, call) == "path/filepath.IsAbs" && len(call.Args) == 1 && state.entryExpr(call.Args[0]) == 1 {
+			return true, true
+		}
+	}
+	return false, false
 }
 
 func (state *ps6127BuilderState) walkElse(statement ast.Stmt) bool {
@@ -623,11 +1024,24 @@ func (state *ps6127BuilderState) assign(assignment *ast.AssignStmt) {
 	object := ps6114ExprObject(state.pass, lhs)
 	delete(state.closures, object)
 	delete(state.bound, object)
+	delete(state.pointers, object)
+	if unary, ok := rhs.(*ast.UnaryExpr); ok && unary.Op == token.AND {
+		if selector := ps6127Selector(unary.X); selector != nil {
+			state.pointers[object] = state.instances[ps6114ExprObject(state.pass, selector.X)]
+		}
+	}
+	if source := ps6114ExprObject(state.pass, rhs); state.pointers[source] != 0 {
+		state.pointers[object] = state.pointers[source]
+	}
 	if literal, ok := rhs.(*ast.FuncLit); ok {
 		state.closures[object] = literal
+	} else if source := ps6114ExprObject(state.pass, rhs); state.closures[source] != nil {
+		state.closures[object] = state.closures[source]
 	}
 	if selector, ok := rhs.(*ast.SelectorExpr); ok {
 		state.bound[object] = state.instances[ps6114ExprObject(state.pass, selector.X)]
+	} else if source := ps6114ExprObject(state.pass, rhs); state.bound[source] != 0 {
+		state.bound[object] = state.bound[source]
 	}
 	root, input, entry, instance := false, false, 0, 0
 	if source := ps6114ExprObject(state.pass, rhs); source != nil {
@@ -653,6 +1067,8 @@ func (state *ps6127BuilderState) assign(assignment *ast.AssignStmt) {
 	if literal, ok := rhs.(*ast.UnaryExpr); ok && literal.Op == token.AND {
 		if composite, ok := literal.X.(*ast.CompositeLit); ok {
 			state.next++
+			state.stored = append(state.stored, false)
+			state.rooted = append(state.rooted, false)
 			state.instances[object] = state.next
 			for _, element := range composite.Elts {
 				pair, ok := element.(*ast.KeyValueExpr)
@@ -672,6 +1088,10 @@ func (state *ps6127BuilderState) assign(assignment *ast.AssignStmt) {
 func (state *ps6127BuilderState) clear(expression ast.Expr) {
 	expression = ps2110Unparen(expression)
 	if star, ok := expression.(*ast.StarExpr); ok {
+		if instance := state.pointers[ps6114ExprObject(state.pass, star.X)]; instance != 0 {
+			state.stored[instance], state.rooted[instance] = false, false
+			return
+		}
 		instance := state.instances[ps6114ExprObject(state.pass, star.X)]
 		if instance != 0 {
 			state.stored[instance], state.rooted[instance] = false, false
@@ -703,6 +1123,12 @@ func (state *ps6127BuilderState) invalidateCall(expression ast.Expr) {
 		}
 		if identifier, ok := call.Fun.(*ast.Ident); ok && state.pass.TypesInfo.Uses[identifier] == types.Universe.Lookup(identifier.Name) {
 			return true
+		}
+		if literal := state.closures[ps6114ExprObject(state.pass, call.Fun)]; literal != nil {
+			state.walkClosure(literal)
+		}
+		if instance := state.bound[ps6114ExprObject(state.pass, call.Fun)]; instance != 0 {
+			state.stored[instance], state.rooted[instance] = false, false
 		}
 		if selector, ok := call.Fun.(*ast.SelectorExpr); ok {
 			state.invalidateArgument(selector.X)
@@ -835,10 +1261,14 @@ func (state *ps6127MatcherState) walk(statements []ast.Stmt, reachable bool) boo
 				delete(state.bound, lhs)
 				if literal, ok := ps2110Unparen(value.Rhs[0]).(*ast.FuncLit); ok {
 					state.closures[lhs] = literal
+				} else if source := ps6114ExprObject(state.pass, value.Rhs[0]); state.closures[source] != nil {
+					state.closures[lhs] = state.closures[source]
 				}
 				if selector, ok := ps2110Unparen(value.Rhs[0]).(*ast.SelectorExpr); ok {
 					object := ps6114ExprObject(state.pass, selector.X)
 					state.bound[lhs] = object == state.receiver || state.aliases[object] == state.receiver
+				} else if source := ps6114ExprObject(state.pass, value.Rhs[0]); state.bound[source] {
+					state.bound[lhs] = true
 				}
 				if unary, ok := ps2110Unparen(value.Rhs[0]).(*ast.UnaryExpr); ok && unary.Op == token.AND {
 					state.pointers[lhs] = ps6114ExprObject(state.pass, unary.X)
@@ -919,16 +1349,20 @@ func (state *ps6127MatcherState) walk(statements []ast.Stmt, reachable bool) boo
 				state.storageStable = false
 			}
 			state.matcherCalls(value.Call)
+			if state.closures[ps6114ExprObject(state.pass, value.Call.Fun)] != nil {
+				state.rootOnly = false
+				state.storageStable = false
+			}
 		case *ast.ExprStmt:
 			if call, ok := ps2110Unparen(value.X).(*ast.CallExpr); ok {
 				if literal, ok := ps2110Unparen(call.Fun).(*ast.FuncLit); ok {
-					if state.walk(literal.Body.List, true) {
-						return true
-					}
+					recursive := state.recursive
+					state.walk(literal.Body.List, true)
+					state.recursive = recursive
 				} else if literal := state.closures[ps6114ExprObject(state.pass, call.Fun)]; literal != nil {
-					if state.walk(literal.Body.List, true) {
-						return true
-					}
+					recursive := state.recursive
+					state.walk(literal.Body.List, true)
+					state.recursive = recursive
 				} else if state.bound[ps6114ExprObject(state.pass, call.Fun)] {
 					state.storageStable = false
 				}
@@ -949,17 +1383,37 @@ func (state *ps6127MatcherState) walk(statements []ast.Stmt, reachable bool) boo
 			}
 		case *ast.SelectStmt:
 			for _, raw := range value.Body.List {
-				state.walk(raw.(*ast.CommClause).Body, true)
+				clause := raw.(*ast.CommClause)
+				if clause.Comm == nil && state.walk(clause.Body, true) {
+					return true
+				}
 			}
 		case *ast.TypeSwitchStmt:
 			if value.Init != nil {
 				state.walk([]ast.Stmt{value.Init}, true)
 			}
 			for _, raw := range value.Body.List {
-				state.walk(raw.(*ast.CaseClause).Body, true)
+				if state.walk(raw.(*ast.CaseClause).Body, true) {
+					return true
+				}
 			}
 		case *ast.LabeledStmt:
 			state.walk([]ast.Stmt{value.Stmt}, true)
+		case *ast.DeclStmt:
+			declaration, ok := value.Decl.(*ast.GenDecl)
+			if ok {
+				for _, spec := range declaration.Specs {
+					values, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for i, name := range values.Names {
+						if i < len(values.Values) {
+							state.walk([]ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{name}, Rhs: []ast.Expr{values.Values[i]}, Tok: token.DEFINE}}, true)
+						}
+					}
+				}
+			}
 		}
 	}
 	return false
@@ -986,6 +1440,12 @@ func (state *ps6127MatcherState) walkRange(loop *ast.RangeStmt, entry types.Obje
 				if star, ok := ps2110Unparen(assignment.Lhs[0]).(*ast.StarExpr); ok && state.pointers[ps6114ExprObject(state.pass, star.X)] == path {
 					path = nil
 				}
+				if star, ok := ps2110Unparen(assignment.Lhs[0]).(*ast.StarExpr); ok && state.pointers[ps6114ExprObject(state.pass, star.X)] == entry {
+					stableEntry = false
+				}
+				if literal, ok := ps2110Unparen(assignment.Rhs[0]).(*ast.FuncLit); ok {
+					state.closures[ps6114ExprObject(state.pass, assignment.Lhs[0])] = literal
+				}
 			}
 			for _, lhs := range assignment.Lhs {
 				object := ps6114ExprObject(state.pass, lhs)
@@ -997,6 +1457,40 @@ func (state *ps6127MatcherState) walkRange(loop *ast.RangeStmt, entry types.Obje
 				}
 			}
 		}
+		ast.Inspect(statement, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if literal := state.closures[ps6114ExprObject(state.pass, call.Fun)]; literal != nil {
+				ast.Inspect(literal.Body, func(n ast.Node) bool {
+					assignment, ok := n.(*ast.AssignStmt)
+					if ok {
+						for _, lhs := range assignment.Lhs {
+							if ps6114ExprObject(state.pass, lhs) == path {
+								path = nil
+							}
+							if ps6114ExprObject(state.pass, lhs) == entry {
+								stableEntry = false
+							}
+						}
+					}
+					return true
+				})
+			}
+			for _, arg := range call.Args {
+				if unary, ok := ps2110Unparen(arg).(*ast.UnaryExpr); ok && unary.Op == token.AND {
+					object := ps6114ExprObject(state.pass, unary.X)
+					if object == entry {
+						stableEntry = false
+					}
+					if object == path {
+						path = nil
+					}
+				}
+			}
+			return true
+		})
 		branch, ok := statement.(*ast.IfStmt)
 		if !ok {
 			if block, ok := statement.(*ast.BlockStmt); ok {
@@ -1056,6 +1550,14 @@ func (state *ps6127MatcherState) matcherCalls(expression ast.Expr) {
 		}
 		if id := ps6127CallID(state.pass, call); strings.HasPrefix(id, "path/filepath.") || strings.HasPrefix(id, "strings.") {
 			return true
+		}
+		if literal := state.closures[ps6114ExprObject(state.pass, call.Fun)]; literal != nil {
+			recursive := state.recursive
+			state.walk(literal.Body.List, true)
+			state.recursive = recursive
+		}
+		if state.bound[ps6114ExprObject(state.pass, call.Fun)] {
+			state.storageStable = false
 		}
 		if selector, ok := call.Fun.(*ast.SelectorExpr); ok {
 			object := ps6114ExprObject(state.pass, selector.X)
@@ -1200,6 +1702,13 @@ func (state *ps6127MatcherState) recursiveRange(loop *ast.RangeStmt) bool {
 		}
 		if _, ok := statement.(*ast.ReturnStmt); ok {
 			return false
+		}
+		if assignment, ok := statement.(*ast.AssignStmt); ok {
+			for _, lhs := range assignment.Lhs {
+				if ps6114ExprObject(state.pass, lhs) == component {
+					return false
+				}
+			}
 		}
 		branch, ok := statement.(*ast.IfStmt)
 		if !ok || !ps6122CanEnter(state.pass, state.flow.body, state.flow.parents, branch.Pos()) || !ps6127ReturnsTrue(state.pass, branch.Body.List) {

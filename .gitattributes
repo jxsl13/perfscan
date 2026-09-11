@@ -9,3 +9,5 @@ checks/testdata/ps6084_owner_candidate.go.txt text eol=lf
 checks/testdata/ps6084_owner_whole_row.go.txt text eol=lf
 checks/testdata/ps6124_owner_before.go.txt text eol=lf
 checks/testdata/ps6124_owner_after.go.txt text eol=lf
+checks/testdata/ps6127_owner_baseline.go.txt text eol=lf
+checks/testdata/ps6127_owner_behavior_test.go.txt text eol=lf
