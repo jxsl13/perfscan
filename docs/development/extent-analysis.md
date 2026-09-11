@@ -1,6 +1,6 @@
 # Output-workspace extent analysis foundation
 
-The `ps6125_extent*` and `ps6125_ssa*` components are preparatory internal
+The `ps6125_extent*`, `ps6125_ssa*`, and `ps6125_access*` components are preparatory internal
 analysis for issue #887. They do **not** register a check, emit diagnostics,
 enable an automatic rewrite, or establish that the issue is resolved.
 
@@ -20,6 +20,11 @@ enable an automatic rewrite, or establish that the issue is resolved.
   are stable descriptor facts; map and channel lengths are not reused as such.
 - Numeric geometry evaluation checks the requested target integer limit.
   Algebraic equality alone never proves that source arithmetic cannot overflow.
+- SSA access descriptions retain the exact root value, typed field declarations,
+  and dereference load sites. Phi inputs must agree on executable edges; mixed,
+  cyclic, indexed, converted, and opaque-call origins remain unknown. Repeated
+  loads are not equated merely because they read the same field path. These
+  descriptions are not must-alias, memory-invariance, or lifetime proofs.
 
 Inputs must be facts about the actual invocation. AST resolvers must establish
 reaching bindings, identity, effects, and path conditions before returning known
@@ -32,6 +37,8 @@ provided; a future driver must bound and join its call contexts independently.
 All hermetic tests run in parallel, including tests for promoted versus sibling
 fields, checked arithmetic, helper specialization, mixed branches, loop widening,
 address and closure mutation, mutable object lengths, and unexecuted bodies.
+Access-path fixtures also cover distinct receiver roots and sibling fields,
+specialized branches, separate load snapshots, and unresolved value origins.
 
 ```sh
 go test -race ./checks -run '^TestPS6125' -count=1
