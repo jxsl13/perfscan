@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"text/tabwriter"
@@ -31,6 +32,8 @@ import (
 )
 
 var version = "dev" // set by the release workflow via -ldflags
+
+var semverToken = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
 
 // stringList is a repeatable, comma-splitting flag.Value: each occurrence
 // appends its comma-separated, whitespace-trimmed parts.
@@ -116,6 +119,8 @@ func currentVersion() string {
 }
 
 func selectVersion(stamped, moduleVersion string) string {
+	stamped = normalizeVersion(stamped)
+	moduleVersion = normalizeVersion(moduleVersion)
 	if stamped != "" && stamped != "dev" && stamped != "(devel)" {
 		return stamped
 	}
@@ -123,6 +128,33 @@ func selectVersion(stamped, moduleVersion string) string {
 		return moduleVersion
 	}
 	return "dev"
+}
+
+func normalizeVersion(version string) string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return version
+	}
+	if suffix, ok := strings.CutPrefix(version, "refs/tags/"); ok {
+		version = suffix
+	}
+	if at := strings.LastIndexByte(version, '@'); at >= 0 {
+		suffix := strings.TrimSpace(version[at+1:])
+		if isSemVerToken(suffix) {
+			return suffix
+		}
+	}
+	if slash := strings.LastIndexByte(version, '/'); slash >= 0 {
+		tail := strings.TrimSpace(version[slash+1:])
+		if isSemVerToken(tail) {
+			return tail
+		}
+	}
+	return version
+}
+
+func isSemVerToken(version string) bool {
+	return semverToken.MatchString(version)
 }
 
 func printUsage() {

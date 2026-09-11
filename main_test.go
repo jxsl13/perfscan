@@ -10,6 +10,9 @@ func TestSelectVersion(t *testing.T) {
 		want          string
 	}{
 		{name: "release workflow stamp wins", stamped: "v1.72.0", moduleVersion: "v1.71.0", want: "v1.72.0"},
+		{name: "release ref prefix is stripped", stamped: "refs/tags/v1.72.0", moduleVersion: "v1.71.0", want: "v1.72.0"},
+		{name: "module path with version is normalized", stamped: "github.com/jxsl13/perfscan@v1.72.0", moduleVersion: "github.com/jxsl13/perfscan@v1.71.0", want: "v1.72.0"},
+		{name: "non-semver stamp is preserved", stamped: "local-build", moduleVersion: "v1.71.0", want: "local-build"},
 		{name: "go install module version", stamped: "dev", moduleVersion: "v1.71.0", want: "v1.71.0"},
 		{name: "empty stamp uses module", moduleVersion: "v1.71.0", want: "v1.71.0"},
 		{name: "local build", stamped: "dev", moduleVersion: "(devel)", want: "dev"},
