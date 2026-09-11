@@ -932,6 +932,9 @@ crossStepAcceleratorResidencyContracts:
 #   bulkCopyHelpers:        [rawCopyLE, rawStoreLE]
 #   vectorizedSiblingFuncs: [vexpF32, vtanhF32, vsiluF32, vgeluF32]
 #   fanOutHelpers:          [parallel.For]
+#   closureEnvironmentGrowthArtifacts:
+#     - |-
+#       {"version":1,"growth":{"Before":{"...":"compiler evidence from the baseline checkout"},"After":{"...":"compiler evidence for this exact source"},"Added":[{"...":"added capture"}]}}
 #   dtypeMethods:           [Dtype]
 #   outputBufferElemTypes:  [float64, float32]
 #   compiledResourceFuncs:  [NewMPSGraph, compilePipeline, buildProgram]

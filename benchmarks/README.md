@@ -174,3 +174,9 @@ Rules without a pair, and why:
   intended backend without process-global mutation, retain that design and
   document the attribution with `//perfscan:ignore PS6124 <reason>`; otherwise
   validate a serialized scoped pin and restoration in the real benchmark.
+
+- **PS6126** (escaping worker closure size-class advisory): the detector is
+  driven by compiler layout and matching-runtime allocator evidence. Its
+  hermetic allocation benchmark demonstrates the class boundary, but cannot
+  reproduce a project worker pool or establish full-operation B/op, unchanged
+  allocs/op, hotness, or a speedup. Measure both metrics at the real boundary.

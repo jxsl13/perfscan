@@ -189,6 +189,11 @@ type Config struct {
 	// whose explicit Context selection can coexist with downstream global routing.
 	ScopedBackendRoutingContracts []ScopedBackendRoutingContract `json:"scopedBackendRoutingContracts,omitempty" yaml:"scopedBackendRoutingContracts"`
 
+	// ClosureEnvironmentGrowthArtifacts are JSON objects emitted by
+	// perfscan-closureenv for compiler-confirmed before/current class crossings.
+	// PS6126 still joins the current half to exact source and a fan-out call.
+	ClosureEnvironmentGrowthArtifacts []string `json:"closureEnvironmentGrowthArtifacts,omitempty" yaml:"closureEnvironmentGrowthArtifacts"`
+
 	// InputViewFuncs and OutputViewFuncs expose repository-specific typed views
 	// over input and destination storage respectively.
 	InputViewFuncs  []string `json:"inputViewFuncs,omitempty" yaml:"inputViewFuncs"`
@@ -2259,6 +2264,7 @@ type Sets struct {
 	NativeSnapshotStringCopyContracts []NativeSnapshotStringCopyContract
 	SchedulerTileGrainContracts       []SchedulerTileGrainContract
 	ScopedBackendRoutingContracts     []ScopedBackendRoutingContract
+	ClosureEnvironmentGrowthArtifacts []string
 	InputViewFuncs                    map[string]bool
 	OutputViewFuncs                   map[string]bool
 	ReferenceBackendPkg               string
@@ -2321,6 +2327,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		NativeSnapshotStringCopyContracts: slices.Clone(c.NativeSnapshotStringCopyContracts),
 		SchedulerTileGrainContracts:       cloneSchedulerTileGrainContracts(c.SchedulerTileGrainContracts),
 		ScopedBackendRoutingContracts:     cloneScopedBackendRoutingContracts(c.ScopedBackendRoutingContracts),
+		ClosureEnvironmentGrowthArtifacts: slices.Clone(c.ClosureEnvironmentGrowthArtifacts),
 		InputViewFuncs:                    toSet(c.InputViewFuncs),
 		OutputViewFuncs:                   toSet(c.OutputViewFuncs),
 		ReferenceBackendPkg:               c.ReferenceBackendPkg,
