@@ -1,0 +1,28 @@
+package main
+
+import (
+	"flag"
+	"testing"
+)
+
+var ownerRecursive = flag.Bool("owner-recursive", false, "review-derived recursive default")
+
+func TestPinnedOwnerPaths(t *testing.T) {
+	t.Parallel()
+	c := defaultConfig(t.TempDir())
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{{".spectackle/spec/spec.md", true}, {"autograd/.spectackle/work/entry.ndjson", *ownerRecursive}, {"pkg/deep/.spectackle/journal/record.md", *ownerRecursive}, {"pkg/.spectackle-adjacent/readme.md", false}, {"pkg/README.md", false}, {"pkg/code.go", false}, {"pkg/assets/model.bin", false}, {"pkg/native/kernel.c", false}, {"docs/guide.md", true}} {
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			_, got := c.ignoredBy(tc.path)
+			if got != tc.want {
+				t.Errorf("ignoredBy(%q)=%t,want%t", tc.path, got, tc.want)
+			}
+		})
+	}
+	if _, full := c.fullRerunBy(".github/workflows/ci.yml"); !full {
+		t.Fatal("full-rerun policy lost")
+	}
+}

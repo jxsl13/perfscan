@@ -408,6 +408,21 @@ nativeGenerationDispatchContracts:
     workerExecutesSynchronously: true
     descriptorMeaningReviewed: true
 
+# Reviewed any-depth metadata policy for PS6127. The source identities and
+# declared fields let the analyzer prove a root-anchored builder/matcher shape;
+# the two booleans are repository-owned safety assertions, not inferred facts.
+# Never enable this for directories containing embedded files, native assets,
+# generated code, or other changes that must retain test coverage.
+recursiveMetadataIgnoreContracts:
+  - name: generated review records
+    builder: example.com/project/internal/cichange.newConfig
+    matcher: example.com/project/internal/cichange.config.ignoredBy
+    rootField: root
+    ignoreField: ignoreParts
+    directoryName: .records
+    anyDepthIntent: true
+    nonEmbeddedMetadataOnly: true
+
 # Helpers exposing typed input views and caller-owned output views.
 inputViewFuncs:
   - f64Data

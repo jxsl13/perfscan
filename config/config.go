@@ -201,6 +201,11 @@ type Config struct {
 	// PS6126 still joins the current half to exact source and a fan-out call.
 	ClosureEnvironmentGrowthArtifacts []string `json:"closureEnvironmentGrowthArtifacts,omitempty" yaml:"closureEnvironmentGrowthArtifacts"`
 
+	// RecursiveMetadataIgnoreContracts bind a root-anchored ignore builder and
+	// matcher to a reviewed directory name whose metadata is intended to be
+	// ignored at any repository depth. PS6127 never infers that safety policy.
+	RecursiveMetadataIgnoreContracts []RecursiveMetadataIgnoreContract `json:"recursiveMetadataIgnoreContracts,omitempty" yaml:"recursiveMetadataIgnoreContracts"`
+
 	// InputViewFuncs and OutputViewFuncs expose repository-specific typed views
 	// over input and destination storage respectively.
 	InputViewFuncs  []string `json:"inputViewFuncs,omitempty" yaml:"inputViewFuncs"`
@@ -2147,6 +2152,44 @@ type ScopedBackendRoutingContract struct {
 	ProcessGlobalWriterIsolation bool `json:"processGlobalWriterIsolation" yaml:"processGlobalWriterIsolation"`
 }
 
+// RecursiveMetadataIgnoreContract records the project-owned safety facts and
+// exact source identities used by PS6127. Field names are declared struct
+// fields, not selectors matched by spelling alone.
+type RecursiveMetadataIgnoreContract struct {
+	Name                    string `json:"name" yaml:"name"`
+	Builder                 string `json:"builder" yaml:"builder"`
+	Matcher                 string `json:"matcher" yaml:"matcher"`
+	RootField               string `json:"rootField" yaml:"rootField"`
+	IgnoreField             string `json:"ignoreField" yaml:"ignoreField"`
+	DirectoryName           string `json:"directoryName" yaml:"directoryName"`
+	AnyDepthIntent          bool   `json:"anyDepthIntent" yaml:"anyDepthIntent"`
+	NonEmbeddedMetadataOnly bool   `json:"nonEmbeddedMetadataOnly" yaml:"nonEmbeddedMetadataOnly"`
+}
+
+func (c RecursiveMetadataIgnoreContract) Valid() bool { //perfscan:ignore PS3106 public config value validation
+	return c.Name != "" && strings.TrimSpace(c.Name) == c.Name && ps6109CallableIDValid(c.Builder) &&
+		ps6109CallableIDValid(c.Matcher) && c.RootField != "" && c.IgnoreField != "" &&
+		c.DirectoryName != "" && filepath.Base(c.DirectoryName) == c.DirectoryName &&
+		c.DirectoryName != "." && c.DirectoryName != ".." && c.AnyDepthIntent && c.NonEmbeddedMetadataOnly
+}
+
+// UsableRecursiveMetadataIgnoreContractCount rejects ambiguous matcher sites.
+func UsableRecursiveMetadataIgnoreContractCount(contracts []RecursiveMetadataIgnoreContract) int {
+	counts := make(map[string]int)
+	for _, contract := range contracts {
+		if contract.Valid() {
+			counts[contract.Matcher]++
+		}
+	}
+	usable := 0
+	for _, contract := range contracts {
+		if contract.Valid() && counts[contract.Matcher] == 1 {
+			usable++
+		}
+	}
+	return usable
+}
+
 func (c ScopedBackendRoutingContract) Valid() bool { //perfscan:ignore PS3106 public config value validation
 	return c.Name != "" && strings.TrimSpace(c.Name) == c.Name && ps6109CallableIDValid(c.ConfiguredSite) &&
 		ps6109CallableIDValid(c.BackendGet) && ps6109CallableIDValid(c.ContextWithBackend) &&
@@ -2273,6 +2316,7 @@ type Sets struct {
 	SchedulerTileGrainContracts       []SchedulerTileGrainContract
 	ScopedBackendRoutingContracts     []ScopedBackendRoutingContract
 	ClosureEnvironmentGrowthArtifacts []string
+	RecursiveMetadataIgnoreContracts  []RecursiveMetadataIgnoreContract
 	InputViewFuncs                    map[string]bool
 	OutputViewFuncs                   map[string]bool
 	ReferenceBackendPkg               string
@@ -2337,6 +2381,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		SchedulerTileGrainContracts:       cloneSchedulerTileGrainContracts(c.SchedulerTileGrainContracts),
 		ScopedBackendRoutingContracts:     cloneScopedBackendRoutingContracts(c.ScopedBackendRoutingContracts),
 		ClosureEnvironmentGrowthArtifacts: slices.Clone(c.ClosureEnvironmentGrowthArtifacts),
+		RecursiveMetadataIgnoreContracts:  slices.Clone(c.RecursiveMetadataIgnoreContracts),
 		InputViewFuncs:                    toSet(c.InputViewFuncs),
 		OutputViewFuncs:                   toSet(c.OutputViewFuncs),
 		ReferenceBackendPkg:               c.ReferenceBackendPkg,

@@ -180,6 +180,10 @@ Rules without a pair, and why:
   hermetic allocation benchmark demonstrates the class boundary, but cannot
   reproduce a project worker pool or establish full-operation B/op, unchanged
   allocs/op, hotness, or a speedup. Measure both metrics at the real boundary.
+- **PS6127** (recursive metadata-ignore consistency advisory): a portable
+  micro-benchmark cannot reproduce repository-specific change selection or CI
+  fan-out. The rule reports a typed policy mismatch only; validate nested
+  metadata and embedded code/asset controls against the real selector and CI.
 - **PS6128** (native generation-dispatch advisory): the finding is a
   correctness mismatch between reviewed hardware-generation semantics and an
   exact project-owned Go/assembly route. A portable toy cannot execute Apple
