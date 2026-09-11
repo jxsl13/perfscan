@@ -26,6 +26,7 @@ import (
 	"golang.org/x/tools/go/packages"
 
 	"github.com/jxsl13/perfscan/config"
+	"github.com/jxsl13/perfscan/internal/closureenv"
 	"github.com/jxsl13/perfscan/lint"
 )
 
@@ -156,16 +157,34 @@ func Run(checks []*lint.Check, opts Options) int {
 	if loadErrors {
 		return 2
 	}
+	for _, check := range enabled {
+		if check.ID == "PS6126" {
+			if err := validateClosureEvidencePackages(pkgs, cfg.ClosureEnvironmentGrowthArtifacts); err != nil {
+				fmt.Fprintln(opts.Stderr, "perfscan:", err)
+				return 2
+			}
+		}
+	}
 	metadata := scanEvidenceMetadata(pkgs)
 
 	findings := make([]Finding, 0, len(pkgs))
 	for _, c := range enabled {
 		if len(c.Analyzer.FactTypes) != 0 {
-			findings = append(findings, runFactCheck(c, pkgs)...)
+			current, err := runFactCheck(c, pkgs)
+			if err != nil {
+				fmt.Fprintln(opts.Stderr, "perfscan:", err)
+				return 2
+			}
+			findings = append(findings, current...)
 			continue
 		}
 		for _, pkg := range pkgs {
-			findings = append(findings, runCheck(c, pkg, nil)...)
+			current, err := runCheck(c, pkg, nil)
+			if err != nil {
+				fmt.Fprintln(opts.Stderr, "perfscan:", err)
+				return 2
+			}
+			findings = append(findings, current...)
 		}
 	}
 
@@ -261,6 +280,27 @@ func Run(checks []*lint.Check, opts Options) int {
 		return 1
 	}
 	return 0
+}
+
+// Evidence for an absent package is an incomplete scan, not a clean result.
+func validateClosureEvidencePackages(packages []*packages.Package, encoded []string) error {
+	for _, artifact := range encoded {
+		growth, err := closureenv.ReadArtifact(strings.NewReader(artifact))
+		if err != nil {
+			return fmt.Errorf("PS6126 invalid closure evidence: %w", err)
+		}
+		found := false
+		for _, pkg := range packages {
+			if pkg.Types != nil && pkg.Types.Path() == growth.After.Package {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("PS6126 closure evidence package %q is outside the loaded scan packages", growth.After.Package)
+		}
+	}
+	return nil
 }
 
 // cachedWd holds the working directory for relPath, which runs once per
@@ -360,6 +400,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"nativeSnapshotStringCopyContracts": validNativeSnapshotStringCopyContracts(cfg.NativeSnapshotStringCopyContracts),
 		"schedulerTileGrainContracts":       validSchedulerTileGrainContracts(cfg.SchedulerTileGrainContracts),
 		"scopedBackendRoutingContracts":     validScopedBackendRoutingContracts(cfg.ScopedBackendRoutingContracts),
+		"closureEnvironmentGrowthArtifacts": validClosureEnvironmentGrowthArtifacts(cfg.ClosureEnvironmentGrowthArtifacts),
 		"inputViewFuncs":                    len(cfg.InputViewFuncs),
 		"outputViewFuncs":                   len(cfg.OutputViewFuncs),
 		"referenceBackendPkg":               len(cfg.ReferenceBackendPkg),
@@ -387,6 +428,16 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		}
 	}
 	return missing
+}
+
+func validClosureEnvironmentGrowthArtifacts(artifacts []string) int {
+	valid := 0
+	for _, artifact := range artifacts {
+		if _, err := closureenv.ReadArtifact(strings.NewReader(artifact)); err == nil {
+			valid++
+		}
+	}
+	return valid
 }
 
 func validScopedBackendRoutingContracts(contracts []config.ScopedBackendRoutingContract) int {
@@ -626,7 +677,7 @@ func newFactStore(analyzer *analysis.Analyzer) *factStore {
 // graph in dependency-first order. Diagnostics remain scoped to the packages
 // the user requested, while dependency passes exist only to publish facts —
 // matching the standard go/analysis driver contract.
-func runFactCheck(c *lint.Check, roots []*packages.Package) []Finding {
+func runFactCheck(c *lint.Check, roots []*packages.Package) ([]Finding, error) {
 	var order []*packages.Package
 	packages.Visit(roots, nil, func(pkg *packages.Package) {
 		if len(pkg.Syntax) != 0 {
@@ -636,15 +687,18 @@ func runFactCheck(c *lint.Check, roots []*packages.Package) []Finding {
 	store := newFactStore(c.Analyzer)
 	var findings []Finding
 	for _, pkg := range order {
-		current := runCheck(c, pkg, store)
+		current, err := runCheck(c, pkg, store)
+		if err != nil {
+			return nil, err
+		}
 		if slices.Contains(roots, pkg) {
 			findings = append(findings, current...)
 		}
 	}
-	return findings
+	return findings, nil
 }
 
-func runCheck(c *lint.Check, pkg *packages.Package, facts *factStore) []Finding {
+func runCheck(c *lint.Check, pkg *packages.Package, facts *factStore) ([]Finding, error) {
 	var out []Finding
 	pass := &analysis.Pass{
 		Analyzer:     c.Analyzer,
@@ -676,9 +730,9 @@ func runCheck(c *lint.Check, pkg *packages.Package, facts *factStore) []Finding 
 		facts.bind(pass)
 	}
 	if _, err := c.Analyzer.Run(pass); err != nil {
-		fmt.Fprintf(os.Stderr, "perfscan: %s on %s: %v\n", c.ID, pkg.PkgPath, err)
+		return nil, fmt.Errorf("%s on %s: %w", c.ID, pkg.PkgPath, err)
 	}
-	return out
+	return out, nil
 }
 
 func (store *factStore) bind(pass *analysis.Pass) {

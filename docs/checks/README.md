@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**418 checks total** — **265 with a bit-identical auto-fix**, 153 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **48 L3** (aggressive).
+**419 checks total** — **265 with a bit-identical auto-fix**, 154 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **49 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -430,4 +430,5 @@ checks' fixes.
 | [PS6122](PS6122.md) | verify | L3 |  | a constant-distance SIMD shift in a repeated path merits target code-generation inspection |
 | [PS6123](PS6123.md) | verify | L3 |  | a typed SIMD select eagerly computes substantially more expensive work for one arm |
 | [PS6124](PS6124.md) | verify | L3 |  | a backend-specific measurement context does not pin a downstream global route |
+| [PS6126](PS6126.md) | verify | L3 |  | an escaping worker callback grew across an allocator size class |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |
