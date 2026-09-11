@@ -32,9 +32,10 @@ type testJob struct {
 
 func main() {
 	workers := flag.Int("workers", runtime.GOMAXPROCS(0), "maximum concurrent go test processes")
-	// Shards already provide cross-test concurrency. Keeping the per-process
-	// test semaphore at one avoids multiplying GOMAXPROCS-heavy analyzer loads.
-	parallel := flag.Int("parallel", 1, "maximum tests run in parallel within each shard")
+	// Shards provide cross-package concurrency. Per-process parallelism is still
+	// enabled so ordinary test cases can run concurrently and CI does not become
+	// unnecessarily serial.
+	parallel := flag.Int("parallel", runtime.GOMAXPROCS(0), "maximum tests run in parallel within each shard")
 	timeout := flag.Duration("timeout", 20*time.Minute, "timeout for each test shard")
 	race := flag.Bool("race", false, "run each shard with the race detector")
 	shardIndex := flag.Int("shard-index", 0, "zero-based external shard assigned to this process")
