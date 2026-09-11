@@ -21,9 +21,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
+        id: go
         with:
           go-version: ${{ matrix.go }}
-          cache-dependency-path: go.sum
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          go-version: ${{ steps.go.outputs.go-version }}
+          scope: test-${{ matrix.shard }}
       - name: Build
         if: matrix.shard == 0
         run: go build ./...
@@ -42,9 +47,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
+        id: go
         with:
           go-version: stable
-          cache-dependency-path: go.sum
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          go-version: ${{ steps.go.outputs.go-version }}
+          scope: quality
       - name: gofmt
         run: |
           # analysistest fixtures under testdata/ need exact // want anchoring
@@ -56,12 +66,18 @@ jobs:
       - name: Set up oldstable Go for staticcheck
         # staticcheck 2026.1 cannot decode Go 1.27 export data yet. Build,
         # race tests, formatting, and vet above still use stable Go.
-        # The first setup already restored the shared module/build caches.
-        # Restoring again collides with read-only module files from that cache.
+        # The shared module cache was already restored. Only the separate
+        # oldstable build directory is restored below, never the modules again.
         uses: actions/setup-go@v7
+        id: go-staticcheck
         with:
           go-version: oldstable
           cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          go-version: ${{ steps.go-staticcheck.outputs.go-version }}
+          scope: quality
+          cache-modules: 'false'
       - name: staticcheck
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@latest
@@ -72,9 +88,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
+        id: go
         with:
           go-version: stable
-          cache-dependency-path: go.sum
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          go-version: ${{ steps.go.outputs.go-version }}
+          scope: extras
       - name: docs up to date
         run: |
           go run ./gendocs
