@@ -52,6 +52,7 @@ type ps6125SSAExtents struct {
 	lengths  map[*ssa.Parameter]ps6125Extent
 	blocks   map[*ssa.BasicBlock]bool
 	edges    map[ps6125SSAEdge]bool
+	origins  *ps6125SSAOrigins // Initialized only after invocation analysis is complete.
 }
 
 // ps6125AnalyzeSSAExtents specializes scalar control/data flow for one invocation.
@@ -208,20 +209,24 @@ func (flow *ps6125SSAExtents) evaluate(value ssa.Value) ps6125Scalar {
 }
 
 // callInputs carries only source-derived scalar/length facts into a closed
-// static callee. Receiver/heap identities and closures require separate proofs;
+// exact callee. Receiver/heap identities and closures require separate proofs;
 // they are not manufactured by matching names or concrete type spellings.
 func (flow *ps6125SSAExtents) callInputs(call *ssa.Call) (*ssa.Function, map[*ssa.Parameter]ps6125Scalar, map[*ssa.Parameter]ps6125Extent) {
-	if call == nil || call.Parent() != flow.function || !flow.blocks[call.Block()] || call.Call.IsInvoke() {
+	if flow == nil {
 		return nil, nil, nil
 	}
-	callee := call.Call.StaticCallee()
-	if callee == nil || len(callee.Blocks) == 0 || len(callee.FreeVars) != 0 || len(callee.Params) != len(call.Call.Args) {
+	if flow.origins == nil {
+		flow.origins = &ps6125SSAOrigins{flow: flow}
+	}
+	binding, known := flow.origins.call(call)
+	if !known || len(binding.function.FreeVars) != 0 {
 		return nil, nil, nil
 	}
+	callee := binding.function
 	inputs := make(map[*ssa.Parameter]ps6125Scalar, len(callee.Params))
 	lengths := make(map[*ssa.Parameter]ps6125Extent)
-	for index, parameter := range callee.Params {
-		argument := call.Call.Args[index]
+	for _, parameter := range callee.Params {
+		argument := binding.values[parameter]
 		inputs[parameter] = flow.scalar(argument)
 		if original, ok := argument.(*ssa.Parameter); ok && original.Parent() == flow.function {
 			lengths[parameter] = flow.lengths[original]
