@@ -1,7 +1,8 @@
 # Output-workspace extent analysis foundation
 
-The `ps6125_extent*`, `ps6125_ssa*`, and `ps6125_access*` components are preparatory internal
-analysis for issue #887. They do **not** register a check, emit diagnostics,
+The `ps6125_extent*`, `ps6125_ssa*`, `ps6125_access*`, `ps6125_call*`, and
+`ps6125_store*` components are preparatory internal analysis for issue #887.
+They do **not** register a check, emit diagnostics,
 enable an automatic rewrite, or establish that the issue is resolved.
 
 ## Supported facts
@@ -15,9 +16,10 @@ enable an automatic rewrite, or establish that the issue is resolved.
 - SSA analysis specializes one invocation using executable edges, must-equality
   phi joins, boolean conditions, and integer products. Its pending/exact/unknown
   lattice has finite height; conflicting loop facts widen to unknown.
-- Static-call transfer carries scalar facts and direct parameter descriptor
-  lengths into a body with no captured free variables. Slice and string lengths
-  are stable descriptor facts; map and channel lengths are not reused as such.
+- Exact-call transfer carries scalar facts and direct parameter descriptor
+  lengths into a body with no captured free variables, including a callable
+  selected by specialized executable edges. Slice and string lengths are stable
+  descriptor facts; map and channel lengths are not reused as such.
 - Numeric geometry evaluation checks the requested target integer limit.
   Algebraic equality alone never proves that source arithmetic cannot overflow.
 - SSA access descriptions retain the exact root value, typed field declarations,
@@ -25,6 +27,18 @@ enable an automatic rewrite, or establish that the issue is resolved.
   cyclic, indexed, converted, and opaque-call origins remain unknown. Repeated
   loads are not equated merely because they read the same field path. These
   descriptions are not must-alias, memory-invariance, or lifetime proofs.
+- Call bindings identify an exact source-visible function or closure and retain
+  its actual SSA arguments and captured cells. They do not dereference captures
+  or infer their pointees. Ambiguous joins, cycles, interface invokes, field
+  loads, function parameters, and opaque calls remain unknown. Phi-origin
+  answers are memoized within one completed invocation analysis.
+- Returned-field analysis closes address uses of a fresh local struct and
+  records an explicit field's source value only when a unique executable store
+  dominates that return. Dominance respects specialized executable edges.
+  Calls, captures, exported addresses, and whole-struct stores reject the proof;
+  missing, conditional, and multiply written fields remain unknown. These facts
+  do not establish the contents, capacity, or lifetime of referenced resources,
+  and source SSA identities are not dynamic allocation-instance identities.
 
 Inputs must be facts about the actual invocation. AST resolvers must establish
 reaching bindings, identity, effects, and path conditions before returning known
@@ -39,6 +53,9 @@ fields, checked arithmetic, helper specialization, mixed branches, loop widening
 address and closure mutation, mutable object lengths, and unexecuted bodies.
 Access-path fixtures also cover distinct receiver roots and sibling fields,
 specialized branches, separate load snapshots, and unresolved value origins.
+Call and returned-field fixtures cover exact argument/capture bindings,
+selected closures, address escapes, overwrites, and specialized conditional
+stores. Existing regression assertions and benchmark gates remain unchanged.
 
 ```sh
 go test -race ./checks -run '^TestPS6125' -count=1
