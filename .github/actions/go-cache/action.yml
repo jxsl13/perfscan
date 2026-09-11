@@ -1,0 +1,51 @@
+name: Cache Go modules and build products separately
+description: Restore modules once per job and refresh compatible build products after successful runs.
+
+inputs:
+  go-version:
+    description: Exact installed version from setup-go's go-version output, not stable or oldstable.
+    required: true
+  scope:
+    description: Job and shard identity, so concurrent jobs do not compete for one build-cache save key.
+    required: true
+  cache-modules:
+    description: Disable on later toolchain setups in the same job to avoid restoring read-only module files twice.
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Locate separate Go cache directories
+      id: paths
+      shell: bash
+      env:
+        # A second toolchain in one job must not change the first cache's save
+        # path or mix its top-level build products into the same directory.
+        GOCACHE: ${{ runner.temp }}/go-build-cache/${{ inputs.go-version }}
+      run: |
+        go_module_cache=$(go env GOMODCACHE)
+        go_build_cache=$(go env GOCACHE)
+        echo "modules=$go_module_cache" >> "$GITHUB_OUTPUT"
+        echo "build=$go_build_cache" >> "$GITHUB_OUTPUT"
+        echo "image=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+        echo "GOCACHE=$go_build_cache" >> "$GITHUB_ENV"
+    - name: Cache downloaded modules
+      if: inputs.cache-modules == 'true'
+      uses: actions/cache@v6.1.0
+      with:
+        path: ${{ steps.paths.outputs.modules }}
+        key: go-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
+    - name: Cache Go build products
+      # The module cache remains dependency-keyed. Build products instead use
+      # a new immutable key each run/attempt, restoring the newest compatible
+      # entry. Otherwise an exact go.sum hit prevents all later build saves.
+      # Go validates source/compiler/options itself; no test or gate is skipped.
+      # Image identity also separates changes to the runner's native libraries.
+      # actions/cache saves only on success; failed/fork-denied saves are not
+      # substitutes for any of the build, race, benchmark or selfscan gates.
+      uses: actions/cache@v6.1.0
+      with:
+        path: ${{ steps.paths.outputs.build }}
+        key: go-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.image }}-go-${{ inputs.go-version }}-${{ inputs.scope }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: |
+          go-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.image }}-go-${{ inputs.go-version }}-${{ inputs.scope }}-
