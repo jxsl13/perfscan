@@ -19,9 +19,17 @@ func (context *ps6125SSAContext) callable(value ssa.Value) ps6125SSAReference {
 		if function, _ := ps6125SSACallee(reference.value); function != nil {
 			return reference
 		}
+		if field, ok := reference.value.(*ssa.Field); ok {
+			reference = reference.context.structField(field.X, field.Field)
+			continue
+		}
 		load, ok := reference.value.(*ssa.UnOp)
 		if !ok || load.Op != token.MUL {
 			break
+		}
+		if field, ok := load.X.(*ssa.FieldAddr); ok {
+			reference = reference.context.loadedStructField(field.X, field.Field, load)
+			continue
 		}
 		cell := reference.context.reference(load.X)
 		allocation, ok := cell.value.(*ssa.Alloc)

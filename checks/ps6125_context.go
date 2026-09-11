@@ -30,6 +30,7 @@ type ps6125SSAContext struct {
 	resolved  map[ssa.Value]ps6125SSAReference
 	resolving map[ssa.Value]bool
 	cells     map[*ssa.Alloc]*ssa.Store
+	structs   map[*ssa.Alloc]*ps6125SSAStructStores
 }
 
 func ps6125NewSSAContext(function *ssa.Function, inputs map[*ssa.Parameter]ps6125Scalar, lengths map[*ssa.Parameter]ps6125Extent, limit int) *ps6125SSAContext {

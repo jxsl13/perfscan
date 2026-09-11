@@ -1,8 +1,8 @@
 # Output-workspace extent analysis foundation
 
 The `ps6125_extent*`, `ps6125_ssa*`, `ps6125_access*`, `ps6125_call*`,
-`ps6125_store*`, `ps6125_context*`, and `ps6125_cell*` components are preparatory
-internal analysis for issue #887.
+`ps6125_store*`, `ps6125_context*`, `ps6125_cell*`, and `ps6125_struct*` components
+are preparatory internal analysis for issue #887.
 They do **not** register a check, emit diagnostics,
 enable an automatic rewrite, or establish that the issue is resolved.
 
@@ -54,6 +54,13 @@ enable an automatic rewrite, or establish that the issue is resolved.
   reject the proof. Initialization must dominate the load or the call edge
   leaving the owning context, not merely closure creation. This narrow rule
   resolves callable sources only; other captured loads remain unknown.
+- Typed struct field projection follows value copies and read-only captured
+  cells to an exact callback source. The backing cell must have either one
+  whole-value initialization or separate single field stores, with no address
+  escapes or captured writes. Initialization is checked at the actual read or
+  cross-context invocation edge. Mixed whole/field writes, overwrites, missing
+  fields, ambiguous values and unproved heap storage remain unknown. Resolving a
+  callback does not make its other captured memory invariant or prove lifetime.
 
 Inputs must be facts about the actual invocation. AST resolvers must establish
 reaching bindings, identity, effects, and path conditions before returning known
@@ -73,7 +80,8 @@ Call and returned-field fixtures cover exact argument/capture bindings,
 selected closures, address escapes, overwrites, and specialized conditional
 stores. Context and function-cell fixtures cover separate helper invocations,
 forwarded closures, foreign values, shared traversal budgets, nested read-only
-and writing captures, and initialization before versus after invocation.
+and writing captures, initialization before versus after invocation, sibling
+callback fields and separate constructor contexts.
 Existing regression assertions and benchmark gates remain unchanged.
 
 ```sh
@@ -100,6 +108,18 @@ before-warning/after-negative detector tests, nor proof of successful
 construction, backend allocation or write extent, or resource lifetime. External
 source is not vendored, and optional replays do not replace the unconditional
 fixtures.
+
+A further opt-in Darwin replay enables CGO source loading for the real Metal
+entry and includes the backend package's SSA body. It verifies the exact
+constructor input through the operations value and captured factory into the
+typed cross-package allocator body. It executes no native kernels and proves
+neither successful construction nor native byte bounds, writes, or lifetime.
+
+```sh
+PERFSCAN_PS6125_EXTERNAL_SOURCE=/absolute/path/to/verified/checkout \
+PERFSCAN_PS6125_EXTERNAL_CGO=1 \
+  go test -race ./checks -run '^TestPS6125ExternalMetalAllocator$' -count=1 -v
+```
 
 ## Remaining issue #887 obligations
 
