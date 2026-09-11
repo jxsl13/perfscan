@@ -1241,6 +1241,34 @@ func TestGoAICurrentVocabularyCompatibility(t *testing.T) {
 	}
 }
 
+func TestRecursiveMetadataIgnoreContractValidation(t *testing.T) {
+	t.Parallel()
+	valid := RecursiveMetadataIgnoreContract{Name: "records", Builder: "example.com/tool.newConfig", Matcher: "example.com/tool.config.ignoredBy", RootField: "root", IgnoreField: "ignoreParts", DirectoryName: ".records", AnyDepthIntent: true, NonEmbeddedMetadataOnly: true}
+	if !valid.Valid() {
+		t.Fatal("complete recursive metadata contract rejected")
+	}
+	tests := map[string]func(*RecursiveMetadataIgnoreContract){
+		"no recursive intent":   func(c *RecursiveMetadataIgnoreContract) { c.AnyDepthIntent = false },
+		"contents not reviewed": func(c *RecursiveMetadataIgnoreContract) { c.NonEmbeddedMetadataOnly = false },
+		"nested directory":      func(c *RecursiveMetadataIgnoreContract) { c.DirectoryName = "a/.records" },
+		"missing builder":       func(c *RecursiveMetadataIgnoreContract) { c.Builder = "" },
+		"missing matcher":       func(c *RecursiveMetadataIgnoreContract) { c.Matcher = "" },
+		"missing root field":    func(c *RecursiveMetadataIgnoreContract) { c.RootField = "" },
+		"missing ignore field":  func(c *RecursiveMetadataIgnoreContract) { c.IgnoreField = "" },
+	}
+	for name, mutate := range tests {
+		name, mutate := name, mutate
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			contract := valid
+			mutate(&contract)
+			if contract.Valid() {
+				t.Fatal("incomplete recursive metadata contract accepted")
+			}
+		})
+	}
+}
+
 // TestExampleConfigIsValidAndGeneric pins the shipped template: it must parse,
 // contain NO unknown keys (so it never drifts back to stale/renamed fields), and
 // populate every documented field so it stays a complete, working reference.

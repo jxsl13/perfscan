@@ -401,6 +401,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"schedulerTileGrainContracts":       validSchedulerTileGrainContracts(cfg.SchedulerTileGrainContracts),
 		"scopedBackendRoutingContracts":     validScopedBackendRoutingContracts(cfg.ScopedBackendRoutingContracts),
 		"closureEnvironmentGrowthArtifacts": validClosureEnvironmentGrowthArtifacts(cfg.ClosureEnvironmentGrowthArtifacts),
+		"recursiveMetadataIgnoreContracts":  config.UsableRecursiveMetadataIgnoreContractCount(cfg.RecursiveMetadataIgnoreContracts),
 		"inputViewFuncs":                    len(cfg.InputViewFuncs),
 		"outputViewFuncs":                   len(cfg.OutputViewFuncs),
 		"referenceBackendPkg":               len(cfg.ReferenceBackendPkg),
