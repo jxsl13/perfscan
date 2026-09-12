@@ -1083,6 +1083,38 @@ crossStepAcceleratorResidencyContracts:
 #       nativeCodeGenerationAndBuildPathsReviewed: true
 #       checkedArithmeticAndShapeBehaviorReviewed: true
 #       errorsFallbackAndSynchronizationReviewed: true
+#   nativeSnapshotReuseContracts:
+#     # These acknowledgements require a current project/native review; they
+#     # are not source-inferred lifetime or performance facts. No auto-fix.
+#     - candidateMethod: example.com/model.Recorder.Profile
+#       acquireCallable: C.mtl_recorder_profile_snapshot
+#       tokensCallable: C.mtl_recorder_profile_label_tokens
+#       lifecycleMethod: example.com/model.Recorder.Free
+#       receiverHandleField: handle
+#       resultSliceField: Events
+#       resultStringField: Label
+#       nativeStringField: label
+#       fillCallable: example.com/model.fillRecorderProfileEvents
+#       ownMethod: example.com/model.recorderProfileLabels.own
+#       intoMethod: example.com/model.Recorder.ProfileInto
+#       handleArgument: 0
+#       pointerOutArgument: 1
+#       countOutArgument: 2
+#       scalarOutArguments: [3, 4, 5, 6, 7]
+#       scalarResultFields: [OmittedMPS, OmittedOverflow, OmittedUnsupported, TimestampFrequency, CommandDuration]
+#       eventNumericFields:
+#         - {nativeField: startOffsetNS, resultField: StartOffset}
+#         - {nativeField: ticks, resultField: Ticks}
+#         - {nativeField: durationNS, resultField: Duration}
+#       eventSpanField: EventSpan
+#       eventStartField: StartOffset
+#       eventDurationField: Duration
+#       nativeStorageLifetimeReviewed: true
+#       nativeRecordShapeAndTerminationReviewed: true
+#       readonlySynchronousExtractionReviewed: true
+#       tokenIdentityAndContentReviewed: true
+#       repeatedExtractionPolicyReviewed: true
+#       ownedOutputAndErrorSemanticsReviewed: true
 #   activeBoundFallbackContracts:
 #     # Reviewed semantic facts, not inferred from these API names. The
 #     # finding is conditional on positive active rows, missing capability,

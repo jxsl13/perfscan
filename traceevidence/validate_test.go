@@ -69,7 +69,7 @@ func TestCaptureCanceledBeforeStartLeavesNoDirectory(t *testing.T) {
 	o := syntheticOptions(t, "0")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if result, err := Capture(ctx, o); err == nil || result != nil {
+	if result, err := syntheticCapture(ctx, o); err == nil || result != nil {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	if _, err := os.Stat(o.Output); !os.IsNotExist(err) {
@@ -99,7 +99,7 @@ func TestCaptureInvalidOptionsDoNotCreateArtifacts(t *testing.T) {
 			t.Parallel()
 			o := syntheticOptions(t, "0")
 			tc.change(o)
-			if result, err := Capture(context.Background(), o); err == nil || result != nil {
+			if result, err := syntheticCapture(context.Background(), o); err == nil || result != nil {
 				t.Fatalf("result=%+v err=%v", result, err)
 			}
 			if _, err := os.Stat(o.Output); !os.IsNotExist(err) {

@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**427 checks total** — **265 with a bit-identical auto-fix**, 162 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **57 L3** (aggressive).
+**428 checks total** — **265 with a bit-identical auto-fix**, 163 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **58 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -439,4 +439,5 @@ checks' fixes.
 | [PS6132](PS6132.md) | alloc | L3 |  | constructor retains maximum-row transient storage despite explicit active-row execution |
 | [PS6133](PS6133.md) | verify | L3 |  | a row-local band offset inflates the whole backing-row shape guard |
 | [PS6135](PS6135.md) | verify | L3 |  | an explicit active-bound capability falls back to capacity-wide work |
+| [PS6137](PS6137.md) | alloc | L3 |  | native snapshot acquisition freshly materializes owned output |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |

@@ -280,6 +280,13 @@ Rules without a pair, and why:
   fallback support. No PS6135-specific speedup is claimed; preserve every
   shape/error/overflow/tail/provider path and measure the complete operation.
 
+PS6137 is an opt-in advisory with no automatic replacement benchmark. Its
+complete owner cgo/source replay is not a native workload execution. GoAI
+PR1184's historical native measurements combine destination/owned-label reuse
+and by-value view changes; a portable toy cannot isolate ABI or lifecycle
+profitability. Validate zero/one/many/error/ownership/growth/cache-overflow paths
+and measure real alternating native controls and convenience-API nonregression.
+
 PS6133 is exempt: checked native row-local shape validation is an advisory
 correctness boundary, not an isolated faster guard. The owner combined exact-row
 device ownership results do not isolate guard cost. A host offset-removal toy
