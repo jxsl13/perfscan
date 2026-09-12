@@ -47,6 +47,13 @@ type Config struct {
 	// explain why a vocabulary exists without triggering an unknown-key warning.
 	Comment string `json:"_comment,omitempty" yaml:"_comment"`
 
+	// DenseRowGEMMFuncs identifies exact package-level functions implementing
+	// row-major C[start:end,:] = A[start:end,:] * B. PS6129 requires the
+	// signature (A, B, C []float32/float64, start, end, depth, columns int),
+	// read-only inputs and store semantics, with no retained operands.
+	DenseRowGEMMFuncs       []string                 `json:"denseRowGEMMFuncs,omitempty" yaml:"denseRowGEMMFuncs"`
+	CausalZeroGEMMContracts []CausalZeroGEMMContract `json:"causalZeroGEMMContracts,omitempty" yaml:"causalZeroGEMMContracts"`
+
 	// NativeGenerationDispatchContracts identify reviewed native entry points
 	// whose operand semantics differ by hardware generation. PS6128 still
 	// proves the complete typed Go dispatch and native source path; these
@@ -2289,6 +2296,8 @@ func psTopKImportPathValid(importPath string) bool {
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
 type Sets struct {
+	DenseRowGEMMFuncs                 map[string]bool
+	CausalZeroGEMMContracts           []CausalZeroGEMMContract
 	CacheLineBytes                    int
 	NativeGenerationDispatchContracts []NativeGenerationDispatchContract
 	ElementAccessors                  map[string]bool
@@ -2354,6 +2363,8 @@ func toSet(xs []string) map[string]bool {
 // Compile converts the config into set form.
 func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep the public value API source-compatible
 	return Sets{
+		DenseRowGEMMFuncs:                 toSet(c.DenseRowGEMMFuncs),
+		CausalZeroGEMMContracts:           cloneCausalZeroGEMMContracts(c.CausalZeroGEMMContracts),
 		CacheLineBytes:                    c.CacheLineBytes,
 		NativeGenerationDispatchContracts: cloneNativeGenerationDispatchContracts(c.NativeGenerationDispatchContracts),
 		ElementAccessors:                  toSet(c.ElementAccessors),

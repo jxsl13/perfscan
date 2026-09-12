@@ -1,0 +1,79 @@
+// Source: jxsl13/goai, backend/cpu/mha.go, commit
+// 2bc5836f5112f34772a0bbc6790da79fc86c953c, mhaBwdGemmBand.
+// This public source excerpt is governed by MPL-2.0:
+// https://mozilla.org/MPL/2.0/ . No runtime candidate or private capture is included.
+// SPDX-License-Identifier: MPL-2.0
+
+// mhaBwdGemmBand runs the backward pipeline for query rows [i0,i0+iN) of head
+// h, writing that band's dQ rows and its dK/dV partials (partK/partV, [sk,dk]).
+func mhaBwdGemmBand(q, g, dQ, pack []float32, partK, partV []float32, geo mhaGeo, h, i0, iN int) {
+	seq, dk, dm := geo.sq, geo.dk, geo.dm
+	kv := h / geo.rep
+	kvStride := 3 * dk * seq
+	kt := pack[kv*kvStride : kv*kvStride+dk*seq]
+	vt := pack[kv*kvStride+dk*seq : kv*kvStride+2*dk*seq]
+	kh := pack[kv*kvStride+2*dk*seq : (kv+1)*kvStride]
+	qOff := h * dk
+
+	qbP, gbP := getF32Raw(iN*dk), getF32Raw(iN*dk)
+	sbP, daP := getF32Raw(iN*seq), getF32Raw(iN*seq)
+	ptP, dqbP := getF32Raw(2*seq*iN), getF32Raw(iN*dk)
+	defer putF32(qbP)
+	defer putF32(gbP)
+	defer putF32(sbP)
+	defer putF32(daP)
+	defer putF32(ptP)
+	defer putF32(dqbP)
+	qb, gb, sb, da, dqb := *qbP, *gbP, *sbP, *daP, *dqbP
+	pt, dat := (*ptP)[:seq*iN], (*ptP)[seq*iN:]
+
+	for r := range iN {
+		copy(qb[r*dk:(r+1)*dk], q[(i0+r)*dm+qOff:(i0+r)*dm+qOff+dk])
+		copy(gb[r*dk:(r+1)*dk], g[(i0+r)*dm+qOff:(i0+r)*dm+qOff+dk])
+	}
+	// P (softmax weights, masked columns zero) and dA = dO·Vᵀ. Causal: both
+	// gemms skip the band's fully-masked column span (see mhaFwdGemmBand).
+	jHi := seq
+	if geo.causal {
+		jHi = min((i0+iN+15)&^15, seq)
+	}
+	gemmF32RowsCols(qb, kt, sb, 0, iN, dk, seq, 0, jHi)
+	mhaSoftmaxBandF32(sb, geo, h, i0, iN)
+	gemmF32RowsCols(gb, vt, da, 0, iN, dk, seq, 0, jHi)
+	// dS = scale·P∘(dA − rowdot), rowdot = Σ_j P·dA in f64, on each row's live
+	// [jmin,jmax) span; the masked span is explicitly zeroed so the dSᵀ·Q
+	// partial gemm adds exactly 0 for it.
+	scale := geo.scale
+	for r := range iN {
+		jmin, jmax := geo.bounds(i0 + r)
+		pr := sb[r*seq : (r+1)*seq : (r+1)*seq]
+		dar := da[r*seq : (r+1)*seq : (r+1)*seq]
+		var dot float64
+		//perfscan:ignore PS3010 small O(seq) rowdot; five band-gemms dominate
+		for j := jmin; j < jmax; j++ {
+			dot += float64(pr[j]) * float64(dar[j])
+		}
+		clear(dar[:jmin])
+		for j := jmin; j < jmax; j++ {
+			dar[j] = float32(scale * float64(pr[j]) * (float64(dar[j]) - dot))
+		}
+		clear(dar[jmax:])
+	}
+	// dQ band = dS·K → disjoint dQ rows.
+	gemmF32Rows(da, kh, dqb, 0, iN, seq, dk)
+	for r := range iN {
+		copy(dQ[(i0+r)*dm+qOff:(i0+r)*dm+qOff+dk], dqb[r*dk:(r+1)*dk])
+	}
+	// Band partials: dV += Pᵀ·dO, dK += dSᵀ·Q — as store-semantics gemms into
+	// this band's own slots, via the [seq,iN] transposes of P and dS.
+	for r := range iN {
+		pr := sb[r*seq : (r+1)*seq : (r+1)*seq]
+		dar := da[r*seq : (r+1)*seq : (r+1)*seq]
+		for j := range seq {
+			pt[j*iN+r] = pr[j]
+			dat[j*iN+r] = dar[j]
+		}
+	}
+	gemmF32Rows(pt, gb, partV, 0, seq, iN, dk)
+	gemmF32Rows(dat, qb, partK, 0, seq, iN, dk)
+}
