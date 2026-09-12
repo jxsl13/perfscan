@@ -142,6 +142,29 @@ func TestGitSnapshotExcludesIgnoredBuildInput(t *testing.T) {
 	if code != 0 || len(status) != 0 {
 		t.Fatalf("fixture should appear clean despite ignored Go input: exit=%d stdout=%q stderr=%q", code, status, stderr)
 	}
+	commit, stderr, code := command(root, env, "git", "rev-parse", "HEAD")
+	if code != 0 {
+		t.Fatalf("exact commit: %s", stderr)
+	}
+	retained := filepath.Join(t.TempDir(), "retained")
+	pin, err := RetainSnapshot(root, strings.TrimSpace(string(commit)), retained)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifySnapshot(root, retained, pin); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(retained, "source", "tracked.go"), []byte("package fixture\n// changed after retention\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifySnapshot(root, retained, pin); err == nil {
+		t.Fatal("accepted mutable snapshot after source tampering")
+	}
+	invalidPin := pin
+	invalidPin.Commit = "--help"
+	if err := VerifySnapshot(root, retained, invalidPin); err == nil {
+		t.Fatal("accepted executable Git option as decoded commit")
+	}
 	tree, stderr, code := command(root, env, "git", "ls-tree", "-r", "-z", "--full-tree", "HEAD")
 	if code != 0 {
 		t.Fatalf("tree: %s", stderr)
