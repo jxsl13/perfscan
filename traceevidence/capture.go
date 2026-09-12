@@ -1,6 +1,6 @@
 // Package traceevidence retains and validates xctrace profiling captures.
 // Acceptance establishes readable artifacts and workload markers, not a
-// performance improvement, uncontaminated counters, or target process exit 0.
+// performance improvement, uncontaminated counters or workload correctness.
 package traceevidence
 
 import (
@@ -39,6 +39,9 @@ type Options struct {
 	MaxArtifactBytes   int64
 	MaxTraceBytes      int64
 	InputPolicy        *InputPolicy
+	ProcessScope       string
+	ReadinessTimeout   time.Duration
+	CleanupTimeout     time.Duration
 }
 
 // Invocation describes an actually executed command. A start, cancellation,
@@ -57,6 +60,7 @@ type Result struct {
 	Invocations    map[string]Invocation `json:"invocations"`
 	Reason         string                `json:"reason"`
 	InputPreflight *InputPreflight       `json:"inputPreflight,omitempty"`
+	Supervision    *Supervision          `json:"supervision,omitempty"`
 }
 
 // Capture creates a NEW evidence directory. It retains every command's raw
@@ -75,6 +79,12 @@ func capture(ctx context.Context, o *Options, runner commandRunner) (*Result, er
 }
 
 func captureInInputEnvironment(ctx context.Context, o *Options, runner commandRunner, environment *inputEnvironment) (*Result, error) {
+	return captureSupervised(ctx, o, runner, environment, nativeRecord)
+}
+
+type recordRunner func(context.Context, *Options, string, []string) (Invocation, *Supervision)
+
+func captureSupervised(ctx context.Context, o *Options, runner commandRunner, environment *inputEnvironment, recordRunner recordRunner) (*Result, error) {
 	if ctx == nil || o == nil {
 		return nil, errors.New("capture requires context and options")
 	}
@@ -153,15 +163,13 @@ func captureInInputEnvironment(ctx context.Context, o *Options, runner commandRu
 	}
 	trace := filepath.Join(root, "capture.trace")
 	target := filepath.Join(root, "target.txt")
-	args := []string{"xctrace", "record"}
-	for _, instrument := range o.Instruments {
-		args = append(args, "--instrument", instrument)
-	}
-	args = append(args, "--time-limit", strconv.FormatInt(o.TimeLimit.Milliseconds(), 10)+"ms", "--no-prompt", "--output", trace, "--target-stdout", target, "--launch", "--")
-	args = append(args, workload...)
-	record := run("record", args...)
+	record, supervision := recordRunner(ctx, o, root, workload)
+	result.Invocations["record"], result.Supervision = record, supervision
 	if record.Failure != "" || record.Exit != 0 && record.Exit != 54 {
 		return finish(errors.New("recorder failed outside the qualified 0/54 outcomes; capture retained"))
+	}
+	if supervision == nil || !supervision.valid() {
+		return finish(errors.New("owned target readiness, successful exit and both-child cleanup were not confirmed"))
 	}
 	if record.Exit == 54 {
 		stdout, err := readRegular(filepath.Join(root, "record.stdout"), o.MaxArtifactBytes)
@@ -192,6 +200,9 @@ func captureInInputEnvironment(ctx context.Context, o *Options, runner commandRu
 	}
 	toc, err := readRegular(filepath.Join(root, "toc.stdout"), o.MaxArtifactBytes)
 	if err != nil {
+		return finish(err)
+	}
+	if err := attachedTarget(toc, supervision.TargetPID, workload[0]); err != nil {
 		return finish(err)
 	}
 	paths, err := tablePaths(toc, o.Schemas)
@@ -230,6 +241,12 @@ func captureInInputEnvironment(ctx context.Context, o *Options, runner commandRu
 }
 
 func validOptions(o *Options) error {
+	if o.ProcessScope != "direct-executable" || o.ReadinessTimeout < time.Millisecond || o.ReadinessTimeout > o.CommandTimeout || o.CleanupTimeout < time.Millisecond || o.CleanupTimeout > 30*time.Second {
+		return errors.New("explicit direct-executable scope and bounded readiness/cleanup timeouts are required")
+	}
+	if len(o.Instruments) != 1 || o.Instruments[0] != "Time Profiler" {
+		return errors.New("supervised attach currently supports only Time Profiler")
+	}
 	if !o.InputPolicy.valid() || o.InputPolicy.Opened == o.Started || o.InputPolicy.Opened == o.Completed {
 		return errors.New("explicit audited-complete input inventory and distinct post-input-open progress marker are required")
 	}

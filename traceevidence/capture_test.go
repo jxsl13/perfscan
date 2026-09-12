@@ -15,6 +15,9 @@ import (
 // These subprocesses simulate command outcomes only. They never profile a
 // workload, invoke Instruments, or modify privacy permissions.
 func TestMain(m *testing.M) {
+	if len(os.Args) == 4 && os.Args[1] == "--synthetic-supervisor" {
+		os.Exit(fakeSupervisor(os.Args[2], os.Args[3]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "xctrace" {
 		os.Exit(fakeXctrace(os.Args[2:]))
 	}
@@ -162,7 +165,19 @@ func fakeXctrace(args []string) int {
 			return 8
 		}
 		if fakeArg(args, "--xpath") == "" {
-			toc := `<trace-toc><run number="1"><data><table schema="gpu-counter"/></data></run></trace-toc>`
+			executable, err := os.Executable()
+			if err != nil {
+				panic(err)
+			}
+			executable, err = filepath.EvalSymlinks(executable)
+			if err != nil {
+				panic(err)
+			}
+			var escapedPath strings.Builder
+			if err := xml.EscapeText(&escapedPath, []byte(executable)); err != nil {
+				panic(err)
+			}
+			toc := `<trace-toc><run number="1"><info><target><process type="attached" pid="123" return-exit-status="0"/></target></info><processes><process pid="123" path="` + escapedPath.String() + `"/></processes><data><table schema="gpu-counter"/></data></run></trace-toc>`
 			if strings.HasPrefix(mode, "native-") {
 				toc = strings.Replace(toc, `<table schema="gpu-counter"/>`, `<table schema="unrelated-events"/><table schema="gpu-counter"/>`, 1)
 			}
@@ -249,7 +264,7 @@ func syntheticOptions(t *testing.T, mode string) *Options {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Options{Xcrun: executable, Directory: t.TempDir(), Output: filepath.Join(t.TempDir(), "evidence"), Workload: []string{executable, mode}, Instruments: []string{"Metal"}, Schemas: []Schema{{Name: "gpu-counter", Columns: []string{"time", "value"}}}, Started: "START", Completed: "DONE", TimeLimit: time.Millisecond, CommandTimeout: 5 * time.Second, MaxArtifactBytes: 4096, MaxTraceBytes: 4096, InputPolicy: &InputPolicy{InventoryComplete: true, Inputs: []Input{}, MaxInputBytes: 64 << 20, Opened: "OPENED"}}
+	return &Options{Xcrun: executable, Directory: t.TempDir(), Output: filepath.Join(t.TempDir(), "evidence"), Workload: []string{executable, mode}, Instruments: []string{"Time Profiler"}, Schemas: []Schema{{Name: "gpu-counter", Columns: []string{"time", "value"}}}, Started: "START", Completed: "DONE", TimeLimit: time.Millisecond, CommandTimeout: 5 * time.Second, MaxArtifactBytes: 4096, MaxTraceBytes: 4096, ProcessScope: "direct-executable", ReadinessTimeout: time.Second, CleanupTimeout: time.Second, InputPolicy: &InputPolicy{InventoryComplete: true, Inputs: []Input{}, MaxInputBytes: 64 << 20, Opened: "OPENED"}}
 }
 
 func syntheticCapture(ctx context.Context, o *Options) (*Result, error) {
@@ -258,7 +273,20 @@ func syntheticCapture(ctx context.Context, o *Options) (*Result, error) {
 	env := inputEnvironment{platform: "darwin", home: filepath.Join(o.Directory, "synthetic-home"), mount: func(string) (MountObservation, error) {
 		return MountObservation{FileSystem: "synthetic-local", MountPoint: "/", Local: true}, nil
 	}, executable: func(os.FileInfo) bool { return true }}
-	return captureInInputEnvironment(ctx, o, nil, &env)
+	return captureSupervised(ctx, o, nil, &env, syntheticRecord)
+}
+
+func syntheticRecord(ctx context.Context, o *Options, root string, workload []string) (Invocation, *Supervision) {
+	// Fake lifecycle only. The old artifact/outcome subprocess controls and
+	// assertions are preserved; production has no launch fallback.
+	bounded, cancel := context.WithTimeout(ctx, o.CommandTimeout)
+	defer cancel()
+	args := []string{"xctrace", "record", "--output", filepath.Join(root, "capture.trace"), "--target-stdout", filepath.Join(root, "target.txt")}
+	args = append(args, workload...)
+	inv := runCommand(bounded, o.Xcrun, o.Directory, filepath.Join(root, "record"), args, o.MaxArtifactBytes)
+	s := goodSupervision()
+	s.RecorderStatus = inv.Exit << 8
+	return inv, &s
 }
 
 func TestCaptureSyntheticAcceptance(t *testing.T) {
