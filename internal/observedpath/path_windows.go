@@ -1,4 +1,4 @@
-package crossover
+package observedpath
 
 import (
 	"errors"
@@ -9,14 +9,14 @@ import (
 	"unsafe"
 )
 
-var finalSDKPath = syscall.NewLazyDLL("kernel32.dll").NewProc("GetFinalPathNameByHandleW")
+var finalPath = syscall.NewLazyDLL("kernel32.dll").NewProc("GetFinalPathNameByHandleW")
 
 // Resolve the opened object, not a FindFirstFile ancestor walk. In particular,
 // setup-go's C: SDK junction can resolve to its actual D: volume. Flags zero
 // request FILE_NAME_NORMALIZED|VOLUME_NAME_DOS. Errors never fall back to an
 // uncanonicalized path. Microsoft specifies the extended DOS/UNC prefix:
 // https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew
-func canonicalSDKPath(path string) (result string, err error) {
+func Canonical(path string) (result string, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -27,12 +27,12 @@ func canonicalSDKPath(path string) (result string, err error) {
 		return "", err
 	}
 	buffer := make([]uint16, 32768)
-	n, _, callErr := finalSDKPath.Call(f.Fd(), uintptr(unsafe.Pointer(&buffer[0])), uintptr(len(buffer)), 0)
+	n, _, callErr := finalPath.Call(f.Fd(), uintptr(unsafe.Pointer(&buffer[0])), uintptr(len(buffer)), 0)
 	if n == 0 {
 		return "", callErr
 	}
 	if n >= uintptr(len(buffer)) {
-		return "", errors.New("canonical SDK path exceeds Windows path limit")
+		return "", errors.New("canonical observed path exceeds Windows path limit")
 	}
 	result = syscall.UTF16ToString(buffer[:n])
 	if strings.HasPrefix(result, `\\?\UNC\`) {
@@ -40,17 +40,17 @@ func canonicalSDKPath(path string) (result string, err error) {
 	} else if strings.HasPrefix(result, `\\?\`) {
 		result = strings.TrimPrefix(result, `\\?\`)
 	} else {
-		return "", errors.New("unexpected canonical Windows SDK path namespace")
+		return "", errors.New("unexpected canonical Windows observed path namespace")
 	}
 	if !filepath.IsAbs(result) {
-		return "", errors.New("canonical Windows SDK path is not absolute")
+		return "", errors.New("canonical Windows observed path is not absolute")
 	}
 	after, err := os.Stat(result)
 	if err != nil {
 		return "", err
 	}
 	if !os.SameFile(before, after) {
-		return "", errors.New("canonical Windows SDK path object identity changed")
+		return "", errors.New("canonical Windows observed path object identity changed")
 	}
 	return result, nil
 }

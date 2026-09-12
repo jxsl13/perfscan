@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/jxsl13/perfscan/config"
 	"github.com/jxsl13/perfscan/internal/crossover"
+	"github.com/jxsl13/perfscan/internal/observedpath"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/packages"
 )
@@ -114,9 +116,9 @@ func ps6131LoadLocal(selection *crossover.BuildSelection, c *config.DispatchCros
 				if parsed[path] == "" {
 					return errors.New("selected typed dependency source was not observed by parser: " + path)
 				}
-				physical, err := filepath.EvalSymlinks(path)
+				physical, err := observedpath.Canonical(path)
 				if err != nil {
-					return err
+					return fmt.Errorf("resolve typed package %q input %q: %w", selected.ID, path, err)
 				}
 				model.TypedFileSHA256[physical] = parsed[path]
 				model.TypedPackageFiles[selected.ID] = append(model.TypedPackageFiles[selected.ID], physical)

@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/jxsl13/perfscan/internal/observedpath"
 )
 
 func binaryControlledGoFiles(data []byte) (map[string]string, error) {
@@ -28,14 +31,14 @@ func binaryControlledGoFiles(data []byte) (map[string]string, error) {
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(pkg.Dir, path)
 			}
-			physical, err := filepath.EvalSymlinks(path)
+			physical, err := observedpath.Canonical(path)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("resolve controlled Go input %q: %w", path, err)
 			}
 			path = physical
 			content, err := os.ReadFile(path)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("read controlled Go input %q: %w", path, err)
 			}
 			sum := sha256.Sum256(content)
 			hash := hex.EncodeToString(sum[:])
@@ -63,9 +66,9 @@ func binaryControlledPackageFiles(data []byte) (map[string][]string, error) {
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(pkg.Dir, path)
 			}
-			physical, err := filepath.EvalSymlinks(path)
+			physical, err := observedpath.Canonical(path)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("resolve controlled package %q input %q: %w", pkg.ImportPath, path, err)
 			}
 			result[pkg.ImportPath] = append(result[pkg.ImportPath], physical)
 		}

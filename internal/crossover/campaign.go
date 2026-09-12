@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/jxsl13/perfscan/config"
 	"github.com/jxsl13/perfscan/internal/allocationcampaign"
 	"github.com/jxsl13/perfscan/internal/closureenv"
+	"github.com/jxsl13/perfscan/internal/observedpath"
 )
 
 // ModelFactory must load the exact selected snapshot's typed source partition,
@@ -153,9 +155,9 @@ func prepare(ctx context.Context, root, goBinary string, p *Plan, factory ModelF
 	if err != nil {
 		return nil, err
 	}
-	physicalHarness, err := filepath.EvalSymlinks(path)
+	physicalHarness, err := observedpath.Canonical(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve generated harness %q: %w", path, err)
 	}
 	if err := validateTypedInputs(model, build, physicalHarness); err != nil {
 		return nil, err
