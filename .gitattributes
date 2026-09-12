@@ -34,3 +34,4 @@ checks/testdata/ps6133_owner_vulkan_shader.txt text eol=lf
 checks/testdata/src/ps6133/metal_layout.h text eol=lf
 checks/testdata/src/ps6133/vulkan_layout.h text eol=lf
 checks/testdata/ps6137_owner_*.txt text eol=lf
+checks/testdata/ps6136-owner/**/*.txt text eol=lf

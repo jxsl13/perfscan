@@ -252,6 +252,7 @@ type Config struct {
 	// ActiveBoundFallbackContracts bind optional explicit-bound interface APIs
 	// and their reviewed capacity-wide fallback semantics for PS6135.
 	ActiveBoundFallbackContracts []ActiveBoundFallbackContract `json:"activeBoundFallbackContracts,omitempty" yaml:"activeBoundFallbackContracts"`
+	OutputWorkspaceContracts     []OutputWorkspaceContract     `json:"outputWorkspaceContracts,omitempty" yaml:"outputWorkspaceContracts"`
 
 	// NativeSnapshotReuseContracts separate source acquisition/ownership roles
 	// from reviewed opaque native lifetime and repeated-extraction policy.
@@ -2361,6 +2362,7 @@ type Sets struct {
 	InPlaceFusionContracts            []InPlaceFusionContract
 	BoundedScratchFlowContracts       []BoundedScratchFlowContract
 	ActiveBoundFallbackContracts      []ActiveBoundFallbackContract
+	OutputWorkspaceContracts          []OutputWorkspaceContract
 	NativeSnapshotReuseContracts      []NativeSnapshotReuseContract
 	ReceiverStagingContracts          []ReceiverStagingContract
 	ReusableOneShotWrapperContracts   []ReusableOneShotWrapperContract
@@ -2437,6 +2439,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		InPlaceFusionContracts:            slices.Clone(c.InPlaceFusionContracts),
 		BoundedScratchFlowContracts:       cloneBoundedScratchFlowContracts(c.BoundedScratchFlowContracts),
 		ActiveBoundFallbackContracts:      cloneActiveBoundFallbackContracts(c.ActiveBoundFallbackContracts),
+		OutputWorkspaceContracts:          cloneOutputWorkspaceContracts(c.OutputWorkspaceContracts),
 		NativeSnapshotReuseContracts:      cloneNativeSnapshotReuseContracts(c.NativeSnapshotReuseContracts),
 		ReceiverStagingContracts:          slices.Clone(c.ReceiverStagingContracts),
 		ReusableOneShotWrapperContracts:   cloneReusableOneShotWrapperContracts(c.ReusableOneShotWrapperContracts),
