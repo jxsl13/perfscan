@@ -98,3 +98,37 @@ Retained local evidence includes source pins, environment metadata, elapsed
 times, parsed test-name inventories and complete partition manifests. It does
 not include successful child stdout/stderr transcripts. Normal full hooks and
 the unchanged cross-platform CI matrix are separate validation gates.
+
+## CI integrity-rejection critical path
+
+Run 34712402217 completed 13 checks successfully but its macOS oldstable
+external shard 1 timed out in the existing owner-shaped crossover campaign.
+The running negative case changed typed test inputs before compilation; its
+stack was in controlled binary source hashing, not discovery coordination.
+Discovery had completed in 2m8.672s. This does not establish discovery as the
+cause of the subsequent 20-minute inner test timeout.
+
+Campaign preparation now freshly resolves and hashes the exact observed typed
+Go/test/dependency paths before compiler preparation, rejecting already-invalid
+inputs early. This check retains no data for reuse: accepted candidates still
+undergo the original controlled compilation, binary reproduction, source-file
+inventory joins and post-build raw invocation reads. Changes after preflight
+remain subject to those independent validators. No timeout, retry, sharding,
+test-selection or worker-default changes are made, and no whole-CI speedup is
+claimed from this integrity-rejection repair.
+
+The dependency Go-source linkname screen also avoids splitting ordinary lines
+into fields. A necessary literal-token check skips files/lines that cannot match;
+candidate lines retain the original whitespace and target-prefix predicate.
+Every source still contributes to the material hash, and native-source checks
+are unchanged. Parallel regressions compare the old scanner with the new one,
+including Unicode whitespace, malformed/quoted directives and changed ordinary
+source bytes.
+
+A three-run local Go1.27 Darwin/arm64 microbenchmark on synthetic 4096-line
+inputs observed 4097 versus 0 allocations per scan with no directives, and
+4098 versus 2 with one unrelated directive. Command:
+`go test ./internal/closureenv -run '^$' -bench '^BenchmarkBinaryLinknameScreen$' -benchtime=100ms -count=3`.
+These are isolated scanner allocation counts, not compiler/campaign allocation
+totals or whole-CI speedups. Other local compilation was not excluded, so elapsed
+microbenchmark times are not used as paired performance evidence.

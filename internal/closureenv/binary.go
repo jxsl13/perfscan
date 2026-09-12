@@ -301,11 +301,8 @@ func binaryMaterialDigest(output []byte, targetPackage ...string) ([32]byte, err
 				return [32]byte{}, err
 			}
 			if filepath.Ext(path) == ".go" {
-				for line := range strings.SplitSeq(string(data), "\n") {
-					fields := strings.Fields(line)
-					if len(fields) >= 3 && fields[0] == "//go:linkname" && strings.HasPrefix(fields[2], targetPackage[0]+".") {
-						return [32]byte{}, errors.New("external linkname reference to inspected package")
-					}
+				if binaryGoReferencesTarget(data, targetPackage[0]) {
+					return [32]byte{}, errors.New("external linkname reference to inspected package")
 				}
 			} else if filepath.Ext(path) != ".mod" && filepath.Base(path) != "go.mod" && filepath.Base(path) != "go.sum" {
 				text := binaryNativeNameReplacer.Replace(string(data))
@@ -316,6 +313,27 @@ func binaryMaterialDigest(output []byte, targetPackage ...string) ([32]byte, err
 		}
 	}
 	return binaryFileDigest(paths)
+}
+
+// Screen the necessary literal before splitting fields. Most dependency source
+// lines are not directives; allocating fields for all of them is unnecessary.
+// Candidate lines still use the original whitespace/token/prefix checks, and
+// every source file remains in the independent material digest below.
+func binaryGoReferencesTarget(data []byte, target string) bool {
+	const directive = "//go:linkname"
+	if !bytes.Contains(data, []byte(directive)) {
+		return false
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if !strings.Contains(line, directive) {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == directive && strings.HasPrefix(fields[2], target+".") {
+			return true
+		}
+	}
+	return false
 }
 
 var binaryNativeNameReplacer = strings.NewReplacer("∕", "/", "·", ".")
