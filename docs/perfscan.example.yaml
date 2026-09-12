@@ -553,6 +553,30 @@ boundedScratchFlowContracts:
 # it only when the candidate method itself has a canonical whole-slice `=` loop.
 # maxRetainedBytes is a recommendation ceiling (and must be <= 64 MiB), not a
 # claim that retaining that amount is safe for every application.
+# PS6132 source witnesses are not an all-program ownership proof. These facts
+# require audit of ALL providers/build tags, recurrent one-row execution,
+# callback allocation, lifecycle and external observations. Geometry-preserving
+# methods are exact reviewed exceptions, not names inferred to be read-only.
+contextTransientWorkspaceContracts:
+  - allocationMethod: example.com/project/decoder.Decoder.allocateActivations
+    allocatorParameter: allocate
+    maximumRowsField: contextRows
+    scratchFields: [activation, normalized]
+    geometryPreservingMethods: [example.com/project/decoder.Decoder.allocateOptional]
+    rowMethod: example.com/project/decoder.Decoder.normalizeRows
+    rowArgument: 2
+    oneRowExecutionMethod: example.com/project/decoder.Decoder.decode
+    batchExecutionMethod: example.com/project/decoder.Decoder.prefill
+    batchRowsBinding: rows
+    constructorOnlyAllocationReviewed: true
+    allocatorCallbackOwnershipReviewed: true
+    allExecutionPathsTransientActiveRowsReviewed: true
+    recurrentOneRowPathsReviewed: true
+    receiverCallsSequential: true
+    checkedGeometryReviewed: true
+    synchronizationLifecycleReviewed: true
+    externalObservationReviewed: true
+
 receiverStagingContracts:
   - name: decoder-prefill-upload
     candidateMethod: example.com/project/decoder.Decoder.prefill

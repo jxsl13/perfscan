@@ -256,6 +256,10 @@ type Config struct {
 	// complete valid contract supplies them.
 	ReceiverStagingContracts []ReceiverStagingContract `json:"receiverStagingContracts,omitempty" yaml:"receiverStagingContracts"`
 
+	// ContextTransientWorkspaceContracts bind reviewed constructor-only
+	// transient device ownership to source-proven maximum-row allocations.
+	ContextTransientWorkspaceContracts []ContextTransientWorkspaceContract `json:"contextTransientWorkspaceContracts,omitempty" yaml:"contextTransientWorkspaceContracts"`
+
 	// ReusableOneShotWrapperContracts are explicit project-owned lifecycle
 	// contracts for PS6109. They separate a reusable Go wrapper shell from the
 	// always-fresh one-shot native handle installed by Reset. Names alone never
@@ -2299,8 +2303,11 @@ func psTopKImportPathValid(importPath string) bool {
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
 type Sets struct {
-	DenseRowGEMMFuncs                 map[string]bool
-	CausalZeroGEMMContracts           []CausalZeroGEMMContract
+	DenseRowGEMMFuncs       map[string]bool
+	CausalZeroGEMMContracts []CausalZeroGEMMContract
+
+	ContextTransientWorkspaceContracts []ContextTransientWorkspaceContract
+
 	CacheLineBytes                    int
 	NativeGenerationDispatchContracts []NativeGenerationDispatchContract
 	ElementAccessors                  map[string]bool
@@ -2367,8 +2374,11 @@ func toSet(xs []string) map[string]bool {
 // Compile converts the config into set form.
 func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep the public value API source-compatible
 	return Sets{
-		DenseRowGEMMFuncs:                 toSet(c.DenseRowGEMMFuncs),
-		CausalZeroGEMMContracts:           cloneCausalZeroGEMMContracts(c.CausalZeroGEMMContracts),
+		DenseRowGEMMFuncs:       toSet(c.DenseRowGEMMFuncs),
+		CausalZeroGEMMContracts: cloneCausalZeroGEMMContracts(c.CausalZeroGEMMContracts),
+
+		ContextTransientWorkspaceContracts: cloneContextTransientWorkspaceContracts(c.ContextTransientWorkspaceContracts),
+
 		CacheLineBytes:                    c.CacheLineBytes,
 		NativeGenerationDispatchContracts: cloneNativeGenerationDispatchContracts(c.NativeGenerationDispatchContracts),
 		ElementAccessors:                  toSet(c.ElementAccessors),
