@@ -13,6 +13,63 @@ and compare arms with benchstat. CI executes every benchmark once
 (`-benchtime=1x`) so the pairs always compile and run; timing claims are
 for humans with benchstat, not for CI gates.
 
+For small allocation changes, use the opt-in diagnostic wrapper around the
+existing PS2002 benchmark functions. It retains integer N, MemBytes, MemAllocs,
+and each quotient/remainder after `testing.Benchmark` returns. This is diagnostic
+evidence in addition to the original benchmark output; it is not a speedup claim.
+
+```bash
+go test -c -tags allocationdiagnostic -o /tmp/perfscan-allocation.test ./benchmarks
+PERFSCAN_ALLOCATION_ARM=before /tmp/perfscan-allocation.test -test.run '^TestAllocationDiagnostic$' -test.benchtime=1024x
+PERFSCAN_ALLOCATION_ARM=after /tmp/perfscan-allocation.test -test.run '^TestAllocationDiagnostic$' -test.benchtime=1024x
+```
+
+Predeclare the fixed count, campaign/pair IDs, GOMAXPROCS, environment, and
+balanced arm/process order. Retain binary/source hashes, compiler options, every
+raw output and exit status, including errors. Build byte-identical diagnostic
+files with identical compiler options into separately pinned old/candidate
+binaries. Run a contemporaneous identical-binary A/B negative-control phase
+(both arms select `before`) and a separate matched old/candidate phase. Invoke
+one arm per fresh process; do not run the benchmark wrapper concurrently with
+other experiments. The commands above are single-invocation examples, not a
+completed balanced campaign. Adapt the wrapper's function selection to the
+project's existing benchmarks, preserving their measured bodies.
+
+`benchmarkevidence.Run` requires fixed N >= 2 and a leaf benchmark: call the
+subbenchmark's measured function directly rather than its `b.Run` parent.
+The public API reports parent aggregates as N=1 and adds already-rounded child
+allocation columns; Run rejects those aggregates instead of labeling them exact.
+It rejects duration-based flags, unexpected N, nil callbacks,
+failed benchmarks/subbenchmarks, and callbacks that exit via Fatal/FailNow/Goexit.
+It checks failure/skip state after deferred cleanup and race checks complete.
+Raw `runtime.Goexit` from cleanup is unsupported: a cleanup-only exit during the
+initial probe can be invisible if a later measured run succeeds. Use cleanup
+Error/Fatal for failures, which are propagated, and run suspect diagnostics in
+isolated processes. This public-API limit prevents a blanket cleanup-exit claim.
+Propagate its error with the enclosing test's Fatal as this wrapper does; never
+publish a zero result as a successful measurement. The public Benchmark helper
+hides its private failure log, so retain the enclosing invocation's rejection
+and exit status. `FromResult` uses the aggregate fields even if custom reported
+metrics override printed allocation columns. Totals above MaxInt64 are explicitly
+rejected to preserve overflow-safe signed deltas across supported Go APIs.
+
+Independently verify every total/quotient/remainder identity, fixed N, hashes,
+pair completeness and order before analysis. `benchmarkevidence.PairedDelta`
+validates equal N and identities, and returns candidate-minus-baseline integer
+totals for one pair. Analyze paired deltas separately from differences of arm
+medians. Neither unchanged rounded allocs/op nor nonsignificant rank tests
+establish equivalence. Do not subtract observed control noise, relax gates, or
+retrospectively promote a rejected candidate.
+
+Allocation counters cover the entire Go process, including parallel workers and
+background/runtime activity, not just the benchmark goroutine. External OS
+processes do not directly allocate on that Go heap. Identical binaries can have
+different exact totals: this does not identify the cause of a candidate's
+difference. Allocation-site/size-class evidence is required before attributing a
+surviving difference. This wrapper does not capture heap profiles, attribute
+sites, orchestrate campaigns, or replace independent campaign verification.
+Related owner issue: [#968](https://github.com/jxsl13/perfscan/issues/968).
+
 Rules without a pair, and why:
 
 - **PS1001–PS1005, PS1009** (per-element dispatch family): the cost lives in
