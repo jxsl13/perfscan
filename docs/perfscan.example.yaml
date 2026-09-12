@@ -1016,6 +1016,13 @@ crossStepAcceleratorResidencyContracts:
 #     - |-
 #       {"version":1,"growth":{"Before":{"...":"compiler evidence from the baseline checkout"},"After":{"...":"compiler evidence for this exact source"},"Added":[{"...":"added capture"}]}}
 #   dtypeMethods:           [Dtype]
+#   coefficientAddressArtifacts:
+#     - |
+#       {"build":{"...":"replayed exact controlled-build evidence"},"function":"polynomialLeaf","loads":[]}
+#   # Generate using perfscan-coefficientcodegen -dir CHECKOUT -package ./p
+#   # -function polynomialLeaf; collect and scan with the same selected compiler
+#   # and GOFLAGS/GOEXPERIMENT/GOOS/GOARCH/GOARM64/CGO environment. PS6130
+#   # recompiles the package and rejects unavailable/unassociated/stale evidence.
 #   outputBufferElemTypes:  [float64, float32]
 #   compiledResourceFuncs:  [NewMPSGraph, compilePipeline, buildProgram]
 #   gpuReductionKernels:    [matvec_q4k, mul_mat_vec_q4_K_f32]

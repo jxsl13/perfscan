@@ -196,3 +196,8 @@ Rules without a pair, and why:
   prototype was withdrawn after fixed workload gates failed. Source-derived
   operation savings are not speedups; qualify a valid production candidate
   against the frozen backend and measure complete-workload allocations too.
+- **PS6130** (SIMD coefficient address setup advisory): the predicate joins
+  exact typed hot polynomial chains to replayed Mach-O ARM64 instruction
+  evidence. A portable toy cannot establish target relocations, register
+  pressure or complete-operation profitability. No layout variant or measured
+  gain is claimed; benchmark the actual leaf and consumers with controls.
