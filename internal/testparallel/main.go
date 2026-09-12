@@ -69,15 +69,24 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	jobs := make([]testJob, 0, len(packages)*(*workers))
-	for _, pkg := range packages {
-		names, err := listTests(ctx, pkg, *race, *timeout)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		jobs = append(jobs, makeTestJobs(pkg, names, *workers, *shardIndex, *shardCount)...)
+	started := time.Now()
+	fmt.Fprintf(os.Stderr, "testparallel: discovery started: packages=%d workers=%d race=%t\n", len(packages), *workers, *race)
+	names, err := discoverTests(ctx, packages, *workers, *race, *timeout, listTests)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "testparallel: discovery failed after %s: %v\n", time.Since(started).Round(time.Millisecond), err)
+		os.Exit(1)
 	}
+	jobs := make([]testJob, 0, len(packages)*(*workers))
+	tests, selected := 0, 0
+	for index, pkg := range packages {
+		tests += len(names[index])
+		packageJobs := makeTestJobs(pkg, names[index], *workers, *shardIndex, *shardCount)
+		for _, job := range packageJobs {
+			selected += len(job.names)
+		}
+		jobs = append(jobs, packageJobs...)
+	}
+	fmt.Fprintf(os.Stderr, "testparallel: discovery complete: packages=%d tests=%d selected=%d jobs=%d elapsed=%s\n", len(packages), tests, selected, len(jobs), time.Since(started).Round(time.Millisecond))
 	if err := runJobs(ctx, jobs, *workers, *parallel, *timeout, *race); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

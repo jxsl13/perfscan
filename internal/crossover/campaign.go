@@ -109,6 +109,9 @@ func prepare(ctx context.Context, root, goBinary string, p *Plan, factory ModelF
 	if err != nil {
 		return nil, err
 	}
+	if err := preflightTypedInputs(ctx, model); err != nil {
+		return nil, err
+	}
 	if model.Boundary != p.Boundary {
 		return nil, errors.New("observed source threshold differs from declared campaign matrix")
 	}
