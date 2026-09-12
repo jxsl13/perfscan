@@ -1,0 +1,21 @@
+// Frozen verbatim GoAI 9501df31a4b9db0852875322afecd5b352c64f0d backend/metal/metal_bridge.h snapshot declarations.
+#define MTL_RECORDER_PROFILE_LABEL_CAPACITY 96
+typedef struct {
+    char label[MTL_RECORDER_PROFILE_LABEL_CAPACITY];
+    unsigned long long startOffsetNS;
+    unsigned long long ticks;
+    unsigned long long durationNS;
+} mtl_recorder_profile_event_snapshot;
+// mtl_recorder_profile_snapshot resolves a completed profile and returns a recorder-owned,
+// immutable event array. The array remains valid until mtl_recorder_free; callers must copy any
+// values they retain. Existing summary/event entry points remain available for ABI compatibility.
+int mtl_recorder_profile_snapshot(void* rec,
+                                  mtl_recorder_profile_event_snapshot** events,
+                                  int* eventCount, int* omittedMPS,
+                                  int* omittedOverflow, int* omittedUnsupported,
+                                  unsigned long long* timestampFrequency,
+                                  unsigned long long* commandDurationNS);
+// mtl_recorder_profile_label_tokens returns recorder-owned NSString identity tokens for the
+// already-built multi-event snapshot. Tokens remain valid until mtl_recorder_free.
+int mtl_recorder_profile_label_tokens(void* rec, uintptr_t** tokens);
+

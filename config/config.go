@@ -252,6 +252,10 @@ type Config struct {
 	// and their reviewed capacity-wide fallback semantics for PS6135.
 	ActiveBoundFallbackContracts []ActiveBoundFallbackContract `json:"activeBoundFallbackContracts,omitempty" yaml:"activeBoundFallbackContracts"`
 
+	// NativeSnapshotReuseContracts separate source acquisition/ownership roles
+	// from reviewed opaque native lifetime and repeated-extraction policy.
+	NativeSnapshotReuseContracts []NativeSnapshotReuseContract `json:"nativeSnapshotReuseContracts,omitempty" yaml:"nativeSnapshotReuseContracts"`
+
 	// RowLocalStridedGuardContracts bind reviewed native band layout to exact
 	// typed backing-buffer validation and ABI argument flow.
 	RowLocalStridedGuardContracts []RowLocalStridedGuardContract `json:"rowLocalStridedGuardContracts,omitempty" yaml:"rowLocalStridedGuardContracts"`
@@ -2355,6 +2359,7 @@ type Sets struct {
 	InPlaceFusionContracts            []InPlaceFusionContract
 	BoundedScratchFlowContracts       []BoundedScratchFlowContract
 	ActiveBoundFallbackContracts      []ActiveBoundFallbackContract
+	NativeSnapshotReuseContracts      []NativeSnapshotReuseContract
 	ReceiverStagingContracts          []ReceiverStagingContract
 	ReusableOneShotWrapperContracts   []ReusableOneShotWrapperContract
 	ReusableResultLoopContracts       []ReusableResultLoopContract
@@ -2429,6 +2434,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		InPlaceFusionContracts:            slices.Clone(c.InPlaceFusionContracts),
 		BoundedScratchFlowContracts:       cloneBoundedScratchFlowContracts(c.BoundedScratchFlowContracts),
 		ActiveBoundFallbackContracts:      cloneActiveBoundFallbackContracts(c.ActiveBoundFallbackContracts),
+		NativeSnapshotReuseContracts:      cloneNativeSnapshotReuseContracts(c.NativeSnapshotReuseContracts),
 		ReceiverStagingContracts:          slices.Clone(c.ReceiverStagingContracts),
 		ReusableOneShotWrapperContracts:   cloneReusableOneShotWrapperContracts(c.ReusableOneShotWrapperContracts),
 		ReusableResultLoopContracts:       cloneReusableResultLoopContracts(c.ReusableResultLoopContracts),
