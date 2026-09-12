@@ -132,7 +132,7 @@ func TestGitSnapshotExcludesIgnoredBuildInput(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, args := range [][]string{{"init"}, {"add", "go.mod", "tracked.go", ".gitignore"}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "pin fixture"}} {
+	for _, args := range [][]string{{"init"}, {"config", "core.autocrlf", "false"}, {"add", "go.mod", "tracked.go", ".gitignore"}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "pin fixture"}, {"config", "core.autocrlf", "true"}} {
 		out, errout, code := command(root, env, "git", args...)
 		if code != 0 {
 			t.Fatalf("git %v: %s %s", args, out, errout)
@@ -142,7 +142,24 @@ func TestGitSnapshotExcludesIgnoredBuildInput(t *testing.T) {
 	if code != 0 || len(status) != 0 {
 		t.Fatalf("fixture should appear clean despite ignored Go input: exit=%d stdout=%q stderr=%q", code, status, stderr)
 	}
-	archive, errout, code := command(root, env, "git", "archive", "--format=tar", "HEAD")
+	tree, stderr, code := command(root, env, "git", "ls-tree", "-r", "-z", "--full-tree", "HEAD")
+	if code != 0 {
+		t.Fatalf("tree: %s", stderr)
+	}
+	// Reproduce the Windows default locally: an ordinary archive contains
+	// converted CRLF bytes and must fail the unchanged committed-blob check.
+	converted, errout, code := command(root, env, "git", "archive", "--format=tar", "HEAD")
+	if code != 0 {
+		t.Fatalf("converted archive: %s", errout)
+	}
+	convertedSnapshot := t.TempDir()
+	if err := unpack(converted, convertedSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := exactTree(convertedSnapshot, tree); err == nil {
+		t.Fatal("accepted checkout-converted source instead of committed blobs")
+	}
+	archive, errout, code := sourceArchive(root, env, "HEAD")
 	if code != 0 {
 		t.Fatalf("archive: %s", errout)
 	}
@@ -150,9 +167,9 @@ func TestGitSnapshotExcludesIgnoredBuildInput(t *testing.T) {
 	if err := unpack(archive, snapshot); err != nil {
 		t.Fatal(err)
 	}
-	tree, stderr, code := command(root, env, "git", "ls-tree", "-r", "-z", "--full-tree", "HEAD")
-	if code != 0 {
-		t.Fatalf("tree: %s", stderr)
+	configured, stderr, code := command(root, env, "git", "config", "core.autocrlf")
+	if code != 0 || strings.TrimSpace(string(configured)) != "true" {
+		t.Fatalf("archive changed caller Git configuration: %q %s", configured, stderr)
 	}
 	if err := exactTree(snapshot, tree); err != nil {
 		t.Fatal(err)
@@ -174,6 +191,32 @@ func TestGitSnapshotExcludesIgnoredBuildInput(t *testing.T) {
 	}
 	if err := exactTree(snapshot, tree); err == nil {
 		t.Fatal("accepted omitted committed build input")
+	}
+	// Explicit attributes override ordinary checkout configuration. They must
+	// still fail closed when they transform the archived committed bytes.
+	if err := os.WriteFile(filepath.Join(root, ".gitattributes"), []byte("*.go text eol=crlf\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", ".gitattributes"}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "pin explicit eol attribute"}} {
+		out, stderr, code := command(root, env, "git", args...)
+		if code != 0 {
+			t.Fatalf("git %v: %s %s", args, out, stderr)
+		}
+	}
+	attributed, stderr, code := sourceArchive(root, env, "HEAD")
+	if code != 0 {
+		t.Fatalf("attributed archive: %s", stderr)
+	}
+	attributedTree, stderr, code := command(root, env, "git", "ls-tree", "-r", "-z", "--full-tree", "HEAD")
+	if code != 0 {
+		t.Fatalf("attributed tree: %s", stderr)
+	}
+	attributedSnapshot := t.TempDir()
+	if err := unpack(attributed, attributedSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := exactTree(attributedSnapshot, attributedTree); err == nil {
+		t.Fatal("accepted attribute-converted committed source")
 	}
 }
 

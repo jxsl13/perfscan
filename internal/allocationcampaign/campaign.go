@@ -170,6 +170,14 @@ func command(root string, env []string, name string, args ...string) ([]byte, []
 	return out.Bytes(), errout.Bytes(), code
 }
 
+// Git archive applies checkout-style CRLF conversion under core.autocrlf=true.
+// A build snapshot must contain committed blob bytes, not host checkout bytes.
+// Override only this invocation; do not alter the caller's repository config.
+// Attribute-driven substitutions remain subject to exactTree's strict check.
+func sourceArchive(root string, env []string, commit string) ([]byte, []byte, int) {
+	return command(root, env, "git", "-c", "core.autocrlf=false", "archive", "--format=tar", commit)
+}
+
 func writeJSON(path string, value any) error {
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
@@ -443,7 +451,7 @@ func Run(o *Options) error {
 		if code != 0 {
 			return errors.New("cannot retain pinned source tree")
 		}
-		archive, errout, code := command(root, env, "git", "archive", "--format=tar", strings.TrimSpace(string(commit)))
+		archive, errout, code := sourceArchive(root, env, strings.TrimSpace(string(commit)))
 		if err := artifact(dir, prefix+"-archive", archive, errout, code); err != nil {
 			return err
 		}

@@ -26,6 +26,10 @@ options. Builds use retained `git archive` snapshots of the exact pinned commits
 excluding ignored/untracked files; original checkout changes cannot alter those
 build inputs. Retained git ls-tree blob identities verify every archived file,
 rejecting omitted/substituted files (including export-ignore/export-subst effects).
+Archive creation uses command-local `core.autocrlf=false` to preserve committed
+blob bytes under Windows-style checkout defaults, without changing repository
+configuration. Explicit attributes such as `text eol=crlf` can still transform
+archive bytes; those trees are intentionally rejected by the same blob check.
 Archive symlinks and unversioned/local module replacements are
 rejected, workspace resolution is disabled with GOWORK=off, and dependencies
 must resolve from pinned versions/checksums with `-mod=readonly`. Supply tracked
