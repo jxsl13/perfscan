@@ -1,0 +1,74 @@
+package nlp
+import("github.com/jxsl13/goai/tensor";"github.com/jxsl13/goai/nn";"github.com/jxsl13/goai/backend")
+type Block struct{LN1 *nn.LayerNorm; LN2 *nn.LayerNorm; Attn *MHA; W1 *tensor.Tensor; B1 *tensor.Tensor; W2 *tensor.Tensor; B2 *tensor.Tensor}
+type Cohere struct{Config CohereConfig; TokEmb *tensor.Tensor; Blocks []*CohereBlock; Norm *nn.LayerNorm; Out *tensor.Tensor}
+type CohereBlock struct{InputNorm *nn.LayerNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; FFN *nn.SwiGLU}
+type CohereConfig struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; HeadDim int; Layers int; Hidden int; Eps float64; RopeBase float64; LogitScale float64}
+type DeepSeekV2 struct{Config DeepSeekV2Config; TokEmb *tensor.Tensor; Blocks []*DeepSeekV2Block; FinalNorm *nn.RMSNorm; LmHead *tensor.Tensor}
+type DeepSeekV2Block struct{InputNorm *nn.RMSNorm; WqA *tensor.Tensor; QANorm *nn.RMSNorm; WqB *tensor.Tensor; WkvA *tensor.Tensor; KvANorm *nn.RMSNorm; WkvB *tensor.Tensor; Wo *tensor.Tensor; PostAttnNorm *nn.RMSNorm; Dense *nn.SwiGLU; MoE *nn.DeepSeekMoE}
+type DeepSeekV2Config struct{Vocab int; Ctx int; Dim int; Heads int; QLoraRank int; KVLoraRank int; QKNope int; QKRope int; VHead int; Layers int; FFN int; Eps float64; RopeBase float64; SoftmaxScale float64; FirstKDense int; NRoutedExperts int; NSharedExperts int; TopK int; MoEHidden int; RoutedScale float64}
+type Falcon struct{Config FalconConfig; TokEmb *tensor.Tensor; Blocks []*FalconBlock; FinalNorm *nn.LayerNorm; Out *tensor.Tensor}
+type FalconBlock struct{InputNorm *nn.LayerNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; Wh *tensor.Tensor; Wout *tensor.Tensor}
+type FalconConfig struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; Layers int; Hidden int; Eps float64; RopeBase float64}
+type GPT struct{Config GPTConfig; TokEmb *tensor.Tensor; PosEmb *tensor.Tensor; Blocks []*Block; LNf *nn.LayerNorm; Head *tensor.Tensor; LayerBackends []backend.Name}
+type GPTConfig struct{Vocab int; Ctx int; Dim int; Heads int; Layers int; Eps float64}
+type GPTNeoX struct{Config GPTNeoXConfig; TokEmb *tensor.Tensor; Blocks []*GPTNeoXBlock; FinalNorm *nn.LayerNorm; Out *tensor.Tensor}
+type GPTNeoXBlock struct{InputNorm *nn.LayerNorm; PostAttnNorm *nn.LayerNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; Bq *tensor.Tensor; Bk *tensor.Tensor; Bv *tensor.Tensor; Bo *tensor.Tensor; Wh *tensor.Tensor; Bh *tensor.Tensor; Wout *tensor.Tensor; Bout *tensor.Tensor}
+type GPTNeoXConfig struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; Layers int; Hidden int; Eps float64; RopeBase float64; RotaryPct float64; RotaryDim int}
+type Gemma struct{Config GemmaConfig; TokEmb *tensor.Tensor; Blocks []*GemmaBlock; FinalNorm *nn.RMSNorm; outT *tensor.Tensor}
+type Gemma2 struct{Config Gemma2Config; TokEmb *tensor.Tensor; Blocks []*Gemma2Block; FinalNorm *nn.RMSNorm; outT *tensor.Tensor}
+type Gemma2Block struct{InputNorm *nn.RMSNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; PostAttnNorm *nn.RMSNorm; PreFFNNorm *nn.RMSNorm; FFN *nn.GLU; PostFFNNorm *nn.RMSNorm}
+type Gemma2Config struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; HeadDim int; Layers int; FFN int; Eps float64; RopeBase float64; QueryPreAttnScalar float64; AttnLogitCap float64; FinalLogitCap float64}
+type GemmaBlock struct{AttnNorm *nn.RMSNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; FFNNorm *nn.RMSNorm; FFN *nn.GLU}
+type GemmaConfig struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; HeadDim int; Layers int; FFN int; Eps float64; RopeBase float64}
+type GraniteMoE struct{Config GraniteMoeConfig; TokEmb *tensor.Tensor; Blocks []*GraniteMoeBlock; Norm *nn.RMSNorm; Out *tensor.Tensor}
+type GraniteMoeBlock struct{AttnNorm *nn.RMSNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; FFNNorm *nn.RMSNorm; MoE *nn.SparseMoE}
+type GraniteMoeConfig struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; Layers int; Hidden int; Experts int; TopK int; Eps float64; RopeBase float64; EmbeddingMult float64; AttentionMult float64; ResidualMult float64; LogitsScale float64}
+type Jamba struct{Config JambaConfig; TokEmb *tensor.Tensor; Layers []*JambaLayer; Norm *nn.RMSNorm; Out *tensor.Tensor}
+type JambaAttention struct{Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor}
+type JambaConfig struct{Vocab int; Dim int; Heads int; KVHeads int; Layers int; TopK int; Eps float64}
+type JambaLayer struct{InputNorm *nn.RMSNorm; PreFFNorm *nn.RMSNorm; Attn *JambaAttention; Mamba *JambaMixer; MoE *JambaMoE; Dense *nn.SwiGLU}
+type JambaMixer struct{Block *nn.MambaBlock; DtNorm *nn.RMSNorm; BNorm *nn.RMSNorm; CNorm *nn.RMSNorm}
+type JambaMoE struct{Router *tensor.Tensor; Experts []*nn.SwiGLU; TopK int}
+type Llama struct{Config LlamaConfig; TokEmb *tensor.Tensor; Blocks []*LlamaBlock; Norm *nn.RMSNorm; Out *tensor.Tensor; LayerBackends []backend.Name}
+type LlamaBlock struct{AttnNorm *nn.RMSNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; Bq *tensor.Tensor; Bk *tensor.Tensor; Bv *tensor.Tensor; QNorm *nn.RMSNorm; KNorm *nn.RMSNorm; FFNNorm *nn.RMSNorm; FFN *nn.SwiGLU}
+type LlamaConfig struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; Layers int; Hidden int; Eps float64; RopeBase float64; EmbeddingMult float64; AttentionMult float64; ResidualMult float64; LogitsScale float64}
+type MHA struct{Heads int; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; Causal bool; LoRA map[string]*nn.LoRALinear; Bias map[string]*tensor.Tensor; Mask *tensor.Tensor}
+type MPT struct{Config MPTConfig; TokEmb *tensor.Tensor; Blocks []*MPTBlock; FinalNorm *nn.LayerNorm; Out *tensor.Tensor}
+type MPTBlock struct{Norm1 *nn.LayerNorm; Norm2 *nn.LayerNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; Wup *tensor.Tensor; Wdown *tensor.Tensor}
+type MPTConfig struct{Vocab int; Ctx int; Dim int; Heads int; Layers int; Hidden int; Eps float64}
+type Mamba struct{Config MambaConfig; Embed *tensor.Tensor; Layers []MambaLayer; Norm *nn.RMSNorm; Head *tensor.Tensor}
+type Mamba2 struct{Config Mamba2Config; Embed *tensor.Tensor; Layers []Mamba2Layer; Norm *nn.RMSNorm; Head *tensor.Tensor}
+type Mamba2Config struct{DModel int; NumHeads int; HeadDim int; NGroups int; N int; DConv int; Intermediate int; Layers int; Vocab int; Eps float64}
+type Mamba2Layer struct{Norm *nn.RMSNorm; Mixer *Mamba2Mixer}
+type Mamba2Mixer struct{InProj *tensor.Tensor; ConvW *tensor.Tensor; ConvB *tensor.Tensor; ALog *tensor.Tensor; D *tensor.Tensor; DtBias *tensor.Tensor; NormW *tensor.Tensor; OutProj *tensor.Tensor; inProjT *tensor.Tensor; outProjT *tensor.Tensor; DModel int; NumHeads int; HeadDim int; NGroups int; N int; DConv int; Intermediate int; ConvDim int; Eps float64}
+type MambaConfig struct{DModel int; N int; DConv int; Expand int; DtRank int; Layers int; Vocab int; Eps float64}
+type MambaLayer struct{Norm *nn.RMSNorm; Mixer *nn.MambaBlock}
+type Mixtral struct{Config MixtralConfig; TokEmb *tensor.Tensor; Blocks []*MixtralBlock; Norm *nn.RMSNorm; Out *tensor.Tensor}
+type MixtralBlock struct{AttnNorm *nn.RMSNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; QNorm *nn.RMSNorm; KNorm *nn.RMSNorm; FFNNorm *nn.RMSNorm; MoE *nn.SparseMoE}
+type MixtralConfig struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; Layers int; Hidden int; Experts int; TopK int; Eps float64; RopeBase float64}
+type Nemotron struct{Config NemotronConfig; TokEmb *tensor.Tensor; Blocks []*NemotronBlock; Norm *nn.LayerNorm; Out *tensor.Tensor}
+type NemotronBlock struct{InputNorm *nn.LayerNorm; PostAttnNorm *nn.LayerNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; Wup *tensor.Tensor; Wdown *tensor.Tensor}
+type NemotronConfig struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; HeadDim int; Layers int; Hidden int; Eps float64; RopeBase float64; RotaryDim int; RotaryPct float64}
+type OLMo2 struct{Config OLMo2Config; TokEmb *tensor.Tensor; Blocks []*OLMo2Block; Norm *nn.RMSNorm; Out *tensor.Tensor}
+type OLMo2Block struct{Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; QNorm *nn.RMSNorm; KNorm *nn.RMSNorm; PostAttnNorm *nn.RMSNorm; FFN *nn.SwiGLU; PostFFNNorm *nn.RMSNorm}
+type OLMo2Config struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; HeadDim int; Layers int; Hidden int; Eps float64; RopeBase float64}
+type OLMoE struct{Config OLMoEConfig; TokEmb *tensor.Tensor; Blocks []*OLMoEBlock; Norm *nn.RMSNorm; Out *tensor.Tensor}
+type OLMoEBlock struct{AttnNorm *nn.RMSNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; QNorm *nn.RMSNorm; KNorm *nn.RMSNorm; FFNNorm *nn.RMSNorm; MoE *nn.SparseMoE}
+type OLMoEConfig struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; HeadDim int; Layers int; Hidden int; Experts int; TopK int; Eps float64; RopeBase float64}
+type Phi struct{Config PhiConfig; TokEmb *tensor.Tensor; Blocks []*PhiBlock; FinalNorm *nn.LayerNorm; Out *tensor.Tensor; OutBias *tensor.Tensor}
+type PhiBlock struct{InputNorm *nn.LayerNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wdense *tensor.Tensor; Bq *tensor.Tensor; Bk *tensor.Tensor; Bv *tensor.Tensor; Bdense *tensor.Tensor; Wfc1 *tensor.Tensor; Bfc1 *tensor.Tensor; Wfc2 *tensor.Tensor; Bfc2 *tensor.Tensor}
+type PhiConfig struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; HeadDim int; Layers int; Hidden int; Eps float64; RopeBase float64; RotaryDim int; RotaryPct float64}
+type QuantBlock struct{AttnNorm *nn.RMSNorm; Wq *nn.QuantLinear; Wk *nn.QuantLinear; Wv *nn.QuantLinear; Wo *nn.QuantLinear; Bq *tensor.Tensor; Bk *tensor.Tensor; Bv *tensor.Tensor; QNorm *nn.RMSNorm; KNorm *nn.RMSNorm; FFNNorm *nn.RMSNorm; FFN *nn.QuantSwiGLU}
+type QuantLlama struct{Config LlamaConfig; TokEmb *tensor.Tensor; Blocks []*QuantBlock; Norm *nn.RMSNorm; Out *nn.QuantLinear}
+type Qwen2MoE struct{Config Qwen2MoeConfig; TokEmb *tensor.Tensor; Blocks []*Qwen2MoeBlock; Norm *nn.RMSNorm; Out *tensor.Tensor}
+type Qwen2MoeBlock struct{AttnNorm *nn.RMSNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; Bq *tensor.Tensor; Bk *tensor.Tensor; Bv *tensor.Tensor; FFNNorm *nn.RMSNorm; MoE *nn.SparseMoE; Shared *nn.SwiGLU; SharedGate *tensor.Tensor}
+type Qwen2MoeConfig struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; Layers int; Hidden int; SharedHidden int; Experts int; TopK int; Eps float64; RopeBase float64}
+type RWKV struct{Config RWKVConfig; Embed *tensor.Tensor; PreLN *nn.LayerNorm; Blocks []*nn.RWKVBlock; LNOut *nn.LayerNorm; Head *tensor.Tensor}
+type RWKVConfig struct{Vocab int; Dim int; Hidden int; Layers int; Eps float64}
+type StableLM struct{Config StableLMConfig; TokEmb *tensor.Tensor; Blocks []*StableLMBlock; Norm *nn.LayerNorm; Out *tensor.Tensor}
+type StableLMBlock struct{InputNorm *nn.LayerNorm; PostAttnNorm *nn.LayerNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; FFN *nn.SwiGLU}
+type StableLMConfig struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; HeadDim int; Layers int; Hidden int; Eps float64; RopeBase float64; RotaryDim int; RotaryPct float64}
+type StarCoder2 struct{Config StarCoder2Config; TokEmb *tensor.Tensor; Blocks []*StarCoder2Block; Norm *nn.LayerNorm; Out *tensor.Tensor}
+type StarCoder2Block struct{InputNorm *nn.LayerNorm; PostAttnNorm *nn.LayerNorm; Wq *tensor.Tensor; Wk *tensor.Tensor; Wv *tensor.Tensor; Wo *tensor.Tensor; Bq *tensor.Tensor; Bk *tensor.Tensor; Bv *tensor.Tensor; Bo *tensor.Tensor; Wfc *tensor.Tensor; Bfc *tensor.Tensor; Wproj *tensor.Tensor; Bproj *tensor.Tensor}
+type StarCoder2Config struct{Vocab int; Ctx int; Dim int; Heads int; KVHeads int; HeadDim int; Layers int; Hidden int; Eps float64; RopeBase float64}

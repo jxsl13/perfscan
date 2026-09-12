@@ -279,6 +279,15 @@ Rules without a pair, and why:
   measurements involve complete scratch/backend changes, not isolated binElem
   fallback support. No PS6135-specific speedup is claimed; preserve every
   shape/error/overflow/tail/provider path and measure the complete operation.
+- **PS6136** (maximum-context retained output workspace advisory): symbolic
+  residency is source-bound constructor geometry under a reviewed one-row
+  versus rare bulk policy, not a native throughput prediction. Frozen actual
+  GPT/Llama before/after owner replay and adversarial source/lifetime tests
+  cannot execute kernels or demonstrate allocator/completion ownership on
+  every provider. Owner PR1207 measurements are attributed complete-public-API
+  campaigns, not a portable toy benchmark or an isolated detector speedup.
+  Preserve physical ToHost transfer, all native parity/errors, checked shapes
+  and release/publication; remeasure residency and complete public workloads.
 
 PS6137 is an opt-in advisory with no automatic replacement benchmark. Its
 complete owner cgo/source replay is not a native workload execution. GoAI
