@@ -16,7 +16,7 @@ The actual owner `Decoder.binElem` is different: it accepts interface `recorder`
 
 ## Offset-inflated strided shape guards
 
-No current analyzer detects the owner Metal/Vulkan `RoPEPair` pre-change guard: `maxOff := max(offQ,offK)` followed by `qkv.n < maxOff+seq*stride`. PR1210 replaces it with independent `offQ+headsQ*hd` and `offK+headsK*hd` band ends within stride and `qkv.n < seq*stride`, preserving independent inverse-frequency storage checks. This missing source-backed scope is reserved PS6133. An arbitrary flat/subview offset requirement is not equivalent and must not be blindly rewritten.
+PS6133 detects the owner Metal/Vulkan `RoPEPair` pre-change guard: `maxOff := max(offQ,offK)` followed by `qkv.n < maxOff+seq*stride`, with exact typed native ABI roles and fingerprinted reviewed bridge/kernel source. PR1210 replaces it with independent `offQ+headsQ*hd` and `offK+headsK*hd` band ends within stride and `qkv.n < seq*stride`, preserving independent inverse-frequency storage checks. [Its source/contract audit](issue-891-row-local-strided-guard.md) distinguishes witnessed immutable buffer/geometry/call flow from reviewed native layout and conditional valid-shape arithmetic. The original wrappers lack band-end checks; a finding does not certify them safe or permit arbitrary offset removal. A real flat/subview offset requirement is not equivalent and remains untouched.
 
 ## Grouped high-water failure ownership
 

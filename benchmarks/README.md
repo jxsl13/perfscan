@@ -271,3 +271,9 @@ Rules without a pair, and why:
   measurements involve complete scratch/backend changes, not isolated binElem
   fallback support. No PS6135-specific speedup is claimed; preserve every
   shape/error/overflow/tail/provider path and measure the complete operation.
+
+PS6133 is exempt: checked native row-local shape validation is an advisory
+correctness boundary, not an isolated faster guard. The owner combined exact-row
+device ownership results do not isolate guard cost. A host offset-removal toy
+cannot qualify native C/index ranges, errors, both bands, shader parity, provider
+fallbacks or complete same-binary decode/prefill behavior.

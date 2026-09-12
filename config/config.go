@@ -252,6 +252,10 @@ type Config struct {
 	// and their reviewed capacity-wide fallback semantics for PS6135.
 	ActiveBoundFallbackContracts []ActiveBoundFallbackContract `json:"activeBoundFallbackContracts,omitempty" yaml:"activeBoundFallbackContracts"`
 
+	// RowLocalStridedGuardContracts bind reviewed native band layout to exact
+	// typed backing-buffer validation and ABI argument flow.
+	RowLocalStridedGuardContracts []RowLocalStridedGuardContract `json:"rowLocalStridedGuardContracts,omitempty" yaml:"rowLocalStridedGuardContracts"`
+
 	// ReceiverStagingContracts are explicit, project-owned ownership contracts
 	// for PS6107. They bind one exact pointer-receiver method to an optional
 	// full-overwrite helper, one synchronous non-retaining consumer, a lifecycle
@@ -2307,6 +2311,8 @@ func psTopKImportPathValid(importPath string) bool {
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
 type Sets struct {
+	RowLocalStridedGuardContracts []RowLocalStridedGuardContract
+
 	DenseRowGEMMFuncs       map[string]bool
 	CausalZeroGEMMContracts []CausalZeroGEMMContract
 
@@ -2379,6 +2385,8 @@ func toSet(xs []string) map[string]bool {
 // Compile converts the config into set form.
 func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep the public value API source-compatible
 	return Sets{
+		RowLocalStridedGuardContracts: cloneRowLocalStridedGuardContracts(c.RowLocalStridedGuardContracts),
+
 		DenseRowGEMMFuncs:       toSet(c.DenseRowGEMMFuncs),
 		CausalZeroGEMMContracts: cloneCausalZeroGEMMContracts(c.CausalZeroGEMMContracts),
 

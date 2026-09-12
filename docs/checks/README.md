@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**425 checks total** — **265 with a bit-identical auto-fix**, 160 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **55 L3** (aggressive).
+**426 checks total** — **265 with a bit-identical auto-fix**, 161 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **56 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -436,5 +436,6 @@ checks' fixes.
 | [PS6129](PS6129.md) | verify | L3 |  | a dense GEMM consumes an explicitly cleared matrix suffix |
 | [PS6130](PS6130.md) | verify | L3 |  | a hot SIMD polynomial leaf repeats coefficient address setup in pinned emitted code |
 | [PS6132](PS6132.md) | alloc | L3 |  | constructor retains maximum-row transient storage despite explicit active-row execution |
+| [PS6133](PS6133.md) | verify | L3 |  | a row-local band offset inflates the whole backing-row shape guard |
 | [PS6135](PS6135.md) | verify | L3 |  | an explicit active-bound capability falls back to capacity-wide work |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |

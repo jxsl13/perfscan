@@ -403,6 +403,8 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		return nil
 	}
 	fields := map[string]int{
+		"rowLocalStridedGuardContracts": config.UsableRowLocalStridedGuardContractCount(cfg.RowLocalStridedGuardContracts),
+
 		"denseRowGEMMFuncs":       config.UsableDenseRowGEMMFuncCount(cfg.DenseRowGEMMFuncs),
 		"causalZeroGEMMContracts": config.UsableCausalZeroGEMMContractCount(cfg.CausalZeroGEMMContracts),
 

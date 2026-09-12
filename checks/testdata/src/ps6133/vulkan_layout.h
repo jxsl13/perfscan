@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: MPL-2.0
+// Frozen excerpt from jxsl13/GoAI backend/vulkan/vk_bridge.c
+// parent 74a7c5c923b25aa35773bb9e907b76aba04a553a; retained verbatim, not native execution.
+int vk_recorder_rope2(void* rec, const uint32_t* spv, int spvLen, void* qh, void* invh,
+                      int seq, int stride, int headsQ, int offQ, int headsK, int offK,
+                      int hd, int half, int posOffset, float posDiv) {
+    if (!rec || !qh || !invh || seq < 1 || stride < 1 || headsQ < 1 || headsK < 1 ||
+        offQ < 0 || offK < 0) return -2;
+    DevBuf* q = (DevBuf*)qh; DevBuf* inv = (DevBuf*)invh;
+    PipeCache* pc = NULL;
+    struct { int32_t seq, stride, headsQ, offQ, headsK, offK, hd, half, posOffset; float posDiv; } push = {
+        seq, stride, headsQ, offQ, headsK, offK, hd, half, posOffset, posDiv };
+    pthread_mutex_lock(&gLock);
+    int rc = -4;
+    if (pipeline_for(spv, spvLen, 2, sizeof(push), &pc) == 0) {
+        int maxOff = offQ > offK ? offQ : offK;
+        VkDeviceSize span = ((VkDeviceSize)maxOff + (VkDeviceSize)seq*stride) * 4;
+        if (span > q->nbytes) span = q->nbytes;
+        VkBuffer buf[2] = { q->buf, inv->buf };
+        VkDeviceSize lens[2] = { span, (VkDeviceSize)half*4 };
+        uint32_t total = (uint32_t)seq * (uint32_t)(headsQ + headsK) * (uint32_t)half;
+        rc = rec_dispatch(pc, 2, buf, lens, &push, sizeof(push), (total + 63u) / 64u, 1u, 1u);
+    }
+    pthread_mutex_unlock(&gLock);
+    return rc;
+}
+
+// vk_recorder_mha_decode
+
+// SPDX-License-Identifier: MPL-2.0
+// Frozen excerpt from jxsl13/GoAI backend/vulkan/shaders/rope2.comp
+// parent 74a7c5c923b25aa35773bb9e907b76aba04a553a; retained verbatim, not native execution.
+#version 450
+
+// Fused two-band RoPE (SPEC T613): ONE dispatch rotates BOTH bands of a fused QKV row in
+// place — the q band (headsQ heads at element offset offQ) and the k band (headsK heads at
+// offset offK), each row `stride` floats wide. Invocation t covers rotated pair i of virtual
+// head h over seq rows: h < headsQ is a q-band head, the rest map to the k band. Replaces the
+// two back-to-back rope dispatches per decoder layer. Same rotation math as rope.comp (the
+// host-precomputed inv[half]/posDiv fold PI/YaRN in). Compiled to rope2.spv (glslc).
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 0) buffer BufQ { float q[]; }; // read-write: in-place rotation
+layout(std430, binding = 1) readonly buffer BufInv { float inv[]; };
+
+layout(push_constant) uniform Dims {
+    int seq; int stride; int headsQ; int offQ; int headsK; int offK;
+    int hd; int halfd; int posOffset; float posDiv;
+} d;
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    uint hh = uint(d.headsQ + d.headsK) * uint(d.halfd);
+    uint total = uint(d.seq) * hh;
+    if (gid >= total) {
+        return;
+    }
+    uint p = gid / hh;
+    uint rem = gid % hh;
+    int h = int(rem / uint(d.halfd));
+    uint i = rem % uint(d.halfd);
+    uint base = (h < d.headsQ)
+        ? uint(d.offQ) + p * uint(d.stride) + uint(h) * uint(d.hd) + i
+        : uint(d.offK) + p * uint(d.stride) + uint(h - d.headsQ) * uint(d.hd) + i;
+
+    float pos = float(int(p) + d.posOffset) / d.posDiv;
+    float theta = inv[i];
+    float c = cos(pos * theta);
+    float s = sin(pos * theta);
+    float qi = q[base];
+    float qih = q[base + uint(d.halfd)];
+    q[base] = qi * c - qih * s;
+    q[base + uint(d.halfd)] = qih * c + qi * s;
+}
