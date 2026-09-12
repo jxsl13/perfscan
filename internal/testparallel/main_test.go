@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -337,47 +338,60 @@ func TestRunTestAttemptsDoesNotMaskConclusiveFailure(t *testing.T) {
 
 func TestRunTestAttemptsSharesTimeoutAcrossRetries(t *testing.T) {
 	t.Parallel()
-	const timeout = 30 * time.Millisecond
-	attempts := 0
-	started := time.Now()
-	output, err := runTestAttempts(context.Background(), "windows", timeout, func(attemptCtx context.Context, remaining time.Duration) (string, error) {
-		attempts++
-		if remaining <= 0 || remaining > timeout {
-			return "", context.Canceled
+	// CI scheduling delays must not consume the budget before the retry runs.
+	synctest.Test(t, func(t *testing.T) {
+		const timeout = 30 * time.Millisecond
+		attempts := 0
+		started := time.Now()
+		output, err := runTestAttempts(context.Background(), "windows", timeout, func(attemptCtx context.Context, remaining time.Duration) (string, error) {
+			attempts++
+			if remaining <= 0 || remaining > timeout {
+				return "", context.Canceled
+			}
+			if attempts == 1 {
+				time.Sleep(timeout / 3)
+				return "exit status 0xc0000005\nFAIL\n", context.DeadlineExceeded
+			}
+			if remaining != 2*timeout/3 {
+				t.Fatalf("retry budget = %s, want %s", remaining, 2*timeout/3)
+			}
+			<-attemptCtx.Done()
+			return "", attemptCtx.Err()
+		})
+		if err == nil || attempts != 2 {
+			t.Fatalf("err = %v, attempts = %d; want timeout failure after one retry", err, attempts)
 		}
-		if attempts == 1 {
-			return "exit status 0xc0000005\nFAIL\n", context.DeadlineExceeded
+		if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+			t.Fatalf("shared timeout took %s; retry appears to have received a fresh budget", elapsed)
 		}
-		<-attemptCtx.Done()
-		return "", attemptCtx.Err()
+		if elapsed, want := time.Since(started), timeout+testTimeoutGrace(timeout); elapsed != want {
+			t.Fatalf("shared timeout took %s, want %s including diagnostic grace", elapsed, want)
+		}
+		if !strings.Contains(output, "retrying this complete shard") {
+			t.Fatalf("combined output omitted retry evidence: %q", output)
+		}
 	})
-	if err == nil || attempts != 2 {
-		t.Fatalf("err = %v, attempts = %d; want timeout failure after one retry", err, attempts)
-	}
-	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
-		t.Fatalf("shared timeout took %s; retry appears to have received a fresh budget", elapsed)
-	}
-	if !strings.Contains(output, "retrying this complete shard") {
-		t.Fatalf("combined output omitted retry evidence: %q", output)
-	}
 }
 
 func TestRunTestAttemptsLeavesTimeoutDiagnosticGrace(t *testing.T) {
 	t.Parallel()
-	const timeout = 10 * time.Second
-	var diagnosticGrace time.Duration
-	_, err := runTestAttempts(context.Background(), "linux", timeout, func(attemptCtx context.Context, remaining time.Duration) (string, error) {
-		outerDeadline, ok := attemptCtx.Deadline()
-		if !ok {
-			return "", context.Canceled
+	// Measure both deadlines with the same clock, independent of CI load.
+	synctest.Test(t, func(t *testing.T) {
+		const timeout = 10 * time.Second
+		var diagnosticGrace time.Duration
+		_, err := runTestAttempts(context.Background(), "linux", timeout, func(attemptCtx context.Context, remaining time.Duration) (string, error) {
+			outerDeadline, ok := attemptCtx.Deadline()
+			if !ok {
+				return "", context.Canceled
+			}
+			diagnosticGrace = time.Until(outerDeadline) - remaining
+			return "ok\n", nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		diagnosticGrace = time.Until(outerDeadline) - remaining
-		return "ok\n", nil
+		if diagnosticGrace < 900*time.Millisecond || diagnosticGrace > 1100*time.Millisecond {
+			t.Fatalf("diagnostic grace = %s, want about 1s", diagnosticGrace)
+		}
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if diagnosticGrace < 900*time.Millisecond || diagnosticGrace > 1100*time.Millisecond {
-		t.Fatalf("diagnostic grace = %s, want about 1s", diagnosticGrace)
-	}
 }
