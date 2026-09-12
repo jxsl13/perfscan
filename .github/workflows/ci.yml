@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# Keep the full matrix for the latest main commit and each independent PR.
+# Superseded commits must not hold runners needed by their replacements.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     strategy:
