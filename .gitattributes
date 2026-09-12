@@ -1,8 +1,10 @@
 * text=auto
+checks/testdata/ps6135_owner_bin_elem.go.txt text eol=lf
 *.go text eol=lf
 *.md text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
+checks/testdata/ps6132_owner_constructor.go.txt text eol=lf
 # These owner fixtures have byte-exact digest assertions on every platform.
 checks/testdata/ps6084_owner_baseline.go.txt text eol=lf
 checks/testdata/ps6084_owner_candidate.go.txt text eol=lf
@@ -18,3 +20,10 @@ checks/testdata/ps6128_owner_worker.go.txt text eol=lf
 checks/testdata/ps6128_owner_caller.go.txt text eol=lf
 checks/testdata/ps6128_corsix_LICENSE.txt text eol=lf
 checks/testdata/ps6129_owner_band.go.txt text eol=lf
+checks/testdata/ps6133_owner_metal.go.txt text eol=lf
+checks/testdata/ps6133_owner_metal_native.txt text eol=lf
+checks/testdata/ps6133_owner_vulkan.go.txt text eol=lf
+checks/testdata/ps6133_owner_vulkan_bridge.txt text eol=lf
+checks/testdata/ps6133_owner_vulkan_shader.txt text eol=lf
+checks/testdata/src/ps6133/metal_layout.h text eol=lf
+checks/testdata/src/ps6133/vulkan_layout.h text eol=lf

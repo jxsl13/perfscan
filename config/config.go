@@ -249,6 +249,14 @@ type Config struct {
 	// semantics from accelerator API names.
 	BoundedScratchFlowContracts []BoundedScratchFlowContract `json:"boundedScratchFlowContracts,omitempty" yaml:"boundedScratchFlowContracts"`
 
+	// ActiveBoundFallbackContracts bind optional explicit-bound interface APIs
+	// and their reviewed capacity-wide fallback semantics for PS6135.
+	ActiveBoundFallbackContracts []ActiveBoundFallbackContract `json:"activeBoundFallbackContracts,omitempty" yaml:"activeBoundFallbackContracts"`
+
+	// RowLocalStridedGuardContracts bind reviewed native band layout to exact
+	// typed backing-buffer validation and ABI argument flow.
+	RowLocalStridedGuardContracts []RowLocalStridedGuardContract `json:"rowLocalStridedGuardContracts,omitempty" yaml:"rowLocalStridedGuardContracts"`
+
 	// ReceiverStagingContracts are explicit, project-owned ownership contracts
 	// for PS6107. They bind one exact pointer-receiver method to an optional
 	// full-overwrite helper, one synchronous non-retaining consumer, a lifecycle
@@ -256,6 +264,10 @@ type Config struct {
 	// those ownership and concurrency guarantees; PS6107 stays silent unless a
 	// complete valid contract supplies them.
 	ReceiverStagingContracts []ReceiverStagingContract `json:"receiverStagingContracts,omitempty" yaml:"receiverStagingContracts"`
+
+	// ContextTransientWorkspaceContracts bind reviewed constructor-only
+	// transient device ownership to source-proven maximum-row allocations.
+	ContextTransientWorkspaceContracts []ContextTransientWorkspaceContract `json:"contextTransientWorkspaceContracts,omitempty" yaml:"contextTransientWorkspaceContracts"`
 
 	// ReusableOneShotWrapperContracts are explicit project-owned lifecycle
 	// contracts for PS6109. They separate a reusable Go wrapper shell from the
@@ -2300,8 +2312,13 @@ func psTopKImportPathValid(importPath string) bool {
 
 // Sets is the compiled, set-shaped view of Config used by analyzers.
 type Sets struct {
-	DenseRowGEMMFuncs                 map[string]bool
-	CausalZeroGEMMContracts           []CausalZeroGEMMContract
+	RowLocalStridedGuardContracts []RowLocalStridedGuardContract
+
+	DenseRowGEMMFuncs       map[string]bool
+	CausalZeroGEMMContracts []CausalZeroGEMMContract
+
+	ContextTransientWorkspaceContracts []ContextTransientWorkspaceContract
+
 	CacheLineBytes                    int
 	NativeGenerationDispatchContracts []NativeGenerationDispatchContract
 	ElementAccessors                  map[string]bool
@@ -2339,6 +2356,7 @@ type Sets struct {
 	KernelRegisterFuncs               map[string]bool
 	InPlaceFusionContracts            []InPlaceFusionContract
 	BoundedScratchFlowContracts       []BoundedScratchFlowContract
+	ActiveBoundFallbackContracts      []ActiveBoundFallbackContract
 	ReceiverStagingContracts          []ReceiverStagingContract
 	ReusableOneShotWrapperContracts   []ReusableOneShotWrapperContract
 	ReusableResultLoopContracts       []ReusableResultLoopContract
@@ -2369,8 +2387,13 @@ func toSet(xs []string) map[string]bool {
 // Compile converts the config into set form.
 func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep the public value API source-compatible
 	return Sets{
-		DenseRowGEMMFuncs:                 toSet(c.DenseRowGEMMFuncs),
-		CausalZeroGEMMContracts:           cloneCausalZeroGEMMContracts(c.CausalZeroGEMMContracts),
+		RowLocalStridedGuardContracts: cloneRowLocalStridedGuardContracts(c.RowLocalStridedGuardContracts),
+
+		DenseRowGEMMFuncs:       toSet(c.DenseRowGEMMFuncs),
+		CausalZeroGEMMContracts: cloneCausalZeroGEMMContracts(c.CausalZeroGEMMContracts),
+
+		ContextTransientWorkspaceContracts: cloneContextTransientWorkspaceContracts(c.ContextTransientWorkspaceContracts),
+
 		CacheLineBytes:                    c.CacheLineBytes,
 		NativeGenerationDispatchContracts: cloneNativeGenerationDispatchContracts(c.NativeGenerationDispatchContracts),
 		ElementAccessors:                  toSet(c.ElementAccessors),
@@ -2408,6 +2431,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		KernelRegisterFuncs:               toSet(c.KernelRegisterFuncs),
 		InPlaceFusionContracts:            slices.Clone(c.InPlaceFusionContracts),
 		BoundedScratchFlowContracts:       cloneBoundedScratchFlowContracts(c.BoundedScratchFlowContracts),
+		ActiveBoundFallbackContracts:      cloneActiveBoundFallbackContracts(c.ActiveBoundFallbackContracts),
 		ReceiverStagingContracts:          slices.Clone(c.ReceiverStagingContracts),
 		ReusableOneShotWrapperContracts:   cloneReusableOneShotWrapperContracts(c.ReusableOneShotWrapperContracts),
 		ReusableResultLoopContracts:       cloneReusableResultLoopContracts(c.ReusableResultLoopContracts),

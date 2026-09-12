@@ -121,6 +121,8 @@ The default is fixed work (`-fixed-n >= 2`). Native records retain actual `N`,
 elapsed nanoseconds, `MemBytes`, `MemAllocs`, quotient and remainder. Nested
 aggregate `N=1`, failed/skipped/exited callbacks and invalid raw identities do
 not qualify. No custom rounded benchmark metric substitutes for raw counters.
+`Measure` requires positive elapsed time for crossover evidence. The existing
+allocation-only `Run` still accepts a stopped/reset timer with zero elapsed time.
 
 Adaptive runs are explicit (`-fixed-n 0 -duration 500ms`) and retain actual raw
 N. Unequal-N totals are not matched paired deltas: reports use exact rational

@@ -553,6 +553,30 @@ boundedScratchFlowContracts:
 # it only when the candidate method itself has a canonical whole-slice `=` loop.
 # maxRetainedBytes is a recommendation ceiling (and must be <= 64 MiB), not a
 # claim that retaining that amount is safe for every application.
+# PS6132 source witnesses are not an all-program ownership proof. These facts
+# require audit of ALL providers/build tags, recurrent one-row execution,
+# callback allocation, lifecycle and external observations. Geometry-preserving
+# methods are exact reviewed exceptions, not names inferred to be read-only.
+contextTransientWorkspaceContracts:
+  - allocationMethod: example.com/project/decoder.Decoder.allocateActivations
+    allocatorParameter: allocate
+    maximumRowsField: contextRows
+    scratchFields: [activation, normalized]
+    geometryPreservingMethods: [example.com/project/decoder.Decoder.allocateOptional]
+    rowMethod: example.com/project/decoder.Decoder.normalizeRows
+    rowArgument: 2
+    oneRowExecutionMethod: example.com/project/decoder.Decoder.decode
+    batchExecutionMethod: example.com/project/decoder.Decoder.prefill
+    batchRowsBinding: rows
+    constructorOnlyAllocationReviewed: true
+    allocatorCallbackOwnershipReviewed: true
+    allExecutionPathsTransientActiveRowsReviewed: true
+    recurrentOneRowPathsReviewed: true
+    receiverCallsSequential: true
+    checkedGeometryReviewed: true
+    synchronizationLifecycleReviewed: true
+    externalObservationReviewed: true
+
 receiverStagingContracts:
   - name: decoder-prefill-upload
     candidateMethod: example.com/project/decoder.Decoder.prefill
@@ -1040,6 +1064,46 @@ crossStepAcceleratorResidencyContracts:
 #   kernelRegisterFuncs:    [add]
 #   inPlaceFusionContracts:
 #     - {name: swiglu-eager, producer: example.com/tensor.Linear.Forward, activation: example.com/backend.Executor.SiLU, activationInputArg: 0, binary: example.com/backend.Executor.Mul, binaryActivationArg: 0, binaryOtherArg: 1, capabilityInterface: example.com/backend.SwiGLUInPlaceFuser, capabilityMethod: FuseSwiGLUInPlace, nonRecordingGuard: example.com/backend.Executor.IsEager, producerReturnsFreshOwned: true, activationReturnsFreshOwned: true, binaryReturnsFreshOwned: true, capabilityOverwritesFirstArg: true, capabilityPreservesSecondArg: true, capabilityRejectsUnsupported: true, capabilityFailureUnmodified: true, capabilityMatchesComposition: true, guardProvesNonRecording: true}
+#   rowLocalStridedGuardContracts:
+#     # Exact pinned-owner example, NOT transferable API-name semantics.
+#     # Review all source/compiled/dtype/lifecycle facts for your revision.
+#     # Finding is conditional on checked valid geometry AND both bands.
+#     - wrapperMethod: github.com/jxsl13/goai/backend/metal.Recorder.RoPEPair
+#       nativeCallable: C.mtl_recorder_rope2
+#       elementCountField: n
+#       handleField: handle
+#       nativeArguments: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+#       evidence:
+#         - {file: metal_bridge.m, start: '// rope2 (SPEC T613)', end: 'static id<MTLComputePipelineState> gRoPE2 = nil;', sha256: 948938afa4dbc8734482b22dcd48c127b7476c6e27ada76920bc503bb71de519}
+#         - {file: metal_bridge.m, start: 'int mtl_recorder_rope2(', end: 'int mtl_recorder_rope2_split(', sha256: b7ebbdb3d3f3a15d103ab7b35a0c1f5976ad78cdef096c65add946b2f6d871b3}
+#       rowLocalBandIndexingReviewed: true
+#       headAndHalfWidthRelationReviewed: true
+#       unshiftedBackingHandleReviewed: true
+#       elementCountAndFloat32StorageReviewed: true
+#       nativeCodeGenerationAndBuildPathsReviewed: true
+#       checkedArithmeticAndShapeBehaviorReviewed: true
+#       errorsFallbackAndSynchronizationReviewed: true
+#   activeBoundFallbackContracts:
+#     # Reviewed semantic facts, not inferred from these API names. The
+#     # finding is conditional on positive active rows, missing capability,
+#     # and retained capacity exceeding rows*width; it does not rewrite guards.
+#     - wrapperMethod: example.com/model.Decoder.binElem
+#       providerType: example.com/model.recorder
+#       capabilityType: example.com/model.binaryNRecorder
+#       boundedMethod: BinaryN
+#       capacityMethod: Binary
+#       providerArgument: 0
+#       bufferArguments: [1, 2, 3]
+#       operationArgument: 4
+#       rowsArgument: 5
+#       widthArgument: 6
+#       boundedActivePrefixReviewed: true
+#       fallbackCapacityWideReviewed: true
+#       sameOperationBufferRolesReviewed: true
+#       activeRowsMayBeBelowCapacityReviewed: true
+#       inactiveTailUnobservedReviewed: true
+#       providerAndBuildPathsReviewed: true
+#       errorsShapeAndSynchronizationReviewed: true
 #   boundedScratchFlowContracts:
 #     - {name: bounded-gelu, allocator: example.com/backend.Device.Alloc, allocatorCapacityArg: 1, producer: example.com/backend.Device.AddBias, producerBufferArg: 1, producerActiveArg: 2, consumer: example.com/backend.Device.GELU, consumerBufferArg: 1, observers: [{function: example.com/backend.Device.Observe, bufferArg: 1, activeArg: 2}], configuredCapacityElements: 3145728, configuredActiveElements: 3072, configuredRepeatCount: 12, allocatorReturnsFreshOwned: true, producerWritesOnlyActivePrefix: true, consumerTraversesFullCapacity: true, observersReadOnlyActivePrefix: true, callsDoNotRetainBuffer: true, callsExecuteSynchronously: true, inactiveTailNotRequired: true, replacement: example.com/backend.Device.BiasGELU, replacementMatchesComposition: true, replacementPreservesActivePrefixBits: true, replacementLeavesInactiveTail: true, replacementPreservesErrorsSideEffects: true, replacementPreservesProviderFallback: true, replacementRejectsUnsupported: true, replacementFailureUnmodified: true}
 #   receiverStagingContracts:

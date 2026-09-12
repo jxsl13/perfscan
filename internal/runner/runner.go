@@ -403,8 +403,13 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		return nil
 	}
 	fields := map[string]int{
-		"denseRowGEMMFuncs":                 config.UsableDenseRowGEMMFuncCount(cfg.DenseRowGEMMFuncs),
-		"causalZeroGEMMContracts":           config.UsableCausalZeroGEMMContractCount(cfg.CausalZeroGEMMContracts),
+		"rowLocalStridedGuardContracts": config.UsableRowLocalStridedGuardContractCount(cfg.RowLocalStridedGuardContracts),
+
+		"denseRowGEMMFuncs":       config.UsableDenseRowGEMMFuncCount(cfg.DenseRowGEMMFuncs),
+		"causalZeroGEMMContracts": config.UsableCausalZeroGEMMContractCount(cfg.CausalZeroGEMMContracts),
+
+		"contextTransientWorkspaceContracts": config.UsableContextTransientWorkspaceContractCount(cfg.ContextTransientWorkspaceContracts),
+
 		"elementAccessors":                  len(cfg.ElementAccessors),
 		"fastPathHelpers":                   len(cfg.FastPathHelpers),
 		"selectorPromotionSymbols":          len(cfg.SelectorPromotionSymbols),
@@ -438,6 +443,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"kernelRegisterFuncs":               len(cfg.KernelRegisterFuncs),
 		"inPlaceFusionContracts":            len(cfg.InPlaceFusionContracts),
 		"receiverStagingContracts":          validReceiverStagingContracts(cfg.ReceiverStagingContracts),
+		"activeBoundFallbackContracts":      config.UsableActiveBoundFallbackContractCount(cfg.ActiveBoundFallbackContracts),
 		"reusableResultLoopContracts":       validReusableResultLoopContracts(cfg.ReusableResultLoopContracts),
 		"recorderResidualAddContracts":      validRecorderResidualAddContracts(cfg.RecorderResidualAddContracts),
 		"rowLocalSparseGatherContracts":     validRowLocalSparseGatherContracts(cfg.RowLocalSparseGatherContracts),

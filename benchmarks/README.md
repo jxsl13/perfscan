@@ -13,6 +13,13 @@ and compare arms with benchstat. CI executes every benchmark once
 (`-benchtime=1x`) so the pairs always compile and run; timing claims are
 for humans with benchstat, not for CI gates.
 
+PS6132 is exempt from an isolated before/after pair: its remedy changes grouped
+device-buffer ownership, optional architecture scratch and failure/synchronization
+lifecycle. A host make toy cannot qualify selected-generation readback, recurrent
+paths, backend capacity guards, public decode/prefill or complete retained bytes.
+The documentation attributes the owner's same-binary constructor and public M2
+campaigns; those measurements are not a universal runtime speedup claim.
+
 For small allocation changes, use the opt-in diagnostic wrapper around the
 existing PS2002 benchmark functions. It retains integer N, MemBytes, MemAllocs,
 and each quotient/remainder after `testing.Benchmark` returns. This is diagnostic
@@ -266,3 +273,15 @@ Rules without a pair, and why:
   validates tooling integrity, not GoAI native performance or a numeric cutoff.
   See `docs/development/dispatch-crossover-evidence.md`; no autofix or speedup
   is claimed.
+- **PS6135** (explicit active-bound capacity fallback advisory): exact typed
+  interface flow plus reviewed capacity/prefix API semantics is not a measured
+  runtime work ratio or capability/provider profile. The owner StepNLast16
+  measurements involve complete scratch/backend changes, not isolated binElem
+  fallback support. No PS6135-specific speedup is claimed; preserve every
+  shape/error/overflow/tail/provider path and measure the complete operation.
+
+PS6133 is exempt: checked native row-local shape validation is an advisory
+correctness boundary, not an isolated faster guard. The owner combined exact-row
+device ownership results do not isolate guard cost. A host offset-removal toy
+cannot qualify native C/index ranges, errors, both bands, shader parity, provider
+fallbacks or complete same-binary decode/prefill behavior.
