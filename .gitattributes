@@ -4,6 +4,8 @@ checks/testdata/ps6135_owner_bin_elem.go.txt text eol=lf
 *.md text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
+checks/testdata/ps6138_owner_*.txt text eol=lf
+checks/testdata/src/ps6138/fields_arm64.s text eol=lf
 checks/testdata/ps6132_owner_constructor.go.txt text eol=lf
 # These owner fixtures have byte-exact digest assertions on every platform.
 checks/testdata/ps6084_owner_baseline.go.txt text eol=lf
