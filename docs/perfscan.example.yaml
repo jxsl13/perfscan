@@ -1064,6 +1064,25 @@ crossStepAcceleratorResidencyContracts:
 #   kernelRegisterFuncs:    [add]
 #   inPlaceFusionContracts:
 #     - {name: swiglu-eager, producer: example.com/tensor.Linear.Forward, activation: example.com/backend.Executor.SiLU, activationInputArg: 0, binary: example.com/backend.Executor.Mul, binaryActivationArg: 0, binaryOtherArg: 1, capabilityInterface: example.com/backend.SwiGLUInPlaceFuser, capabilityMethod: FuseSwiGLUInPlace, nonRecordingGuard: example.com/backend.Executor.IsEager, producerReturnsFreshOwned: true, activationReturnsFreshOwned: true, binaryReturnsFreshOwned: true, capabilityOverwritesFirstArg: true, capabilityPreservesSecondArg: true, capabilityRejectsUnsupported: true, capabilityFailureUnmodified: true, capabilityMatchesComposition: true, guardProvesNonRecording: true}
+#   rowLocalStridedGuardContracts:
+#     # Exact pinned-owner example, NOT transferable API-name semantics.
+#     # Review all source/compiled/dtype/lifecycle facts for your revision.
+#     # Finding is conditional on checked valid geometry AND both bands.
+#     - wrapperMethod: github.com/jxsl13/goai/backend/metal.Recorder.RoPEPair
+#       nativeCallable: C.mtl_recorder_rope2
+#       elementCountField: n
+#       handleField: handle
+#       nativeArguments: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+#       evidence:
+#         - {file: metal_bridge.m, start: '// rope2 (SPEC T613)', end: 'static id<MTLComputePipelineState> gRoPE2 = nil;', sha256: 948938afa4dbc8734482b22dcd48c127b7476c6e27ada76920bc503bb71de519}
+#         - {file: metal_bridge.m, start: 'int mtl_recorder_rope2(', end: 'int mtl_recorder_rope2_split(', sha256: b7ebbdb3d3f3a15d103ab7b35a0c1f5976ad78cdef096c65add946b2f6d871b3}
+#       rowLocalBandIndexingReviewed: true
+#       headAndHalfWidthRelationReviewed: true
+#       unshiftedBackingHandleReviewed: true
+#       elementCountAndFloat32StorageReviewed: true
+#       nativeCodeGenerationAndBuildPathsReviewed: true
+#       checkedArithmeticAndShapeBehaviorReviewed: true
+#       errorsFallbackAndSynchronizationReviewed: true
 #   activeBoundFallbackContracts:
 #     # Reviewed semantic facts, not inferred from these API names. The
 #     # finding is conditional on positive active rows, missing capability,
