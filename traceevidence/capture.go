@@ -38,6 +38,7 @@ type Options struct {
 	CommandTimeout     time.Duration
 	MaxArtifactBytes   int64
 	MaxTraceBytes      int64
+	InputPolicy        *InputPolicy
 }
 
 // Invocation describes an actually executed command. A start, cancellation,
@@ -49,12 +50,13 @@ type Invocation struct {
 }
 
 type Result struct {
-	Accepted    bool                  `json:"accepted"`
-	TimeLimited bool                  `json:"timeLimited"`
-	TraceSHA256 string                `json:"traceSHA256"`
-	TableRows   map[string]int64      `json:"tableRows"`
-	Invocations map[string]Invocation `json:"invocations"`
-	Reason      string                `json:"reason"`
+	Accepted       bool                  `json:"accepted"`
+	TimeLimited    bool                  `json:"timeLimited"`
+	TraceSHA256    string                `json:"traceSHA256"`
+	TableRows      map[string]int64      `json:"tableRows"`
+	Invocations    map[string]Invocation `json:"invocations"`
+	Reason         string                `json:"reason"`
+	InputPreflight *InputPreflight       `json:"inputPreflight,omitempty"`
 }
 
 // Capture creates a NEW evidence directory. It retains every command's raw
@@ -69,6 +71,10 @@ func Capture(ctx context.Context, o *Options) (*Result, error) {
 type commandRunner func(context.Context, string, string, string, []string, int64) Invocation
 
 func capture(ctx context.Context, o *Options, runner commandRunner) (*Result, error) {
+	return captureInInputEnvironment(ctx, o, runner, nil)
+}
+
+func captureInInputEnvironment(ctx context.Context, o *Options, runner commandRunner, environment *inputEnvironment) (*Result, error) {
 	if ctx == nil || o == nil {
 		return nil, errors.New("capture requires context and options")
 	}
@@ -107,6 +113,22 @@ func capture(ctx context.Context, o *Options, runner commandRunner) (*Result, er
 	if err := writeNew(filepath.Join(root, "plan.json"), append(plan, '\n')); err != nil {
 		return finish(err)
 	}
+	preflightContext, cancelPreflight := context.WithTimeout(ctx, o.CommandTimeout)
+	if environment == nil {
+		result.InputPreflight, err = PreflightInputs(preflightContext, o.Directory, o.Workload, o.InputPolicy)
+	} else {
+		result.InputPreflight, err = preflightInputs(preflightContext, o.Directory, o.Workload, o.InputPolicy, *environment)
+	}
+	cancelPreflight()
+	preflightData, encodePreflightErr := json.MarshalIndent(result.InputPreflight, "", "  ")
+	if encodePreflightErr == nil {
+		encodePreflightErr = writeNew(filepath.Join(root, "input-preflight.json"), append(preflightData, '\n'))
+	}
+	if err != nil || encodePreflightErr != nil {
+		return finish(errors.Join(err, encodePreflightErr))
+	}
+	workload := slices.Clone(o.Workload)
+	workload[0] = result.InputPreflight.Inputs[0].Canonical
 	executable := o.Xcrun
 	if executable == "" {
 		executable = "xcrun"
@@ -136,7 +158,7 @@ func capture(ctx context.Context, o *Options, runner commandRunner) (*Result, er
 		args = append(args, "--instrument", instrument)
 	}
 	args = append(args, "--time-limit", strconv.FormatInt(o.TimeLimit.Milliseconds(), 10)+"ms", "--no-prompt", "--output", trace, "--target-stdout", target, "--launch", "--")
-	args = append(args, o.Workload...)
+	args = append(args, workload...)
 	record := run("record", args...)
 	if record.Failure != "" || record.Exit != 0 && record.Exit != 54 {
 		return finish(errors.New("recorder failed outside the qualified 0/54 outcomes; capture retained"))
@@ -162,7 +184,7 @@ func capture(ctx context.Context, o *Options, runner commandRunner) (*Result, er
 	if err != nil {
 		return finish(err)
 	}
-	if !workloadMarkers(output, o.Started, o.Completed) {
+	if !workloadInputMarkers(output, o.Started, o.InputPolicy.Opened, o.Completed) {
 		return finish(errors.New("missing, duplicated or unordered workload start/completion markers"))
 	}
 	if invocation := run("toc", "xctrace", "export", "--input", trace, "--toc"); invocation.Exit != 0 || invocation.Failure != "" {
@@ -208,6 +230,9 @@ func capture(ctx context.Context, o *Options, runner commandRunner) (*Result, er
 }
 
 func validOptions(o *Options) error {
+	if !o.InputPolicy.valid() || o.InputPolicy.Opened == o.Started || o.InputPolicy.Opened == o.Completed {
+		return errors.New("explicit audited-complete input inventory and distinct post-input-open progress marker are required")
+	}
 	if o.Output == "" || len(o.Workload) == 0 || o.Workload[0] == "" || len(o.Instruments) == 0 || len(o.Schemas) == 0 || len(o.Schemas) > 32 || o.TimeLimit < time.Millisecond || o.CommandTimeout <= o.TimeLimit || o.CommandTimeout > 24*time.Hour || o.MaxArtifactBytes < 1 || o.MaxArtifactBytes > 64<<20 || o.MaxTraceBytes < 1 || o.MaxTraceBytes > 8<<30 {
 		return errors.New("capture needs a new output path, workload, instruments, required schemas, positive byte limits and timeout longer than time-limit")
 	}

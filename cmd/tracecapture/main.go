@@ -33,6 +33,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var o traceevidence.Options
 	var selected instruments
 	var schemaFile string
+	var inputFile string
 	flags := flag.NewFlagSet("tracecapture", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.StringVar(&o.Output, "out", "", "NEW retained evidence directory (never overwritten or automatically removed)")
@@ -40,6 +41,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags.StringVar(&o.Directory, "dir", "", "working directory for the recorder and workload")
 	flags.Var(&selected, "instrument", "instrument display name; repeat for every instrument")
 	flags.StringVar(&schemaFile, "schemas", "", "JSON array of required schema names and column mnemonics from the selected Instruments version")
+	flags.StringVar(&inputFile, "inputs", "", "required audited-complete input inventory JSON; no staging or profiler-child permission guarantee")
 	flags.StringVar(&o.Started, "started", "", "exact target-output line marking workload start")
 	flags.StringVar(&o.Completed, "completed", "", "exact target-output line attesting successful workload completion")
 	flags.DurationVar(&o.TimeLimit, "time-limit", 30*time.Second, "recorder time limit")
@@ -53,6 +55,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	o.Instruments, o.Workload = selected, flags.Args()
+	inputData, err := readSchemaFile(inputFile)
+	if err == nil {
+		o.InputPolicy, err = decodeInputPolicy(inputData)
+	}
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "required input inventory:", err)
+		return 2
+	}
 	data, err := readSchemaFile(schemaFile)
 	if err == nil {
 		o.Schemas, err = decodeSchemas(data)

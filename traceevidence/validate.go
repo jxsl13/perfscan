@@ -196,6 +196,10 @@ func workloadMarkers(data []byte, started, completed string) bool {
 	return start >= 0 && finish > start
 }
 
+func workloadInputMarkers(data []byte, started, opened, completed string) bool {
+	return workloadMarkers(data, started, opened) && workloadMarkers(data, opened, completed)
+}
+
 type xmlNode struct {
 	name     string
 	attrs    map[string]string
@@ -279,11 +283,6 @@ func children(node *xmlNode, name string) []*xmlNode {
 		}
 	}
 	return result
-}
-
-func validateTOC(data []byte, schemas []Schema) error {
-	_, err := tablePaths(data, schemas)
-	return err
 }
 
 func tablePaths(data []byte, schemas []Schema) (map[string]string, error) {

@@ -85,16 +85,16 @@ func fakeXctrace(args []string) int {
 				fakeWrite(filepath.Join(trace, "large"), strings.Repeat("x", 8192))
 			}
 		}
-		markers := "START\nDONE\n"
+		markers := "START\nOPENED\nDONE\n"
 		switch mode {
 		case "missing-start":
-			markers = "DONE\n"
+			markers = "OPENED\nDONE\n"
 		case "missing-completion":
-			markers = "START\n"
+			markers = "START\nOPENED\n"
 		case "reverse-markers":
-			markers = "DONE\nSTART\n"
+			markers = "DONE\nOPENED\nSTART\n"
 		case "duplicate-start":
-			markers = "START\nSTART\nDONE\n"
+			markers = "START\nSTART\nOPENED\nDONE\n"
 		case "substring-markers":
 			markers = "prefix START\nprefix DONE\n"
 		case "large-target":
@@ -187,7 +187,7 @@ func fakeXctrace(args []string) int {
 			fakeWrite(filepath.Join(trace, "mode"), "changed")
 		}
 		if mode == "mutate-target" {
-			fakeWrite(filepath.Join(filepath.Dir(trace), "target.txt"), "START\nDONE\nchanged")
+			fakeWrite(filepath.Join(filepath.Dir(trace), "target.txt"), "START\nOPENED\nDONE\nchanged")
 		}
 		var escaped strings.Builder
 		if err := xml.EscapeText(&escaped, []byte(fakeArg(args, "--xpath"))); err != nil {
@@ -249,7 +249,16 @@ func syntheticOptions(t *testing.T, mode string) *Options {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Options{Xcrun: executable, Output: filepath.Join(t.TempDir(), "evidence"), Workload: []string{"synthetic-workload", mode}, Instruments: []string{"Metal"}, Schemas: []Schema{{Name: "gpu-counter", Columns: []string{"time", "value"}}}, Started: "START", Completed: "DONE", TimeLimit: time.Millisecond, CommandTimeout: 5 * time.Second, MaxArtifactBytes: 4096, MaxTraceBytes: 4096}
+	return &Options{Xcrun: executable, Directory: t.TempDir(), Output: filepath.Join(t.TempDir(), "evidence"), Workload: []string{executable, mode}, Instruments: []string{"Metal"}, Schemas: []Schema{{Name: "gpu-counter", Columns: []string{"time", "value"}}}, Started: "START", Completed: "DONE", TimeLimit: time.Millisecond, CommandTimeout: 5 * time.Second, MaxArtifactBytes: 4096, MaxTraceBytes: 4096, InputPolicy: &InputPolicy{InventoryComplete: true, Inputs: []Input{}, MaxInputBytes: 64 << 20, Opened: "OPENED"}}
+}
+
+func syntheticCapture(ctx context.Context, o *Options) (*Result, error) {
+	// Only path/mount classification is synthetic. All existing subprocess
+	// execution, hashes, stream/status retention and assertions remain real.
+	env := inputEnvironment{platform: "darwin", home: filepath.Join(o.Directory, "synthetic-home"), mount: func(string) (MountObservation, error) {
+		return MountObservation{FileSystem: "synthetic-local", MountPoint: "/", Local: true}, nil
+	}, executable: func(os.FileInfo) bool { return true }}
+	return captureInInputEnvironment(ctx, o, nil, &env)
 }
 
 func TestCaptureSyntheticAcceptance(t *testing.T) {
@@ -258,7 +267,7 @@ func TestCaptureSyntheticAcceptance(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			o := syntheticOptions(t, mode)
-			result, err := Capture(context.Background(), o)
+			result, err := syntheticCapture(context.Background(), o)
 			if err != nil || result == nil || !result.Accepted || result.TimeLimited != strings.HasPrefix(mode, "54") || len(result.TraceSHA256) != 64 || result.TableRows["gpu-counter"] != 2 {
 				t.Fatalf("result=%+v err=%v", result, err)
 			}
@@ -291,7 +300,7 @@ func TestCaptureSyntheticRejections(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			o := syntheticOptions(t, mode)
-			result, err := Capture(context.Background(), o)
+			result, err := syntheticCapture(context.Background(), o)
 			if err == nil || result == nil || result.Accepted || result.Reason == "" {
 				t.Fatalf("result=%+v err=%v", result, err)
 			}
@@ -312,7 +321,7 @@ func TestCapturePreservesExistingDirectory(t *testing.T) {
 	}
 	sentinel := filepath.Join(o.Output, "existing")
 	fakeWrite(sentinel, "keep")
-	if result, err := Capture(context.Background(), o); err == nil || result != nil {
+	if result, err := syntheticCapture(context.Background(), o); err == nil || result != nil {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	data, err := os.ReadFile(sentinel)
@@ -333,7 +342,7 @@ func TestCaptureRequiresObservedVersion(t *testing.T) {
 			o := syntheticOptions(t, "0")
 			o.Directory = t.TempDir()
 			fakeWrite(filepath.Join(o.Directory, "synthetic-version-mode"), mode)
-			result, err := Capture(context.Background(), o)
+			result, err := syntheticCapture(context.Background(), o)
 			if err == nil || result == nil || result.Accepted {
 				t.Fatalf("result=%+v err=%v", result, err)
 			}
@@ -355,7 +364,7 @@ func TestCaptureRejectsConflictingNativeTimeoutMarkers(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			o := syntheticOptions(t, mode)
-			result, err := Capture(context.Background(), o)
+			result, err := syntheticCapture(context.Background(), o)
 			if err == nil || result == nil || result.Accepted {
 				t.Fatalf("result=%+v err=%v", result, err)
 			}
@@ -372,7 +381,7 @@ func TestCaptureRejectsConflictingNativeTimeoutMarkers(t *testing.T) {
 func TestCaptureRejectsResultPersistenceConflict(t *testing.T) {
 	t.Parallel()
 	o := syntheticOptions(t, "preexisting-result")
-	result, err := Capture(context.Background(), o)
+	result, err := syntheticCapture(context.Background(), o)
 	if err == nil || result == nil || result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
