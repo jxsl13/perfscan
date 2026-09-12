@@ -35,6 +35,14 @@ type BinaryBuild struct {
 	BinarySHA256      string            `json:"binarySHA256"`
 	SourceSHA256      map[string]string `json:"sourceSHA256"`
 	Data              []byte            `json:"-"`
+	// PortableMaterialSHA256 uses observed package/file identities instead of
+	// checkout locations. It is populated only by the additive portable API;
+	// existing PS6130 artifacts and their strict serialized schema are unchanged.
+	PortableMaterialSHA256 string `json:"-"`
+	// ControlledGoFileSHA256 records the exact selected compiler Go/test inputs.
+	// It supports an additive typed-model join without changing PS6130 schema.
+	ControlledGoFileSHA256 map[string]string   `json:"-"`
+	ControlledPackageFiles map[string][]string `json:"-"`
 }
 
 // CollectBinary uses the same exact package/module/toolchain selection as
@@ -42,6 +50,20 @@ type BinaryBuild struct {
 // bounded mode rejects workspaces, replacements, overlays, cgo and custom
 // compiler/linker flags; it never executes a build command from an artifact.
 func CollectBinary(ctx context.Context, request *PackageRequest, requiredSDKPackages ...string) (*BinaryBuild, error) {
+	return collectBinary(ctx, request, true, requiredSDKPackages...)
+}
+
+// CollectPortableBinary exposes the same controlled material/compiler build
+// without the Mach-O ARM64 scope used by PS6130. It retains every other gate:
+// CGO_ENABLED=0, no workspace/replacements/overlays, fixed compiler flags and
+// pre/post input/tool hashes. Optional SDK identities remain mandatory when
+// supplied. Cross-target binaries may be collected but must not be executed
+// as host measurements by a campaign runner.
+func CollectPortableBinary(ctx context.Context, request *PackageRequest, requiredSDKPackages ...string) (*BinaryBuild, error) {
+	return collectBinary(ctx, request, false, requiredSDKPackages...)
+}
+
+func collectBinary(ctx context.Context, request *PackageRequest, machOARM64 bool, requiredSDKPackages ...string) (*BinaryBuild, error) {
 	if request == nil || request.Pattern == "" || strings.HasPrefix(request.Pattern, "-") {
 		return nil, errors.New("missing exact package pattern")
 	}
@@ -82,8 +104,15 @@ func CollectBinary(ctx context.Context, request *PackageRequest, requiredSDKPack
 	if err := json.Unmarshal(out, &selected); err != nil {
 		return nil, err
 	}
-	if workspace := selected["GOWORK"]; selected["GOOS"] != "darwin" || selected["GOARCH"] != "arm64" || selected["CGO_ENABLED"] != "0" || (workspace != "" && workspace != "off") {
-		return nil, errors.New("binary evidence requires Darwin ARM64, CGO_ENABLED=0 and no workspace")
+	if workspace := selected["GOWORK"]; selected["GOOS"] == "" || selected["GOARCH"] == "" || selected["CGO_ENABLED"] != "0" || (workspace != "" && workspace != "off") {
+		return nil, errors.New("binary evidence requires an explicit target, CGO_ENABLED=0 and no workspace")
+	}
+	if machOARM64 && (selected["GOOS"] != "darwin" || selected["GOARCH"] != "arm64") {
+		return nil, errors.New("Mach-O evidence requires Darwin ARM64")
+	}
+	architecture, err := targetArchitecture(ctx, resolved, request.Dir, environment, selected["GOARCH"])
+	if err != nil {
+		return nil, err
 	}
 	flags := strings.Fields(selected["GOFLAGS"])
 	for _, flag := range flags {
@@ -134,6 +163,24 @@ func CollectBinary(ctx context.Context, request *PackageRequest, requiredSDKPack
 	if err != nil {
 		return nil, err
 	}
+	portableMaterial := ""
+	var controlledGoFiles map[string]string
+	var controlledPackages map[string][]string
+	if !machOARM64 {
+		digest, err := binaryPortableMaterialDigest(out)
+		if err != nil {
+			return nil, err
+		}
+		portableMaterial = hex.EncodeToString(digest[:])
+		controlledGoFiles, err = binaryControlledGoFiles(out)
+		if err != nil {
+			return nil, err
+		}
+		controlledPackages, err = binaryControlledPackageFiles(out)
+		if err != nil {
+			return nil, err
+		}
+	}
 	sources := make(map[string]string, len(target.GoFiles))
 	for _, name := range target.GoFiles {
 		data, err := os.ReadFile(filepath.Join(target.Dir, name))
@@ -170,12 +217,18 @@ func CollectBinary(ctx context.Context, request *PackageRequest, requiredSDKPack
 	if err != nil || after != material {
 		return nil, errors.New("binary build materials changed during collection")
 	}
+	if !machOARM64 {
+		digest, err := binaryPortableMaterialDigest(out)
+		if err != nil || hex.EncodeToString(digest[:]) != portableMaterial {
+			return nil, errors.New("portable binary inputs changed during collection")
+		}
+	}
 	currentToolchain, err := binaryFileDigest(tools)
 	if err != nil || currentToolchain != toolchain {
 		return nil, errors.New("compiler tools changed during collection")
 	}
 	digest := sha256.Sum256(data)
-	return &BinaryBuild{Package: target.ImportPath, GoVersion: selected["GOVERSION"], GOOS: selected["GOOS"], GOARCH: selected["GOARCH"], GOFLAGS: selected["GOFLAGS"], GOEXPERIMENT: selected["GOEXPERIMENT"], ArchitectureLevel: selected["GOARM64"], CGOEnabled: selected["CGO_ENABLED"], MaterialSHA256: hex.EncodeToString(material[:]), ToolchainSHA256: hex.EncodeToString(toolchain[:]), BinarySHA256: hex.EncodeToString(digest[:]), SourceSHA256: sources, Data: data}, nil
+	return &BinaryBuild{Package: target.ImportPath, GoVersion: selected["GOVERSION"], GOOS: selected["GOOS"], GOARCH: selected["GOARCH"], GOFLAGS: selected["GOFLAGS"], GOEXPERIMENT: selected["GOEXPERIMENT"], ArchitectureLevel: architecture, CGOEnabled: selected["CGO_ENABLED"], MaterialSHA256: hex.EncodeToString(material[:]), ToolchainSHA256: hex.EncodeToString(toolchain[:]), BinarySHA256: hex.EncodeToString(digest[:]), SourceSHA256: sources, Data: data, PortableMaterialSHA256: portableMaterial, ControlledGoFileSHA256: controlledGoFiles, ControlledPackageFiles: controlledPackages}, nil
 }
 
 type listedBinaryPackage struct {

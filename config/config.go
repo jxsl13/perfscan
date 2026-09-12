@@ -209,7 +209,8 @@ type Config struct {
 	ClosureEnvironmentGrowthArtifacts []string `json:"closureEnvironmentGrowthArtifacts,omitempty" yaml:"closureEnvironmentGrowthArtifacts"`
 	// CoefficientAddressArtifacts are controlled-build artifacts replayed by
 	// PS6130; unsigned source/binary hashes alone are never accepted as proof.
-	CoefficientAddressArtifacts []string `json:"coefficientAddressArtifacts,omitempty" yaml:"coefficientAddressArtifacts"`
+	CoefficientAddressArtifacts []string                    `json:"coefficientAddressArtifacts,omitempty" yaml:"coefficientAddressArtifacts"`
+	DispatchCrossoverContracts  []DispatchCrossoverContract `json:"dispatchCrossoverContracts,omitempty" yaml:"dispatchCrossoverContracts"`
 
 	// RecursiveMetadataIgnoreContracts bind a root-anchored ignore builder and
 	// matcher to a reviewed directory name whose metadata is intended to be
@@ -2350,6 +2351,7 @@ type Sets struct {
 	ScopedBackendRoutingContracts     []ScopedBackendRoutingContract
 	ClosureEnvironmentGrowthArtifacts []string
 	CoefficientAddressArtifacts       []string
+	DispatchCrossoverContracts        []DispatchCrossoverContract
 	RecursiveMetadataIgnoreContracts  []RecursiveMetadataIgnoreContract
 	InputViewFuncs                    map[string]bool
 	OutputViewFuncs                   map[string]bool
@@ -2425,6 +2427,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		ScopedBackendRoutingContracts:     cloneScopedBackendRoutingContracts(c.ScopedBackendRoutingContracts),
 		ClosureEnvironmentGrowthArtifacts: slices.Clone(c.ClosureEnvironmentGrowthArtifacts),
 		CoefficientAddressArtifacts:       slices.Clone(c.CoefficientAddressArtifacts),
+		DispatchCrossoverContracts:        cloneDispatchCrossoverContracts(c.DispatchCrossoverContracts),
 		RecursiveMetadataIgnoreContracts:  slices.Clone(c.RecursiveMetadataIgnoreContracts),
 		InputViewFuncs:                    toSet(c.InputViewFuncs),
 		OutputViewFuncs:                   toSet(c.OutputViewFuncs),

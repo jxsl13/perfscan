@@ -637,6 +637,17 @@ func decode(data []byte, destination any) error {
 	return decoder.Decode(destination)
 }
 
+// Decode retains the campaign's strict schema rules for related evidence
+// containers: duplicate/null/trailing, unknown/missing and typed numeric
+// overflow values are rejected. destination must be a nonnil pointer.
+func Decode(data []byte, destination any) error {
+	value := reflect.ValueOf(destination)
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		return errors.New("strict evidence decoding requires a nonnil pointer")
+	}
+	return decode(data, destination)
+}
+
 func requiredFields(data []byte, kind reflect.Type) error {
 	switch kind.Kind() {
 	case reflect.Struct:
@@ -647,6 +658,9 @@ func requiredFields(data []byte, kind reflect.Type) error {
 		for index := 0; index < kind.NumField(); index++ {
 			field := kind.Field(index)
 			name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+			if name == "-" {
+				continue
+			}
 			if name == "" {
 				name = field.Name
 			}
@@ -670,6 +684,53 @@ func requiredFields(data []byte, kind reflect.Type) error {
 		}
 	}
 	return nil
+}
+
+// RawInvocation contains retained observed process status and stream hashes,
+// not a caller-supplied successful-execution claim.
+type RawInvocation struct {
+	Exit         int    `json:"exit"`
+	StdoutSHA256 string `json:"stdoutSHA256"`
+	StderrSHA256 string `json:"stderrSHA256"`
+}
+
+// Capture invokes one fresh process and retains all streams/status even when
+// the process fails. Related source-bound campaigns reuse this exact raw path.
+// Artifact names are basenames; execution remains in the source package dir.
+func Capture(dir, name, root string, env []string, binary string, args ...string) (RawInvocation, error) {
+	if name == "" || filepath.Base(name) != name || name == "." || name == ".." {
+		return RawInvocation{}, errors.New("invalid raw invocation artifact name")
+	}
+	out, stderr, exit := command(root, env, binary, args...)
+	record := RawInvocation{exit, hash(out), hash(stderr)}
+	return record, artifact(dir, name, out, stderr, exit)
+}
+
+// ReadInvocation independently checks retained streams and status against
+// their manifest record. Failed invocations are never accepted as evidence.
+func ReadInvocation(dir, name string, record RawInvocation) ([]byte, error) {
+	if name == "" || filepath.Base(name) != name || name == "." || name == ".." {
+		return nil, errors.New("invalid raw invocation artifact name")
+	}
+	out, err := os.ReadFile(filepath.Join(dir, name+".stdout"))
+	if err != nil {
+		return nil, err
+	}
+	stderr, err := os.ReadFile(filepath.Join(dir, name+".stderr"))
+	if err != nil {
+		return nil, err
+	}
+	exit, err := os.ReadFile(filepath.Join(dir, name+".exit"))
+	if err != nil {
+		return nil, err
+	}
+	if hash(out) != record.StdoutSHA256 || hash(stderr) != record.StderrSHA256 || string(exit) != strconv.Itoa(record.Exit)+"\n" {
+		return nil, errors.New("raw invocation stream/status hash mismatch")
+	}
+	if record.Exit != 0 {
+		return nil, errors.New("raw invocation failed; retained evidence is rejected")
+	}
+	return out, nil
 }
 
 func readJSON(path string, destination any) error {

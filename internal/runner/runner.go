@@ -459,6 +459,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"sharedFanOutContracts":                     validSharedFanOutContracts(cfg.SharedFanOutContracts),
 		"nativeGenerationDispatchContracts":         config.UsableNativeGenerationDispatchContractCount(cfg.NativeGenerationDispatchContracts),
 		"coefficientAddressArtifacts":               len(cfg.CoefficientAddressArtifacts),
+		"dispatchCrossoverContracts":                config.UsableDispatchCrossoverContractCount(cfg.DispatchCrossoverContracts),
 	}
 	missing := make([]string, 0, len(c.Vocab))
 	for _, v := range c.Vocab {
