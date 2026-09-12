@@ -258,3 +258,11 @@ Rules without a pair, and why:
   evidence. A portable toy cannot establish target relocations, register
   pressure or complete-operation profitability. No layout variant or measured
   gain is claimed; benchmark the actual leaf and consumers with controls.
+- **PS6131** (stale measured dispatch crossover advisory): an unrelated portable
+  microbenchmark cannot establish a production serial/parallel threshold. The
+  source-bound recorder separates preallocated policy, forced complete-operation
+  diagnostics and the original unmodified benchmark; it requires below/above
+  shapes, allocations and fresh-process controls. Its owner-shaped regression
+  validates tooling integrity, not GoAI native performance or a numeric cutoff.
+  See `docs/development/dispatch-crossover-evidence.md`; no autofix or speedup
+  is claimed.

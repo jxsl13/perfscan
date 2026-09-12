@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"testing"
+	"time"
 )
 
 // Allocation contains integer totals and the quotient/remainder identities
@@ -48,6 +49,37 @@ func Run(n int, benchmark func(*testing.B)) (Allocation, error) {
 	if n < 2 || benchmark == nil || benchtime == nil || benchtime.Value.String() != fmt.Sprintf("%dx", n) {
 		return Allocation{}, fmt.Errorf("diagnostic requires fixed N >= 2 and -test.benchtime=%dx", n)
 	}
+	observation, err := Measure(n, benchmark)
+	return observation.Allocation, err
+}
+
+// Observation retains elapsed time separately from the exact allocation
+// counters. Per-operation latency is the rational ElapsedNanos/Allocation.N.
+type Observation struct {
+	Allocation   Allocation `json:"allocation"`
+	ElapsedNanos int64      `json:"elapsedNanos"`
+}
+
+// Measure applies Run's leaf/failure/cleanup integrity safeguards while
+// retaining actual elapsed time. n>=2 selects fixed work; n=0 permits a
+// positive duration already selected by -test.benchtime and retains actual N.
+// Adaptive samples with different N can induce different GC pressure. They
+// must not be presented as equal-work paired total deltas; rerun allocation-
+// heavy complete operations at fixed work before a crossover decision.
+// Run's unsupported raw cleanup-only initial-probe Goexit boundary also applies.
+func Measure(n int, benchmark func(*testing.B)) (Observation, error) {
+	benchtime := flag.Lookup("test.benchtime")
+	if benchmark == nil || benchtime == nil {
+		return Observation{}, errors.New("missing diagnostic benchmark or testing benchtime")
+	}
+	if n == 0 {
+		duration, err := time.ParseDuration(benchtime.Value.String())
+		if err != nil || duration <= 0 {
+			return Observation{}, errors.New("adaptive diagnostic requires positive duration benchtime")
+		}
+	} else if n < 2 || benchtime.Value.String() != fmt.Sprintf("%dx", n) {
+		return Observation{}, fmt.Errorf("diagnostic requires fixed N >= 2 and -test.benchtime=%dx", n)
+	}
 	failed, exited := false, false
 	var measured *testing.B
 	result := testing.Benchmark(func(b *testing.B) {
@@ -62,12 +94,19 @@ func Run(n int, benchmark func(*testing.B)) (Allocation, error) {
 	})
 	// runN executes cleanup and race checks after our callback's defer.
 	if failed || exited || measured == nil || measured.Failed() || measured.Skipped() {
-		return Allocation{}, errors.New("diagnostic benchmark failed or exited before returning; retain invocation output and reject its evidence")
+		return Observation{}, errors.New("diagnostic benchmark failed or exited before returning; retain invocation output and reject its evidence")
 	}
-	if result.N != n {
-		return Allocation{}, fmt.Errorf("diagnostic iteration count mismatch: got %d, want %d", result.N, n)
+	if result.N < 2 || n != 0 && result.N != n {
+		return Observation{}, fmt.Errorf("diagnostic iteration count mismatch or aggregate: got %d, fixed request %d", result.N, n)
 	}
-	return FromResult(result)
+	allocation, err := FromResult(result)
+	if err != nil {
+		return Observation{}, err
+	}
+	if result.T <= 0 {
+		return Observation{}, errors.New("diagnostic has no positive measured elapsed time")
+	}
+	return Observation{allocation, int64(result.T)}, nil
 }
 
 // Delta is candidate minus baseline for one matched pair. It is not a
