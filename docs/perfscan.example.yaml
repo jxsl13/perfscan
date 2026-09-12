@@ -23,6 +23,50 @@ _comment: Replace every placeholder below with this repository's vocabulary.
 # conservative 64-byte default; Apple M-series CPUs use 128-byte cache lines.
 cacheLineBytes: 128
 
+# PS6129 exact package-level row-major store GEMMs. The reviewed API must be
+# (A,B,C []float32 or []float64,start,end,depth,columns int), with read-only
+# non-retained inputs and C[start:end,:]=A[start:end,:]*B store semantics.
+# Vocabulary supplies API semantics only; explicit complete suffix clears,
+# fresh unaliased storage, transpose indexing and full dimensions are proved
+# from source. Opaque mask helpers and pooled scratch are not certified.
+# An advisory is not permission to skip 0*NaN/Inf or leave scratch tails stale.
+denseRowGEMMFuncs:
+  - example.com/tensor.gemmRows
+
+# PS6129 pooled-scratch causal path: bind one exact owner and its UNIQUE typed
+# local/parameter names. Semantic review must cover every probability-helper
+# dispatch path and exclusive leases from allocation until deferred release.
+# These booleans supply opaque ownership/helper facts; source still proves
+# region extents/disjoint partitions, row views, final clears, transpose and
+# full GEMM argument flow. L=geometry.offset+queryOffset+rows when causal;
+# a finding is conditional on L<sequence and never supplies an autofix.
+causalZeroGEMMContracts:
+  - ownerSite: example.com/tensor.backwardBand
+    gemmFunction: example.com/tensor.gemmRows
+    boundsMethod: example.com/tensor.Geometry.bounds
+    probabilityHelper: example.com/tensor.softmaxBand
+    scratchAllocator: example.com/tensor.getRaw
+    scratchRelease: example.com/tensor.putRaw
+    nonRetainingBufferHelpers: [example.com/tensor.gemmRowsCols]
+    rowsBinding: rows
+    sequenceBinding: sequence
+    queryOffsetBinding: queryOffset
+    geometryBinding: geometry
+    sequenceField: querySequence
+    causalField: causal
+    offsetField: offset
+    matrices:
+      - sourceBinding: probability
+        transposeBinding: probabilityTranspose
+        probability: true
+      - sourceBinding: scoreGradient
+        transposeBinding: scoreGradientTranspose
+    boundsSemanticsReviewed: true
+    selfAttentionGeometryReviewed: true
+    scratchOwnershipReviewed: true
+    helperSemanticsReviewed: true
+    probabilityAllDispatchPathsClearReviewed: true
+
 # PS6085 is a fail-closed advisory for a profiled function that repeatedly adds
 # one of exactly two floating-point offsets to every lane of an
 # immutable package-level lookup row before multiplying it. Bind the exact

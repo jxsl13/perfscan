@@ -190,3 +190,9 @@ Rules without a pair, and why:
   AMX or establish M1 versus M2/M3 descriptor behavior. Validate K=1..3, K=4,
   and K=5 on each supported generation and benchmark only the retained valid
   native path; no speedup is claimed.
+- **PS6129** (dense GEMM zero suffix advisory): a toy arithmetic benchmark
+  cannot qualify nonfinite fallback, target SIMD dispatch, pooled scratch
+  clearing and the complete backward/GPT operation. The owner's runtime
+  prototype was withdrawn after fixed workload gates failed. Source-derived
+  operation savings are not speedups; qualify a valid production candidate
+  against the frozen backend and measure complete-workload allocations too.
