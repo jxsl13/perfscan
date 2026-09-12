@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,11 +36,18 @@ func (s *BuildSelection) Environment(ctx context.Context) ([]string, string, err
 	}
 	resolved, err := exec.LookPath(binary)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("resolve selected SDK executable %q: %w", binary, err)
 	}
-	resolved, err = filepath.EvalSymlinks(resolved)
+	selected, err := os.Stat(resolved)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("stat selected SDK executable: %w", err)
+	}
+	if !selected.Mode().IsRegular() {
+		return nil, "", errors.New("selected SDK executable must be an available regular file")
+	}
+	resolved, err = canonicalSDKPath(resolved)
+	if err != nil {
+		return nil, "", fmt.Errorf("canonicalize selected SDK executable %q: %w", binary, err)
 	}
 	resolved, err = filepath.Abs(resolved)
 	if err != nil {
@@ -53,6 +61,10 @@ func (s *BuildSelection) Environment(ctx context.Context) ([]string, string, err
 		return nil, "", errors.New("select an available SDK/bin/go executable, not a wrapper or artifact-supplied command")
 	}
 	sdk := filepath.Dir(filepath.Dir(resolved))
+	physical, err := os.Stat(filepath.Join(sdk, "bin", "go"+suffix))
+	if err != nil || !physical.Mode().IsRegular() || !os.SameFile(selected, physical) {
+		return nil, "", errors.New("canonical SDK executable identity differs from selected file")
+	}
 	env := make([]string, 0, len(os.Environ())+12)
 	for _, value := range os.Environ() {
 		key, _, _ := strings.Cut(value, "=")
@@ -84,9 +96,13 @@ func (s *BuildSelection) Environment(ctx context.Context) ([]string, string, err
 	if err := json.Unmarshal(out, &observed); err != nil {
 		return nil, "", err
 	}
-	root, err := filepath.EvalSymlinks(observed["GOROOT"])
-	if err != nil || root != sdk || observed["GOVERSION"] == "" {
+	if !sameObservedSDK(observed["GOROOT"], sdk, observed["GOVERSION"]) {
 		return nil, "", errors.New("typed loading selected a different SDK")
 	}
 	return env, resolved, nil
+}
+
+func sameObservedSDK(root, selected, version string) bool {
+	physical, err := canonicalSDKPath(root)
+	return err == nil && physical == selected && version != ""
 }

@@ -65,10 +65,14 @@ func binaryPortableMaterialDigest(output []byte) ([32]byte, error) {
 				path = filepath.Join(pkg.Dir, path)
 			} else {
 				relative, err := filepath.Rel(pkg.Dir, path)
-				if err != nil {
+				// Windows may put the observed go-test action cache on a
+				// different volume from the package. That is an external
+				// location, still subject to the generated-main checks below.
+				// Other Rel failures must not qualify malformed package roots.
+				if err != nil && (!filepath.IsAbs(pkg.Dir) || strings.EqualFold(filepath.VolumeName(pkg.Dir), filepath.VolumeName(path))) {
 					return [32]byte{}, err
 				}
-				if filepath.IsLocal(relative) {
+				if err == nil && filepath.IsLocal(relative) {
 					identity = relative
 				} else {
 					// The selected go command emits a synthetic test main in its
