@@ -39,13 +39,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags.StringVar(&o.Output, "out", "", "NEW retained evidence directory (never overwritten or automatically removed)")
 	flags.StringVar(&o.Xcrun, "xcrun", "xcrun", "configured xcrun executable")
 	flags.StringVar(&o.Directory, "dir", "", "working directory for the recorder and workload")
-	flags.Var(&selected, "instrument", "instrument display name; repeat for every instrument")
+	flags.Var(&selected, "instrument", "native profile selection: currently exactly one 'Time Profiler' template")
 	flags.StringVar(&schemaFile, "schemas", "", "JSON array of required schema names and column mnemonics from the selected Instruments version")
 	flags.StringVar(&inputFile, "inputs", "", "required audited-complete input inventory JSON; no staging or profiler-child permission guarantee")
 	flags.StringVar(&o.Started, "started", "", "exact target-output line marking workload start")
 	flags.StringVar(&o.Completed, "completed", "", "exact target-output line attesting successful workload completion")
 	flags.DurationVar(&o.TimeLimit, "time-limit", 30*time.Second, "recorder time limit")
 	flags.DurationVar(&o.CommandTimeout, "command-timeout", 2*time.Minute, "deadline for each direct recorder/export command, longer than time-limit")
+	flags.StringVar(&o.ProcessScope, "process-scope", "", "required direct-executable acknowledgement; no descendant/service containment")
+	flags.DurationVar(&o.ReadinessTimeout, "readiness-timeout", 20*time.Second, "maximum wait for recording readiness before owned target resumes")
+	flags.DurationVar(&o.CleanupTimeout, "cleanup-timeout", 5*time.Second, "independent cleanup deadline per owned child")
 	flags.Int64Var(&o.MaxArtifactBytes, "artifact-bytes", 16<<20, "per stdout/stderr/export/target size limit, at most 64 MiB")
 	flags.Int64Var(&o.MaxTraceBytes, "trace-bytes", 1<<30, "post-record trace bundle size limit, at most 8 GiB")
 	if err := flags.Parse(args); err != nil {
@@ -71,7 +74,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "required schemas:", err)
 		return 2
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := signal.NotifyContext(context.Background(), captureSignals()...)
 	defer cancel()
 	result, err := traceevidence.Capture(ctx, &o)
 	if result != nil {
