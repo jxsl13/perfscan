@@ -1064,6 +1064,27 @@ crossStepAcceleratorResidencyContracts:
 #   kernelRegisterFuncs:    [add]
 #   inPlaceFusionContracts:
 #     - {name: swiglu-eager, producer: example.com/tensor.Linear.Forward, activation: example.com/backend.Executor.SiLU, activationInputArg: 0, binary: example.com/backend.Executor.Mul, binaryActivationArg: 0, binaryOtherArg: 1, capabilityInterface: example.com/backend.SwiGLUInPlaceFuser, capabilityMethod: FuseSwiGLUInPlace, nonRecordingGuard: example.com/backend.Executor.IsEager, producerReturnsFreshOwned: true, activationReturnsFreshOwned: true, binaryReturnsFreshOwned: true, capabilityOverwritesFirstArg: true, capabilityPreservesSecondArg: true, capabilityRejectsUnsupported: true, capabilityFailureUnmodified: true, capabilityMatchesComposition: true, guardProvesNonRecording: true}
+#   activeBoundFallbackContracts:
+#     # Reviewed semantic facts, not inferred from these API names. The
+#     # finding is conditional on positive active rows, missing capability,
+#     # and retained capacity exceeding rows*width; it does not rewrite guards.
+#     - wrapperMethod: example.com/model.Decoder.binElem
+#       providerType: example.com/model.recorder
+#       capabilityType: example.com/model.binaryNRecorder
+#       boundedMethod: BinaryN
+#       capacityMethod: Binary
+#       providerArgument: 0
+#       bufferArguments: [1, 2, 3]
+#       operationArgument: 4
+#       rowsArgument: 5
+#       widthArgument: 6
+#       boundedActivePrefixReviewed: true
+#       fallbackCapacityWideReviewed: true
+#       sameOperationBufferRolesReviewed: true
+#       activeRowsMayBeBelowCapacityReviewed: true
+#       inactiveTailUnobservedReviewed: true
+#       providerAndBuildPathsReviewed: true
+#       errorsShapeAndSynchronizationReviewed: true
 #   boundedScratchFlowContracts:
 #     - {name: bounded-gelu, allocator: example.com/backend.Device.Alloc, allocatorCapacityArg: 1, producer: example.com/backend.Device.AddBias, producerBufferArg: 1, producerActiveArg: 2, consumer: example.com/backend.Device.GELU, consumerBufferArg: 1, observers: [{function: example.com/backend.Device.Observe, bufferArg: 1, activeArg: 2}], configuredCapacityElements: 3145728, configuredActiveElements: 3072, configuredRepeatCount: 12, allocatorReturnsFreshOwned: true, producerWritesOnlyActivePrefix: true, consumerTraversesFullCapacity: true, observersReadOnlyActivePrefix: true, callsDoNotRetainBuffer: true, callsExecuteSynchronously: true, inactiveTailNotRequired: true, replacement: example.com/backend.Device.BiasGELU, replacementMatchesComposition: true, replacementPreservesActivePrefixBits: true, replacementLeavesInactiveTail: true, replacementPreservesErrorsSideEffects: true, replacementPreservesProviderFallback: true, replacementRejectsUnsupported: true, replacementFailureUnmodified: true}
 #   receiverStagingContracts:

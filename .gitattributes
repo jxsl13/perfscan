@@ -1,4 +1,5 @@
 * text=auto
+checks/testdata/ps6135_owner_bin_elem.go.txt text eol=lf
 *.go text eol=lf
 *.md text eol=lf
 *.yaml text eol=lf

@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: MPL-2.0
+// Exact public GoAI capability and wrapper from parent74a7c5c923b25aa35773bb9e907b76aba04a553a.
+// Unchanged at PR1210 merge ec20269a20e2028ec10aa02cd9d26095e8aa161b.
+// https://github.com/jxsl13/goai/blob/74a7c5c923b25aa35773bb9e907b76aba04a553a/llamagpu/decoder.go
+type binaryNRecorder interface {
+	BinaryN(a, b, o buffer, op, n int) error
+}
+
+func (d *Decoder) binElem(r recorder, a, b, o buffer, op, rows, width int) error {
+	if bn, ok := r.(binaryNRecorder); ok && rows > 0 && width > 0 {
+		return bn.BinaryN(a, b, o, op, rows*width)
+	}
+	return r.Binary(a, b, o, op)
+}
