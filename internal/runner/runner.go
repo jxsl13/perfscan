@@ -27,6 +27,7 @@ import (
 
 	"github.com/jxsl13/perfscan/config"
 	"github.com/jxsl13/perfscan/internal/closureenv"
+	"github.com/jxsl13/perfscan/internal/coefficientcodegen"
 	"github.com/jxsl13/perfscan/lint"
 )
 
@@ -158,6 +159,12 @@ func Run(checks []*lint.Check, opts Options) int {
 		return 2
 	}
 	for _, check := range enabled {
+		if check.ID == "PS6130" {
+			if err := validateCoefficientEvidencePackages(pkgs, cfg.CoefficientAddressArtifacts); err != nil {
+				fmt.Fprintln(opts.Stderr, "perfscan:", err)
+				return 2
+			}
+		}
 		if check.ID == "PS6126" {
 			if err := validateClosureEvidencePackages(pkgs, cfg.ClosureEnvironmentGrowthArtifacts); err != nil {
 				fmt.Fprintln(opts.Stderr, "perfscan:", err)
@@ -303,6 +310,26 @@ func validateClosureEvidencePackages(packages []*packages.Package, encoded []str
 	return nil
 }
 
+func validateCoefficientEvidencePackages(packages []*packages.Package, encoded []string) error {
+	for _, text := range encoded {
+		a, err := coefficientcodegen.Read(strings.NewReader(text))
+		if err != nil {
+			return fmt.Errorf("PS6130 invalid codegen evidence: %w", err)
+		}
+		found := false
+		for _, pkg := range packages {
+			if pkg.Types != nil && pkg.Types.Path() == a.Build.Package {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("PS6130 evidence package %q is outside the loaded scan packages", a.Build.Package)
+		}
+	}
+	return nil
+}
+
 // cachedWd holds the working directory for relPath, which runs once per
 // finding when formatting output — caching avoids a Getwd syscall per
 // finding. Run refreshes it up front (the process may chdir between runs,
@@ -424,6 +451,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"stateExpandedLookupContracts":              validStateExpandedLookupContracts(cfg.StateExpandedLookupContracts),
 		"sharedFanOutContracts":                     validSharedFanOutContracts(cfg.SharedFanOutContracts),
 		"nativeGenerationDispatchContracts":         config.UsableNativeGenerationDispatchContractCount(cfg.NativeGenerationDispatchContracts),
+		"coefficientAddressArtifacts":               len(cfg.CoefficientAddressArtifacts),
 	}
 	missing := make([]string, 0, len(c.Vocab))
 	for _, v := range c.Vocab {
