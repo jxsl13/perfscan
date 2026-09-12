@@ -12,7 +12,7 @@ PS6132 adds the missing constructor candidate. Its pinned fixture contains uncha
 
 PS6106 (`TestPS6106Source`, `TestPS6106Configured`, `testdata/src/ps6106contract`) covers fresh local/private-field storage, an adjacent bounded producer, capacity-wide consumer, and bounded observer on one statically concrete provider. Its configured fixture proves a 1024/16-element ratio and rejects interface dispatch, split instances and unstable extents.
 
-The actual owner `Decoder.binElem` is different: it accepts interface `recorder` and parameter buffers plus explicit `rows,width`, tries asserted `binaryNRecorder.BinaryN(...,rows*width)`, then returns unbounded `r.Binary(...)`. PS6106's current source/contract grammar cannot accept this branch/interface wrapper. Related metadata is not acceptance evidence. The missing explicit-bound fallback scope is reserved PS6135; this audit does not claim it implemented by PS6132.
+The actual owner `Decoder.binElem` is different: it accepts interface `recorder` and parameter buffers plus explicit `rows,width`, tries asserted `binaryNRecorder.BinaryN(...,rows*width)`, then returns unbounded `r.Binary(...)`. PS6106's current source/contract grammar cannot accept this branch/interface wrapper. Related metadata is not acceptance evidence. PS6135 implements the separate explicit-bound fallback source/contract scope; its [coverage audit](issue-891-active-bound-fallback.md) distinguishes typed whole-wrapper replay from reviewed capacity/provider semantics and conditional cost. This is not coverage implemented by PS6132.
 
 ## Offset-inflated strided shape guards
 

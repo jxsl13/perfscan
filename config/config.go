@@ -248,6 +248,10 @@ type Config struct {
 	// semantics from accelerator API names.
 	BoundedScratchFlowContracts []BoundedScratchFlowContract `json:"boundedScratchFlowContracts,omitempty" yaml:"boundedScratchFlowContracts"`
 
+	// ActiveBoundFallbackContracts bind optional explicit-bound interface APIs
+	// and their reviewed capacity-wide fallback semantics for PS6135.
+	ActiveBoundFallbackContracts []ActiveBoundFallbackContract `json:"activeBoundFallbackContracts,omitempty" yaml:"activeBoundFallbackContracts"`
+
 	// ReceiverStagingContracts are explicit, project-owned ownership contracts
 	// for PS6107. They bind one exact pointer-receiver method to an optional
 	// full-overwrite helper, one synchronous non-retaining consumer, a lifecycle
@@ -2344,6 +2348,7 @@ type Sets struct {
 	KernelRegisterFuncs               map[string]bool
 	InPlaceFusionContracts            []InPlaceFusionContract
 	BoundedScratchFlowContracts       []BoundedScratchFlowContract
+	ActiveBoundFallbackContracts      []ActiveBoundFallbackContract
 	ReceiverStagingContracts          []ReceiverStagingContract
 	ReusableOneShotWrapperContracts   []ReusableOneShotWrapperContract
 	ReusableResultLoopContracts       []ReusableResultLoopContract
@@ -2415,6 +2420,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		KernelRegisterFuncs:               toSet(c.KernelRegisterFuncs),
 		InPlaceFusionContracts:            slices.Clone(c.InPlaceFusionContracts),
 		BoundedScratchFlowContracts:       cloneBoundedScratchFlowContracts(c.BoundedScratchFlowContracts),
+		ActiveBoundFallbackContracts:      cloneActiveBoundFallbackContracts(c.ActiveBoundFallbackContracts),
 		ReceiverStagingContracts:          slices.Clone(c.ReceiverStagingContracts),
 		ReusableOneShotWrapperContracts:   cloneReusableOneShotWrapperContracts(c.ReusableOneShotWrapperContracts),
 		ReusableResultLoopContracts:       cloneReusableResultLoopContracts(c.ReusableResultLoopContracts),

@@ -265,3 +265,9 @@ Rules without a pair, and why:
   evidence. A portable toy cannot establish target relocations, register
   pressure or complete-operation profitability. No layout variant or measured
   gain is claimed; benchmark the actual leaf and consumers with controls.
+- **PS6135** (explicit active-bound capacity fallback advisory): exact typed
+  interface flow plus reviewed capacity/prefix API semantics is not a measured
+  runtime work ratio or capability/provider profile. The owner StepNLast16
+  measurements involve complete scratch/backend changes, not isolated binElem
+  fallback support. No PS6135-specific speedup is claimed; preserve every
+  shape/error/overflow/tail/provider path and measure the complete operation.
