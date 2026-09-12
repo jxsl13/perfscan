@@ -447,6 +447,13 @@ func (selection *ps6136Selection) initializationValues(remaining int) bool {
 		return false
 	}
 	counts := make(map[*types.Var]int)
+	type observation struct {
+		context     *ps6125SSAContext
+		instruction ssa.Instruction
+		field       *types.Var
+	}
+	initializers := make(map[*types.Var]observation)
+	var reads []observation
 	pending := []*ps6125SSAContext{selection.context}
 	for len(pending) != 0 {
 		context := pending[len(pending)-1]
@@ -461,6 +468,15 @@ func (selection *ps6136Selection) initializationValues(remaining int) bool {
 				continue
 			}
 			for _, instruction := range block.Instrs {
+				if load, ok := instruction.(*ssa.UnOp); ok && load.Op == token.MUL {
+					path := paths.resolve(load.X)
+					if path.known && len(path.access.fields) == 1 && ps6136AccessOwnerRoot(context, path, selection.ownerType) == selection.owner {
+						field := path.access.fields[0]
+						if field == selection.maximumRows || field == selection.width {
+							reads = append(reads, observation{context, load, field})
+						}
+					}
+				}
 				if store, ok := instruction.(*ssa.Store); ok {
 					path := paths.resolve(store.Addr)
 					if path.known && len(path.access.fields) == 1 && ps6136AccessOwnerRoot(context, path, selection.ownerType) == selection.owner {
@@ -474,6 +490,7 @@ func (selection *ps6136Selection) initializationValues(remaining int) bool {
 								return false
 							}
 							counts[field]++
+							initializers[field] = observation{context, store, field}
 						}
 					}
 				}
@@ -488,7 +505,16 @@ func (selection *ps6136Selection) initializationValues(remaining int) bool {
 			}
 		}
 	}
-	return counts[selection.maximumRows] == 1 && counts[selection.width] == 1
+	if counts[selection.maximumRows] != 1 || counts[selection.width] != 1 {
+		return false
+	}
+	for _, read := range reads {
+		initializer := initializers[read.field]
+		if !ps6136ContextInstructionDominates(initializer.context, initializer.instruction, read.context, read.instruction, 128) {
+			return false
+		}
+	}
+	return true
 }
 
 type ps6136ConstructorProof struct {

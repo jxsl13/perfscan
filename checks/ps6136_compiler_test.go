@@ -230,6 +230,20 @@ func sampleTopKCandidates(*nlp.Sampler,[]int32,[]float32)int{return 0}
 	}
 	if rewrite != nil {
 		files = rewrite(fs, files)
+		// Meaningful injected nodes must have real source positions: a NoPos
+		// call can otherwise fail source census and vacuously pass a negative.
+		for index, file := range files {
+			var source bytes.Buffer
+			if err := format.Node(&source, fs, file); err != nil {
+				return nil, err
+			}
+			name := fs.Position(file.Pos()).Filename
+			parsed, err := parser.ParseFile(fs, name, source.Bytes(), parser.ParseComments|parser.SkipObjectResolution)
+			if err != nil {
+				return nil, err
+			}
+			files[index] = parsed
+		}
 	}
 	pkg, err := (&types.Config{Importer: imports}).Check("github.com/jxsl13/goai/llamagpu", fs, files, info)
 	return &analysisOwnerFixture{fs, files, info, pkg, imports.sources}, err

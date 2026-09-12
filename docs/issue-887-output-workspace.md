@@ -73,6 +73,12 @@ Workload common-versus-bulk policy is also reviewed, not inferred from names,
 method visibility or static call frequency. A full logical consumer or a
 hard-real-time prohibition on growth allocation invalidates this advice.
 
+The unique source initialization of maximum rows and width must precede every
+selected constructor geometry load. Exact helper invocation boundaries are
+ordered too: a helper write is complete only when it dominates all executable
+returns. Late assignments and conditional initialization cannot establish the
+allocation extent, even if the eventual published owner has correct fields.
+
 ## Residency and validation
 
 For float32 output, symbolic retained bytes are `4*Ctx*Vocab`, common bytes
