@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: MPL-2.0
+// Verbatim public GoAI functions from pre-change commit 74a7c5c923b25aa35773bb9e907b76aba04a553a.
+// https://github.com/jxsl13/goai/blob/74a7c5c923b25aa35773bb9e907b76aba04a553a/llamagpu/decoder.go
+// GoAI PR1210 merge ec20269a20e2028ec10aa02cd9d26095e8aa161b replaces the eager constructor.
+func (d *Decoder) recordAttnNorm(r recorder, b block, rows int) error {
+	if d.postNorm {
+		return r.Blit(d.dx.b, 0, d.xn.b, 0, rows*d.d)
+	}
+	e := d.norm(r, d.dx.b, b.gAttn, b.bAttn, d.xn.b, rows)
+	if d.parallelTwoNorm { // norm2(x0) BEFORE the attn add, for the FFN branch
+		e = firstErr(e, d.norm(r, d.dx.b, b.gFFN, b.bFFN, d.xn2.b, rows))
+	}
+	return e
+}
+func (d *Decoder) norm(r recorder, x, gamma, beta, o buffer, rows int) error {
+	if d.lnBias {
+		return r.LayerNorm(x, gamma, beta, o, rows, d.d, d.eps)
+	}
+	return r.RMSNorm(x, gamma, o, rows, d.d, d.eps)
+}
+func (d *Decoder) allocScratch(mk func(data []float32) *bufSlot) {
+	c := d.maxLen
+	d.dinv = mk(d.invHost)
+	d.dx = mk(make([]float32, c*d.d))
+	d.xn = mk(make([]float32, c*d.d))
+	d.xn2 = mk(make([]float32, c*d.d))
+	d.q = mk(make([]float32, c*d.qDim))
+	d.k = mk(make([]float32, c*d.kvDim))
+	d.v_ = mk(make([]float32, c*d.kvDim))
+	d.qkv = mk(make([]float32, c*(d.qDim+2*d.kvDim)))
+	d.attn = mk(make([]float32, c*d.qDim))
+	d.allocResidualScratch(mk, c)
+	d.gate = mk(make([]float32, c*d.hidden))
+	d.up = mk(make([]float32, c*d.hidden))
+	if d.ops.fusedGateUp {
+		d.gu = mk(make([]float32, c*2*d.hidden)) // fused gate|up GEMV output for the SwiGLUHalves path
+	}
+	d.logitsRows = 1
+	if d.ops.eagerFullLogits {
+		d.logitsRows = c
+	}
+	d.logits = mk(make([]float32, d.logitsRows*d.v))
+	if d.moe {
+		d.moeGate = mk(make([]float32, c*d.nExperts))
+		d.moeW = mk(make([]float32, c*d.nExperts))
+		d.moeCol = mk(make([]float32, c))
+	}
+}
