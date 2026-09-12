@@ -281,11 +281,6 @@ func children(node *xmlNode, name string) []*xmlNode {
 	return result
 }
 
-func validateTOC(data []byte, schemas []Schema) error {
-	_, err := tablePaths(data, schemas)
-	return err
-}
-
 func tablePaths(data []byte, schemas []Schema) (map[string]string, error) {
 	root, err := parseXML(data)
 	if err != nil {
