@@ -266,19 +266,24 @@ func (selection *ps6136Selection) consumerCalls(context *ps6125SSAContext, leave
 		return nil
 	}
 	parameter := context.flow.function.Params[0]
-	if !types.Identical(parameter.Type(), types.NewPointer(selection.ownerType)) || parameter.Object() == nil {
+	parameterObject := ps6136ParameterObject(parameter)
+	if parameterObject == nil || !types.Identical(parameter.Type(), types.NewPointer(selection.ownerType)) {
 		return nil
 	}
 	owner := context.reference(parameter)
 	var pool ps6125ExtentPool
-	width := ps6125SymbolicExtent(pool.identity(parameter.Object(), []*types.Var{selection.width}, false))
+	width := ps6125SymbolicExtent(pool.identity(parameterObject, []*types.Var{selection.width}, false))
 	var bulkExtent ps6125Extent
 	if bulk {
-		if len(context.flow.function.Params) < 2 || !types.Identical(context.flow.function.Params[1].Type(), types.NewSlice(types.Typ[types.Int])) {
+		if len(context.flow.function.Params) < 2 {
 			return nil
 		}
 		tokens := context.flow.function.Params[1]
-		length := ps6125SymbolicExtent(pool.identity(tokens.Object(), nil, true))
+		tokensObject := ps6136ParameterObject(tokens)
+		if tokensObject == nil || !types.Identical(tokens.Type(), types.NewSlice(types.Typ[types.Int])) {
+			return nil
+		}
+		length := ps6125SymbolicExtent(pool.identity(tokensObject, nil, true))
 		// Recompute the contextual scalar/branch algebra after binding the
 		// actual bulk descriptor, retaining the same invocation identity.
 		context.flow = ps6125AnalyzeSSAExtents(context.flow.function, nil, map[*ssa.Parameter]ps6125Extent{tokens: length})
@@ -498,12 +503,13 @@ func (selection *ps6136Selection) constructorAllocation(remaining int) *ps6136Co
 		return nil
 	}
 	model, ok := selection.model.value.(*ssa.Parameter)
-	if !ok || model.Object() == nil {
+	modelObject := ps6136ParameterObject(model)
+	if !ok || modelObject == nil {
 		return nil
 	}
 	var pool ps6125ExtentPool
-	rows := pool.identity(model.Object(), []*types.Var{selection.modelConfig, selection.configRows}, false)
-	width := pool.identity(model.Object(), []*types.Var{selection.modelConfig, selection.configWidth}, false)
+	rows := pool.identity(modelObject, []*types.Var{selection.modelConfig, selection.configRows}, false)
+	width := pool.identity(modelObject, []*types.Var{selection.modelConfig, selection.configWidth}, false)
 	residency, ok := ps6136OutputResidency(rows, width)
 	if !ok {
 		return nil

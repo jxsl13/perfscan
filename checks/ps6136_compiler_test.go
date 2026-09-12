@@ -81,9 +81,7 @@ func sampleTopKCandidates(*nlp.Sampler,[]int32,[]float32)int{return 0}
 			return nil, err
 		}
 		// Owner bodies keep their original import binding environment.
-		for _, declaration := range extra.Decls {
-			support.Decls = append(support.Decls, declaration)
-		}
+		support.Decls = append(support.Decls, extra.Decls...)
 		support.Imports = append(support.Imports, extra.Imports...)
 		deviceSource, err := os.ReadFile("testdata/ps6136-owner/sampling_fastpath.go.txt")
 		if err != nil {
