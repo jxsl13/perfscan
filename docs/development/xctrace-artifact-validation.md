@@ -76,6 +76,8 @@ tables to make a failing capture pass.
 go run ./cmd/tracecapture \
   -out /approved/captures/new-sample \
   -schemas /approved/captures/required-schemas.json \
+  -inputs /approved/captures/declared-inputs.json \
+  -dir /private/tmp/approved-workload-directory \
   -instrument 'Metal GPU Counters' \
   -instrument 'Metal Application' -instrument GPU \
   -started WORKLOAD_STARTED -completed WORKLOAD_SUCCEEDED \
@@ -102,9 +104,12 @@ must separately supervise the workload/process group when that is required.
 The complete XML parser has explicit byte, depth and element-count limits.
 Trace members are hashed as streams without loading entire files into memory.
 
-Input access and privacy preflight (#867) are not implemented by this collector.
-It does not copy protected inputs, change permissions, request Full Disk Access,
-or work around TCC. Permission failures retain diagnostics and fail closed.
+Input preflight (#867) now requires an explicit audited-complete inventory and
+post-input-open marker before any tool is launched. See the separate
+[input preflight policy](xctrace-input-preflight.md). It fails early only: it
+does not copy/link protected inputs, change permissions, request Full Disk
+Access, or work around TCC. A parent read/hash is not proof of profiler-child
+access. Permission failures retain diagnostics and fail closed.
 Raw artifacts can contain sensitive workload details; keep them local and
 outside a repository intended for publication.
 
@@ -121,6 +126,8 @@ rows). The controlled workload performed CPU-only work, emitted its successful
 phase marker, and, for the timeout case, remained alive without further work.
 This qualified native command/XML/marker integration, **not** Metal counter
 semantics, complete target-process success, profiling accuracy or a speedup.
+This #866 smoke predates the required #867 input policy and does not qualify
+profiler-child privacy access under that new policy.
 
 All four native development attempts were retained. The first status-54 attempt
 exposed the native marker/basename spelling and was rejected by the earlier
