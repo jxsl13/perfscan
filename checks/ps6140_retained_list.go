@@ -12,9 +12,43 @@ import (
 
 type ps6140RetainedListProof struct {
 	public       *ps6140RetainedPublicProof
+	input        *ps6140RetainedListInput
 	release      *types.Func
 	elementClose *types.Func
 	retentions   map[*ps6125SSAContext]*ps6140FactoryRetentionProof
+}
+
+// Actual source receipts only. Callers supply the complete reviewed public
+// context inventory, not fabricated ScenarioUses. List closure does not prove
+// constructor callbacks, storage isolation, failure cleanup, release phase or
+// native lifetime; those remain separately composed prerequisites.
+type ps6140RetainedListInput struct {
+	constructor, publication *ps6125SSAContext
+	owner                    ps6125SSAReference
+	storage                  *ps6140FactoryStorageProof
+	publicContexts           []ps6140RetainedListContext
+	requiredFactories        map[*ps6125SSAContext]ps6125SSAReference
+}
+
+type ps6140RetainedListContext struct {
+	context *ps6125SSAContext
+	owner   ps6125SSAReference
+}
+
+func ps6140RetainedListPublicInput(public *ps6140RetainedPublicProof) *ps6140RetainedListInput {
+	if public == nil || public.allocation == nil {
+		return nil
+	}
+	input := &ps6140RetainedListInput{constructor: public.constructor, publication: public.publication, owner: public.owner, storage: public.storage, requiredFactories: map[*ps6125SSAContext]ps6125SSAReference{public.allocation.factory: public.allocation.errorCell}}
+	for _, uses := range public.entries {
+		if uses == nil || uses.scenario == nil {
+			return nil
+		}
+		for context := range uses.scenario.refined {
+			input.publicContexts = append(input.publicContexts, ps6140RetainedListContext{context, uses.scenario.receiver})
+		}
+	}
+	return input
 }
 
 // Source-level list isolation for the selected constructor class and its typed
@@ -28,14 +62,29 @@ func ps6140RetainedListSource(pass *analysis.Pass, pkg *ssa.Package, selection *
 	return ps6140RetainedListSourceCheck(pass, pkg, selection, public, budget, nil)
 }
 
-func ps6140RetainedListSourceCheck(pass *analysis.Pass, pkg *ssa.Package, selection *ps6136Selection, public *ps6140RetainedPublicProof, budget int, rejected func(string)) (result *ps6140RetainedListProof) {
+func ps6140RetainedListSourceCheck(pass *analysis.Pass, pkg *ssa.Package, selection *ps6136Selection, public *ps6140RetainedPublicProof, budget int, rejected func(string)) *ps6140RetainedListProof {
+	result := ps6140RetainedListReceiptSourceCheck(pass, pkg, selection, ps6140RetainedListPublicInput(public), budget, rejected)
+	if result != nil {
+		result.public = public
+	}
+	return result
+}
+
+func ps6140RetainedListReceiptSource(pass *analysis.Pass, pkg *ssa.Package, selection *ps6136Selection, input *ps6140RetainedListInput, budget int) *ps6140RetainedListProof {
+	return ps6140RetainedListReceiptSourceCheck(pass, pkg, selection, input, budget, nil)
+}
+
+func ps6140RetainedListReceiptSourceCheck(pass *analysis.Pass, pkg *ssa.Package, selection *ps6136Selection, input *ps6140RetainedListInput, budget int, rejected func(string)) (result *ps6140RetainedListProof) {
 	stage := "input"
 	defer func() {
 		if result == nil && rejected != nil {
 			rejected(stage)
 		}
 	}()
-	if pass == nil || pkg == nil || pass.Pkg != pkg.Pkg || selection == nil || public == nil || selection.context != public.constructor || selection.owner != public.owner || public.publication == nil || public.storage == nil || budget <= 0 || selection.retained == nil || selection.retained.Exported() {
+	if pass == nil || pkg == nil || pass.Pkg != pkg.Pkg || selection == nil || input == nil || selection.context != input.constructor || selection.owner != input.owner || input.publication == nil || input.storage == nil || budget <= 0 || selection.retained == nil || selection.retained.Exported() || len(input.requiredFactories) == 0 {
+		return nil
+	}
+	if !ps6140RetainedListInputs(pkg, selection, input, &budget) {
 		return nil
 	}
 	list := selection.retained
@@ -124,7 +173,7 @@ func ps6140RetainedListSourceCheck(pass *analysis.Pass, pkg *ssa.Package, select
 	}) {
 		return nil
 	}
-	proof := &ps6140RetainedListProof{public: public, release: release, elementClose: close, retentions: make(map[*ps6125SSAContext]*ps6140FactoryRetentionProof)}
+	proof := &ps6140RetainedListProof{input: input, release: release, elementClose: close, retentions: make(map[*ps6125SSAContext]*ps6140FactoryRetentionProof)}
 	visit := func(context *ps6125SSAContext, owner ps6125SSAReference, construction bool) bool {
 		paths := ps6125AccessPaths{flow: context.flow}
 		for _, block := range context.flow.function.Blocks {
@@ -163,10 +212,10 @@ func ps6140RetainedListSourceCheck(pass *analysis.Pass, pkg *ssa.Package, select
 				}
 				retention := proof.retentions[context]
 				if retention == nil {
-					input := context.reference(context.flow.function.Params[0])
-					backend := ps6136FactoryResult(context, input, selection.allocator, selection.slot)
+					parameter := context.reference(context.flow.function.Params[0])
+					backend := ps6136FactoryResult(context, parameter, selection.allocator, selection.slot)
 					retention = ps6140FactoryRetention(context, backend, owner, selection.ownerType, list, selection.slot, budget)
-					if retention == nil || ps6136FactoryErrorCell(context, backend) != public.allocation.errorCell {
+					if retention == nil || !ps6140RetainedListErrorCell(input, ps6136FactoryErrorCell(context, backend), &budget) {
 						return false
 					}
 					proof.retentions[context] = retention
@@ -178,7 +227,7 @@ func ps6140RetainedListSourceCheck(pass *analysis.Pass, pkg *ssa.Package, select
 		}
 		return true
 	}
-	pending := []*ps6125SSAContext{public.publication}
+	pending := []*ps6125SSAContext{input.publication}
 	seen := make(map[*ps6125SSAContext]bool)
 	for len(pending) != 0 {
 		context := pending[len(pending)-1]
@@ -196,15 +245,92 @@ func ps6140RetainedListSourceCheck(pass *analysis.Pass, pkg *ssa.Package, select
 			}
 		}
 	}
-	for _, uses := range public.entries {
-		for context := range uses.scenario.refined {
-			if !visit(context, uses.scenario.receiver, false) {
-				return nil
-			}
+	for _, public := range input.publicContexts {
+		if !visit(public.context, public.owner, false) {
+			return nil
 		}
 	}
-	if proof.retentions[public.allocation.factory] == nil {
-		return nil // The selected allocation must participate, not just siblings.
+	stage = "required allocation participation"
+	for factory := range input.requiredFactories {
+		if proof.retentions[factory] == nil {
+			return nil // Every required allocation participates, not just siblings.
+		}
 	}
 	return proof
+}
+
+func ps6140RetainedListErrorCell(input *ps6140RetainedListInput, cell ps6125SSAReference, budget *int) bool {
+	if cell.context == nil || cell.value == nil {
+		return false
+	}
+	for _, required := range input.requiredFactories {
+		*budget--
+		if *budget <= 0 {
+			return false
+		}
+		if cell == required {
+			return true
+		}
+	}
+	return false
+}
+
+func ps6140RetainedListInputs(pkg *ssa.Package, selection *ps6136Selection, input *ps6140RetainedListInput, budget *int) bool {
+	if input.constructor == nil || input.constructor.flow == nil || input.constructor.flow.function.Pkg != pkg || input.publication.flow == nil || input.publication.flow.function.Pkg != pkg {
+		return false
+	}
+	current := input.constructor
+	for current != input.publication {
+		*budget--
+		if *budget <= 0 || current.parent == nil || current.site == nil || current.parent.calls[current.site] != current {
+			return false
+		}
+		current = current.parent
+	}
+	storage := input.storage
+	if _, required := input.requiredFactories[storage.factory]; !required || storage.factory == nil || storage.factory.flow == nil || len(storage.factory.flow.function.Params) != 1 || storage.backend == nil || storage.callback == nil || storage.callback.flow == nil || storage.native == nil || storage.wrapper == nil || storage.nativeField == nil {
+		return false
+	}
+	if ps6136FactoryResult(storage.factory, storage.factory.reference(storage.factory.flow.function.Params[0]), selection.allocator, selection.slot) != storage.backend || storage.factory.call(storage.backend) != storage.callback {
+		return false
+	}
+	native := storage.native.Call.StaticCallee()
+	if storage.native.Parent() != storage.callback.flow.function || !storage.callback.flow.blocks[storage.native.Block()] || native == nil || native.Object() == nil || !selection.allocatorIDs[ps6090FunctionID(native.Object().(*types.Func))] || ps6136FieldVar(storage.wrapper, storage.nativeField.Name()) != storage.nativeField {
+		return false
+	}
+	for factory, cell := range input.requiredFactories {
+		*budget--
+		if *budget <= 0 || factory == nil || factory.flow == nil || factory.flow.function.Pkg != pkg || len(factory.flow.function.Params) != 1 || cell.context == nil || cell.value == nil {
+			return false
+		}
+		backend := ps6136FactoryResult(factory, factory.reference(factory.flow.function.Params[0]), selection.allocator, selection.slot)
+		if backend == nil || ps6136FactoryErrorCell(factory, backend) != cell {
+			return false
+		}
+	}
+	for _, public := range input.publicContexts {
+		*budget--
+		if *budget <= 0 || public.context == nil || public.context.flow == nil || public.context.flow.function.Pkg != pkg || public.owner.context == nil || public.owner.value == nil || !types.Identical(public.owner.value.Type(), types.NewPointer(selection.ownerType)) {
+			return false
+		}
+		root := public.context
+		for root.parent != nil {
+			*budget--
+			if *budget <= 0 || root.site == nil || root.parent.calls[root.site] != root {
+				return false
+			}
+			root = root.parent
+		}
+		if root.flow == nil || root.flow.function.Pkg != pkg {
+			return false
+		}
+		formal := false
+		for _, parameter := range root.flow.function.Params {
+			formal = formal || root.reference(parameter) == public.owner
+		}
+		if !formal {
+			return false
+		}
+	}
+	return true
 }

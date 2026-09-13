@@ -35,7 +35,7 @@ func main() {
 	// Shards provide cross-package concurrency. Per-process parallelism is still
 	// enabled so ordinary test cases can run concurrently and CI does not become
 	// unnecessarily serial.
-	parallel := flag.Int("parallel", runtime.GOMAXPROCS(0), "maximum tests run in parallel within each shard")
+	parallel := flag.Int("parallel", 0, "maximum tests run in parallel within each shard (default: per-worker CPU share)")
 	maxTestsPerJob := flag.Int("max-tests-per-job", 150, "maximum discovered test names in each test process")
 	timeout := flag.Duration("timeout", 20*time.Minute, "timeout for each test shard")
 	race := flag.Bool("race", false, "run each shard with the race detector")
@@ -45,6 +45,16 @@ func main() {
 	if *workers < 1 {
 		_, _ = io.WriteString(os.Stderr, "testparallel: -workers must be at least 1\n")
 		os.Exit(2)
+	}
+	processProcs := workerCPUShare(runtime.GOMAXPROCS(0), *workers)
+	parallelExplicit := false
+	flag.Visit(func(value *flag.Flag) {
+		if value.Name == "parallel" {
+			parallelExplicit = true
+		}
+	})
+	if !parallelExplicit {
+		*parallel = processProcs
 	}
 	if *parallel < 1 {
 		_, _ = io.WriteString(os.Stderr, "testparallel: -parallel must be at least 1\n")
@@ -75,8 +85,10 @@ func main() {
 		os.Exit(1)
 	}
 	started := time.Now()
-	fmt.Fprintf(os.Stderr, "testparallel: discovery started: packages=%d workers=%d race=%t\n", len(packages), *workers, *race)
-	names, err := discoverTests(ctx, packages, *workers, *race, *timeout, listTests)
+	fmt.Fprintf(os.Stderr, "testparallel: discovery started: packages=%d workers=%d race=%t host-cpus=%d host-procs=%d worker-procs=%d parallel=%d\n", len(packages), *workers, *race, runtime.NumCPU(), runtime.GOMAXPROCS(0), processProcs, *parallel)
+	names, err := discoverTests(ctx, packages, *workers, *race, *timeout, func(ctx context.Context, pkg string, race bool, timeout time.Duration) ([]string, error) {
+		return listTestsWithCPUShare(ctx, pkg, race, timeout, processProcs)
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "testparallel: discovery failed after %s: %v\n", time.Since(started).Round(time.Millisecond), err)
 		os.Exit(1)
@@ -92,7 +104,7 @@ func main() {
 		jobs = append(jobs, packageJobs...)
 	}
 	fmt.Fprintf(os.Stderr, "testparallel: discovery complete: packages=%d tests=%d selected=%d jobs=%d elapsed=%s\n", len(packages), tests, selected, len(jobs), time.Since(started).Round(time.Millisecond))
-	if err := runJobs(ctx, jobs, *workers, *parallel, *timeout, *race); err != nil {
+	if err := runJobs(ctx, jobs, *workers, *parallel, *timeout, *race, processProcs); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -177,6 +189,10 @@ func listPackages(ctx context.Context, patterns []string, race bool) ([]string, 
 }
 
 func listTests(ctx context.Context, pkg string, race bool, timeout time.Duration) ([]string, error) {
+	return listTestsWithCPUShare(ctx, pkg, race, timeout, 0)
+}
+
+func listTestsWithCPUShare(ctx context.Context, pkg string, race bool, timeout time.Duration, processProcs int) ([]string, error) {
 	out, err := runTestAttempts(ctx, runtime.GOOS, timeout, func(attemptCtx context.Context, remaining time.Duration) (string, error) {
 		args := []string{"test"}
 		if race {
@@ -184,6 +200,9 @@ func listTests(ctx context.Context, pkg string, race bool, timeout time.Duration
 		}
 		args = append(args, "-timeout", remaining.String(), "-list", ".", pkg)
 		cmd := exec.CommandContext(attemptCtx, "go", args...)
+		if processProcs > 0 {
+			cmd.Env = workerEnvironment(os.Environ(), processProcs, runtime.GOOS)
+		}
 		output, err := cmd.CombinedOutput()
 		return string(output), err
 	})
@@ -230,7 +249,7 @@ func partition(names []string, workers int) [][]string {
 	return groups
 }
 
-func runJobs(ctx context.Context, jobs []testJob, workers, parallel int, timeout time.Duration, race bool) error {
+func runJobs(ctx context.Context, jobs []testJob, workers, parallel int, timeout time.Duration, race bool, processProcs int) error {
 	queue := make(chan testJob)
 	errs := make(chan error, len(jobs))
 	var outputMu sync.Mutex
@@ -240,7 +259,7 @@ func runJobs(ctx context.Context, jobs []testJob, workers, parallel int, timeout
 		go func() {
 			defer wg.Done()
 			for job := range queue {
-				output, err := runTestJob(ctx, job, parallel, timeout, race, runtime.GOOS)
+				output, err := runTestJobWithCPUShare(ctx, job, parallel, timeout, race, runtime.GOOS, processProcs)
 				outputMu.Lock()
 				fmt.Printf("=== %s shard %d/%d ===\n%s", job.pkg, job.shard+1, job.shardCount, output)
 				outputMu.Unlock()
@@ -276,10 +295,13 @@ func runJobs(ctx context.Context, jobs []testJob, workers, parallel int, timeout
 	return nil
 }
 
-func runTestJob(ctx context.Context, job testJob, parallel int, timeout time.Duration, race bool, goos string) (string, error) {
+func runTestJobWithCPUShare(ctx context.Context, job testJob, parallel int, timeout time.Duration, race bool, goos string, processProcs int) (string, error) {
 	return runTestAttempts(ctx, goos, timeout, func(attemptCtx context.Context, remaining time.Duration) (string, error) {
 		args := testArgs(job, parallel, remaining, race)
 		cmd := exec.CommandContext(attemptCtx, "go", args...)
+		if processProcs > 0 {
+			cmd.Env = workerEnvironment(os.Environ(), processProcs, runtime.GOOS)
+		}
 		var output bytes.Buffer
 		cmd.Stdout = &output
 		cmd.Stderr = &output
