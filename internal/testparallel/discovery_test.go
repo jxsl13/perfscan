@@ -83,7 +83,7 @@ func TestDiscoveryBoundedConcurrentOrderedAndExhaustive(t *testing.T) {
 		}
 		for external := range 3 {
 			for index, pkg := range packages {
-				if got, wantJobs := makeTestJobs(pkg, result.names[index], 2, external, 3), makeTestJobs(pkg, want[index], 2, external, 3); !reflect.DeepEqual(got, wantJobs) {
+				if got, wantJobs := makeTestJobs(pkg, result.names[index], 2, 150, external, 3), makeTestJobs(pkg, want[index], 2, 150, external, 3); !reflect.DeepEqual(got, wantJobs) {
 					t.Fatalf("discovery changed exact external/inner job selection: %v vs %v", got, wantJobs)
 				}
 			}

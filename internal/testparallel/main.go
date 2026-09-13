@@ -36,6 +36,7 @@ func main() {
 	// enabled so ordinary test cases can run concurrently and CI does not become
 	// unnecessarily serial.
 	parallel := flag.Int("parallel", runtime.GOMAXPROCS(0), "maximum tests run in parallel within each shard")
+	maxTestsPerJob := flag.Int("max-tests-per-job", 150, "maximum discovered test names in each test process")
 	timeout := flag.Duration("timeout", 20*time.Minute, "timeout for each test shard")
 	race := flag.Bool("race", false, "run each shard with the race detector")
 	shardIndex := flag.Int("shard-index", 0, "zero-based external shard assigned to this process")
@@ -47,6 +48,10 @@ func main() {
 	}
 	if *parallel < 1 {
 		_, _ = io.WriteString(os.Stderr, "testparallel: -parallel must be at least 1\n")
+		os.Exit(2)
+	}
+	if *maxTestsPerJob < 1 {
+		_, _ = io.WriteString(os.Stderr, "testparallel: -max-tests-per-job must be at least 1\n")
 		os.Exit(2)
 	}
 	if *timeout <= 0 {
@@ -80,7 +85,7 @@ func main() {
 	tests, selected := 0, 0
 	for index, pkg := range packages {
 		tests += len(names[index])
-		packageJobs := makeTestJobs(pkg, names[index], *workers, *shardIndex, *shardCount)
+		packageJobs := makeTestJobs(pkg, names[index], *workers, *maxTestsPerJob, *shardIndex, *shardCount)
 		for _, job := range packageJobs {
 			selected += len(job.names)
 		}
@@ -103,9 +108,16 @@ func validateExternalShard(index, count int) error {
 	return nil
 }
 
-func makeTestJobs(pkg string, names []string, workers, externalIndex, externalCount int) []testJob {
+func makeTestJobs(pkg string, names []string, workers, maxTestsPerJob, externalIndex, externalCount int) []testJob {
 	selected := selectExternalShard(pkg, names, externalIndex, externalCount)
-	groups := partition(selected, workers)
+	// Job granularity is independent of process concurrency. Large packages
+	// need more than one wave of jobs so queued parallel tests do not all share
+	// the same process timeout. Round-robin partitioning keeps groups balanced.
+	count := workers
+	if len(selected) > 0 {
+		count = max(count, 1+(len(selected)-1)/maxTestsPerJob)
+	}
+	groups := partition(selected, count)
 	jobs := make([]testJob, 0, len(groups))
 	for shard, group := range groups {
 		jobs = append(jobs, testJob{pkg: pkg, shard: shard, shardCount: len(groups), names: group})
