@@ -295,10 +295,6 @@ func runJobs(ctx context.Context, jobs []testJob, workers, parallel int, timeout
 	return nil
 }
 
-func runTestJob(ctx context.Context, job testJob, parallel int, timeout time.Duration, race bool, goos string) (string, error) {
-	return runTestJobWithCPUShare(ctx, job, parallel, timeout, race, goos, 0)
-}
-
 func runTestJobWithCPUShare(ctx context.Context, job testJob, parallel int, timeout time.Duration, race bool, goos string, processProcs int) (string, error) {
 	return runTestAttempts(ctx, goos, timeout, func(attemptCtx context.Context, remaining time.Duration) (string, error) {
 		args := testArgs(job, parallel, remaining, race)
