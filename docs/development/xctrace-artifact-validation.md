@@ -6,6 +6,11 @@ recorder time limit that returned status 54 after saving a usable Metal trace.
 only after observing its artifacts and successfully exporting required data.
 This is executable collection/validation, not a manifest of asserted booleans.
 
+The current native recorder uses [supervised attach](xctrace-supervised-attach.md)
+and supports **Time Profiler only**. Historical Metal/`--launch` examples and
+native #866 smoke results below are not qualification of this new launch mode.
+There is no unsafe `--launch` fallback. Required schema assertions are unchanged.
+
 The collector creates a new directory and saves its plan before launching any
 command. It invokes the configured `xcrun` with fixed `xctrace` record/export
 arguments, without a shell. It observes the tool version and retains each
@@ -20,6 +25,10 @@ directories, symlinks, devices and pipes are not accepted as configurations.
 ## Required evidence
 
 Both recorder status 0 and status 54 require:
+
+- Observed recording readiness before resuming the directly owned target,
+  target exit0, confirmed reap of target and recorder, and exact attached
+  target PID/executable in the exported TOC. Forced cleanup is rejection.
 
 - A nonempty directory trace bundle containing only directories and regular
   files; symlinks, special files and over-limit bundles are rejected.
@@ -67,7 +76,9 @@ are not table identifiers. For example, one required value table might be:
 ]
 ```
 
-This illustrative single table is **not** the complete Metal policy in #866:
+This JSON illustrates the schema format, not the current Time Profiler policy.
+The CLI example below requires a separately observed Time Profiler schema file;
+do not reuse this GPU table for it. This single table is **not** the complete Metal policy in #866:
 that policy also needs its performance-limiter, GPU-interval and shader-profiler
 tables, with their observed names and required columns. Do not omit required
 tables to make a failing capture pass.
@@ -78,29 +89,31 @@ go run ./cmd/tracecapture \
   -schemas /approved/captures/required-schemas.json \
   -inputs /approved/captures/declared-inputs.json \
   -dir /private/tmp/approved-workload-directory \
-  -instrument 'Metal GPU Counters' \
-  -instrument 'Metal Application' -instrument GPU \
+  -process-scope direct-executable \
+  -instrument 'Time Profiler' \
   -started WORKLOAD_STARTED -completed WORKLOAD_SUCCEEDED \
-  -- /approved/bin/metal-workload
+  -- /approved/bin/cpu-workload
 ```
 
 The workload must emit the completion marker **only after its required work
 and correctness checks succeed**. A marker attests that defined phase; xctrace
-does not provide the target exit status through the recorder exit code. A
-workload that emits success and subsequently fails is not certified as a
-successful process by this API. Applications needing that guarantee must
-independently observe it. Counter identity, value semantics, active intervals,
+does not provide the target exit status through the recorder exit code. The
+supervisor separately requires the owned target's observed exit 0; success output
+followed by failure or forced termination is rejected. Counter identity, value
+semantics, active intervals,
 contamination, workload correctness and statistical qualification remain
 separate checks; readable XML is not a measured performance win.
 
-Command streams/exports are bounded while being retained; exceeding a limit
-cancels that command and retains the captured prefix. Trace/target limits are
-checked **after recording**, not a live disk quota. They do not constrain
+Command streams/exports and supervised target stdout/stderr are bounded live
+while being retained; exceeding a limit cancels the operation and retains the
+captured prefix. The trace bundle limit is checked **after recording**, not a
+live disk quota. These limits do not constrain
 Instruments' internal memory use. Use short prequalified captures and suitable
 external disk/process limits; a larger volume policy is not inferred here.
-Cancellation terminates the direct command and bounds pipe waiting. It is not
-a guarantee that Instruments has terminated every launched descendant; callers
-must separately supervise the workload/process group when that is required.
+Capture cancellation closes a private control pipe; the supervisor performs
+independently bounded direct-target/recorder termination and reap. Unresolved
+cleanup rejects the sample. This is not arbitrary descendant/service containment
+and process groups alone do not supply that guarantee.
 The complete XML parser has explicit byte, depth and element-count limits.
 Trace members are hashed as streams without loading entire files into memory.
 
@@ -120,7 +133,8 @@ synthetic xcrun stand-in, including success/54 acceptance and all rejection
 paths. They do not launch Instruments, require macOS privacy changes, or measure
 GPU performance.
 
-A separate local native Time Profiler smoke with xctrace 16.0 (17F113) validated
+A separate **historical `--launch`** native Time Profiler smoke with
+xctrace 16.0 (17F113) validated
 both recorder status 0 (1,580 exported time-sample rows) and status 54 (1,677
 rows). The controlled workload performed CPU-only work, emitted its successful
 phase marker, and, for the timeout case, remained alive without further work.

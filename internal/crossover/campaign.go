@@ -109,6 +109,9 @@ func prepare(ctx context.Context, root, goBinary string, p *Plan, factory ModelF
 	if err != nil {
 		return nil, err
 	}
+	if err := preflightTypedInputs(ctx, model); err != nil {
+		return nil, err
+	}
 	if model.Boundary != p.Boundary {
 		return nil, errors.New("observed source threshold differs from declared campaign matrix")
 	}
@@ -356,6 +359,9 @@ func VerifyCampaign(ctx context.Context, repository, directory, goBinary, planPi
 			return nil, errors.New("undeclared or nonregular campaign artifact")
 		}
 	}
+	if err := preflightInvocations(directory, expected, records); err != nil {
+		return nil, err
+	}
 	if err := allocationcampaign.VerifySnapshot(repository, filepath.Join(directory, "snapshot"), p.Snapshot); err != nil {
 		return nil, err
 	}
@@ -423,6 +429,24 @@ func VerifyCampaign(ctx context.Context, repository, directory, goBinary, planPi
 		report.Pairs = append(report.Pairs, Pair{Invocation: invocation, A: a, B: b, Comparison: comparison})
 	}
 	return report, nil
+}
+
+// Reject already-invalid retained evidence before source loading or compilation.
+// These bytes are deliberately discarded: verification must read them again
+// after reproducing the build, rather than trusting a pre-compilation snapshot.
+func preflightInvocations(directory string, expected []Invocation, records []Record) error {
+	if len(records) != len(expected) {
+		return errors.New("incomplete campaign invocation inventory")
+	}
+	for i, record := range records {
+		if record.Invocation != expected[i] {
+			return errors.New("sample order or cell differs from predeclared plan")
+		}
+		if _, err := allocationcampaign.ReadInvocation(directory, "sample-"+strconv.Itoa(i), record.Raw); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // CurrentBuild observes today's source/tool selection independently of the old

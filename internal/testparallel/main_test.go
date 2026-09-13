@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -150,7 +151,7 @@ func TestExternalAndWorkerShardsCoverEveryTestOnce(t *testing.T) {
 	names := []string{"TestA", "TestB", "TestC", "TestD", "TestE", "TestF", "TestG"}
 	seen := make(map[string]int, len(names))
 	for external := range 2 {
-		for _, job := range makeTestJobs("example.com/p", names, 3, external, 2) {
+		for _, job := range makeTestJobs("example.com/p", names, 3, 150, external, 2) {
 			if job.pkg != "example.com/p" || job.shardCount < 1 || job.shard >= job.shardCount {
 				t.Fatalf("invalid job metadata: %+v", job)
 			}
@@ -162,6 +163,67 @@ func TestExternalAndWorkerShardsCoverEveryTestOnce(t *testing.T) {
 	for _, name := range names {
 		if seen[name] != 1 {
 			t.Fatalf("%s appeared %d times after both sharding layers, want once", name, seen[name])
+		}
+	}
+}
+
+func TestCappedExternalAndInnerJobsCoverEveryTestOnce(t *testing.T) {
+	t.Parallel()
+	names := make([]string, 1001)
+	for i := range names {
+		names[i] = fmt.Sprintf("Test%04d", i)
+	}
+	seen := make(map[string]int, len(names))
+	for external := range 2 {
+		for _, job := range makeTestJobs("example.com/p", names, 2, 150, external, 2) {
+			if job.pkg != "example.com/p" || job.shardCount < 1 || job.shard >= job.shardCount {
+				t.Fatalf("invalid job metadata: %+v", job)
+			}
+			for _, name := range job.names {
+				if externalShardForName(job.pkg, name, 2) != external {
+					t.Fatalf("inner partition changed external assignment of %s", name)
+				}
+				seen[name]++
+			}
+		}
+	}
+	for _, name := range names {
+		if seen[name] != 1 {
+			t.Fatalf("%s appeared %d times after both sharding layers, want once", name, seen[name])
+		}
+	}
+}
+
+func TestJobsBoundLargePackagesIndependentlyOfWorkers(t *testing.T) {
+	t.Parallel()
+	for _, cap := range []int{1, 7, 150} {
+		for _, size := range []int{0, 1, 2, 149, 150, 151, 300, 301, 523} {
+			names := make([]string, size)
+			for i := range names {
+				names[i] = fmt.Sprintf("Test%04d", i)
+			}
+			jobs := makeTestJobs("example.com/p", names, 2, cap, 0, 1)
+			wantCount := min(size, max(2, (size+cap-1)/cap))
+			if len(jobs) != wantCount {
+				t.Fatalf("size %d: got %d jobs, want %d", size, len(jobs), wantCount)
+			}
+			if !reflect.DeepEqual(jobs, makeTestJobs("example.com/p", names, 2, cap, 0, 1)) {
+				t.Fatalf("size %d: job partition is unstable", size)
+			}
+			seen := make(map[string]int, size)
+			for _, job := range jobs {
+				if len(job.names) == 0 || len(job.names) > cap || len(job.names) < size/max(1, len(jobs)) {
+					t.Fatalf("size %d: unbalanced or oversized job: %+v", size, job)
+				}
+				for _, name := range job.names {
+					seen[name]++
+				}
+			}
+			for _, name := range names {
+				if seen[name] != 1 {
+					t.Fatalf("size %d: %s selected %d times, want once", size, name, seen[name])
+				}
+			}
 		}
 	}
 }

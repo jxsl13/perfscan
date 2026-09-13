@@ -102,6 +102,19 @@ Rules without a pair, and why:
   that the win evaporates on any memory-touching path; its evidence table
   lives in the check text.
 - **PS6004**: a verification-gap advisory; there is nothing to time.
+- **PS6141** (unamortized activation packing verification advisory): no isolated
+  universal Before/After transform is claimed. Precision, shape, target and reuse
+  lifetime determine whether packing, fusion or another project-specific boundary
+  is preferable; a toy Go kernel would manufacture unrelated performance evidence.
+  [Owner issue 835](https://github.com/jxsl13/perfscan/issues/835) reports an exact
+  oracle-validated Apple M2 Pro Q4_K x Q8_K/I8MM candidate at M=1, N=4096, K=1024:
+  established median 182032 ns/op versus packed median 208481 ns/op (about 0.87x),
+  with one extra allocation. These are attributed owner observations, not locally
+  reproduced benchmark results. Benchmark the complete conversion-and-consumer
+  boundary at the actual shape and validate numeric/allocation/lifetime contracts.
+  Synthetic/MIXED source tests prove detector obligations, not measured gain or
+  observed activation-positive provenance. This non-autofix rule is intentionally
+  not added to the autofix-only benchmark exemption allowlist.
 - **PS6005–PS6059, PS6062–PS6079, PS6084, PS6104, and PS6112–PS6114** (accelerator and campaign verification advisories): their
   remedies require real device traces, independent processes, exact workload
   identities, topology/parity evidence, or project-specific kernels. A toy Go

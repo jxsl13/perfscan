@@ -9,7 +9,7 @@ Every check has a stable PS-prefixed ID and a fix level:
 reporting and fixing: `perfscan -fix` applies exactly the reported
 checks' fixes.
 
-**431 checks total** — **265 with a bit-identical auto-fix**, 166 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **61 L3** (aggressive).
+**432 checks total** — **265 with a bit-identical auto-fix**, 167 advisory. By fix level: **246 L1** (idiomatic), **124 L2** (structured), **62 L3** (aggressive).
 
 | ID | Category | Level | Auto-fix | Title |
 |----|----------|-------|----------|-------|
@@ -443,4 +443,5 @@ checks' fixes.
 | [PS6137](PS6137.md) | alloc | L3 |  | native snapshot acquisition freshly materializes owned output |
 | [PS6138](PS6138.md) | verify | L3 |  | an ARM64 counted loop serially extracts adjacent fields with destructive shifts |
 | [PS6140](PS6140.md) | verify | L3 |  | constructor scratch is unused by selected concrete projection implementations |
+| [PS6141](PS6141.md) | verify | L3 |  | fresh activation packing immediately feeds one dot boundary without visible amortization |
 | [PS7001](PS7001.md) | offload | L3 |  | a serial-K GPU reduction kernel (one thread per row, no SIMD-group reduction) leaves lanes idle at M=1 |

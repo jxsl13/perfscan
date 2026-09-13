@@ -338,6 +338,10 @@ type Config struct {
 	// records bridge only semantics hidden behind typed call boundaries.
 	ResidentCodebookContracts []ResidentCodebookContract `json:"residentCodebookContracts,omitempty" yaml:"residentCodebookContracts"`
 
+	// SingleUseQuantizationContracts bind reviewed quantization/consumer meaning;
+	// source analysis must separately prove fresh ownership, effects and one use.
+	SingleUseQuantizationContracts []SingleUseQuantizationContract `json:"singleUseQuantizationContracts,omitempty" yaml:"singleUseQuantizationContracts"`
+
 	// StateExpandedLookupContracts bind PS6085 to one exact profiled function
 	// and package-level lookup array. The explicit evidence, byte budget, and
 	// validation promises keep a cache-for-arithmetic trade out of generic
@@ -2378,6 +2382,7 @@ type Sets struct {
 	FragmentedAcceleratorObjectiveContracts   []FragmentedAcceleratorObjectiveContract
 	CrossStepAcceleratorResidencyContracts    []CrossStepAcceleratorResidencyContract
 	ResidentCodebookContracts                 []ResidentCodebookContract
+	SingleUseQuantizationContracts            []SingleUseQuantizationContract
 	StateExpandedLookupContracts              []StateExpandedLookupContract
 	SharedFanOutContracts                     []SharedFanOutContract
 }
@@ -2456,6 +2461,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		FragmentedAcceleratorObjectiveContracts:   cloneFragmentedAcceleratorObjectiveContracts(c.FragmentedAcceleratorObjectiveContracts),
 		CrossStepAcceleratorResidencyContracts:    slices.Clone(c.CrossStepAcceleratorResidencyContracts),
 		ResidentCodebookContracts:                 slices.Clone(c.ResidentCodebookContracts),
+		SingleUseQuantizationContracts:            cloneSingleUseQuantizationContracts(c.SingleUseQuantizationContracts),
 		StateExpandedLookupContracts:              slices.Clone(c.StateExpandedLookupContracts),
 		SharedFanOutContracts:                     cloneSharedFanOutContracts(c.SharedFanOutContracts),
 	}

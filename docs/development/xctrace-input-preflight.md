@@ -11,7 +11,7 @@ assumes that its own access grants a profiler child access.
 
 Every Capture/CLI request must provide InputPolicy (`-inputs` JSON in the CLI).
 Omission, a null inputs array or an incomplete declaration fails closed. The
-workload executable is resolved and included automatically; the native launch
+workload executable is resolved and included automatically; the supervised target
 uses its observed canonical path. The user must additionally enumerate every
 direct and indirect model, tokenizer, configuration, shader, cache seed and
 other required file for the selected operation and all provider/build paths.
@@ -90,8 +90,13 @@ privacy policy versions, per-provider controls, deferred file access, network
 providers, inode aliases and later filesystem changes remain separate unknowns.
 Preflight observations are snapshots, not authenticated or atomic guarantees
 about later target reads. The caller must independently qualify the exact
-profiler child and externally supervise its targets; extending a time limit is
-not a privacy fix. A rejected path should be addressed through an explicitly
+target's input access; extending a time limit is
+not a privacy fix. [Supervised attach](xctrace-supervised-attach.md) now owns,
+terminates and reaps the direct target and recorder through SIGINT/SIGTERM
+cancellation, private control-pipe EOF and bounded failure cleanup. Other signals
+that terminate the supervisor cannot guarantee cleanup. This does not contain
+arbitrary descendants or service processes.
+A rejected path should be addressed through an explicitly
 authorized workflow outside this collector, never by an automatic staging or
 permission workaround.
 
@@ -99,7 +104,8 @@ The workload must emit exactly one start marker, then the configured `opened`
 marker **only after all declared required input opens/checks succeed**, then
 exactly one successful completion marker. The collector requires that order.
 The post-open marker helps distinguish input stalls; it does not source-prove
-inventory completeness, every deferred read, target process exit or correctness.
+inventory completeness, every deferred read or correctness. Successful target
+exit and direct-child cleanup are separately required by the supervisor.
 No marker is invented by the collector.
 
 ## Validation limits

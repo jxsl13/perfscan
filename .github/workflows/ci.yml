@@ -46,7 +46,9 @@ jobs:
         # Every platform uses two external runners. Stable name hashing keeps
         # the package-qualified selections disjoint and exhaustive even if
         # independently discovered test-list order differs.
-        run: go run ./internal/testparallel -race -workers ${{ runner.os == 'macOS' && 2 || 4 }} -shard-index ${{ matrix.shard }} -shard-count 2 ./...
+        # Bound each inner job to 150 discovered names so large packages run
+        # in multiple waves without increasing process concurrency or timeout.
+        run: go run ./internal/testparallel -race -workers ${{ runner.os == 'macOS' && 2 || 4 }} -max-tests-per-job 150 -shard-index ${{ matrix.shard }} -shard-count 2 ./...
 
   quality:
     runs-on: ubuntu-latest
