@@ -1,0 +1,15 @@
+package nn
+import("sync";"github.com/jxsl13/goai/tensor";"github.com/jxsl13/goai/backend";"github.com/jxsl13/goai/format/gguf")
+type DeepSeekMoE struct{Shared []*SwiGLU; Routed *SparseMoE}
+type GLU struct{Wgate *tensor.Tensor; Wup *tensor.Tensor; Wdown *tensor.Tensor; act backend.Op; name string}
+type LayerNorm struct{Gamma *tensor.Tensor; Beta *tensor.Tensor; Eps float64}
+type Linear struct{W *tensor.Tensor; B *tensor.Tensor}
+type LoRALinear struct{W *tensor.Tensor; A *tensor.Tensor; B *tensor.Tensor; R int; Alpha float64}
+type LossFreeBalancer struct{Bias []float64; Rate float64}
+type MambaBlock struct{InX *Linear; InZ *Linear; ConvW *tensor.Tensor; ConvB *tensor.Tensor; DtLow *Linear; BProj *Linear; CProj *Linear; DtProj *Linear; ALog *tensor.Tensor; Dskip *tensor.Tensor; OutProj *Linear; DModel int; DInner int; DConv int; N int; DtRank int}
+type QuantLinear struct{Weight []byte; QT gguf.QuantType; In int; Out int; resOnce sync.Once; res backend.ResidentWeight}
+type QuantSwiGLU struct{Gate *QuantLinear; Up *QuantLinear; Down *QuantLinear}
+type RMSNorm struct{Gamma *tensor.Tensor; Eps float64}
+type RWKVBlock struct{Dim int; LN1 *LayerNorm; LN2 *LayerNorm; MuR *tensor.Tensor; MuK *tensor.Tensor; MuV *tensor.Tensor; Wr *Linear; Wk *Linear; Wv *Linear; Wo *Linear; WLog *tensor.Tensor; U *tensor.Tensor; CMuR *tensor.Tensor; CMuK *tensor.Tensor; CWr *Linear; CWk *Linear; CWv *Linear}
+type SparseMoE struct{Router *Linear; Experts []*SwiGLU; TopK int; balancer *LossFreeBalancer; loadCount []int}
+type SwiGLU struct{Wgate *tensor.Tensor; Wup *tensor.Tensor; Wdown *tensor.Tensor}
