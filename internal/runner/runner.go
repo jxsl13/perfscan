@@ -28,6 +28,7 @@ import (
 	"github.com/jxsl13/perfscan/config"
 	"github.com/jxsl13/perfscan/internal/closureenv"
 	"github.com/jxsl13/perfscan/internal/coefficientcodegen"
+	"github.com/jxsl13/perfscan/internal/scanscope"
 	"github.com/jxsl13/perfscan/lint"
 )
 
@@ -143,7 +144,7 @@ func Run(checks []*lint.Check, opts Options) int {
 	}
 	enabled = kept
 
-	pkgs, err := load(&opts)
+	pkgs, scope, err := loadForChecks(&opts, enabled, cfg.SingleUseQuantizationContracts, load, loadWithScope)
 	if err != nil {
 		fmt.Fprintln(opts.Stderr, "perfscan:", err)
 		return 2
@@ -177,7 +178,7 @@ func Run(checks []*lint.Check, opts Options) int {
 	findings := make([]Finding, 0, len(pkgs))
 	for _, c := range enabled {
 		if len(c.Analyzer.FactTypes) != 0 {
-			current, err := runFactCheck(c, pkgs)
+			current, err := runFactCheckWithScope(c, pkgs, scope)
 			if err != nil {
 				fmt.Fprintln(opts.Stderr, "perfscan:", err)
 				return 2
@@ -186,7 +187,7 @@ func Run(checks []*lint.Check, opts Options) int {
 			continue
 		}
 		for _, pkg := range pkgs {
-			current, err := runCheck(c, pkg, nil)
+			current, err := runCheckWithScope(c, pkg, nil, scope)
 			if err != nil {
 				fmt.Fprintln(opts.Stderr, "perfscan:", err)
 				return 2
@@ -403,7 +404,8 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		return nil
 	}
 	fields := map[string]int{
-		"rowLocalStridedGuardContracts": config.UsableRowLocalStridedGuardContractCount(cfg.RowLocalStridedGuardContracts),
+		"singleUseQuantizationContracts": config.UsableSingleUseQuantizationContractCount(cfg.SingleUseQuantizationContracts),
+		"rowLocalStridedGuardContracts":  config.UsableRowLocalStridedGuardContractCount(cfg.RowLocalStridedGuardContracts),
 
 		"denseRowGEMMFuncs":       config.UsableDenseRowGEMMFuncCount(cfg.DenseRowGEMMFuncs),
 		"causalZeroGEMMContracts": config.UsableCausalZeroGEMMContractCount(cfg.CausalZeroGEMMContracts),
@@ -719,6 +721,10 @@ func newFactStore(analyzer *analysis.Analyzer) *factStore {
 // the user requested, while dependency passes exist only to publish facts —
 // matching the standard go/analysis driver contract.
 func runFactCheck(c *lint.Check, roots []*packages.Package) ([]Finding, error) {
+	return runFactCheckWithScope(c, roots, nil)
+}
+
+func runFactCheckWithScope(c *lint.Check, roots []*packages.Package, scope *scanscope.Target) ([]Finding, error) {
 	var order []*packages.Package
 	packages.Visit(roots, nil, func(pkg *packages.Package) {
 		if len(pkg.Syntax) != 0 {
@@ -728,7 +734,7 @@ func runFactCheck(c *lint.Check, roots []*packages.Package) ([]Finding, error) {
 	store := newFactStore(c.Analyzer)
 	var findings []Finding
 	for _, pkg := range order {
-		current, err := runCheck(c, pkg, store)
+		current, err := runCheckWithScope(c, pkg, store, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -740,6 +746,10 @@ func runFactCheck(c *lint.Check, roots []*packages.Package) ([]Finding, error) {
 }
 
 func runCheck(c *lint.Check, pkg *packages.Package, facts *factStore) ([]Finding, error) {
+	return runCheckWithScope(c, pkg, facts, nil)
+}
+
+func runCheckWithScope(c *lint.Check, pkg *packages.Package, facts *factStore, scope *scanscope.Target) ([]Finding, error) {
 	var out []Finding
 	pass := &analysis.Pass{
 		Analyzer:     c.Analyzer,
@@ -766,6 +776,9 @@ func runCheck(c *lint.Check, pkg *packages.Package, facts *factStore) ([]Finding
 				fset:    pkg.Fset,
 			})
 		},
+	}
+	if scope != nil && scope.Known() {
+		pass.ResultOf[scanscope.Key] = *scope
 	}
 	if facts != nil {
 		facts.bind(pass)
