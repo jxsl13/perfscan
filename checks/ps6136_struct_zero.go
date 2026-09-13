@@ -87,7 +87,14 @@ func ps6136StructFieldZeroAt(context *ps6125SSAContext, address ssa.Value, field
 		point = current.site
 		current = current.parent
 	}
-	if current != cell.context || !cell.context.flow.instructionDominates(allocation, point) {
+	if current != cell.context {
+		// A returned closure executes after its creator left the invocation
+		// stack. Only its exact closed capture may inherit initialization,
+		// and initialization must precede closure creation. structCell has
+		// already rejected later writes, captures that write and escapes.
+		point = ps6136ReturnedCapturePoint(context, cell)
+	}
+	if point == nil || !cell.context.flow.instructionDominates(allocation, point) {
 		return false
 	}
 	if stores.whole != nil {

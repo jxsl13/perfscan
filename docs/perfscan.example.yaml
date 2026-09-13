@@ -23,6 +23,53 @@ _comment: Replace every placeholder below with this repository's vocabulary.
 # conservative 64-byte default; Apple M-series CPUs use 128-byte cache lines.
 cacheLineBytes: 128
 
+# PS6140 follows a complete source-visible constructor class and all loaded
+# public owner uses before reporting unused projection scratch. This template
+# remains DISABLED until every independent review below is completed. Exact
+# typed names and flags never replace source dispatch/use/lifetime proofs.
+# Native count units/ABI are explicitly reviewed assumptions, not inferred from
+# a []float32 API. Optional profile dimensions illustrate requested storage;
+# omit both for symbolic-only reporting. This advisory never supplies an edit.
+unusedProjectionScratchContracts:
+  - ownerType: example.com/model.Decoder
+    modelType: example.com/model.Model
+    constructorEntry: example.com/model.NewDecoder
+    constructorFunction: example.com/model.newDecoder
+    modelConfigField: Config
+    configRowsField: Context
+    configWidthField: Width
+    maximumRowsField: maxRows
+    widthField: width
+    workspaceField: attentionScratch
+    slotBufferField: buffer
+    retainedListField: allocations
+    backendOpsField: ops
+    backendAllocatorField: newBuffer
+    backendAllocator: example.com/device.NewFloat32Buffer
+    allocationFunction: example.com/model.Decoder.allocateScratch
+    releaseMethod: example.com/model.Decoder.Release
+    nativeReleaseMethod: example.com/device.Buffer.Release
+    blockType: example.com/model.block
+    blocksField: blocks
+    projections:
+      - {field: attentionOutput, concreteType: example.com/model.fusedLinear}
+    classFlags: [postNorm, sandwich, mixtureOfExperts]
+    unusedFormal: 2 # zero-based explicit method parameter, excluding receiver
+    nativeAllocationCountBits: 32
+    nativeAllocationCountUnit: bytes # or float32-elements, per exact bridge
+    nativeSizeBits: 64
+    profileRows: 2048
+    profileWidth: 2048
+    freshIndependentFloat32StorageReviewed: false
+    nativeFailureOwnershipReviewed: false
+    nativeInputCopyAndAliasesReviewed: false
+    nativeReleaseAndFinalizerReviewed: false
+    sequentialCompletionReviewed: false
+    positiveCheckedSourceGeometryReviewed: false
+    nativeByteCountRangeReviewed: false
+    externalOwnerObservationsReviewed: false
+    allProviderBuildPathsReviewed: false
+
 # PS6129 exact package-level row-major store GEMMs. The reviewed API must be
 # (A,B,C []float32 or []float64,start,end,depth,columns int), with read-only
 # non-retained inputs and C[start:end,:]=A[start:end,:]*B store semantics.

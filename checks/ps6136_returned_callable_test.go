@@ -1,6 +1,45 @@
 package checks
 
-import "testing"
+import (
+	"testing"
+
+	"golang.org/x/tools/go/ssa"
+)
+
+func TestPS6136ReturnedCallableSiblingCapture(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, body string
+		want       bool
+	}{
+		{"completed-initializer", "return func(){fn()}", true},
+		{"initialization-before-all-returns", "var cell func();out:=func(){cell()};cell=fn;return out", true},
+		{"early-uninitialized-return", "var cell func();out:=func(){cell()};if choose{return out};cell=fn;return out", false},
+		{"escaped-cell", "expose(&fn);return func(){fn()}", false},
+		{"captured-reassignment", "change:=func(){fn=other};change();return func(){fn()}", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			pkg := ps6125TestSSA(t, `package extent;var choose bool
+func leaf(){};func other(){};func expose(*func()){}
+func wrap(fn func())func(){`+test.body+`}
+func invoke(fn func()){fn()};func root(){fn:=wrap(leaf);invoke(fn)}
+`)
+			root := ps6125NewSSAContext(pkg.Func("root"), nil, nil, 512)
+			known := false
+			budget := 512
+			if !ps6136WalkConsumerCalls(root, func(context *ps6125SSAContext, call *ssa.Call) bool {
+				if child := ps6136Call(context, call); child != nil && child.flow.function == pkg.Func("leaf") {
+					known = true
+					return true
+				}
+				return false
+			}, &budget) || known != test.want {
+				t.Fatalf("captured callable initialized=%v want=%v", known, test.want)
+			}
+		})
+	}
+}
 
 func TestPS6136ReturnedCallableBoundaries(t *testing.T) {
 	t.Parallel()

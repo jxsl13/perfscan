@@ -447,6 +447,7 @@ func missingVocab(c *lint.Check, cfg *config.Config) []string {
 		"receiverStagingContracts":          validReceiverStagingContracts(cfg.ReceiverStagingContracts),
 		"activeBoundFallbackContracts":      config.UsableActiveBoundFallbackContractCount(cfg.ActiveBoundFallbackContracts),
 		"outputWorkspaceContracts":          config.UsableOutputWorkspaceContractCount(cfg.OutputWorkspaceContracts),
+		"unusedProjectionScratchContracts":  config.UsableUnusedProjectionScratchContractCount(cfg.UnusedProjectionScratchContracts),
 		"nativeSnapshotReuseContracts":      config.UsableNativeSnapshotReuseContractCount(cfg.NativeSnapshotReuseContracts),
 		"reusableResultLoopContracts":       validReusableResultLoopContracts(cfg.ReusableResultLoopContracts),
 		"recorderResidualAddContracts":      validRecorderResidualAddContracts(cfg.RecorderResidualAddContracts),

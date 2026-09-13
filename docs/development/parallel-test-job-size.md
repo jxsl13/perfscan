@@ -8,7 +8,8 @@ owner-shaped end-to-end campaign, with many ordinary tests queued behind
 `t.Parallel`; the evidence did not identify an assertion failure or a single
 hung test.
 
-`-max-tests-per-job` now defaults to 150, and CI specifies that value explicitly.
+`-max-tests-per-job` defaults to 150; CI now explicitly selects 100 (see the
+follow-up below). Local hooks retain the default.
 After stable external assignment, each package uses
 `max(workers, ceil(selected / max-tests-per-job))` balanced round-robin groups,
 capped by the number of selected names. Empty selections produce no jobs.
@@ -36,3 +37,37 @@ checks establish partition correctness, not a measured CI speedup or proof
 that every macOS job fits its time budget; the complete CI matrix must validate
 the runtime result. A name-count cap cannot guarantee wall time for a single
 heavy test or its subtests.
+
+## Windows cumulative workload and timeout diagnostics
+
+[PR 1019's first CI run](https://github.com/jxsl13/perfscan/actions/runs/34776488035)
+passed twelve gates, but both Windows external-shard-1 jobs ended inner checks
+group 4/6 at exactly the outer 20-minute budget plus five-second diagnostic
+grace. Windows reported the killed `go.exe` as exit status 1. Its ordinary
+package-output buffering hid progress; neighboring groups spent about six to
+nine seconds in command startup/build before their inner test timer began.
+
+The same 144-name group passed locally with Go 1.26, race detection, one CPU
+and `-parallel=1` in 612.179s. The end-to-end PS6131 campaign took 375.34s and
+the twenty CUDA source-class cases added about 119s. All cases and assertions
+remain. The previous main Windows stable run had already taken 1045.470s in
+group 4/6 before these additional source-class tests.
+
+At the observed 1678-name checks census, external shard 1 contains 863 names.
+The CI cap of 100 creates nine groups of 95/96 names instead of six groups of
+143/144. The campaign remains in the first four-worker wave (group 4), while
+the CUDA matrix moves to group 7. This separates the observed heavy workloads
+without changing workers, CPU shares, external selection, race detection or
+the timeout. The runtime improvement is an inference pending the full CI
+matrix, not a Windows per-test measurement or a wall-time guarantee.
+
+The runner now records each job's start, test count and elapsed time. Raw
+`go test -v` output reaches its existing capture before package completion,
+preserving progress if the outer command is killed. Actual context expiry is
+joined with the original process error, keeping both errors discoverable and
+the captured output intact. Deadline/cancellation failures are never retried;
+the existing narrowly recognized Windows runtime-crash rules are unchanged.
+Deterministic clock tests exercise the original 20-minute-plus-five-second
+deadline, cancellation, ordinary failures and retained process errors. Added
+100-name-cap regressions preserve exact-once coverage across both external
+shards for the two- and four-worker settings; all earlier 150-cap cases remain.

@@ -409,6 +409,21 @@ func ps6136SelectionPath(context *ps6125SSAContext, value ssa.Value, budget int)
 	if reference.context != context || reference.value != value {
 		return ps6136SelectionPath(reference.context, reference.value, budget-1)
 	}
+	// A constructor may translate its model config into a distinct common
+	// config value. Follow an exact closed field initializer before composing
+	// access paths: similarly named fields in the two types are not identities.
+	var projected ps6125SSAReference
+	switch source := value.(type) {
+	case *ssa.Field:
+		projected = context.structField(source.X, source.Field)
+	case *ssa.UnOp:
+		if address, ok := source.X.(*ssa.FieldAddr); ok && source.Op == token.MUL {
+			projected = context.loadedStructField(address.X, address.Field, source)
+		}
+	}
+	if projected.value != nil && projected != reference {
+		return ps6136SelectionPath(projected.context, projected.value, budget-1)
+	}
 	paths := ps6125AccessPaths{flow: context.flow}
 	path := paths.resolve(value)
 	if !path.known {
