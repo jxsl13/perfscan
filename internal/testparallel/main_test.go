@@ -196,8 +196,8 @@ func TestCappedExternalAndInnerJobsCoverEveryTestOnce(t *testing.T) {
 
 func TestJobsBoundLargePackagesIndependentlyOfWorkers(t *testing.T) {
 	t.Parallel()
-	for _, cap := range []int{1, 7, 150} {
-		for _, size := range []int{0, 1, 2, 149, 150, 151, 300, 301, 523} {
+	for _, cap := range []int{1, 7, 100, 150} {
+		for _, size := range []int{0, 1, 2, 99, 100, 101, 149, 150, 151, 300, 301, 523} {
 			names := make([]string, size)
 			for i := range names {
 				names[i] = fmt.Sprintf("Test%04d", i)
@@ -241,6 +241,7 @@ func TestTestArgsBoundNestedParallelismAndTimeout(t *testing.T) {
 	got := testArgs(job, 1, 20*time.Minute, true)
 	want := []string{
 		"test",
+		"-v",
 		"-count=1",
 		"-timeout=20m0s",
 		"-parallel=1",

@@ -309,7 +309,7 @@ func TestGoCacheChangePreservesAllCIGateCommands(t *testing.T) {
 	wanted := map[string][]string{
 		"test": {
 			"Build|matrix.shard == 0|go build ./...",
-			"Test in parallel||go run ./internal/testparallel -race -workers ${{ runner.os == 'macOS' && 2 || 4 }} -max-tests-per-job 150 -shard-index ${{ matrix.shard }} -shard-count 2 ./...",
+			"Test in parallel||go run ./internal/testparallel -race -workers ${{ runner.os == 'macOS' && 2 || 4 }} -max-tests-per-job 100 -shard-index ${{ matrix.shard }} -shard-count 2 ./...",
 		},
 		"quality": {
 			"gofmt||# analysistest fixtures under testdata/ need exact // want anchoring\n# (single-line loops etc.) that gofmt would break, so exclude them.\nout=$(gofmt -l . | grep -v /testdata/ || true)\nif [ -n \"$out\" ]; then echo \"gofmt needed on:\"; echo \"$out\"; exit 1; fi",

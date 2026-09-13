@@ -259,9 +259,14 @@ func runJobs(ctx context.Context, jobs []testJob, workers, parallel int, timeout
 		go func() {
 			defer wg.Done()
 			for job := range queue {
+				started := time.Now()
+				outputMu.Lock()
+				fmt.Fprintf(os.Stderr, "testparallel: starting %s shard %d/%d: tests=%d\n", job.pkg, job.shard+1, job.shardCount, len(job.names))
+				outputMu.Unlock()
 				output, err := runTestJobWithCPUShare(ctx, job, parallel, timeout, race, runtime.GOOS, processProcs)
 				outputMu.Lock()
 				fmt.Printf("=== %s shard %d/%d ===\n%s", job.pkg, job.shard+1, job.shardCount, output)
+				fmt.Fprintf(os.Stderr, "testparallel: finished %s shard %d/%d: tests=%d elapsed=%s error=%v\n", job.pkg, job.shard+1, job.shardCount, len(job.names), time.Since(started).Round(time.Millisecond), err)
 				outputMu.Unlock()
 				if err != nil {
 					errs <- fmt.Errorf("%s shard %d/%d: %w", job.pkg, job.shard+1, job.shardCount, err)
@@ -341,6 +346,12 @@ func runTestAttempts(ctx context.Context, goos string, timeout time.Duration, ru
 		}
 		output, err := run(attemptCtx, remaining)
 		combined.WriteString(output)
+		// Windows reports TerminateProcess as exit status 1. Keep that process
+		// error, but also identify the outer deadline/cancellation that killed
+		// cmd/go; neither may be mistaken for a retryable runtime crash.
+		if cause := attemptCtx.Err(); cause != nil {
+			return combined.String(), errors.Join(err, cause)
+		}
 		if !retryableWindowsRuntimeCrash(attemptCtx, goos, output, err) || attempt == windowsRuntimeCrashAttempts {
 			return combined.String(), err
 		}
@@ -399,6 +410,9 @@ func retryableWindowsRuntimeCrash(ctx context.Context, goos, output string, err 
 func testArgs(job testJob, parallel int, timeout time.Duration, race bool) []string {
 	args := []string{
 		"test",
+		// Make cmd/go forward test progress before the package exits. Without
+		// this, an outer timeout can kill cmd/go with all diagnostics buffered.
+		"-v",
 		"-count=1",
 		fmt.Sprintf("-timeout=%s", timeout),
 		fmt.Sprintf("-parallel=%d", parallel),
