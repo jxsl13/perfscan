@@ -251,8 +251,9 @@ type Config struct {
 
 	// ActiveBoundFallbackContracts bind optional explicit-bound interface APIs
 	// and their reviewed capacity-wide fallback semantics for PS6135.
-	ActiveBoundFallbackContracts []ActiveBoundFallbackContract `json:"activeBoundFallbackContracts,omitempty" yaml:"activeBoundFallbackContracts"`
-	OutputWorkspaceContracts     []OutputWorkspaceContract     `json:"outputWorkspaceContracts,omitempty" yaml:"outputWorkspaceContracts"`
+	ActiveBoundFallbackContracts     []ActiveBoundFallbackContract     `json:"activeBoundFallbackContracts,omitempty" yaml:"activeBoundFallbackContracts"`
+	OutputWorkspaceContracts         []OutputWorkspaceContract         `json:"outputWorkspaceContracts,omitempty" yaml:"outputWorkspaceContracts"`
+	UnusedProjectionScratchContracts []UnusedProjectionScratchContract `json:"unusedProjectionScratchContracts,omitempty" yaml:"unusedProjectionScratchContracts"`
 
 	// NativeSnapshotReuseContracts separate source acquisition/ownership roles
 	// from reviewed opaque native lifetime and repeated-extraction policy.
@@ -2363,6 +2364,7 @@ type Sets struct {
 	BoundedScratchFlowContracts       []BoundedScratchFlowContract
 	ActiveBoundFallbackContracts      []ActiveBoundFallbackContract
 	OutputWorkspaceContracts          []OutputWorkspaceContract
+	UnusedProjectionScratchContracts  []UnusedProjectionScratchContract
 	NativeSnapshotReuseContracts      []NativeSnapshotReuseContract
 	ReceiverStagingContracts          []ReceiverStagingContract
 	ReusableOneShotWrapperContracts   []ReusableOneShotWrapperContract
@@ -2440,6 +2442,7 @@ func (c Config) Compile() Sets { //perfscan:ignore PS3106 one startup call; keep
 		BoundedScratchFlowContracts:       cloneBoundedScratchFlowContracts(c.BoundedScratchFlowContracts),
 		ActiveBoundFallbackContracts:      cloneActiveBoundFallbackContracts(c.ActiveBoundFallbackContracts),
 		OutputWorkspaceContracts:          cloneOutputWorkspaceContracts(c.OutputWorkspaceContracts),
+		UnusedProjectionScratchContracts:  cloneUnusedProjectionScratchContracts(c.UnusedProjectionScratchContracts),
 		NativeSnapshotReuseContracts:      cloneNativeSnapshotReuseContracts(c.NativeSnapshotReuseContracts),
 		ReceiverStagingContracts:          slices.Clone(c.ReceiverStagingContracts),
 		ReusableOneShotWrapperContracts:   cloneReusableOneShotWrapperContracts(c.ReusableOneShotWrapperContracts),

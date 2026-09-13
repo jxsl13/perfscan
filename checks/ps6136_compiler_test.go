@@ -33,6 +33,11 @@ func ps6136CompileOwners(t *testing.T, revision string, metalEntry, shared bool)
 // Rewrite is only for explicitly altered adversaries. Authentic replay calls
 // the nil-rewrite entry above and still compiles complete original owner bodies.
 func ps6136CompileOwnersRewrite(t *testing.T, revision string, metalEntry, shared bool, rewrite func(*token.FileSet, []*ast.File) []*ast.File) (*analysisOwnerFixture, error) {
+	return ps6136CompileOwnersRewriteImports(t, revision, metalEntry, shared, rewrite, nil)
+}
+
+// Additional fixture APIs are explicit scaffolding; existing replays use nil.
+func ps6136CompileOwnersRewriteImports(t *testing.T, revision string, metalEntry, shared bool, rewrite func(*token.FileSet, []*ast.File) []*ast.File, overrides map[string]string) (*analysisOwnerFixture, error) {
 	t.Helper()
 	fs := token.NewFileSet()
 	data, err := os.ReadFile("testdata/ps6136-owner/" + revision + "/gpt.go.txt")
@@ -133,8 +138,8 @@ func sampleTopKCandidates(*nlp.Sampler,[]int32,[]float32)int{return 0}
 			}
 		}
 	}
-	imports := &ps6136FixtureImporter{fallback: importer.Default(), packages: map[string]*types.Package{}, sources: map[string]string{}}
-	info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Uses: map[*ast.Ident]types.Object{}, Defs: map[*ast.Ident]types.Object{}, Selections: map[*ast.SelectorExpr]*types.Selection{}}
+	imports := &ps6136FixtureImporter{fallback: importer.Default(), packages: map[string]*types.Package{}, sources: map[string]string{}, overrides: overrides}
+	info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Uses: map[*ast.Ident]types.Object{}, Defs: map[*ast.Ident]types.Object{}, Selections: map[*ast.SelectorExpr]*types.Selection{}, Implicits: map[ast.Node]types.Object{}}
 	files := []*ast.File{gpt, support}
 	if shared {
 		// Complete, unmodified owner files: no alternate constructor or
@@ -230,6 +235,20 @@ func sampleTopKCandidates(*nlp.Sampler,[]int32,[]float32)int{return 0}
 	}
 	if rewrite != nil {
 		files = rewrite(fs, files)
+		// Meaningful injected nodes must have real source positions: a NoPos
+		// call can otherwise fail source census and vacuously pass a negative.
+		for index, file := range files {
+			var source bytes.Buffer
+			if err := format.Node(&source, fs, file); err != nil {
+				return nil, err
+			}
+			name := fs.Position(file.Pos()).Filename
+			parsed, err := parser.ParseFile(fs, name, source.Bytes(), parser.ParseComments|parser.SkipObjectResolution)
+			if err != nil {
+				return nil, err
+			}
+			files[index] = parsed
+		}
 	}
 	pkg, err := (&types.Config{Importer: imports}).Check("github.com/jxsl13/goai/llamagpu", fs, files, info)
 	return &analysisOwnerFixture{fs, files, info, pkg, imports.sources}, err
@@ -244,9 +263,10 @@ type analysisOwnerFixture struct {
 }
 
 type ps6136FixtureImporter struct {
-	fallback types.Importer
-	packages map[string]*types.Package
-	sources  map[string]string
+	overrides map[string]string
+	fallback  types.Importer
+	packages  map[string]*types.Package
+	sources   map[string]string
 }
 
 func (i *ps6136FixtureImporter) Import(path string) (*types.Package, error) {
@@ -315,7 +335,15 @@ func NewConcurrentRecorder()(*Recorder,error){return nil,nil}
 func NewProfilingRecorder(int)(*Recorder,error){return nil,nil}
 `
 	default:
-		return i.fallback.Import(path)
+		// Explicit external API overrides may introduce a provider absent from
+		// the older Metal-only scaffold. Without one, retain the normal importer;
+		// unknown packages never acquire fabricated APIs implicitly.
+		if i.overrides[path] == "" {
+			return i.fallback.Import(path)
+		}
+	}
+	if override := i.overrides[path]; override != "" {
+		source = override
 	}
 	fs := token.NewFileSet()
 	file, err := parser.ParseFile(fs, path+".go", source, parser.SkipObjectResolution)

@@ -288,6 +288,14 @@ Rules without a pair, and why:
   campaigns, not a portable toy benchmark or an isolated detector speedup.
   Preserve physical ToHost transfer, all native parity/errors, checked shapes
   and release/publication; remeasure residency and complete public workloads.
+- **PS6140** (unused concrete-projection scratch advisory): source-bound
+  requested float32 storage and illustrative profile ranking are not native
+  residency measurements. Full before/after Metal and CUDA owner replay proves
+  class-specific source uses, not native allocation, finalizer or stream/graph
+  completion. The issue #890 / GoAI PR1209 figures are attributed owner
+  measurements. A portable allocation toy cannot qualify deletion safety or
+  establish an isolated native throughput gain; retain the exact buffer-class
+  residency tests and alternating same-binary constructor/public-API campaigns.
 
 PS6137 is an opt-in advisory with no automatic replacement benchmark. Its
 complete owner cgo/source replay is not a native workload execution. GoAI

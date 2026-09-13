@@ -31,8 +31,10 @@ func ps6136FactoryRetention(context *ps6125SSAContext, backend *ssa.Call, owner 
 		return false
 	}
 	var appendCall *ssa.Call
+	var appendStore *ssa.Store
 	var array *ssa.Alloc
 	var returnedSlot *ssa.Alloc
+	var publication *ssa.Return
 	for _, block := range context.flow.function.Blocks {
 		if !context.flow.blocks[block] {
 			continue
@@ -49,6 +51,7 @@ func ps6136FactoryRetention(context *ps6125SSAContext, backend *ssa.Call, owner 
 						return false
 					}
 					returnedSlot = candidate
+					publication = returned
 				}
 			}
 			store, ok := instruction.(*ssa.Store)
@@ -78,10 +81,12 @@ func ps6136FactoryRetention(context *ps6125SSAContext, backend *ssa.Call, owner 
 			if candidate == nil {
 				return false
 			}
-			appendCall, array = call, candidate
+			appendCall, appendStore, array = call, store, candidate
 		}
 	}
-	if appendCall == nil || returnedSlot == nil {
+	// Merely finding the append does not prove successful publication retained
+	// the buffer: a conditional append can be bypassed on the return path.
+	if appendCall == nil || returnedSlot == nil || publication == nil || !context.flow.instructionDominates(appendStore, publication) {
 		return false
 	}
 	resultUsers := result.Referrers()

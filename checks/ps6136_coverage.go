@@ -14,6 +14,12 @@ import (
 // are supplied only after exact typed argument, extent and ownership checks;
 // this routine never interprets configuration as a source proof.
 func ps6136ClosedObservations(pass *analysis.Pass, owner *types.Named, workspace *types.Var, proved map[ast.Node]bool) bool {
+	return ps6136ClosedObservationsCheck(pass, owner, workspace, proved, nil)
+}
+
+// The optional diagnostic reports the first rejected source node; it grants no
+// approval and preserves the strict observation checks used by the rule.
+func ps6136ClosedObservationsCheck(pass *analysis.Pass, owner *types.Named, workspace *types.Var, proved map[ast.Node]bool, rejected func(ast.Node, string)) bool {
 	if owner == nil || workspace == nil {
 		return false
 	}
@@ -53,6 +59,15 @@ func ps6136ClosedObservations(pass *analysis.Pass, owner *types.Named, workspace
 		return typ != nil && types.Identical(typ, owner)
 	}
 	valid := true
+	reject := func(node ast.Node, reason string) {
+		if !valid {
+			return
+		}
+		valid = false
+		if rejected != nil {
+			rejected(node, reason)
+		}
+	}
 	for _, file := range pass.Files {
 		ast.Inspect(file, func(node ast.Node) bool {
 			if !valid {
@@ -70,7 +85,7 @@ func ps6136ClosedObservations(pass *analysis.Pass, owner *types.Named, workspace
 							break
 						}
 						if isOwner(pass.TypesInfo.TypeOf(selector.X)) {
-							valid = false
+							reject(n, "interior owner field address")
 							break
 						}
 						expression = ps2110Unparen(selector.X)
@@ -79,14 +94,14 @@ func ps6136ClosedObservations(pass *analysis.Pass, owner *types.Named, workspace
 			case *ast.SelectorExpr:
 				selection := pass.TypesInfo.Selections[n]
 				if selection != nil && selection.Obj() == workspace && !approved(n) {
-					valid = false
+					reject(n, "unproved workspace selector")
 				}
 				if isOwner(pass.TypesInfo.TypeOf(n)) && !approved(n) {
 					outer, ok := parents[n].(*ast.SelectorExpr)
 					if !ok || outer.X != n {
-						valid = false
+						reject(n, "whole owner selector exposure")
 					} else if next := pass.TypesInfo.Selections[outer]; next == nil || next.Kind() != types.FieldVal {
-						valid = false
+						reject(n, "owner selector method exposure")
 					}
 				}
 			case *ast.CompositeLit:
@@ -94,12 +109,12 @@ func ps6136ClosedObservations(pass *analysis.Pass, owner *types.Named, workspace
 					for _, element := range n.Elts {
 						keyed, ok := element.(*ast.KeyValueExpr)
 						if !ok {
-							valid = false
+							reject(n, "unkeyed owner literal")
 							break
 						}
 						identifier, ok := keyed.Key.(*ast.Ident)
 						if !ok || pass.TypesInfo.Uses[identifier] == workspace && !proved[keyed.Key] {
-							valid = false
+							reject(n, "unproved owner literal workspace")
 							break
 						}
 					}
@@ -128,12 +143,12 @@ func ps6136ClosedObservations(pass *analysis.Pass, owner *types.Named, workspace
 				}
 				selector, ok := parent.(*ast.SelectorExpr)
 				if !ok {
-					valid = false // aliases, captures, sends, opaque arguments, whole stores
+					reject(n, "whole owner identifier exposure") // aliases, captures, sends, opaque arguments, whole stores
 					break
 				}
 				selection := pass.TypesInfo.Selections[selector]
 				if selection == nil || selection.Kind() != types.FieldVal {
-					valid = false // implicit-address methods require their exact call proof
+					reject(n, "implicit owner method exposure") // implicit-address methods require their exact call proof
 				}
 			}
 			return valid

@@ -60,6 +60,34 @@ type ps6125SSAExtents struct {
 // heap/receiver field invariants, effects of opaque calls, allocation lifetimes,
 // hotness or runtime no-overflow. Loads and unresolved calls stay unknown.
 func ps6125AnalyzeSSAExtents(function *ssa.Function, inputs map[*ssa.Parameter]ps6125Scalar, lengths map[*ssa.Parameter]ps6125Extent) *ps6125SSAExtents {
+	return ps6125AnalyzeSSAExtentsWithImmutableBools(function, inputs, lengths, nil)
+}
+
+// Immutable boolean loads and nil comparisons must be proved for this invocation by the
+// caller's complete source effect/ownership analysis. This entry point only
+// validates their SSA shape; configuration is not a source proof. All facts
+// still participate in the ordinary finite-lattice solver, including joins and
+// loop backedges. The original entry point supplies no memory assumptions.
+func ps6125AnalyzeSSAExtentsWithImmutableBools(function *ssa.Function, inputs map[*ssa.Parameter]ps6125Scalar, lengths map[*ssa.Parameter]ps6125Extent, immutable map[ssa.Value]bool) *ps6125SSAExtents {
+	for value := range immutable {
+		if value == nil || value.Parent() != function || !types.Identical(value.Type(), types.Typ[types.Bool]) {
+			return nil
+		}
+		switch value := value.(type) {
+		case *ssa.UnOp:
+			if _, field := value.X.(*ssa.FieldAddr); !field || value.Op != token.MUL {
+				return nil
+			}
+		case *ssa.BinOp:
+			left, leftNil := value.X.(*ssa.Const)
+			right, rightNil := value.Y.(*ssa.Const)
+			if value.Op != token.EQL && value.Op != token.NEQ || !(leftNil && left.IsNil() || rightNil && right.IsNil()) {
+				return nil
+			}
+		default:
+			return nil
+		}
+	}
 	result := &ps6125SSAExtents{function: function, facts: make(map[ssa.Value]ps6125Scalar), lengths: lengths, blocks: make(map[*ssa.BasicBlock]bool), edges: make(map[ps6125SSAEdge]bool)}
 	if function == nil || len(function.Blocks) == 0 {
 		return result
@@ -97,7 +125,11 @@ func ps6125AnalyzeSSAExtents(function *ssa.Function, inputs map[*ssa.Parameter]p
 		queued[instruction] = false
 		if value, ok := instruction.(ssa.Value); ok {
 			old := result.facts[value]
-			joined := ps6125JoinScalars(old, result.evaluate(value))
+			evaluated := result.evaluate(value)
+			if truth, proved := immutable[value]; proved {
+				evaluated = ps6125Scalar{state: ps6125Boolean, truth: truth}
+			}
+			joined := ps6125JoinScalars(old, evaluated)
 			// A known lattice element can only stay itself or become unknown.
 			if joined.state != old.state {
 				result.facts[value] = joined

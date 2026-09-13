@@ -77,13 +77,12 @@ func ps6136ReturnedCallable(reference ps6125SSAReference, active map[ps6125SSARe
 		if store == nil {
 			return ps6125SSAReference{}
 		}
-		var point ssa.Instruction = load
-		current := reference.context
-		for current != cell.context && current.parent != nil {
-			point = current.site
-			current = current.parent
-		}
-		if current != cell.context || !cell.context.flow.instructionDominates(store, point) {
+		// A returned closure can be invoked through a sibling helper after
+		// its creating call completed. Lift initialization only when it
+		// dominates every executable creator return, then order the exact
+		// creator call against the actual invocation. Creation alone is not
+		// initialization, and an early uninitialized return stays unknown.
+		if !ps6136ContextInstructionDominates(cell.context, store, reference.context, load, 128) {
 			return ps6125SSAReference{}
 		}
 		return ps6136ReturnedCallable(cell.context.reference(store.Val), active)
