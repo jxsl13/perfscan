@@ -29,7 +29,9 @@ type SingleUseQuantizationContract struct {
 	// packedByteDot additionally requires source-proved current-block byte lanes,
 	// returned signed lane/header origins and the producer's exact byte stride.
 	// It does not attest authentic activation provenance or numeric equivalence.
-	ConsumerForm                      string                           `json:"consumerForm" yaml:"consumerForm"`
+	ConsumerForm string `json:"consumerForm" yaml:"consumerForm"`
+	// -1 selects sourceSummary receiver-held weights with one packed argument.
+	// The receiver's complete source body and storage/effects must prove the role.
 	WeightArgument                    int                              `json:"weightArgument" yaml:"weightArgument"`
 	QuantizationAndDotMeaningReviewed bool                             `json:"quantizationAndDotMeaningReviewed" yaml:"quantizationAndDotMeaningReviewed"`
 	BenchmarkExemptOwners             []string                         `json:"benchmarkExemptOwners" yaml:"benchmarkExemptOwners"`
@@ -65,6 +67,11 @@ func (c *SingleUseQuantizationContract) Valid() bool {
 			return false
 		}
 	case "twoInputDot", "sourceSummary", "packedByteDot":
+		// A sourceSummary method may consume receiver-held weights. This role
+		// still requires typed source proof; configuration does not certify it.
+		if c.ConsumerForm == "sourceSummary" && c.WeightArgument == -1 && c.PackedArgument == 0 && c.RowsArgument == -1 {
+			break
+		}
 		if c.RowsArgument != -1 || c.WeightArgument < 0 || c.WeightArgument > 1 || c.PackedArgument == c.WeightArgument {
 			return false
 		}

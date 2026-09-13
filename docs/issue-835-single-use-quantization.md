@@ -50,8 +50,9 @@ source facts:
   claimed.
 
 Supported roles can be permuted; they are not GoAI-name or fixture whitelists.
-Unknown helper forms, imported/native consumers, source-visible errors and method
-APIs remain unsupported. The cast producer is not a Q8_K codec: scale, rounding,
+Unknown helper forms, imported/native consumers and source-visible errors
+remain unsupported. The initial canonical forms do not support method APIs.
+The cast producer is not a Q8_K codec: scale, rounding,
 clamping, block sums and approximate or reciprocal equivalence are not inferred.
 Fresh make-backed storage is not proof of heap allocation or allocation count;
 zero-length inputs, escape analysis and compiler elision matter.
@@ -65,6 +66,30 @@ fused boundaries and reused allocation-free scratch are not admitted by this
 initial canonical source subset.
 
 ## Source-visible multi-function summaries
+
+The bounded source-summary method extension uses `weightArgument: -1`,
+`packedArgument: 0`, and `rowsArgument: -1` for one explicit packed argument
+and receiver-held weights. A typed struct or pointer receiver must contain
+exactly one packed slice field and numeric shape fields. Its actual incoming
+owner object must be used once, and complete method/helper bodies must retain
+the indexed weight origin and one returned packed reduction without writes,
+escapes, repeated consumption or receiver rebinding. Method helper calls bind
+the actual typed receiver as an additional invocation root; a memoized method
+declaration does not certify another receiver. Scalar receiver metadata cannot
+impersonate weight-origin evidence. Captured method values, method expressions,
+promotion/implicit addressing, additional reference/cache fields and unknown
+bodies remain unsupported. Existing function roles and packed-byte signed
+protocol controls retain their own requirements; receiver-held `packedByteDot`
+protocol geometry is not admitted by this extension.
+
+The retained primary GoAI `QuantLinear.Forward` at
+`80c9e49870d1061e614b38806d82b46cb917a886` reads `Weight`, `In`, `Out`, and `QT`
+from a pointer receiver. It also uses `sync.Once`, a closure, resident/native
+interface calls and error results. Those authentic effects remain outside
+source admission. Positive method fixtures model its weight/shape receiver
+layout using readable scalar source methods, with a synthetic activation owner;
+they are source storage/effect evidence, not retained activation-positive owner
+provenance, numerical equivalence, benchmark evidence or issue completion.
 
 The additional opt-in `sourceSummary` form composes source-visible functions:
 an allocating helper can return fresh named slice storage, a filling helper can
