@@ -85,3 +85,24 @@ func TestSingleUseQuantizationTwoInputRoleBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestSingleUseQuantizationSourceMethodRoles(t *testing.T) {
+	t.Parallel()
+	base := SingleUseQuantizationContract{Quantizer: "fixture.pack", Consumer: "fixture.Kernel.Dot", ConsumerForm: "sourceSummary", PackedArgument: 0, WeightArgument: -1, RowsArgument: -1, QuantizationAndDotMeaningReviewed: true}
+	if !base.Valid() {
+		t.Fatal("source method roles rejected")
+	}
+	for _, edit := range []func(*SingleUseQuantizationContract){
+		func(c *SingleUseQuantizationContract) { c.PackedArgument = 1 },
+		func(c *SingleUseQuantizationContract) { c.RowsArgument = 0 },
+		func(c *SingleUseQuantizationContract) { c.ConsumerForm = "twoInputDot" },
+		func(c *SingleUseQuantizationContract) { c.ConsumerForm = "packedByteDot" },
+		func(c *SingleUseQuantizationContract) { c.QuantizationAndDotMeaningReviewed = false },
+	} {
+		c := base
+		edit(&c)
+		if c.Valid() {
+			t.Fatal("unproved or ambiguous method roles accepted")
+		}
+	}
+}

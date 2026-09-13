@@ -147,11 +147,16 @@ func ps6141Candidates(pass *analysis.Pass, owner *ast.FuncDecl, contract *config
 			case *ast.ExprStmt:
 				consume, _ = next.X.(*ast.CallExpr)
 			}
-			if consume == nil || !slices.Contains(live, ast.Node(block.List[nextIndex])) || ps6087FunctionID(pass, consume) != contract.Consumer || len(consume.Args) != 2 || consume.Ellipsis.IsValid() {
+			methodWeights := contract.ConsumerForm == "sourceSummary" && contract.WeightArgument == -1
+			consumerParams := 2
+			if methodWeights {
+				consumerParams = 1
+			}
+			if consume == nil || !slices.Contains(live, ast.Node(block.List[nextIndex])) || ps6087FunctionID(pass, consume) != contract.Consumer || len(consume.Args) != consumerParams || consume.Ellipsis.IsValid() {
 				continue
 			}
 			_, signature, typed := typedCallee(pass, consume.Fun)
-			if !typed || signature.Recv() != nil || signature.Variadic() || signature.TypeParams().Len() != 0 || signature.Params().Len() != 2 ||
+			if !typed || methodWeights != (signature.Recv() != nil) || signature.Variadic() || signature.TypeParams().Len() != 0 || signature.Params().Len() != consumerParams ||
 				!types.Identical(signature.Params().At(contract.PackedArgument).Type(), packedType) {
 				continue
 			}
@@ -159,7 +164,13 @@ func ps6141Candidates(pass *analysis.Pass, owner *ast.FuncDecl, contract *config
 			if !ok || pass.TypesInfo.Uses[packed] != object || !types.Identical(pass.TypesInfo.TypeOf(packed), packedType) {
 				continue
 			}
-			if contract.ConsumerForm == "twoInputDot" || contract.ConsumerForm == "sourceSummary" || contract.ConsumerForm == "packedByteDot" {
+			if methodWeights {
+				recv := ps6141ActualReceiver(pass, consume, signature)
+				id, direct := recv.(*ast.Ident)
+				if !direct || !ps6141OwnerFormal(ownerObject, pass.TypesInfo.Uses[id]) || ps6141ObjectUses(pass, owner.Body, pass.TypesInfo.Uses[id]) != 1 {
+					continue
+				}
+			} else if contract.ConsumerForm == "twoInputDot" || contract.ConsumerForm == "sourceSummary" || contract.ConsumerForm == "packedByteDot" {
 				weight, direct := consume.Args[contract.WeightArgument].(*ast.Ident)
 				if !direct || !types.Identical(pass.TypesInfo.TypeOf(weight), packedType) {
 					continue

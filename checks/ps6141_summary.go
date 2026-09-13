@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"slices"
 
 	"github.com/jxsl13/perfscan/config"
 	"golang.org/x/tools/go/analysis"
@@ -76,7 +77,12 @@ func ps6141ComposedBoundary(pass *analysis.Pass, producer, consumer *ast.FuncDec
 	}
 	ps, qs := p.Type().(*types.Signature), q.Type().(*types.Signature)
 	destination := c.ProducerForm == "destination"
-	if (!destination && (ps.Params().Len() != 1 || ps.Results().Len() != 1)) || (destination && (ps.Params().Len() != 2 || ps.Results().Len() != 0)) || qs.Params().Len() != 2 || qs.Results().Len() != 1 {
+	methodWeights := c.ConsumerForm == "sourceSummary" && c.WeightArgument == -1
+	consumerParams := 2
+	if methodWeights {
+		consumerParams = 1
+	}
+	if ps.Recv() != nil || (!destination && (ps.Params().Len() != 1 || ps.Results().Len() != 1)) || (destination && (ps.Params().Len() != 2 || ps.Results().Len() != 0)) || qs.Params().Len() != consumerParams || qs.Results().Len() != 1 || methodWeights != (qs.Recv() != nil) {
 		return nil, nil
 	}
 	input, ok := types.Unalias(ps.Params().At(c.FloatInputArgument).Type()).Underlying().(*types.Slice)
@@ -90,12 +96,21 @@ func ps6141ComposedBoundary(pass *analysis.Pass, producer, consumer *ast.FuncDec
 		packed = ps.Results().At(0).Type()
 	}
 	layout, ok := types.Unalias(packed).Underlying().(*types.Slice)
-	if !ok || !ps6141SummaryLayout(layout.Elem(), 0) || !types.Identical(qs.Params().At(c.PackedArgument).Type(), packed) || !types.Identical(qs.Params().At(c.WeightArgument).Type(), packed) {
+	var weightType types.Type
+	if methodWeights {
+		weightType = ps6141ReceiverPacked(qs.Recv().Type())
+	} else {
+		weightType = qs.Params().At(c.WeightArgument).Type()
+	}
+	if !ok || !ps6141SummaryLayout(layout.Elem(), 0) || !types.Identical(qs.Params().At(c.PackedArgument).Type(), packed) || !types.Identical(weightType, packed) {
 		return nil, nil
 	}
 	index := &ps6141SummaryIndex{pass: pass, declarations: ps6099LocalFunctionDeclarations(pass), memo: map[*types.Func]ps6141SourceSummary{}, active: map[*types.Func]bool{}, remaining: 20000}
 	a, b := index.producer(p), index.function(q)
 	pr, wr := ps6141Root(c.PackedArgument+1), ps6141Root(c.WeightArgument+1)
+	if methodWeights {
+		wr = ps6141Root(qs.Params().Len() + 1)
+	}
 	if c.ConsumerForm == "packedByteDot" && (a.byteProducer == nil || b.byteConsumerStride != a.byteProducer.layout.byteStride || !b.byteConsumerInputs[pr] || !b.byteConsumerInputs[wr]) {
 		return nil, nil
 	}
@@ -146,7 +161,10 @@ func (index *ps6141SummaryIndex) function(fn *types.Func) ps6141SourceSummary {
 	decl := index.declarations[fn]
 	sig := fn.Type().(*types.Signature)
 	// Formal roots must never overlap the reserved 1000+ protocol namespaces.
-	if decl == nil || decl.Body == nil || sig.Params().Len() >= 1000 || sig.Recv() != nil || sig.Variadic() || sig.TypeParams().Len() != 0 || sig.Results().Len() > 1 {
+	if decl == nil || decl.Body == nil || sig.Params().Len() >= 1000 || sig.Recv() != nil && sig.Params().Len() >= 999 || sig.Variadic() || sig.TypeParams().Len() != 0 || sig.RecvTypeParams().Len() != 0 || sig.Results().Len() > 1 {
+		return ps6141SourceSummary{}
+	}
+	if sig.Recv() != nil && !ps6141MethodReceiver(index.pass, decl, sig.Recv()) {
 		return ps6141SourceSummary{}
 	}
 	index.active[fn] = true
@@ -169,6 +187,10 @@ func (index *ps6141SummaryIndex) function(fn *types.Func) ps6141SourceSummary {
 		} else {
 			body.summary.valid = false
 		}
+	}
+	if recv := sig.Recv(); recv != nil {
+		root := ps6141Root(sig.Params().Len() + 1)
+		body.roots[recv] = root
 	}
 	body.block(decl.Body)
 	if body.byteConsumer != nil {
@@ -581,6 +603,12 @@ func (b *ps6141SummaryBody) expression(expr ast.Expr) ps6141Deps {
 	case *ast.SelectorExpr:
 		selection := b.index.pass.TypesInfo.Selections[x]
 		if selection != nil && selection.Kind() == types.FieldVal {
+			if id, direct := ps2110Unparen(x.X).(*ast.Ident); direct && ps6141ReceiverPacked(b.index.pass.TypesInfo.TypeOf(id)) != nil && ps6141NumericScalar(b.index.pass.TypesInfo.TypeOf(x)) {
+				if !b.path(x) {
+					b.summary.valid = false
+				}
+				return nil // shape metadata cannot impersonate indexed weight origin
+			}
 			return b.expression(x.X)
 		}
 	case *ast.CallExpr:
@@ -630,9 +658,22 @@ func (b *ps6141SummaryBody) expression(expr ast.Expr) ps6141Deps {
 // effects fail closed. Scalar helper arithmetic may be arbitrary source syntax.
 func (b *ps6141SummaryBody) call(call *ast.CallExpr) ps6141SourceSummary {
 	fn, sig, ok := typedCallee(b.index.pass, call.Fun)
-	if !ok || sig.Recv() != nil || call.Ellipsis.IsValid() || len(call.Args) != sig.Params().Len() {
+	if !ok || call.Ellipsis.IsValid() || len(call.Args) != sig.Params().Len() {
 		b.summary.valid = false
 		return ps6141SourceSummary{}
+	}
+	args := slices.Clone(call.Args)
+	formals := make([]*types.Var, 0, sig.Params().Len()+1)
+	for i := 0; i < sig.Params().Len(); i++ {
+		formals = append(formals, sig.Params().At(i))
+	}
+	if sig.Recv() != nil {
+		recv := ps6141ActualReceiver(b.index.pass, call, sig)
+		if recv == nil {
+			b.summary.valid = false
+			return ps6141SourceSummary{}
+		}
+		args, formals = append(args, recv), append(formals, sig.Recv())
 	}
 	s := b.index.function(fn)
 	b.summary.byteLaneTransformUnknown = b.summary.byteLaneTransformUnknown || s.byteLaneTransformUnknown
@@ -643,10 +684,16 @@ func (b *ps6141SummaryBody) call(call *ast.CallExpr) ps6141SourceSummary {
 	bindings := map[ps6141Root]ps6141Deps{}
 	seen := map[ps6141Root]bool{}
 	// Symbolic-map domain: seen keys are actual invocation roots, including negative fresh-allocation identities
-	for i, arg := range call.Args {
-		if _, slice := types.Unalias(sig.Params().At(i).Type()).Underlying().(*types.Slice); slice {
+	for i, arg := range args {
+		_, slice := types.Unalias(formals[i].Type()).Underlying().(*types.Slice)
+		if slice || formals[i] == sig.Recv() {
 			r := b.root(arg)
 			_, direct := ps2110Unparen(arg).(*ast.Ident)
+			if selector, field := ps2110Unparen(arg).(*ast.SelectorExpr); field {
+				id, base := ps2110Unparen(selector.X).(*ast.Ident)
+				selection := b.index.pass.TypesInfo.Selections[selector]
+				direct = base && selection != nil && selection.Kind() == types.FieldVal && len(selection.Index()) == 1 && ps6141ReceiverPacked(b.index.pass.TypesInfo.TypeOf(id)) != nil
+			}
 			if r == 0 || seen[r] || !b.path(arg) || !direct { //perfscan:ignore PS3003 symbolic invocation roots include negative fresh identities and sparse 1000/2000/3000 protocol namespaces, not traversal indexes
 				b.summary.valid = false
 				return ps6141SourceSummary{}
@@ -680,8 +727,8 @@ func (b *ps6141SummaryBody) call(call *ast.CallExpr) ps6141SourceSummary {
 		out.resultDeps = ps6141ByteDropLaneTokens(out.resultDeps)
 	}
 	// Symbolic-map domain: resultDeps combines sparse formal origins with 1000/2000/3000 protocol namespaces
-	for i, arg := range call.Args {
-		if s.resultDeps[ps6141Root(i+1)] && ps6141SummaryScalar(sig.Params().At(i).Type()) { //perfscan:ignore PS3003 symbolic invocation roots include negative fresh identities and sparse 1000/2000/3000 protocol namespaces, not traversal indexes
+	for i, arg := range args {
+		if s.resultDeps[ps6141Root(i+1)] && ps6141SummaryScalar(formals[i].Type()) { //perfscan:ignore PS3003 symbolic invocation roots include negative fresh identities and sparse 1000/2000/3000 protocol namespaces, not traversal indexes
 			if b.erases(arg) {
 				out.resultSuppressed = true
 			}
